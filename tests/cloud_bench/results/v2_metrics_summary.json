@@ -1,0 +1,18 @@
+{
+  "generation": "v2-go",
+  "role": "lite",
+  "pid": 13557,
+  "startup_vmrss_kb": 7728,
+  "startup_vmrss_mb": 7,
+  "peak_vmhwm_kb": 29532,
+  "peak_vmhwm_mb": 28,
+  "final_vmrss_kb": 17812,
+  "final_vmrss_mb": 17,
+  "fds_open": 17,
+  "core_limit_zero": true,
+  "zero_disk_leak": true,
+  "ipv4_health": 200,
+  "ipv6_health": 200,
+  "readonly_guard_blocked": true,
+  "hub_calls_delta_on_200_reqs": 0
+}

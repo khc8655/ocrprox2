@@ -1,0 +1,56 @@
+{
+  "gateway_url": "http://127.0.0.1:8787",
+  "timestamp": 1794108011,
+  "stream_benchmark": {
+    "total_requests": 100,
+    "concurrency": 50,
+    "success_count": 100,
+    "failure_count": 0,
+    "total_time_sec": 0.302,
+    "rps": 331.49,
+    "ttft_p50_ms": 82.36,
+    "ttft_p95_ms": 129.87,
+    "ttft_p99_ms": 137.23,
+    "latency_p50_ms": 127.4,
+    "latency_p95_ms": 167.5,
+    "latency_p99_ms": 177.54
+  },
+  "chaos_scenarios": {
+    "client_400_no_misban": {
+      "bad_statuses": [
+        400,
+        400,
+        400
+      ],
+      "recovered_on_next_request": true,
+      "post_bad_status": 200,
+      "post_bad_error": null
+    },
+    "embedded_error_peek": {
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 3050.15,
+      "leaked_error": false,
+      "error": null
+    },
+    "rate_limit_failover": {
+      "ok": true,
+      "status_code": 200,
+      "duration_ms": 43.68,
+      "error": null
+    }
+  },
+  "large_payload_benchmark": {
+    "concurrency": 5,
+    "size_mb": 8,
+    "success_count": 5,
+    "total_requests": 5,
+    "total_time_sec": 0.32
+  },
+  "hub_lazy_once": {
+    "hub_calls_before": 0,
+    "hub_calls_after": 0,
+    "hub_calls_delta": 0,
+    "lazy_once_preserved": true
+  }
+}

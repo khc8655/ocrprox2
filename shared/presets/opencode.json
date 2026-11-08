@@ -1,0 +1,100 @@
+{
+  "id": "opencode",
+  "name": "OpenCode Zen",
+  "version": "2.0.0",
+  "updated_at": "2026-10-18",
+  "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移",
+  "protocol": "openai",
+  "base_url": "https://opencode.ai/zen/v1",
+  "doc_url": "https://opencode.ai/docs/zen/",
+  "description": "OpenCode Zen 官方托管模型（opencode.ai/zen 登录领取 Key，纯 OpenAI 协议直通透传）。免费档模型限时免费，按账号/IP 计每日限额；超限返回 429 FreeUsageLimitError。注意：免费模型原则上仅限 OpenCode 客户端内调用，第三方直连可能触发 403 FreeTierError。",
+  "features": {
+    "multimodal": true,
+    "native_thinking": true,
+    "tools": true
+  },
+  "recommended_models": [
+    {
+      "description": "Zen 免费全能 stealth 模型（限时免费）",
+      "name": "big-pickle",
+      "upstream_model": "big-pickle"
+    },
+    {
+      "description": "Zen 免费 stealth 模型，零数据保留",
+      "name": "space-bunny-free",
+      "upstream_model": "space-bunny-free"
+    },
+    {
+      "description": "阶跃 Step 5 Preview 免费版，零数据保留",
+      "name": "step-5-preview-free",
+      "upstream_model": "step-5-preview-free"
+    },
+    {
+      "description": "LongCat 2.5 Preview 免费版，零数据保留",
+      "name": "longcat-2.5-preview-free",
+      "upstream_model": "longcat-2.5-preview-free"
+    },
+    {
+      "description": "小米 MiMo V2.6 Flash 免费版",
+      "name": "mimo-v2.6-flash-free",
+      "upstream_model": "mimo-v2.6-flash-free"
+    },
+    {
+      "description": "Ling 3.1 Flash 免费版",
+      "name": "ling-3.1-flash-free",
+      "upstream_model": "ling-3.1-flash-free"
+    },
+    {
+      "description": "Nemotron 3 Ultra 免费试用（NVIDIA 通道，请勿传输机密数据）",
+      "name": "nemotron-3-ultra-free",
+      "upstream_model": "nemotron-3-ultra-free"
+    },
+    {
+      "description": "Nemotron 3.5 Lightning 免费试用（NVIDIA 通道）",
+      "name": "nemotron-3.5-lightning-free",
+      "upstream_model": "nemotron-3.5-lightning-free"
+    }
+  ],
+  "adapter_rules": {
+    "error_rules": [
+      {
+        "action": "quota_exhausted",
+        "cooldown_sec": 1800,
+        "failover": true,
+        "match_keywords": [
+          "FreeTierError",
+          "free tier",
+          "within OpenCode"
+        ],
+        "match_status": 403,
+        "name": "zen_free_tier_forbidden"
+      },
+      {
+        "action": "failover",
+        "cooldown_sec": 300,
+        "failover": true,
+        "match_keywords": [
+          "FreeUsageLimitError",
+          "daily free usage limit",
+          "Rate limit exceeded"
+        ],
+        "match_status": 429,
+        "name": "zen_daily_free_limit"
+      }
+    ],
+    "reasoning": {
+      "strategy": "openai_passthrough"
+    },
+    "sanitization": {
+      "unsupported_params": []
+    },
+    "tools": {
+      "normalize_choice_to_string": false,
+      "rescue_from_text": false,
+      "strip_json_schema": false
+    },
+    "user_tracking": {
+      "passthrough_user": true
+    }
+  }
+}

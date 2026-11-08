@@ -1,0 +1,60 @@
+{
+  "version": 2,
+  "description": "LLMProxy2 三运行时（hub / lite / full）默认配置权威表",
+  "profiles": {
+    "hub": {
+      "settings": {
+        "run_mode": "agent",
+        "agent_routing_strategy": "sticky_failover",
+        "agent_first_byte_timeout_sec": 120,
+        "cooldown_rate_limit_sec": 15,
+        "cooldown_server_error_sec": 30,
+        "cooldown_network_error_sec": 15,
+        "cooldown_auth_error_sec": 86400,
+        "ocr_max_inflight": 4,
+        "kb_global_max_concurrency": 16,
+        "mode_schedule_enabled": false,
+        "mode_schedule_agent_window": "08:30-22:30",
+        "mode_schedule_timezone": "Asia/Shanghai",
+        "mode_schedule_webhook_url": "",
+        "mode_schedule_webhook_secret": ""
+      }
+    },
+    "lite": {
+      "settings": {
+        "run_mode": "agent",
+        "agent_routing_strategy": "sticky_failover",
+        "agent_first_byte_timeout_sec": 120,
+        "cooldown_rate_limit_sec": 15,
+        "cooldown_server_error_sec": 30,
+        "cooldown_network_error_sec": 15,
+        "cooldown_auth_error_sec": 86400,
+        "ocr_max_inflight": 4,
+        "kb_global_max_concurrency": 16,
+        "mode_schedule_enabled": false,
+        "mode_schedule_agent_window": "08:30-22:30",
+        "mode_schedule_timezone": "Asia/Shanghai",
+        "mode_schedule_webhook_url": "",
+        "mode_schedule_webhook_secret": ""
+      }
+    },
+    "full": {
+      "settings": {
+        "run_mode": "agent",
+        "agent_routing_strategy": "sticky_failover",
+        "agent_first_byte_timeout_sec": 120,
+        "cooldown_rate_limit_sec": 15,
+        "cooldown_server_error_sec": 30,
+        "cooldown_network_error_sec": 15,
+        "cooldown_auth_error_sec": 86400,
+        "ocr_max_inflight": 4,
+        "kb_global_max_concurrency": 16,
+        "mode_schedule_enabled": false,
+        "mode_schedule_agent_window": "08:30-22:30",
+        "mode_schedule_timezone": "Asia/Shanghai",
+        "mode_schedule_webhook_url": "",
+        "mode_schedule_webhook_secret": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "$comment": "Contract for Hub to Node on-demand configuration projection via POST /api/node/config",
+  "version": 1,
+  "endpoint": {
+    "method": "POST",
+    "path": "/api/node/config"
+  },
+  "auth": {
+    "type": "bearer_token",
+    "header": "Authorization",
+    "format": "Bearer stk_node_<48hex>"
+  },
+  "caching": {
+    "request_header": "If-None-Match",
+    "response_headers": [
+      "ETag",
+      "X-Config-Version",
+      "X-Lease-Until",
+      "X-Grace-Until"
+    ]
+  },
+  "responses": {
+    "200": {
+      "description": "Initial activation or configuration changed since ETag",
+      "body": {
+        "ok": true,
+        "config_version": "integer",
+        "lease_ttl": "integer (seconds)",
+        "grace_ttl": "integer (seconds)",
+        "lease_until": "integer (unix epoch seconds)",
+        "payload": {
+          "providers": "object (keyed by provider id)",
+          "agent_models": "object (keyed by model name)",
+          "settings": "object (RuntimeSettings)",
+          "adapter_rules": "object (keyed by provider id)"
+        }
+      }
+    },
+    "304": {
+      "description": "Not Modified. Zero byte payload. Node extends lease in-memory.",
+      "headers": {
+        "ETag": "string",
+        "X-Config-Version": "string",
+        "X-Lease-Until": "string",
+        "X-Grace-Until": "string"
+      },
+      "body_length": 0
+    },
+    "401": {
+      "description": "Node revoked, disabled, or invalid token. Node must immediately call PurgeSecrets() and stop serving.",
+      "body": {
+        "ok": false,
+        "error": "node_revoked_or_invalid"
+      }
+    }
+  },
+  "invariants": {
+    "physical_zero_leak": "No provider or key with origin='local' may ever appear in the projected payload.",
+    "scope_isolation": "Only providers listed in node.scope.providers and models listed in node.scope.models may appear in the payload.",
+    "zero_disk": "Lite nodes must hold the payload in-memory (atomic.Pointer) and never persist to disk."
+  }
+}

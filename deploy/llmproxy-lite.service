@@ -1,0 +1,28 @@
+[Unit]
+Description=LLMProxy2 Lite Node (Zero-Disk In-Memory Relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+Environment="LLMPROXY_ROLE=lite"
+Environment="LLMPROXY_ADDR=[::]:8000"
+Environment="LLMPROXY_HUB_URL=https://your-hub.edgeone.app"
+Environment="LLMPROXY_NODE_TOKEN=stk_node_replace_me"
+Environment="LLMPROXY_CLIENT_KEY=sk-llmproxy-replace_me"
+Environment="GOMEMLIMIT=48MiB"
+ExecStart=/usr/local/bin/llmproxy
+Restart=always
+RestartSec=3
+
+# 内存与零落盘强制加固
+LimitCORE=0
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

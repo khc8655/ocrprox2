@@ -1,0 +1,52 @@
+{
+  "id": "agnes",
+  "name": "Agnes AI",
+  "version": "1.4.0",
+  "updated_at": "2026-10-18",
+  "update_notes": "Agnes 3.0 / 2.5 Flash 旗舰推理模型适配，支持 512K 长上下文与原生 Thinking 思考直通",
+  "protocol": "openai",
+  "base_url": "https://apihub.agnes-ai.com/v1",
+  "anthropic_base_url": "https://apihub.agnes-ai.com/v1",
+  "doc_url": "https://www.agnes-ai.com/zh-Hans/docs/agnes-30-flash",
+  "description": "Agnes AI 平台，支持 agnes-3.0-flash 等高并发轻量 Agent 模型，原生直通 512k 上下文",
+  "features": {
+    "native_thinking": true,
+    "tools": true,
+    "multimodal": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [
+    {
+      "name": "agnes-3.0-flash",
+      "upstream_model": "agnes-3.0-flash",
+      "description": "Agnes 3.0 Flash 全新一代旗舰开源推理模型 (512K 上下文)"
+    },
+    {
+      "name": "agnes-2.5-flash",
+      "upstream_model": "agnes-2.5-flash",
+      "description": "Agnes 2.5 Flash 旗舰高速模型 (512K 上下文)"
+    },
+    {
+      "name": "agnes-2.0-flash",
+      "upstream_model": "agnes-2.0-flash",
+      "description": "Agnes 2.0 Flash 兼容回退模型"
+    }
+  ],
+  "adapter_rules": {
+    "reasoning": {
+      "strategy": "openai_passthrough"
+    },
+    "tools": {
+      "normalize_choice_to_string": false,
+      "strip_json_schema": false,
+      "rescue_from_text": false
+    },
+    "user_tracking": {
+      "passthrough_user": true
+    },
+    "sanitization": {
+      "unsupported_params": [],
+      "max_tokens_ceiling": 65536
+    }
+  }
+}

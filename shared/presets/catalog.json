@@ -1,0 +1,314 @@
+{
+  "version": "2026.11.08",
+  "updated_at": "2026-11-08T00:00:00.000Z",
+  "providers": [
+    {
+      "id": "agnes",
+      "name": "Agnes AI",
+      "version": "1.4.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "Agnes 3.0 / 2.5 Flash 旗舰推理模型适配，支持 512K 长上下文与原生 Thinking 思考直通",
+      "rule_hash": "fefc72d3505b",
+      "protocol": "openai",
+      "base_url": "https://apihub.agnes-ai.com/v1",
+      "anthropic_base_url": "https://apihub.agnes-ai.com/v1",
+      "doc_url": "https://www.agnes-ai.com/zh-Hans/docs/agnes-30-flash",
+      "description": "Agnes AI 平台，支持 agnes-3.0-flash 等高并发轻量 Agent 模型，原生直通 512k 上下文",
+      "features": {
+        "native_thinking": true,
+        "tools": true,
+        "multimodal": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 3
+    },
+    {
+      "id": "amd",
+      "name": "AMD Radeon Cloud",
+      "version": "2026.10.19",
+      "updated_at": "2026-10-19",
+      "update_notes": "AMD 推理集群适配：system 消息置顶、reasoning 字段映射；reasoning.enabled 剥离改由本适配文件声明",
+      "rule_hash": "8beb737c0a71",
+      "protocol": "openai",
+      "base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "anthropic_base_url": "https://developer.amd.com.cn/radeon/api/v1",
+      "doc_url": "https://amd-aim.github.io/radeon-cloud-docs/",
+      "description": "AMD 官方开发者平台，基于高性能推理集群。原生直通深度思考，自动适配 system 消息置顶规整与 reasoning 思考字段映射",
+      "features": {
+        "native_thinking": true,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 4
+    },
+    {
+      "id": "bai",
+      "name": "B.AI",
+      "version": "1.4.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "DeepSeek-V4 Flash / Qwen 3.8 Flash 适配，原生兼容 OpenAI 与 Anthropic Messages 双通道",
+      "rule_hash": "29fa1b76a913",
+      "protocol": "openai",
+      "base_url": "https://api.b.ai/v1",
+      "anthropic_base_url": "https://api.b.ai/v1",
+      "doc_url": "https://docs.b.ai/llmservice/api/#messages-api-anthropic-compatible",
+      "description": "B.AI 统一大模型服务，原生兼容 OpenAI Chat Completions 与 Anthropic Messages 协议双通道直通透传",
+      "features": {
+        "native_thinking": true,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 4
+    },
+    {
+      "id": "cline",
+      "name": "Cline",
+      "version": "1.1.1",
+      "updated_at": "2026-10-30",
+      "update_notes": "Cline 官方 API 非流式响应为 {\"data\":{...}} 信封；网关自动解包为 OpenAI ChatCompletion",
+      "rule_hash": "7d965b5484ab",
+      "protocol": "openai",
+      "base_url": "https://api.cline.bot/api/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://docs.cline.bot/api/overview",
+      "description": "Cline 官方大模型 API，基于 OpenRouter 聚合架构，支持 Claude、GPT-4o、Gemini 2.5、Muse Spark 等多厂商模型。网关已自动适配客户端受限模型别名映射与原生直通。",
+      "features": {
+        "native_thinking": true,
+        "tools": true,
+        "multimodal": true
+      },
+      "recommended_models_count": 7
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek 官方开放平台",
+      "version": "1.2.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "DeepSeek 官方平台直连适配，支持 V3 全尺寸旗舰与 R1 reasoning_content 思考流纯净透传",
+      "rule_hash": "61ae3a7b32fb",
+      "protocol": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://api-docs.deepseek.com",
+      "description": "DeepSeek 官方 API，原生支持 reasoning_content 深度思考与前缀缓存",
+      "features": {
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 2
+    },
+    {
+      "id": "google",
+      "name": "Google AI Studio",
+      "version": "1.2.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "Google Gemini 3.5 / 2.5 系列 Thinking Config 思考等级 (low/medium/high) 自动适配映射",
+      "rule_hash": "f87bea8c1551",
+      "protocol": "google_openai",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "anthropic_base_url": null,
+      "doc_url": "https://ai.google.dev/gemini-api/docs/openai",
+      "description": "Google 官方 Gemini 系列大模型，支持 Gemini 2.5 / 3 / 3.5+，内置 Thinking Matrix、深度 Schema 裁剪与思考预算自动提升",
+      "features": {
+        "native_thinking": true,
+        "multimodal": true,
+        "tools": true
+      },
+      "recommended_models_count": 5
+    },
+    {
+      "id": "minimax",
+      "name": "MiniMax",
+      "version": "1.4.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "MiniMax-M3 / M3.1-Flash-Preview 官方平台适配，OpenAI Completions 与 Anthropic Messages 双协议直通",
+      "rule_hash": "e5cff916701c",
+      "protocol": "openai",
+      "base_url": "https://api.minimaxi.com/v1",
+      "anthropic_base_url": "https://api.minimaxi.com/anthropic",
+      "doc_url": "https://platform.minimax.cn/docs/api-reference/text-chat-openai",
+      "description": "MiniMax 开放平台（国内），MiniMax-M3 / M3.1-Flash-Preview，原生 OpenAI Chat Completions 与 Anthropic Messages 双协议直通",
+      "features": {
+        "native_thinking": true,
+        "multimodal": true,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 2
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA NIM",
+      "version": "2.0.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "NVIDIA NIM 官方免费推理 API 适配，完善 404 未激活与 403/429 免费配额超限快速切换",
+      "rule_hash": "8e640ea75adb",
+      "protocol": "openai",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://docs.api.nvidia.com/",
+      "description": "NVIDIA NIM 官方加速平台（build.nvidia.com 免费领取 nvapi- Key，无需绑卡；免费档约 40 RPM / 每日 1 万请求）。注意模型按账号单独激活，404 即该 Key 未开通该模型；流式推理返回 reasoning_content，已加固自动关流防护",
+      "features": {
+        "multimodal": true,
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 6
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI 官方",
+      "version": "1.2.1",
+      "updated_at": "2026-10-19",
+      "update_notes": "OpenAI 官方端点纯净直通；reasoning.enabled（官方不支持）剥离改由本适配文件声明",
+      "rule_hash": "6d5b9ffdb7ac",
+      "protocol": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://platform.openai.com/docs",
+      "description": "OpenAI 官方 API 或标准兼容中转网关，纯中转零损耗极速透传，原生支持 reasoning_effort 思考控制与多模态",
+      "features": {
+        "native_thinking": true,
+        "tools": true,
+        "multimodal": true
+      },
+      "recommended_models_count": 4
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode Zen",
+      "version": "2.0.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移",
+      "rule_hash": "7b700ff3eb3e",
+      "protocol": "openai",
+      "base_url": "https://opencode.ai/zen/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://opencode.ai/docs/zen/",
+      "description": "OpenCode Zen 官方托管模型（opencode.ai/zen 登录领取 Key，纯 OpenAI 协议直通透传）。免费档模型限时免费，按账号/IP 计每日限额；超限返回 429 FreeUsageLimitError。注意：免费模型原则上仅限 OpenCode 客户端内调用，第三方直连可能触发 403 FreeTierError。",
+      "features": {
+        "multimodal": true,
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 8
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "version": "1.0.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "OpenRouter 官方预设，收录 7 大热门免费模型 (:free) 与 OpenAI/Anthropic 双端点及 402 欠费识别",
+      "rule_hash": "9172f2c3a65f",
+      "protocol": "openai",
+      "base_url": "https://openrouter.ai/api/v1",
+      "anthropic_base_url": "https://openrouter.ai/api/v1",
+      "doc_url": "https://openrouter.ai/docs/api/reference/overview",
+      "description": "OpenRouter 全球模型聚合网关，原生支持 OpenAI 与 Anthropic 双协议。免费档（:free 后缀模型）：20 RPM；每日 50 请求（openrouter.ai 账户累计消费 ≥$10 后提至 1000/日）。注册无需绑卡（sk-or- 开头 Key）。",
+      "features": {
+        "anthropic_messages": true,
+        "multimodal": true,
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 7
+    },
+    {
+      "id": "sensenova",
+      "name": "商汤日日新",
+      "version": "1.3.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "商汤 SenseNova 平台 GLM-5.2 与多模态 OCR 高速识别适配，Messages 原生直通",
+      "rule_hash": "0cf60ddb3bd5",
+      "protocol": "openai",
+      "base_url": "https://token.sensenova.cn/v1",
+      "anthropic_base_url": "https://token.sensenova.cn/v1",
+      "doc_url": "https://platform.sensenova.cn/docs",
+      "description": "商汤日日新大模型开放平台，支持 sensenova-6.8-flash-lite、deepseek-v4-flash、glm-5.2 等旗舰与轻量模型",
+      "features": {
+        "native_thinking": true,
+        "multimodal": true,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 3
+    },
+    {
+      "id": "siliconflow",
+      "name": "硅基流动",
+      "version": "1.2.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "硅基流动高并发推理平台，DeepSeek-V3/R1 与开源大模型及向量/重排端点全链路适配",
+      "rule_hash": "61ae3a7b32fb",
+      "protocol": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://docs.siliconflow.cn",
+      "description": "硅基流动高并发推理平台，包含 DeepSeek-V3/R1、Qwen2.5 等海量开源模型",
+      "features": {
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 3
+    },
+    {
+      "id": "stepfun",
+      "name": "阶跃星辰",
+      "version": "1.2.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "阶跃星辰 Step-3.7-Flash 平台适配，reasoning_effort 自动兼容与 deepseek 思考格式注入",
+      "rule_hash": "ff735ef0f91a",
+      "protocol": "openai",
+      "base_url": "https://api.stepfun.com/step_plan",
+      "anthropic_base_url": null,
+      "doc_url": "https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create",
+      "description": "阶跃星辰大模型平台，支持 step-3.7-flash、step-3.5-flash 等，原生 OpenAI 协议直通透传",
+      "features": {
+        "native_thinking": true,
+        "multimodal": true,
+        "tools": true
+      },
+      "recommended_models_count": 2
+    },
+    {
+      "id": "tokenrhythm",
+      "name": "TokenRhythm",
+      "version": "1.2.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "TokenRhythm 聚合平台多模型路由适配，支持 OpenAI 兼容接口高速直通",
+      "rule_hash": "61ae3a7b32fb",
+      "protocol": "openai",
+      "base_url": "https://tokenrhythm.studio/v1",
+      "anthropic_base_url": null,
+      "doc_url": "https://tokenrhythm.studio/docs/api-integration",
+      "description": "TokenRhythm 聚合大模型路由网关，支持 deepseek-v4-flash, Claude, GPT 系列，原生协议直通透传",
+      "features": {
+        "native_thinking": true,
+        "tools": true
+      },
+      "recommended_models_count": 3
+    },
+    {
+      "id": "vertex",
+      "name": "Google Vertex AI",
+      "version": "1.1.0",
+      "updated_at": "2026-10-18",
+      "update_notes": "Google Cloud Vertex AI 专属适配，多 region 动态端点计算与 ThoughtSplitter 思考流分离",
+      "rule_hash": "1128b7ad5ca0",
+      "protocol": "vertex_openai",
+      "base_url": "https://aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/global/endpoints/openapi",
+      "anthropic_base_url": null,
+      "doc_url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start/openai?hl=zh-cn",
+      "description": "Google Cloud Vertex AI 官方大模型端点。凭证、Project ID 与服务区域在新增 Key 时强绑定，自动规整 google/ 前缀与思考等级配置",
+      "features": {
+        "native_thinking": true,
+        "multimodal": true,
+        "tools": true,
+        "require_project_id": true,
+        "require_location": true
+      },
+      "recommended_models_count": 1
+    }
+  ]
+}

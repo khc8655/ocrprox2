@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const sharedPresetsDir = __dirname;
+const projectRoot = join(__dirname, '../..');
+
+let releaseDate = '2026-11-08';
+try {
+  const versionJson = JSON.parse(readFileSync(join(projectRoot, 'version.json'), 'utf8'));
+  releaseDate = String(versionJson.release_date || versionJson.version || '2026-11-08');
+} catch (_) {}
+
+const catalogVersion = releaseDate.replace(/-/g, '.');
+
+const presetFiles = readdirSync(sharedPresetsDir)
+  .filter((f) => f.endsWith('.json') && f !== 'catalog.json')
+  .sort();
+
+const presets = presetFiles.map((file) => JSON.parse(readFileSync(join(sharedPresetsDir, file), 'utf8')));
+
+const catalog = {
+  version: catalogVersion,
+  updated_at: `${releaseDate}T00:00:00.000Z`,
+  providers: presets.map((p) => {
+    const rulesStr = JSON.stringify(p.adapter_rules || {});
+    const ruleHash = createHash('sha256').update(rulesStr).digest('hex').slice(0, 12);
+    return {
+      id: p.id,
+      name: p.name,
+      version: p.version || '1.0.0',
+      updated_at: p.updated_at || releaseDate,
+      update_notes: p.update_notes || p.description || '',
+      rule_hash: ruleHash,
+      protocol: p.protocol || 'openai',
+      base_url: p.base_url || '',
+      anthropic_base_url: p.anthropic_base_url || null,
+      doc_url: p.doc_url || null,
+      description: p.description || '',
+      features: p.features || {},
+      recommended_models_count: (p.recommended_models || []).length,
+    };
+  }),
+};
+
+const catalogPath = join(sharedPresetsDir, 'catalog.json');
+writeFileSync(catalogPath, JSON.stringify(catalog, null, 2), 'utf8');
+console.log(`Generated catalog at: ${catalogPath} (${presets.length} presets, version ${catalogVersion})`);

@@ -1,0 +1,8 @@
+{
+  "generation": "v2-go",
+  "mode": "docker-64m",
+  "container_name": "v2-go-64m-lab",
+  "post_load_status": "running",
+  "exit_code": 0,
+  "oom_killed": false
+}

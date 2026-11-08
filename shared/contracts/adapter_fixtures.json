@@ -1,0 +1,202 @@
+{
+  "$comment": "Test fixtures for AdapterEngine and declarative preset rules across all supported upstream providers.",
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "stream_only_aggregation",
+      "description": "Upstream requires stream=true; client sends stream=false. Engine forces upstream stream and aggregates chunks to complete non-stream JSON response.",
+      "provider_id": "siliconflow",
+      "adapter_rules": {
+        "stream_only": true
+      },
+      "client_request": {
+        "model": "deepseek-ai/DeepSeek-V2.5",
+        "messages": [{"role": "user", "content": "hello"}],
+        "stream": false
+      },
+      "upstream_request_mutation": {
+        "stream": true
+      },
+      "upstream_stream_chunks": [
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1762560000,\"model\":\"deepseek-ai/DeepSeek-V2.5\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"}}]}\n\n",
+        "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":1762560000,\"model\":\"deepseek-ai/DeepSeek-V2.5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world!\"}}]}\n\n",
+        "data: [DONE]\n\n"
+      ],
+      "expected_aggregated_response": {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Hello world!"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rescue_from_text_tool_calls",
+      "description": "Model outputs markdown JSON code block in content; rescue_from_text parses and converts it into standard tool_calls.",
+      "provider_id": "tokenrhythm",
+      "adapter_rules": {
+        "rescue_from_text": true
+      },
+      "upstream_response": {
+        "id": "cmpl-rescue-1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "I will check the weather for you.\n```json\n{\n  \"name\": \"get_current_weather\",\n  \"arguments\": {\"location\": \"Tokyo\", \"unit\": \"celsius\"}\n}\n```"
+            },
+            "finish_reason": "stop"
+          }
+        ]
+      },
+      "expected_rescued_response": {
+        "choices": [
+          {
+            "message": {
+              "role": "assistant",
+              "content": "I will check the weather for you.",
+              "tool_calls": [
+                {
+                  "id": "call_rescued_0",
+                  "type": "function",
+                  "function": {
+                    "name": "get_current_weather",
+                    "arguments": "{\"location\":\"Tokyo\",\"unit\":\"celsius\"}"
+                  }
+                }
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unwrap_root_data",
+      "description": "Unwrap non-standard response envelope (e.g. { data: { id: ..., choices: ... } }).",
+      "provider_id": "sensenova",
+      "adapter_rules": {
+        "unwrap_root": "data"
+      },
+      "upstream_response": {
+        "code": 0,
+        "msg": "success",
+        "data": {
+          "id": "sn-chat-1",
+          "choices": [
+            {
+              "index": 0,
+              "message": {"role": "assistant", "content": "SenseNova answer"}
+            }
+          ]
+        }
+      },
+      "expected_unwrapped_response": {
+        "id": "sn-chat-1",
+        "choices": [
+          {
+            "index": 0,
+            "message": {"role": "assistant", "content": "SenseNova answer"}
+          }
+        ]
+      }
+    },
+    {
+      "id": "amd_strip_reasoning",
+      "description": "AMD Radeon Cloud rejects reasoning.enabled parameters; adapter strips it out before forwarding.",
+      "provider_id": "amd",
+      "adapter_rules": {
+        "strip_reasoning_enabled": true
+      },
+      "client_request": {
+        "model": "deepseek-r1",
+        "messages": [{"role": "user", "content": "calculate 2+2"}],
+        "reasoning": {"enabled": true},
+        "reasoning_effort": "high"
+      },
+      "expected_request_mutation": {
+        "model": "deepseek-r1",
+        "messages": [{"role": "user", "content": "calculate 2+2"}]
+      }
+    },
+    {
+      "id": "gemini_2_5_thinking_budget",
+      "description": "Translates OpenAI reasoning_effort into Gemini 2.5 thinking_budget (or thinkingConfig.thinkingBudget).",
+      "provider_id": "google",
+      "adapter_rules": {
+        "gemini_compat": true
+      },
+      "client_request": {
+        "model": "gemini-2.5-pro",
+        "messages": [{"role": "user", "content": "solve riddle"}],
+        "reasoning_effort": "high"
+      },
+      "expected_gemini_config": {
+        "thinking_budget": 24576
+      }
+    },
+    {
+      "id": "gemini_3_x_thinking_level",
+      "description": "Translates reasoning_effort into Gemini 3.x thinking_level (LOW/MEDIUM/HIGH).",
+      "provider_id": "google",
+      "adapter_rules": {
+        "gemini_compat": true
+      },
+      "client_request": {
+        "model": "gemini-3.0-pro",
+        "messages": [{"role": "user", "content": "deep analysis"}],
+        "reasoning_effort": "high"
+      },
+      "expected_gemini_config": {
+        "thinking_level": "HIGH"
+      }
+    },
+    {
+      "id": "thought_tag_stream_split",
+      "description": "Vertex / Gemini <thought>...</thought> stream chunks separated into reasoning content vs main content.",
+      "provider_id": "vertex",
+      "adapter_rules": {
+        "thought_tag_marker": "<thought>"
+      },
+      "raw_stream_chunk": "<thought>Analyzing the logic...</thought>The result is 42.",
+      "expected_split": {
+        "reasoning_content": "Analyzing the logic...",
+        "content": "The result is 42."
+      }
+    },
+    {
+      "id": "gemini_schema_clean",
+      "description": "Recursively clean unsupported keywords ($schema, title, default) from Gemini function call parameters schema.",
+      "input_schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "SearchQuery",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "QueryString",
+            "default": "default query"
+          }
+        },
+        "required": ["query"]
+      },
+      "expected_cleaned_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}

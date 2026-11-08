@@ -1,0 +1,172 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LLMProxy2 Runtime Settings Schema",
+  "version": 2,
+  "type": "object",
+  "groups": [
+    {
+      "id": "routing",
+      "title": "模式与路由策略"
+    },
+    {
+      "id": "timeout",
+      "title": "超时与时限"
+    },
+    {
+      "id": "fault",
+      "title": "冷却与容错"
+    },
+    {
+      "id": "concurrency",
+      "title": "并发与队列"
+    },
+    {
+      "id": "schedule",
+      "title": "时段调度"
+    }
+  ],
+  "properties": {
+    "run_mode": {
+      "group": "routing",
+      "label": "当前运行模式",
+      "hint": "agent 模式提供对话代理服务；kb 模式提供知识库流水线服务",
+      "type": "string",
+      "enum": ["agent", "kb"],
+      "default": "agent",
+      "roles": ["lite", "full"]
+    },
+    "agent_routing_strategy": {
+      "group": "routing",
+      "label": "智能体 Key 调度策略",
+      "hint": "sticky_failover: 粘性首选，遇故障顺延切换；round_robin: 轮询分摊；manual: 固定首个候选不切换",
+      "type": "string",
+      "enum": ["sticky_failover", "round_robin", "manual"],
+      "default": "sticky_failover",
+      "roles": ["hub", "lite", "full"]
+    },
+    "agent_first_byte_timeout_sec": {
+      "group": "timeout",
+      "label": "智能体首字节等待超时 (TTFT)",
+      "hint": "等待上游首个响应块的秒数，超时则换下一个 Key。总超时固定 300s",
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 300,
+      "default": 120,
+      "unit": "s",
+      "roles": ["hub", "lite", "full"]
+    },
+    "cooldown_rate_limit_sec": {
+      "group": "fault",
+      "label": "429 速率限制冷却秒数",
+      "hint": "上游返回 429 时的模型/Key 级退避秒数",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 15,
+      "unit": "s",
+      "roles": ["hub", "lite", "full"]
+    },
+    "cooldown_server_error_sec": {
+      "group": "fault",
+      "label": "5xx 服务端错误冷却秒数",
+      "hint": "上游返回 500/502/503/504 时的冷却秒数",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 30,
+      "unit": "s",
+      "roles": ["hub", "lite", "full"]
+    },
+    "cooldown_network_error_sec": {
+      "group": "fault",
+      "label": "网络超时冷却秒数",
+      "hint": "连接断开或首字节超时的冷却秒数",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 15,
+      "unit": "s",
+      "roles": ["hub", "lite", "full"]
+    },
+    "cooldown_auth_error_sec": {
+      "group": "fault",
+      "label": "401/403 鉴权与配额错误冷却秒数",
+      "hint": "上游 Key 失效或欠费封禁时的 Key 级冷却秒数（默认 24h）",
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 604800,
+      "default": 86400,
+      "unit": "s",
+      "roles": ["hub", "lite", "full"]
+    },
+    "ocr_max_inflight": {
+      "group": "concurrency",
+      "label": "OCR 预读并发信号量上限",
+      "hint": "KB 模式流式 OCR 同时在途解析的最大请求数，防大图 OOM",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32,
+      "default": 4,
+      "roles": ["full"]
+    },
+    "kb_global_max_concurrency": {
+      "group": "concurrency",
+      "label": "KB 全局最大并发上限",
+      "hint": "KB 模式跨分类（chat/emb/rerank/ocr）全局总并发限制",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128,
+      "default": 16,
+      "roles": ["full"]
+    },
+    "mode_schedule_enabled": {
+      "group": "schedule",
+      "label": "时段自动切换开关",
+      "hint": "开启后在指定时间窗口运行 Agent 模式，窗口外切入 KB 模式",
+      "type": "boolean",
+      "default": false,
+      "roles": ["full"]
+    },
+    "mode_schedule_agent_window": {
+      "group": "schedule",
+      "label": "Agent 运行时间窗口",
+      "hint": "格式: 'HH:MM-HH:MM'，如 '08:30-22:30'",
+      "type": "string",
+      "default": "08:30-22:30",
+      "roles": ["full"]
+    },
+    "mode_schedule_timezone": {
+      "group": "schedule",
+      "label": "时段调度时区",
+      "hint": "IANA 时区名称，默认 'Asia/Shanghai'",
+      "type": "string",
+      "default": "Asia/Shanghai",
+      "roles": ["full"]
+    },
+    "mode_schedule_webhook_url": {
+      "group": "schedule",
+      "label": "时段切换通知 Webhook URL",
+      "hint": "模式自动切换时向该 URL 发送 POST 事件通知",
+      "type": "string",
+      "default": "",
+      "roles": ["full"]
+    },
+    "mode_schedule_webhook_secret": {
+      "group": "schedule",
+      "label": "Webhook HMAC-SHA256 签名密钥",
+      "hint": "若提供则在请求头 X-Signature 中携带 HMAC 签名",
+      "type": "string",
+      "default": "",
+      "roles": ["full"]
+    }
+  },
+  "required": [
+    "run_mode",
+    "agent_routing_strategy",
+    "agent_first_byte_timeout_sec",
+    "cooldown_rate_limit_sec",
+    "cooldown_server_error_sec",
+    "cooldown_network_error_sec",
+    "cooldown_auth_error_sec"
+  ]
+}

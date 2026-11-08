@@ -1,0 +1,75 @@
+{
+  "id": "google",
+  "name": "Google AI Studio",
+  "version": "1.2.0",
+  "updated_at": "2026-10-18",
+  "update_notes": "Google Gemini 3.5 / 2.5 系列 Thinking Config 思考等级 (low/medium/high) 自动适配映射",
+  "protocol": "google_openai",
+  "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "doc_url": "https://ai.google.dev/gemini-api/docs/openai",
+  "description": "Google 官方 Gemini 系列大模型，支持 Gemini 2.5 / 3 / 3.5+，内置 Thinking Matrix、深度 Schema 裁剪与思考预算自动提升",
+  "features": {
+    "native_thinking": true,
+    "multimodal": true,
+    "tools": true
+  },
+  "recommended_models": [
+    {
+      "name": "gemini-3.8-flash",
+      "upstream_model": "gemini-3.8-flash",
+      "description": "最新 Flash（thinking_level minimal/low/medium/high）"
+    },
+    {
+      "name": "gemini-3.5-flash",
+      "upstream_model": "gemini-3.5-flash",
+      "description": "高性价比 Flash"
+    },
+    {
+      "name": "gemini-3.1-pro",
+      "upstream_model": "gemini-3.1-pro",
+      "description": "旗舰 Pro（thinking_level low/medium/high，不可关闭思考）"
+    },
+    {
+      "name": "gemini-2.5-flash",
+      "upstream_model": "gemini-2.5-flash",
+      "description": "经典 Flash（thinking_budget，可关闭思考）"
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "upstream_model": "gemini-2.5-pro",
+      "description": "经典 Pro（thinking_budget）"
+    }
+  ],
+  "adapter_rules": {
+    "reasoning": {
+      "strategy": "gemini_thinking_matrix",
+      "none_action": "include_thoughts_false",
+      "headroom_elevation": true,
+      "model_matrix": {
+        "flash": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "pro": [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    },
+    "tools": {
+      "normalize_choice_to_string": false,
+      "strip_json_schema": true,
+      "deep_schema_sanitization": true,
+      "rescue_from_text": true
+    },
+    "user_tracking": {
+      "passthrough_user": true
+    },
+    "sanitization": {
+      "unsupported_params": []
+    }
+  }
+}

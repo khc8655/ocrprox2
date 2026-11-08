@@ -1,0 +1,8 @@
+{
+  "generation": "v1-python",
+  "mode": "docker-64m",
+  "container_name": "v1-python-64m-lab",
+  "post_load_status": "exited",
+  "exit_code": 137,
+  "oom_killed": true
+}

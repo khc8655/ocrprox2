@@ -1,0 +1,12 @@
+{
+  "generation": "v1-python",
+  "mode": "host",
+  "pid": 11550,
+  "startup_vmrss_kb": 62672,
+  "startup_vmrss_mb": 61,
+  "peak_vmhwm_kb": 201992,
+  "peak_vmhwm_mb": 197,
+  "final_vmrss_kb": 71028,
+  "final_vmrss_mb": 69,
+  "fds_open": 15
+}

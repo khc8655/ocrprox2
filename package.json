@@ -1,0 +1,21 @@
+{
+  "name": "llmproxy2",
+  "version": "2.0.0",
+  "description": "LLMProxy2 (OCRProxy v2) — High-Performance Zero-Overhead AI Gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:admin": "node shared/admin/build.mjs",
+    "build:presets": "node shared/presets/build-catalog.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test:hub": "node --test edgeone-hub/test/hub.test.mjs",
+    "test:admin": "node shared/admin/build.mjs",
+    "test:t1": "node --test tests/t1_contracts/verify_contracts.test.mjs",
+    "test:t3": "node --test tests/t3_e2e/e2e.test.mjs",
+    "test:full": "npm run test:t1 && npm run test:hub && go test -race ./... && npm run test:t3",
+    "verify:release": "node scripts/verify-release.mjs",
+    "test": "npm run test:t1 && npm run test:hub"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

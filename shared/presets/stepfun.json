@@ -1,0 +1,44 @@
+{
+  "id": "stepfun",
+  "name": "阶跃星辰",
+  "version": "1.2.0",
+  "updated_at": "2026-10-18",
+  "update_notes": "阶跃星辰 Step-3.7-Flash 平台适配，reasoning_effort 自动兼容与 deepseek 思考格式注入",
+  "protocol": "openai",
+  "base_url": "https://api.stepfun.com/step_plan",
+  "doc_url": "https://platform.stepfun.com/docs/zh/api-reference/chat/chat-completion-create",
+  "description": "阶跃星辰大模型平台，支持 step-3.7-flash、step-3.5-flash 等，原生 OpenAI 协议直通透传",
+  "features": {
+    "native_thinking": true,
+    "multimodal": true,
+    "tools": true
+  },
+  "recommended_models": [
+    {
+      "name": "step-3.7-flash",
+      "upstream_model": "step-3.7-flash",
+      "description": "阶跃最新闪电高速推理大模型"
+    },
+    {
+      "name": "step-3.5-flash",
+      "upstream_model": "step-3.5-flash",
+      "description": "阶跃 Step-3.5 高性价比推理模型"
+    }
+  ],
+  "adapter_rules": {
+    "reasoning": {
+      "strategy": "openai_passthrough"
+    },
+    "tools": {
+      "normalize_choice_to_string": false,
+      "strip_json_schema": false,
+      "rescue_from_text": false
+    },
+    "user_tracking": {
+      "passthrough_user": true
+    },
+    "sanitization": {
+      "unsupported_params": []
+    }
+  }
+}

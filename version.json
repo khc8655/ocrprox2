@@ -1,0 +1,13 @@
+{
+  "version": "v20261108-02",
+  "semver": "2.0.0",
+  "release_date": "2026-11-08",
+  "commit": "release",
+  "title": "LLMProxy2 (OCRProxy v2) 2.0.0 正式版 — 三端融合架构 (Hub / Lite / Full) 全量交付与 G1~G6 门禁闭环",
+  "changelog": [
+    "完成 W0~W6 全工作流闭环：9 个 Magpie 冻结级标准库微模块 + 1 代全量业务 1:1 纯 Go 移植",
+    "交付 Go Lite 极简 NAT 节点（Lazy-Once + Lease + ETag 304 续租 + 401 内存清零 + 64MB 容器零 OOM）",
+    "交付 Go Full 完整节点（内嵌 74KB Magpie 极简 Web 控制台、AES-256-GCM 持久化、Kernel Guard、Agent/KB 双模门禁与多候选故障转移、OAuth Device Flow）",
+    "交付 EdgeOne Makers 轻中枢（节点签发/轮换/吊销、Scope 投影、Key 校验与模型探测）与 T1/T2/T3 全量自动化门禁"
+  ]
+}

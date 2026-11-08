@@ -1,0 +1,51 @@
+# Root Build Artifacts & Binaries
+/dist/
+dist/
+/llmproxy
+bin/
+*.exe
+*.out
+*.test
+
+# Dependencies & Environments
+node_modules/
+.venv/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.enc
+
+# Runtime State & Dynamic Data
+usage.jsonl
+key_bans.json
+stats_data.json
+agent_metrics.json
+mode_schedule_state.json
+
+# Logs, Backups & Corruptions
+*.log
+*.log.*
+*.log.1
+*.bak
+*.corrupt*
+*.tmp
+scratch/
+
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Explicit Whitelist: Zero-drift required files & EdgeOne functions
+!shared/presets/catalog.json
+!shared/admin/dist/
+!shared/admin/dist/index.html
+!internal/admin/assets/index.html
+!edge-functions/
+!edge-functions/**
+!edgeone-hub/
+!edgeone-hub/**
