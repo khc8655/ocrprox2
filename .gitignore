@@ -25,6 +25,10 @@ key_bans.json
 stats_data.json
 agent_metrics.json
 mode_schedule_state.json
+*.sqlite
+*.sqlite3
+*.db
+data/
 
 # Logs, Backups & Corruptions
 *.log
@@ -34,6 +38,12 @@ mode_schedule_state.json
 *.corrupt*
 *.tmp
 scratch/
+*snapshot*.json
+before_*.json
+after_*.json
+matrix_results.json
+live_hub_test_report.md
+.live_test*
 
 # OS & Editor
 .DS_Store

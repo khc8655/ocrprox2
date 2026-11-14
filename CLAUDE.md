@@ -22,7 +22,7 @@
 
 1. **可执行契约与 Schema**：`internal/types/types.go` + `shared/config/settings.schema.json` + `shared/config/runtime-profiles.json` + `shared/contracts/*.json` + 自动化门禁测试（`tests/` & `go test ./...`）
 2. **多 Agent 协作与接口锁死蓝图**：[`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md)（定义了全局唯一 Go 结构体、跨包接口签名与 W0~W6 物理文件所有权边界，任何 Agent 开工前必读！）
-3. **核心规范文档**：[`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)、[`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md)、[`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md)、[`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md)、[`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md)
+3. **核心规范文档**：[`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)、[`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md)、[`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md)、[`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md)、[`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md)、[`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md)
 4. **工程准则**：[`ARCHITECTURE_STANDARDS.md`](file:///Users/xk/Documents/llmproxy2/ARCHITECTURE_STANDARDS.md)
 5. **其它说明文档**：`README.md`、历史归档或旧草案
 
@@ -85,16 +85,62 @@
    - Step 5：补充契约测试与行为单测；
    - Step 6：同步更新 `docs/` 规范文档。
    - **禁止复活已废弃字段**：`request_total_budget_sec`、`max_retries`、`max_attempts_per_provider`（硬总超时固定为 `300s`）。
+4. **设计先行变更铁律（Design-First Change Rule）**：
+   - **跨端交互与契约优先**：在修改跨端实现（前后端交互 API、中枢与节点通信、核心数据结构）前，必须先行更新设计规范与机器可读契约：
+     - 若修改管理端 UI 与后端的交互 API：必须先同步更新 [`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md) 与可执行契约 [`shared/contracts/admin-ui-backend.json`](file:///Users/xk/Documents/llmproxy2/shared/contracts/admin-ui-backend.json)；
+     - 若调整 Go 节点数据结构或跨包核心接口：必须先同步更新 [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md) 与 `internal/types/types.go`；
+     - 若涉及外部依赖平台机制或边缘限制：必须将平台约束先行沉淀至 [`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md) 或 [`docs/EXTERNAL_REFERENCES.md`](file:///Users/xk/Documents/llmproxy2/docs/EXTERNAL_REFERENCES.md)，严禁未经契约定义直接编写跨端实现代码。
+5. **开源仓库与测试数据安全红线（Public Repository & Test Data Redlines）**：
+   - **零真实凭据与敏感数据**：严禁在 Git 工作区或 Git 提交历史中出现任何真实生产域名、密码、私钥、或真实节点令牌（`stk_node_*`）；单元测试与 E2E 仅允许使用 `0123456789abcdef` / 全零等合成 Mock 字符串；
+   - **测试快照与测试产物隔离**：所有针对线上 EdgeOne Hub 或外部平台的实机集成测试（T4 级测试）、冒烟脚本、测试快照（如 `before_*.json`、`after_*.json`、`matrix_results.json`、`live_hub_test_report.md`）必须严格放置在仓库根目录外的 `scratch/` 外部临时目录中运行，严禁污染或提交至 Git 仓库。
 
 ---
 
-## 5. 发布与提交门禁（G1~G6）
+## 5. 四层测试体系与五步双轨发布流程
 
-任何代码提交与版本发布前，必须确保以下门禁全绿（详见 [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md)）：
+### 5.1 四层测试金字塔（T1 ~ T4）
 
-- **G1 版本一致性**：`version.json`、Git Tag、二进制内嵌版本与构建产物一致；
-- **G2 零构建漂移**：运行 `npm run build:admin` 后工作区无未提交的生成物差异；
-- **G3 契约完整性**：前后端路由契约、节点投影契约、只读路由白名单守卫（`routeMux`）100% 通过；
-- **G4 Profile 与 Schema 一致性**：`settings.schema.json` 与 `runtime-profiles.json` 双向对齐；
-- **G5 三层测试全绿**：`go test -race ./...` + T1（契约）+ T2（单元）+ T3（E2E，含中枢请求次数断言与 Lite 零落盘扫描）；
-- **G6 文档同步与工作区洁净**：代码、测试、文档、`CHANGELOG.md` 同批更新。
+项目实行严格的四层分层测试架构（详见 [`docs/TESTING_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/TESTING_SPEC.md)）：
+
+- **T1：静态契约与 AST 门禁层（Contract & Guard < 5s，零网络）**：
+  - `T1.settings_contract`：`settings.schema` ↔ `runtime-profiles` ↔ Go `types.go` 1:1 对齐与已废弃字段阻断；
+  - `T1.admin_ui_contract`：前后端路由契约与 `HOST.capabilities` 声明一致性；
+  - `T1.presets_integrity`：16 家厂商预设与 `catalog.json` 哈希防篡改；
+  - `T1.readonly_route_guard`：Go `internal/router/readonly.go`（`routeMux` 路由白名单单测报错机制）；
+  - `T1.ui_layout_and_zero_inline_style`：单文件控制台零内联样式、零抽屉、零左边框彩条、打包体积 `≤ 80KB`；
+  - `T1.hub_export_guard`：EdgeOne `edge-functions/` 纯 Web Standard 检查（零 `node:*` 引用、零 `Buffer`、无边界逃逸）与 AST 显式 `export function onRequest*` 路由扫描门禁。
+- **T2：单元测试与并发竞争检测（Unit & Race < 30s）**：
+  - `edgeone-hub/test/hub.test.mjs`：中枢 CAS 乐观锁、Scope 投影、304 续租、节点签发/吊销/轮换；
+  - `go test -race ./...`：Go 全包并发数据竞争检测（覆盖 `netguard`、`hubsync` 单飞与宽限期、`scheduler` 故障转移与双账号同错自愈、`adapters` 等）。
+- **T3：本地多进程黑盒端到端测试（Local Blackbox E2E）**：
+  - 真实编译 `bin/llmproxy` 二进制，使用 `127.0.0.1` 临时端口与合成测试密钥；
+  - 验证 Lite 节点零轮询断言（中枢请求严格为 1）、全盘零落盘扫描、401 吊销内存清零、双栈监听与 Full 模式离线回退。
+- **T4：线上 EdgeOne Hub 实机冒烟与集成验证（Live Hub Smoke & Verification）**：
+  - 当修改并部署 `edgeone-hub/` 或 `edge-functions/` 时触发；
+  - **严格在仓库外 `scratch/` 目录执行**：测试前后获取配置与节点快照、使用 `zz_e2e_` 命名空间隔离测试节点、验证 100% 零残留清理与管理端只读可访问性。
+
+### 5.2 六道发布门禁（G1 ~ G6）
+
+执行 `npm run verify:release` 时必须全绿（详见 [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md)）：
+
+- **G1 版本与许可证一致性**：`version.json`（`vYYYYMMDD-NN` + `semver`）、`CHANGELOG.md` 与 `THIRD_PARTY_NOTICES` 对齐；
+- **G2 确定性构建与零漂移**：`npm run build:presets` + `npm run build:admin` 生成物与 Go 静态编译无漂移；
+- **G3 前后端与节点契约守卫**：T1 各项契约守卫与 AST 路由导出检查 100% 通过；
+- **G4 Profile 与 Schema 双向对齐**：`settings.schema.json`、`runtime-profiles.json` 与 Go 结构体一致；
+- **G5 全量测试与 Race 检测**：`npm run test:hub` + `go test -race ./...` + `npm run test:t3` 全绿；
+- **G6 工作区洁净度与敏感信息扫描**：零未提交改动、零禁存测试快照文件、零泄漏真实私钥或真实节点令牌（`stk_node_*`）。
+
+### 5.3 五步双轨发布与部署 SOP
+
+项目采用 **主分支触发 EdgeOne 中枢部署 + Git Tag 触发 GitHub Actions 编译 Go 二进制** 的双轨发布模式：
+
+1. **Step 1：确定性构建（Zero-Drift Artifact Build）**：
+   运行 `npm run build:presets && npm run build:admin`，生成 `catalog.json` 与内嵌控制台，确保工作区无构建漂移。
+2. **Step 2：版本号与日志同步（Version & Changelog Sync）**：
+   原子更新 `version.json`（更新 `version`、`semver`、`release_date`、`title`、`changelog`）及 `CHANGELOG.md`。
+3. **Step 3：本地门禁终审（Mandatory Local Gatekeeper）**：
+   执行 `npm run verify:release`，确认 G1 ~ G6 六道门禁 100% PASS，任何一项失败严禁推送。
+4. **Step 4：主分支推送与中枢部署（Main Branch Push & EdgeOne Hub Deploy）**：
+   执行 `git push origin main`，触发腾讯云 EdgeOne Makers 自动化构建与边缘部署（若中枢更新，在外部 `scratch/` 执行 T4 冒烟验证）。
+5. **Step 5：Tag 推送与跨平台二进制发版（Tag Push & Go Multi-Arch Release）**：
+   执行 `git tag vYYYYMMDD-NN && git push origin vYYYYMMDD-NN`，触发 GitHub Actions `ci-release.yml` 自动完成 Linux AMD64/ARM64 及 macOS 多架构静态交叉编译并发布至 GitHub Releases。

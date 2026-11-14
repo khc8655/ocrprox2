@@ -6,8 +6,11 @@
 
 ## 一、 版本号与单一真源（Version SSOT）
 
-1. **版本格式**：采用日期序号制 `vYYYYMMDD-NN`（如 `v20261108-01`），同时在 [`version.json`](file:///Users/xk/Documents/llmproxy2/version.json) 中维护对应的语义化版本 `semver`（如 `2.0.0`）。
-2. **唯一真源**：根目录 [`version.json`](file:///Users/xk/Documents/llmproxy2/version.json) 是全仓库唯一的版本定义源。
+1. **双轨版本号方案（Dual-Version Scheme）**：
+   - **`version`（日期序号制）**：采用 `vYYYYMMDD-NN` 格式（如 `v20261114-01`）。用于 Git Tag、Go 二进制内嵌版本、发布归档以及三端握手诊断（`/healthz`、`POST /api/node/config`）；
+   - **`semver`（语义化版本）**：采用标准 `MAJOR.MINOR.PATCH` 格式（如 `2.0.1`）。用于包管理器、生态版本对照与语义兼容性声明；
+   - **原子同步更新铁律**：每次发版必须在同一 Git 提交中原子更新 [`version.json`](file:///Users/xk/Documents/llmproxy2/version.json) 与 [`CHANGELOG.md`](file:///Users/xk/Documents/llmproxy2/CHANGELOG.md)。`CHANGELOG.md` 顶层必须包含与 `version.json` 中 `version` 完全一致的条目标题，严禁版本号脱节或单边提交。
+2. **唯一真源（Single Source of Truth）**：根目录 [`version.json`](file:///Users/xk/Documents/llmproxy2/version.json) 是全仓库唯一的版本定义源。
 3. **自动注入点**：
    - **Go 二进制**：编译时通过 `-ldflags="-s -w -X main.version=$(jq -r .version version.json) -X main.commit=$(git rev-parse --short HEAD)"` 注入，支持 `llmproxy --version` 与 `/healthz` 读取；
    - **管理端 UI 与 EdgeOne Hub**：由 `npm run build:admin` 在构建时从 `version.json` 自动同步到构建产物。
@@ -49,25 +52,60 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" 
 | 门禁编号 | 门禁名称 | 自动化检查内容 |
 |---|---|---|
 | **G1** | **版本与许可证一致性** | 1. 校验 `version.json` 字段完整性（`version`, `semver`, `release_date`, `commit`, `title`, `changelog`）；<br>2. 校验 `CHANGELOG.md` 包含当前版本号条目；<br>3. 校验 `THIRD_PARTY_NOTICES` 包含 `yetone/magpie` MIT 许可证声明。 |
-| **G2** | **确定性构建与零漂移** | 1. 执行 `npm run build:admin` 与 Go 编译；<br>2. 检查 `git status --porcelain` 中所有生成物目录无未提交变更（Zero Drift）。 |
-| **G3** | **前后端与节点契约守卫** | 执行 `T1.admin_ui_contract`、`T1.readonly_route_guard`（Magpie `routeMux` 只读路由守卫）与 `T1.hub_export_guard`。 |
-| **G4** | **Profile 与 Schema 双向对齐** | 执行 `T1.settings_contract` 与 `T1.presets_integrity`，确保 `settings.schema.json`、`runtime-profiles.json`、Go 结构体与前端表单 100% 同步。 |
-| **G5** | **全量三层测试与 Race 检测** | 1. 执行 `go test -race ./...`；<br>2. 执行 T2 EdgeOne 中枢单测；<br>3. 执行 T3 黑盒 E2E 测试（含 **Lite 节点中枢调用次数断言** 与 **全盘零落盘扫描**）。 |
-| **G6** | **工作区洁净度与敏感信息扫描** | 1. 确认 Git 工作树无未跟踪残留或未提交修改；<br>2. 扫描全仓代码确保无硬编码真实 `sk-*`、私钥或 `.pem` 证书被意外追踪。 |
+| **G2** | **确定性构建与零漂移** | 1. 执行 `npm run build:presets` 与 `npm run build:admin`；<br>2. 检查 `git status --porcelain` 中所有生成物目录无未提交变更（Zero Drift）；<br>3. 确保 Go 二进制在 `CGO_ENABLED=0` 下干净编译。 |
+| **G3** | **前后端与节点契约守卫** | 执行 T1 契约守卫：`T1.admin_ui_contract`、`T1.readonly_route_guard`（Magpie `routeMux` 只读路由守卫）、`T1.ui_layout_and_zero_inline_style`（极简 UI 体积与样式守卫）与 `T1.hub_export_guard`（EdgeOne 纯 Web Standard 与 AST 显式 `export function onRequest*` 守卫）。 |
+| **G4** | **Profile 与 Schema 双向对齐** | 执行 `T1.settings_contract` 与 `T1.presets_integrity`，确保 `settings.schema.json`、`runtime-profiles.json`、Go 结构体与前端表单 100% 同步且无已废弃字段。 |
+| **G5** | **全量测试与 Race 检测** | 1. 执行 `npm run test:hub`（EdgeOne 中枢单测）；<br>2. 执行 `go test -race ./...`（Go 全模块并发数据竞争检测）；<br>3. 执行 `npm run test:t3`（本地多进程黑盒 E2E 测试，含 **Lite 节点中枢调用次数严格为 1** 与 **全盘零落盘扫描**）。 |
+| **G6** | **工作区洁净度与敏感信息扫描** | 1. 确认 Git 工作树无未跟踪残留或未提交修改；<br>2. 扫描工作区严禁残留任何线上测试快照或报告文件（`before_config.json`, `after_config.json`, `before_nodes.json`, `after_nodes.json`, `matrix_results.json`, `live_hub_test_report.md`）；<br>3. 扫描全仓代码确保无硬编码真实 `sk-*`、未脱敏私钥文件或真实节点令牌（`stk_node_*`）。 |
 
 ---
 
-## 四、 标准发版 SOP
+## 四、 五步双轨发版与部署 SOP
 
-1. **特性开发与测试**：完成代码与对应 T1/T2/T3 测试编写，本地运行 `go test -race ./...`。
-2. **构建共享资产**：运行 `npm run build:admin` 同步前端与预设产物。
-3. **更新版本与文档**：更新 `version.json`、`CHANGELOG.md` 及涉及的 `docs/*.md` 规范文档。
-4. **执行发版门禁**：运行 `npm run verify:release`，确认 **G1 ~ G6 全部 PASS**。
-5. **交叉编译与签名校验**：运行 `npm run build:release` 生成 `dist/` 下各平台静态二进制与 `SHA256SUMS`。
-6. **提交与打标**：
-   ```bash
-   git add -A
-   git commit -m "release: vYYYYMMDD-NN <简明标题>"
-   git tag -a vYYYYMMDD-NN -m "vYYYYMMDD-NN"
-   git push origin main --tags
-   ```
+本项目采用 **主分支推送触发 EdgeOne 中枢自动化部署 + Git Tag 触发 GitHub Actions 编译多架构 Go 二进制** 的双轨发布模式，发版流程严格遵循以下 5 个步骤：
+
+```text
+ ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+ │    Step 1    │     │    Step 2    │     │    Step 3    │     │    Step 4    │     │    Step 5    │
+ │ 确定性构建产物 │ ──> │ 版本与日志同步 │ ──> │ 本地门禁终审  │ ──> │ 主分支推送部署 │ ──> │ 打标与全架构发版│
+ │ Zero-Drift   │     │ Version Sync │     │ G1 ~ G6 100% │     │ EdgeOne Auto │     │ GitHub CI    │
+ └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+```
+
+### Step 1：确定性资产构建（Zero-Drift Artifact Build）
+运行预设和前端构建脚本，更新静态资产：
+```bash
+npm run build:presets
+npm run build:admin
+```
+构建脚本会自动将预设目录哈希同步至 `catalog.json`，并将打包压缩后的管理端单文件控制台同步复制至 `edge-functions/_hub/admin.html` 与 `internal/admin/assets/index.html`。
+
+### Step 2：版本号与更新日志同步（Version & Changelog Sync）
+原子同步更新 [`version.json`](file:///Users/xk/Documents/llmproxy2/version.json) 与 [`CHANGELOG.md`](file:///Users/xk/Documents/llmproxy2/CHANGELOG.md)：
+1. 在 `version.json` 中更新 `version`（`vYYYYMMDD-NN`）、`semver`（`MAJOR.MINOR.PATCH`）、`release_date`、`title` 及 `changelog` 数组；
+2. 在 `CHANGELOG.md` 顶层添加对应版本号的发布日志块，详细记录 `Added`、`Fixed`、`Changed` 改动点。
+
+### Step 3：本地门禁终审（Mandatory Local Gatekeeper）
+在本地运行全自动发版门禁脚本：
+```bash
+npm run verify:release
+```
+**铁律**：G1 ~ G6 六道门禁必须 100% 通过（PASS）。任一门禁失败必须立即阻断发版，修复后重试，严禁绕过门禁强行推送。
+
+### Step 4：主分支推送与中枢部署（Main Branch Push & Hub Deployment）
+将经过门禁验证的代码提交并推送到 GitHub `main` 分支：
+```bash
+git add -A
+git commit -m "release: vYYYYMMDD-NN <简明摘要>"
+git push origin main
+```
+- **EdgeOne 自动化部署**：推送至 `main` 分支后，腾讯云 EdgeOne Makers 会自动捕获提交并完成边缘函数与静态资源的部署；
+- **可选 T4 外部冒烟验证**：若本次改动涉及 `edgeone-hub/` 或 `edge-functions/`，在部署完成后必须在仓库外部 `scratch/` 目录运行 T4 冒烟脚本，验证生产环境 100% 正常且零残留。
+
+### Step 5：Tag 推送与跨平台编译发版（Tag Push & Go Release）
+在本地创建与 `version.json` 完全一致的 Git Tag 并推送到远程仓库：
+```bash
+git tag vYYYYMMDD-NN
+git push origin vYYYYMMDD-NN
+```
+- **GitHub Actions 自动化流水线**：推送到 Tag 后，`.github/workflows/ci-release.yml` 触发流水线，在纯净容器中自动交叉编译 `linux-amd64`、`linux-arm64`、`darwin-arm64` 静态二进制，计算 `SHA256SUMS`，并自动发布 GitHub Release 制品。

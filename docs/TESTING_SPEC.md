@@ -1,53 +1,65 @@
-# 测试体系规范 (Testing Specification — T1 / T2 / T3)
+# 测试体系规范 (Testing Specification — T1 / T2 / T3 / T4)
 
 > **核心目标**：用自动化测试锁死架构契约、安全红线与性能基线，确保从 1 代 Python 迁移到 2 代 Go × Magpie 内核后 **100% 功能等价、零安全退化、零轮询计费泄露**。
 
 ---
 
-## 一、 三层测试金字塔总览
+## 一、 四层测试金字塔总览
 
-项目继承并升级 1 代的三层测试架构，所有测试通过 `npm run test:full`（或分层命令）统一编排：
+项目实行严格的四层分层测试架构，所有本地测试通过 `npm run test:full`（或分层命令）统一编排，线上部署接入 T4 外部冒烟隔离验证：
 
 ```text
                   ┌──────────────────────────────────────────┐
-                  │       T3: 黑盒端到端测试 (E2E Suite)        │
-                  │  真实编译 Go 二进制 (lite & full) + 模拟上游 │
-                  │  验证：零轮询计数、零落盘扫描、双栈、OCR压测  │
+                  │   T4: 线上 EdgeOne 实机冒烟与集成验证       │
+                  │  (Live Hub Smoke, scratch/ 隔离, 零污染)   │
+                  └────────────────────┬─────────────────────┘
+                                       │
+                  ┌────────────────────┴─────────────────────┐
+                  │       T3: 本地黑盒端到端测试 (Local E2E)   │
+                  │  真实编译 Go 二进制 (lite & full) + 模拟中枢 │
+                  │  127.0.0.1 临时端口、零落盘扫描、双栈、零轮询│
                   └────────────────────┬─────────────────────┘
                                        │
             ┌──────────────────────────┴───────────────────────────┐
             │         T2: 单元测试与并发竞争检测 (Unit & Race)        │
-            │  Go: go test -race ./internal/... (含 Magpie 搬运包)  │
-            │  Hub: Node.js 测试 EdgeOne 节点签发/投影/304/吊销逻辑   │
+            │  Go: go test -race ./... (含 Magpie 搬运包与调度器)    │
+            │  Hub: npm run test:hub (Node.js 契约、304、Scope 投影) │
             └──────────────────────────┬───────────────────────────┘
                                        │
      ┌─────────────────────────────────┴──────────────────────────────────┐
-     │              T1: 静态契约与 Schema 门禁测试 (Contract < 5s)          │
-     │  settings.schema ↔ runtime-profiles ↔ admin UI ↔ Go/JS 读取点对齐  │
-     │  readonly.go routeMux 路由白名单守卫 · 预设 JSON 完整性校验           │
+     │              T1: 静态契约与 AST 门禁层 (Contract & AST < 5s)        │
+     │  settings.schema ↔ runtime-profiles ↔ admin UI ↔ Go/JS 1:1 对齐   │
+     │  readonly.go routeMux 守卫 · UI 零内联样式 · EdgeOne AST 显式导出  │
+     │  edge-functions 纯 Web Standard (零 node:*、零 Buffer、零逃逸)    │
      └────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 二、 T1：静态契约与 Schema 校验层（目标耗时 `< 5s`，零网络）
+## 二、 T1：静态契约与 AST 门禁层（目标耗时 `< 5s`，零网络）
 
 | 测试项 ID | 校验内容 | 失败判定条件 |
 |---|---|---|
-| **`T1.settings_contract`** | 扫描 `shared/config/settings.schema.json`、`runtime-profiles.json`、`shared/admin/js/settings*.js` 与 Go `internal/config/`、EdgeOne `edgeone-hub/` | 任何设置项未在 Schema 登记、默认值不一致、或复活了已删除字段（`request_total_budget_sec` 等）立即变红 |
-| **`T1.admin_ui_contract`** | 校验 `shared/contracts/admin-ui-backend.json` 中声明的所有 API 路径、请求方法和响应字段 | `edgeone-hub` 或 Go `internal/admin` 缺失契约路由，或前端引用了不存在的 `data-cap` 能力位 |
-| **`T1.presets_integrity`** | 校验 `shared/presets/*.json` 与生成的 `catalog.json` 的 Schema 合法性及 `rule_hash` 一致性 | JSON 语法错误、未知 `adapter_rules` 键或构建产物漂移 |
-| **`T1.readonly_route_guard`** | 执行 Magpie 搬运的 `internal/router/readonly_test.go` (`routeMux` 门禁) | 任何新注册到 HTTP `ServeMux` 的路由未显式在 `allowedLiteRoutes` 或 `fullOnlyRoutes` 登记 |
+| **`T1.settings_contract`** | 扫描 `shared/config/settings.schema.json`、`runtime-profiles.json`、`shared/admin/js/settings*.js` 与 Go `internal/types/types.go`、EdgeOne `edgeone-hub/` | 任何设置项未在 Schema 登记、默认值不一致、字段未 1:1 对齐、或复活了已删除字段（`request_total_budget_sec`、`max_retries` 等）立即变红 |
+| **`T1.admin_ui_contract`** | 校验 `shared/contracts/admin-ui-backend.json` 中声明的所有 API 路径、请求方法、响应字段与 `shared/admin/js/host.js` 的 `HOST.capabilities` | `edgeone-hub` 或 Go `internal/admin` 缺失契约路由，或前端引用了未在当前角色声明的 `data-cap` 能力位 |
+| **`T1.presets_integrity`** | 校验 `shared/presets/*.json` 16 家厂商预设与生成的 `catalog.json` 的 Schema 合法性及 `rule_hash` 一致性 | JSON 语法错误、未知 `adapter_rules` 键或构建产物发生漂移 |
+| **`T1.readonly_route_guard`** | 执行 Magpie 搬运的 `internal/router/readonly_test.go` (`routeMux` 门禁) | 任何新注册到 HTTP `ServeMux` 的路由未显式在 `allowedLiteRoutes` 或 `fullOnlyRoutes` 白名单登记 |
 | **`T1.ui_layout_and_zero_inline_style`** | 扫描 `shared/admin/` 全部 `.html`、`.css`、`.js` 文件（执行 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 五大硬门禁） | 出现任何 `style="` 或 `.style.display` 内联样式、出现 `.drawer` 组件、出现左边框彩条，或打包总大小 `> 80KB` |
-| **`T1.hub_export_guard`** | AST/静态检查 `edgeone-hub/` | 若 `edgeone-hub` 仍残留 `/v1/*` 路由或未对 `origin === "local"` 执行物理过滤则变红 |
+| **`T1.hub_export_guard`** | 扫描 `edgeone-hub/` 与 `edge-functions/` 的 AST 与纯 Web Standard 边界规范 | 1. 发现任何 `/v1/*` 推理代理路由；<br>2. 投影计算未对 `origin === "local"` 实施物理阻断；<br>3. `edge-functions/` 与 `edgeone-hub/` 引入 `node:*` 模块、`Buffer.from/alloc`、`process.cwd` 或 `../edgeone-hub` 逃逸；<br>4. `edge-functions/` 入口文件使用 `export * from` 或缺失显式 `export function onRequest*`。 |
 
 ---
 
 ## 三、 T2：单元测试与并发竞争检测层（目标耗时 `< 30s`）
 
-全部 Go 单测强制开启 **`-race`（并发数据竞争检测器）**：`go test -race ./internal/...`
+执行 EdgeOne 中枢纯 JS 单元测试与 Go 全包单测，全部 Go 单测强制开启 **`-race`（并发数据竞争检测器）**：
+```bash
+npm run test:hub           # 执行 edgeone-hub/test/hub.test.mjs
+go test -race ./...        # 执行 Go 全量模块并发数据竞争检测
+```
 
 | 测试包 / 模块 | 核心测试覆盖点 |
+|---|---|
+| **`edgeone-hub/` (Node.js)** | 1. CAS 乐观锁版本递增与 409 冲突拦截；<br>2. 节点签发（`stk_node_<48hex>`）、Token 轮换与即刻吊销；<br>3. Scope 白名单投影（`origin="vault"` 下发 vs `origin="local"` 物理阻断）；<br>4. ETag 计算与 304 续租协商；<br>5. 兼容 Unix 秒级与毫秒级时间戳的租约宽限期解析。 |
 |---|---|
 | **`internal/netguard` & `internal/upstream`** | 1. IPv4/IPv6 私网、Loopback、`::ffff:127.0.0.1`、云元数据 `169.254.169.254`/`100.100.100.200`、Clash Fake-IP `198.18.0.1`/`fc00::1` 拦截；<br>2. DNS Rebinding 模拟（第一次解析公网、第二次解析内网，验证 Pinning 生效）；<br>3. Go 标准库 Happy Eyeballs（300ms IPv6 黑洞自动切 IPv4）与 `sse.go` 裸 JSON 错误行扫描。 |
 | **`internal/auth` & `internal/obs`** | 1. 四权分立凭据隔离（`ADMIN_PASSWORD`/`NODE_TOKEN`/`CLIENT_KEY` 互不可越权）与 Loopback 强制鉴权；<br>2. `applog.go` 的 `scrub()` 对 `sk-*`、`Bearer`、`?key=`、`AIza*`、`eyJ*` 100% 脱敏及 5MB 双文件自动轮转；<br>3. `usage.go` (`usage.jsonl` 追加写与按 `today/7d/30d` + 时区聚合) 与 `trace.go` (`traceKeep=60` 环形覆盖与 `Tries[]` 多跳故障转移记录)。 |
@@ -73,9 +85,9 @@
    - **NAT 双栈与 IPv6 黑洞回退**：在云端 Linux 环境模拟 IPv6 路由黑洞，实测 300ms Happy Eyeballs 无感回退 IPv4；
    - **吞吐量与尾延迟（P50 / P95 / P99 Gateway Overhead）**：对比 1,000 次请求下 1 代 Python vs 2 代 Go 的网关自身转发开销、FD 句柄泄漏与 Goroutine 收敛情况。
 
-### 4.2 T3 标准黑盒用例
+### 4.2 T3 本地黑盒用例（`npm run test:t3`）
 
-启动真实编译出的 `bin/llmproxy` 进程（分别以 `--role=lite` 和 `--role=full` 启动）+ 本地/云端 Mock EdgeOne Hub + Mock 上游 LLM Server：
+启动真实编译出的 `bin/llmproxy` 进程（分别以 `--role=lite` 和 `--role=full` 启动），**严格使用 `127.0.0.1` 临时端口与合成测试密钥（Synthetic Mock Keys）** + 本地 Mock EdgeOne Hub + Mock 上游 LLM Server：
 
 1. **`T3.lite_zero_disk_and_budget`（NAT 极简节点专项验收）**：
    - 发送 1,000 次客户端 `/v1/chat/completions`（流式 + 非流式）与 `/v1/messages` 请求：
@@ -90,7 +102,37 @@
 
 ---
 
-## 五、 1 代 21 项测试向 2 代测试套件的迁移映射表
+## 五、 T4：线上 EdgeOne Hub 实机冒烟与集成验证层（Live Hub Smoke & Verification）
+
+当 `edgeone-hub/` 或 `edge-functions/` 发生改动并部署至腾讯云 EdgeOne Makers 后，必须执行 T4 实机冒烟与集成验证。
+
+### 5.1 安全与外部隔离红线
+- **严格在仓库外部 `scratch/` 执行**：所有 T4 测试脚本、快照文件（`before_*.json`、`after_*.json`、`matrix_results.json`）与测试报告（`live_hub_test_report.md`）**严禁保存在 Git 代码仓库目录内**，必须存放在外部临时目录（如 `../scratch/` 或系统临时目录）；
+- **零生产污染（Zero Side-Effect）**：测试过程不得修改生产环境已有配置或删除已有节点；测试结束后必须达到 **100% 零残留（Zero-Diff）**。
+
+### 5.2 T4 验证流程与断言规范
+
+1. **Before 生产快照获取**：
+   - 读取当前生产配置保存为 `before_config.json`；
+   - 读取当前节点列表保存为 `before_nodes.json`。
+2. **`zz_e2e_` 命名空间隔离**：
+   - 测试临时签发的所有节点 ID 强制以 `zz_e2e_` 为前缀（如 `zz_e2e_hk_vm01`），与现有节点明确隔离。
+3. **端到端生命周期闭环验证**：
+   - **节点签发**：`POST /api/admin/nodes`，断言返回的 `node_token` 符合 `stk_node_<48hex>` 规范；
+   - **配置投影**：`POST /api/node/config`，断言成功下发允许 Scope 内的 `origin="vault"` 供应商与 Key，且所有 `origin="local"` 供应商与 Key 100% 被阻断；
+   - **租约协商与 304 续租**：使用返回的 `etag` 发送带 `If-None-Match` 的续租请求，断言响应为 `304 Not Modified` 且 Body 为空；
+   - **即刻吊销生效**：调用 `PATCH /api/admin/nodes/:id` 将节点置为 `enabled: false`，再次请求配置投影，断言立即返回 `401 Unauthorized`；
+   - **节点清理**：调用 `DELETE /api/admin/nodes/:id` 彻底删除临时节点。
+4. **After 生产快照与 100% 零残留（Zero-Diff）断言**：
+   - 抓取测试后的配置 `after_config.json` 与节点列表 `after_nodes.json`；
+   - 比对 `before_config.json` 与 `after_config.json`，断言除 `_version` 或时间戳外生产配置 100% 一致；
+   - 比对 `before_nodes.json` 与 `after_nodes.json`，断言所有 `zz_e2e_` 测试节点全部被清理，生产节点集合完全一致。
+5. **管理端只读访问校验**：
+   - 模拟只读浏览器请求线上 `https://<hub-domain>/admin` 与 `/healthz`，校验 HTTP 状态码为 200，HTML 包含 `#app` 根容器，且 `/healthz` 返回健康状态。
+
+---
+
+## 六、 1 代 21 项测试向 2 代测试套件的迁移映射表
 
 | 1 代测试文件 (`ocrprox/tests/`) | 2 代对应落点 (`llmproxy2`) | 演进方式 |
 |---|---|---|

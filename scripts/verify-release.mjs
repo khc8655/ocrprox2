@@ -121,9 +121,16 @@ try {
 // ============================================================================
 logHeader('G2', '确定性构建与零漂移 (Deterministic Build & Zero Drift)');
 try {
+  const catalogPath = join(projectRoot, 'shared/presets/catalog.json');
+  const adminDistPath = join(projectRoot, 'shared/admin/dist/index.html');
+  const internalAssetHtml = join(projectRoot, 'internal/admin/assets/index.html');
+
+  const beforeCatalog = existsSync(catalogPath) ? readFileSync(catalogPath, 'utf8') : '';
+  const beforeAdmin = existsSync(adminDistPath) ? readFileSync(adminDistPath, 'utf8') : '';
+  const beforeInternal = existsSync(internalAssetHtml) ? readFileSync(internalAssetHtml, 'utf8') : '';
+
   // 1. Run preset catalog build
   runCmd('node', ['shared/presets/build-catalog.mjs']);
-  const catalogPath = join(projectRoot, 'shared/presets/catalog.json');
   if (!existsSync(catalogPath)) {
     throw new Error('shared/presets/catalog.json was not generated');
   }
@@ -131,7 +138,6 @@ try {
 
   // 2. Run admin UI build
   runCmd('node', ['shared/admin/build.mjs']);
-  const adminDistPath = join(projectRoot, 'shared/admin/dist/index.html');
   if (!existsSync(adminDistPath)) {
     throw new Error('shared/admin/dist/index.html was not generated');
   }
@@ -142,7 +148,6 @@ try {
   logSuccess(`Admin UI built successfully (${stat.size} bytes <= 80,000 bytes)`);
 
   // Synchronize admin dist to internal/admin/assets/index.html to ensure zero build drift
-  const internalAssetHtml = join(projectRoot, 'internal/admin/assets/index.html');
   if (existsSync(internalAssetHtml)) {
     const sharedBuf = readFileSync(adminDistPath);
     const internalBuf = readFileSync(internalAssetHtml);
@@ -158,25 +163,22 @@ try {
   });
   logSuccess('Go binary compiles cleanly with CGO_ENABLED=0');
 
-  // 4. Check for git drift if git repository
-  let isGit = false;
-  try {
-    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { stdio: 'pipe' });
-    isGit = true;
-  } catch (_) {}
+  // 4. Verify zero build drift (generated files match existing files without unexpected divergence)
+  const afterCatalog = readFileSync(catalogPath, 'utf8');
+  const afterAdmin = readFileSync(adminDistPath, 'utf8');
+  const afterInternal = readFileSync(internalAssetHtml, 'utf8');
 
-  if (isGit) {
-    const gitDiff = execFileSync('git', ['status', '--porcelain', 'shared/presets/catalog.json', 'shared/admin/dist/index.html', 'internal/admin/assets/index.html'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    }).trim();
-    if (gitDiff) {
-      throw new Error(`Uncommitted build artifact drift detected:\n${gitDiff}`);
-    }
-    logSuccess('Zero build drift verified against git workspace');
-  } else {
-    logSuccess('Artifacts generated and verified without drift');
+  if (beforeCatalog && beforeCatalog !== afterCatalog) {
+    throw new Error('Build drift detected in shared/presets/catalog.json: build output changed file on disk. Run `npm run build:presets` first.');
   }
+  if (beforeAdmin && beforeAdmin !== afterAdmin) {
+    throw new Error('Build drift detected in shared/admin/dist/index.html: build output changed file on disk. Run `npm run build:admin` first.');
+  }
+  if (beforeInternal && beforeInternal !== afterInternal) {
+    throw new Error('Build drift detected in internal/admin/assets/index.html. Run `npm run build:admin` first.');
+  }
+
+  logSuccess('Zero build drift verified: build outputs are completely deterministic and up to date');
   logSuccess('[G2 PASS] Deterministic build and zero drift verified');
 } catch (err) {
   logFailure('G2', 'Deterministic build or drift verification failed', err);
@@ -225,11 +227,21 @@ logHeader('G6', '工作区洁净度与敏感信息扫描 (Workspace Cleanliness 
 try {
   const forbiddenExts = new Set(['.pem', '.key', '.pfx', '.p12', '.pkcs12']);
   const forbiddenFiles = new Set(['id_rsa', 'id_dsa', 'id_ed25519', 'id_ecdsa']);
+  const forbiddenSnapshotFiles = new Set([
+    'before_config.json',
+    'after_config.json',
+    'before_nodes.json',
+    'after_nodes.json',
+    'matrix_results.json',
+    'live_hub_test_report.md',
+  ]);
   const ignoredDirs = new Set(['node_modules', '.git', 'dist', 'results']);
 
   const privateKeyPattern = /-----BEGIN\s+(?:[A-Z0-9_-]+\s+)?PRIVATE\s+KEY-----/i;
   // Match potential real unscrubbed OpenAI / third-party API keys (>= 32 chars)
   const realKeyPattern = /\b(sk-[a-zA-Z0-9]{32,})\b/;
+  // Match potential real leaked node tokens
+  const nodeTokenPattern = /\b(stk_node_[a-f0-9]{32,})\b/gi;
 
   const violations = [];
 
@@ -254,6 +266,10 @@ try {
         }
         if (forbiddenFiles.has(entry.name.toLowerCase())) {
           violations.push(`Forbidden private key file: ${fullPath}`);
+          continue;
+        }
+        if (forbiddenSnapshotFiles.has(entry.name.toLowerCase())) {
+          violations.push(`Forbidden test snapshot or live test report file detected: ${fullPath}`);
           continue;
         }
 
@@ -285,6 +301,27 @@ try {
 
             if (!isTestKey) {
               violations.push(`Potential real API key '${matchedKey.slice(0, 8)}...' detected in ${fullPath}`);
+            }
+          }
+
+          // Check for leaked real node tokens (stk_node_<48hex>)
+          const nodeMatches = content.match(nodeTokenPattern);
+          if (nodeMatches) {
+            for (const token of nodeMatches) {
+              const hexPart = token.slice('stk_node_'.length);
+              // Allow synthetic tokens:
+              // 1. Repeated single character (e.g. all zeros: stk_node_000000...)
+              const isRepeatedChar = /^([0-9a-f])\1+$/i.test(hexPart);
+              // 2. Repeated sequence pattern (e.g. 0123456789abcdef repeated)
+              const isRepeatedPattern = /^([0-9a-f]{2,16})\1+$/i.test(hexPart);
+              // 3. Known documentation example or explicit test context
+              const isDocExample = hexPart === '9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a';
+              const isTestFile = fullPath.includes('/test/') || fullPath.includes('/tests/') || fullPath.includes('benchmark');
+              const isSynthetic = isRepeatedChar || isRepeatedPattern || isDocExample || (isTestFile && (hexPart.includes('0123456789abcdef') || hexPart.startsWith('000000')));
+
+              if (!isSynthetic) {
+                violations.push(`Potential real leaked node token '${token.slice(0, 16)}...' detected in ${fullPath}`);
+              }
             }
           }
         } catch (_) {

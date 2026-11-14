@@ -4,6 +4,44 @@
 
 ---
 
+## [v20261114-01] - 2026-11-14
+
+### Added
+- **EdgeOne Makers 官方运行时指南与平台适配规范**：
+  - 新增 [`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md)：沉淀 EdgeOne Makers V8 Isolate Serverless 运行时限制、Web Standard API 边界、5MB 包体积配额、KV 最终一致性格局（同节点即时生效 / 跨节点 60s）与 Web Crypto 鉴权规范。
+- **四层测试金字塔与 T4 线上实机冒烟验证**：
+  - 升级 [`docs/TESTING_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/TESTING_SPEC.md)，扩展为 T1~T4 四层测试架构：
+    - T1：静态契约、UI 限制、Go 路由白名单及 EdgeOne AST 显式导出与纯 Web Standard 边界守卫；
+    - T2：EdgeOne Hub 单元测试与 Go `-race` 并发竞争检测（`npm run test:hub` + `go test -race ./...`）；
+    - T3：本地多进程黑盒 E2E 测试（`npm run test:t3`，严格采用 `127.0.0.1` 临时端口与合成测试密钥）；
+    - T4：线上 EdgeOne Hub 实机冒烟与集成验证（在外部 `scratch/` 隔离运行、`before/after` 快照对比、`zz_e2e_` 命名空间隔离、100% 零残留验证及只读控制台探活）。
+- **五步双轨发版 SOP 与发布规范**：
+  - 升级 [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md)，正式确立「`version` 日期序号制 + `semver` 语义化版本」双轨方案与原子同步机制；
+  - 确立五步双轨发布流程（Step 1 确定性构建 -> Step 2 版本与日志同步 -> Step 3 本地门禁终审 -> Step 4 主分支推送中枢部署 -> Step 5 Tag 推送与 GitHub Actions 跨平台静态二进制构建）。
+- **发布门禁 G6 硬化与仓库防泄露规则**：
+  - 升级 [`scripts/verify-release.mjs`](file:///Users/xk/Documents/llmproxy2/scripts/verify-release.mjs) Gate G6：新增禁止残留测试快照与报告文件校验（`before_config.json`, `after_config.json`, `before_nodes.json`, `after_nodes.json`, `matrix_results.json`, `live_hub_test_report.md`）及真实节点令牌防泄露正则扫描（`/\bstk_node_[a-f0-9]{32,}\b/i`）；
+  - 更新 [`.gitignore`](file:///Users/xk/Documents/llmproxy2/.gitignore)：显式忽略 `*.sqlite`、`*.sqlite3`、`*.db`、`data/`、`*snapshot*.json`、`before_*.json`、`after_*.json`、`matrix_results.json`、`live_hub_test_report.md`、`.live_test*`。
+
+### Fixed
+- **EdgeOne 纯 Web Standard 运行时适配（`8ef569a`）**：
+  - 彻底去除 `edge-functions/` 及 `edgeone-hub/` 依赖链中所有 `node:crypto`、`node:fs`、`node:path`、`node:url` 内置模块与全局 `Buffer`；
+  - 采用标准 Web Crypto API（`crypto.getRandomValues` / `crypto.subtle`）实现节点令牌生成、SHA-256 哈希计算与 Bearer 鉴权常量时间比对；
+  - 将中枢核心依赖收敛至自包含目录 `edge-functions/_hub/`，阻断跨根目录依赖，彻底解决 EdgeOne 平台构建失败与线上静默 404 问题。
+- **EdgeOne Makers AST 显式路由扫描适配（`cc1172d`）**：
+  - 针对 EdgeOne Makers 平台构建期仅做顶层静态 AST 扫描的机制，将 `edge-functions/` 下所有路由文件的 `export * from '...'` 间接转发导出重构为显式顶层 `export async function onRequest(...)` 声明，修复线上路由无法被平台注册的缺陷。
+- **Go hubsync 协议数字时间戳解析兼容（`8f72508`）**：
+  - 修复 [`internal/hubsync/hubsync.go`](file:///Users/xk/Documents/llmproxy2/internal/hubsync/hubsync.go) 中对租约截止时间 `lease_until` 与宽限期截止时间 `grace_until` 的反序列化逻辑，全面兼容中枢返回的 Unix 秒级（10位）与毫秒级（13位）数字时间戳，杜绝由于时间格式反序列化失败导致节点降级。
+
+### Changed
+- **设计规范文档体系统一收敛**：
+  - 移除历史遗留冗余目录与文件 `doc/GO_NODE_REFACTOR_SPEC.md`（`rm -rf doc`），将唯一权威系统架构设计规范统一收敛至 [`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)。
+- **工程宪法与治理红线更新（[`CLAUDE.md`](file:///Users/xk/Documents/llmproxy2/CLAUDE.md)）**：
+  - 将 [`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md) 纳入核心权威规范文档序列；
+  - 确立「设计先行变更铁律（Design-First Change Rule）」：跨端 API、数据模型与外部依赖变更前必须先行同步更新契约文件（`docs/ADMIN_UI_BACKEND_CONTRACT.md` + `shared/contracts/admin-ui-backend.json` 或 `docs/MULTI_AGENT_BLUEPRINT.md` + `internal/types/types.go`）；
+  - 确立「开源仓库与测试数据安全红线（Public Repository & Test Data Redlines）」：零真实凭据/令牌入库，实机测试脚本与快照产物必须严格隔离在外部 `scratch/` 临时目录运行。
+
+---
+
 ## [v20261108-02] - 2026-11-08
 
 ### Added
@@ -33,7 +71,7 @@
 ### Added
 - **项目初始化与标准文档体系建设**：
   - 新增 [`README.md`](file:///Users/xk/Documents/llmproxy2/README.md)、[`CLAUDE.md`](file:///Users/xk/Documents/llmproxy2/CLAUDE.md)、[`ARCHITECTURE_STANDARDS.md`](file:///Users/xk/Documents/llmproxy2/ARCHITECTURE_STANDARDS.md)，确立工程宪法与七大架构准则。
-  - 新增 [`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)（并同步更新 [`doc/GO_NODE_REFACTOR_SPEC.md`](file:///Users/xk/Documents/llmproxy2/doc/GO_NODE_REFACTOR_SPEC.md)）：深度复盘前任设计草案的五大缺陷，确立 **EdgeOne Makers 轻中枢 (`hub`) + Go 极简 NAT 节点 (`lite`) + Go 完整节点 (`full`)** 的三端融合架构。
+  - 新增 [`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)（现已统一收敛至 `docs/`，移除旧 `doc/` 历史草案）：深度复盘前任设计草案的五大缺陷，确立 **EdgeOne Makers 轻中枢 (`hub`) + Go 极简 NAT 节点 (`lite`) + Go 完整节点 (`full`)** 的三端融合架构。
   - 新增 [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md)：完成 `yetone/magpie` 近 1,000 次提交（734 个版本）变更热度审计，确立 9 个零变更标准库微模块的白名单搬运矩阵与三层统计/轨迹回放（`applog` + `usage.jsonl` + `traceKeep=60`）方案。
   - 新增 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md)：确立 Magpie 极简风格 UI 标准（安静表面、`.list/.row` + 行内原地展开 `.editor`、零抽屉、零内联样式、体积 ≤ 80KB）。
   - 新增 [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md)：锁死全局唯一 Go 核心结构体与跨包接口（`internal/types/types.go`）及 W0~W6 多 Agent 物理文件所有权边界（零冲突并行开发）。
