@@ -1,2 +1,2 @@
-export * from '../../../edgeone-hub/api/vault/manifest.js';
-export { default } from '../../../edgeone-hub/api/vault/manifest.js';
+export * from '../../_hub/api/vault/manifest.js';
+export { default } from '../../_hub/api/vault/manifest.js';

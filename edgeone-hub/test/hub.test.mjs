@@ -9,6 +9,7 @@ import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv } from '../lib/config.js';
+import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
 import * as edgeAdmin from '../../edge-functions/admin.js';
 import * as edgeIndex from '../../edge-functions/index.js';
 import * as edgeHealth from '../../edge-functions/health.js';
@@ -836,8 +837,24 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(patchData.ok, true);
       assert.strictEqual(patchData.node.name, 'edgeone-renamed-node');
 
+      // 3b. Multi-level dynamic route edge-functions/api/admin/nodes/[[default]].js
+      const defaultParamModule = await import('../../edge-functions/api/admin/nodes/[[default]].js');
+      const rotateReq = makeAdminReq('POST', `/api/admin/nodes/${nodeId}/rotate`);
+      const rotateCtx = {
+        request: rotateReq,
+        env: TEST_ENV,
+        agent_kv: mockKv,
+        params: { default: [nodeId, 'rotate'] },
+      };
+      const rotateResp = await defaultParamModule.onRequestPost(rotateCtx);
+      assert.strictEqual(rotateResp.status, 200);
+      const rotateData = await rotateResp.json();
+      assert.strictEqual(rotateData.ok, true);
+      assert.ok(rotateData.node_token.startsWith('stk_node_'));
+      const rotatedToken = rotateData.node_token;
+
       // 4. Fetch node configuration via edge-functions/api/node/config.js onRequestPost
-      const nodePullReq = makeNodeReq('POST', '/api/node/config', issuedToken);
+      const nodePullReq = makeNodeReq('POST', '/api/node/config', rotatedToken);
       const nodePullCtx = { request: nodePullReq, env: TEST_ENV, agent_kv: mockKv };
       const pullResp = await edgeNodeConfig.onRequestPost(nodePullCtx);
       assert.strictEqual(pullResp.status, 200);
@@ -847,6 +864,43 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(pullData.ok, true);
       assert.ok(pullData.payload.providers.openai);
       assert.strictEqual(pullData.payload.providers.openai.api_keys[0].key, 'sk-secret-xyz12345');
+    });
+  });
+
+  describe('9. Web Standard Pure Crypto & SHA-256 Vectors', () => {
+    test('SHA-256 standard vectors and token format compliance', () => {
+      // Standard vectors (NIST FIPS 180-4)
+      assert.strictEqual(
+        hashToken('hello'),
+        '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+        'SHA-256("hello") must match FIPS standard vector'
+      );
+      assert.strictEqual(
+        hashToken(''),
+        '',
+        'hashToken("") must return empty string for empty input'
+      );
+      assert.strictEqual(
+        hashToken('abc'),
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        'SHA-256("abc") must match FIPS standard vector'
+      );
+
+      // Node token format
+      const token = generateNodeToken();
+      assert.ok(token.startsWith('stk_node_'), 'Token must start with stk_node_');
+      assert.strictEqual(token.length, 57, 'Token must be exactly 57 chars (9 + 48 hex)');
+      assert.match(token, /^stk_node_[0-9a-f]{48}$/, 'Token must match stk_node_<48hex>');
+
+      // Constant time comparison
+      assert.strictEqual(constantTimeCompare('secret_pass', 'secret_pass'), true);
+      assert.strictEqual(constantTimeCompare('secret_pass', 'wrong_pass'), false);
+      assert.strictEqual(constantTimeCompare('short', 'longer_string'), false);
+      assert.strictEqual(constantTimeCompare(null, 'test'), false);
+
+      // ETag computation
+      const etag = computeEtag({ key: 'val' });
+      assert.match(etag, /^"[0-9a-f]{16}"$/, 'ETag must be 16 hex chars wrapped in quotes');
     });
   });
 });

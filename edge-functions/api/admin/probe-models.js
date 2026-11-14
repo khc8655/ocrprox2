@@ -1,2 +1,2 @@
-export * from '../../../edgeone-hub/api/admin/probe-models.js';
-export { default } from '../../../edgeone-hub/api/admin/probe-models.js';
+export * from '../../_hub/api/admin/probe-models.js';
+export { default } from '../../_hub/api/admin/probe-models.js';

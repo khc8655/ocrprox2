@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const adminDir = __dirname;
 const distDir = join(adminDir, 'dist');
+const projectRoot = join(adminDir, '..', '..');
 
 console.log('=== LLMProxy2 Magpie Minimalist Admin UI Builder & Gate Verification ===\n');
 
@@ -91,7 +92,6 @@ console.log(`   ✓ Bundle size ${sizeKb} KB <= 80 KB limit (100% compliant)`);
 
 // 8. Generate edge-functions/admin.js (EdgeOne Hub Console)
 console.log('\n7. Generating edge-functions/admin.js (EdgeOne Hub Console)...');
-const projectRoot = join(adminDir, '..', '..');
 const edgeFuncDir = join(projectRoot, 'edge-functions');
 mkdirSync(edgeFuncDir, { recursive: true });
 
@@ -140,6 +140,35 @@ export default {
 const edgeAdminPath = join(edgeFuncDir, 'admin.js');
 writeFileSync(edgeAdminPath, adminJsContent, 'utf8');
 console.log(`   ✓ edge-functions/admin.js generated successfully (${adminJsContent.length} bytes)`);
+
+// 9. Sync pure Web Standard hub files to edge-functions/_hub/ (Self-Contained Edge Packaging)
+console.log('\n8. Synchronizing edgeone-hub to edge-functions/_hub/ (Self-Contained Edge Functions)...');
+const hubDir = join(projectRoot, 'edgeone-hub');
+const generatedPresetsPath = join(hubDir, 'lib/generated-presets.js');
+if (!existsSync(generatedPresetsPath)) {
+  console.log('   Generating presets catalog & pre-compiled presets map first...');
+  execFileSync('node', [join(projectRoot, 'shared/presets/build-catalog.mjs')], { stdio: 'inherit' });
+}
+
+function syncDirectory(srcDir, destDir) {
+  mkdirSync(destDir, { recursive: true });
+  const entries = readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(srcDir, entry.name);
+    const destPath = join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      syncDirectory(srcPath, destPath);
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      const content = readFileSync(srcPath, 'utf8');
+      writeFileSync(destPath, content, 'utf8');
+    }
+  }
+}
+
+const edgeHubDir = join(edgeFuncDir, '_hub');
+syncDirectory(join(hubDir, 'lib'), join(edgeHubDir, 'lib'));
+syncDirectory(join(hubDir, 'api'), join(edgeHubDir, 'api'));
+console.log('   ✓ edge-functions/_hub/ synchronized successfully');
 
 console.log('\n=== ALL 5 HARD GATES PASSED! Dist bundle generated at: ===');
 console.log(distPath);

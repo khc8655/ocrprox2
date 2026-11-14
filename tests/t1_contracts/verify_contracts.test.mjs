@@ -416,6 +416,55 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       assert.strictEqual(modelCandidates.length, 1, 'Candidates referencing local providers must be stripped');
       assert.strictEqual(modelCandidates[0].provider, 'hub_public');
     });
+
+    test('pure Web Standard gate: edgeone-hub/lib, edgeone-hub/api, and edge-functions have zero node: imports and zero Buffer', () => {
+      const dirsToScan = [
+        join(projectRoot, 'edgeone-hub/lib'),
+        join(projectRoot, 'edgeone-hub/api'),
+        join(projectRoot, 'edge-functions'),
+      ];
+
+      const forbiddenPatterns = [
+        { regex: /["']node:[a-z]/i, desc: 'node:* builtin import' },
+        { regex: /\brequire\s*\(/, desc: 'require(...)' },
+        { regex: /\bBuffer\.(from|alloc)\b/, desc: 'Buffer.from/alloc' },
+        { regex: /\bprocess\.cwd\b/, desc: 'process.cwd' },
+      ];
+
+      function scanFiles(dir) {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanFiles(fullPath);
+          } else if (entry.isFile() && entry.name.endsWith('.js')) {
+            const content = readFileSync(fullPath, 'utf8');
+
+            // For edge-functions, assert zero boundary escaping (no ../edgeone-hub)
+            if (fullPath.includes('/edge-functions/')) {
+              assert.strictEqual(
+                content.includes('../edgeone-hub'),
+                false,
+                `Found boundary escaping reference '../edgeone-hub' in ${fullPath}`
+              );
+            }
+
+            for (const { regex, desc } of forbiddenPatterns) {
+              const matched = regex.test(content);
+              assert.strictEqual(
+                matched,
+                false,
+                `Forbidden Node-specific API '${desc}' detected in ${fullPath}`
+              );
+            }
+          }
+        }
+      }
+
+      for (const d of dirsToScan) {
+        scanFiles(d);
+      }
+    });
   });
 
 });

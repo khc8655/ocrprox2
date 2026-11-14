@@ -1,4 +1,4 @@
-import { resolveKvBinding } from '../edgeone-hub/lib/config.js';
+import { resolveKvBinding } from './_hub/lib/config.js';
 
 export function handleHealthRequest(context) {
   const kv = resolveKvBinding(context);

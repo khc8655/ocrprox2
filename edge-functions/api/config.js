@@ -1,2 +1,2 @@
-export * from '../../edgeone-hub/api/config.js';
-export { default } from '../../edgeone-hub/api/config.js';
+export * from '../_hub/api/config.js';
+export { default } from '../_hub/api/config.js';

@@ -1,2 +1,2 @@
-export * from '../../../edgeone-hub/api/vault/fetch.js';
-export { default } from '../../../edgeone-hub/api/vault/fetch.js';
+export * from '../../_hub/api/vault/fetch.js';
+export { default } from '../../_hub/api/vault/fetch.js';
