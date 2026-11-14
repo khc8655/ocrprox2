@@ -21,6 +21,7 @@ Edge Functions 运行在 EdgeOne 全球 3200+ 边缘节点的 **V8 Isolate Serve
 | **Web Standard APIs** | ✅ 原生支持 | 支持 ES2023+、`Request`、`Response`、`Headers`、`Fetch`、`ReadableStream`、`TextEncoder`/`TextDecoder`、`Web Crypto API` (`crypto.getRandomValues` / `crypto.subtle`)、`Cache API` (`caches`)、`Cookies`。 |
 | **Node.js 内置模块** | ❌ **不支持** | **严禁在 Edge Functions 及其依赖链中使用 `node:crypto`、`node:fs`、`node:path`、`node:url` 或全局 `Buffer`**。若代码中包含这些模块，边缘函数在平台部署编译阶段会失败，线上访问将静默返回 `404: NOT_FOUND`。 |
 | **事件监听** | ❌ 不支持 `addEventListener` | 必须使用标准 Function Handlers 导出：`onRequest`、`onRequestGet`、`onRequestPost`、`onRequestPatch`、`onRequestPut`、`onRequestDelete`、`onRequestHead`、`onRequestOptions`。 |
+| **路由 AST 扫描** | ⚠️ **必须显式导出** | 平台构建期静态扫描文件顶层的 `export [async] function onRequest*` 来注册路由；**严禁使用 `export * from '...'` 间接重导出**，否则平台会跳过该路由注册并在线上返回 `404`。 |
 | **地理信息** | ✅ `context.request.eo` | 可读取客户端 GEO 信息与 EdgeOne 扩展字段。 |
 
 ### 1.2 硬性配额限制

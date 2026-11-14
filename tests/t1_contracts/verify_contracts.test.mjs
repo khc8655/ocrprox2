@@ -465,6 +465,38 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         scanFiles(d);
       }
     });
+
+    test('edge-functions route files forbid export * from and explicitly declare onRequest handler', () => {
+      const edgeFuncDir = join(projectRoot, 'edge-functions');
+
+      function scanDir(dir) {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === '_hub') continue;
+            scanDir(fullPath);
+          } else if (entry.isFile() && entry.name.endsWith('.js')) {
+            const content = readFileSync(fullPath, 'utf8');
+
+            // 1. Edge functions route entry files must NOT use 'export * from'
+            assert.strictEqual(
+              /export\s+\*\s+from/i.test(content),
+              false,
+              `Found forbidden 'export * from' in route file: ${fullPath}. EdgeOne AST scanner requires explicit handler declarations.`
+            );
+
+            // 2. Must explicitly declare export (async )?function onRequest
+            assert.ok(
+              /export\s+(?:async\s+)?function\s+onRequest\b/.test(content),
+              `Route file must explicitly declare 'export (async )?function onRequest': ${fullPath}`
+            );
+          }
+        }
+      }
+
+      scanDir(edgeFuncDir);
+    });
   });
 
 });

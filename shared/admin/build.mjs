@@ -170,5 +170,39 @@ syncDirectory(join(hubDir, 'lib'), join(edgeHubDir, 'lib'));
 syncDirectory(join(hubDir, 'api'), join(edgeHubDir, 'api'));
 console.log('   ✓ edge-functions/_hub/ synchronized successfully');
 
+// 10. Generate edge-functions/api/ route entry points with explicit handler exports
+console.log('\n9. Generating edge-functions/api/ route entry points with explicit handler exports...');
+const apiRoutes = [
+  { file: 'api/config.js', target: '../_hub/api/config.js' },
+  { file: 'api/node/config.js', target: '../../_hub/api/node/config.js' },
+  { file: 'api/admin/nodes.js', target: '../../_hub/api/admin/nodes.js' },
+  { file: 'api/admin/nodes/[id].js', target: '../../../_hub/api/admin/nodes.js' },
+  { file: 'api/admin/nodes/[id]/rotate.js', target: '../../../../_hub/api/admin/nodes.js' },
+  { file: 'api/admin/nodes/[[default]].js', target: '../../../_hub/api/admin/nodes.js' },
+  { file: 'api/admin/verify-key.js', target: '../../_hub/api/admin/verify-key.js' },
+  { file: 'api/admin/probe-models.js', target: '../../_hub/api/admin/probe-models.js' },
+  { file: 'api/vault/manifest.js', target: '../../_hub/api/vault/manifest.js' },
+  { file: 'api/vault/fetch.js', target: '../../_hub/api/vault/fetch.js' },
+];
+
+for (const { file, target } of apiRoutes) {
+  const filePath = join(edgeFuncDir, file);
+  mkdirSync(dirname(filePath), { recursive: true });
+  const content = `import { onRequest as _onRequest } from '${target}';
+
+export async function onRequest(context) { return _onRequest(context); }
+export async function onRequestGet(context) { return _onRequest(context); }
+export async function onRequestPost(context) { return _onRequest(context); }
+export async function onRequestPut(context) { return _onRequest(context); }
+export async function onRequestPatch(context) { return _onRequest(context); }
+export async function onRequestDelete(context) { return _onRequest(context); }
+export async function onRequestOptions() {
+  return new Response(null, { status: 204 });
+}
+`;
+  writeFileSync(filePath, content, 'utf8');
+}
+console.log(`   ✓ ${apiRoutes.length} edge-functions/api/ route entry points generated successfully`);
+
 console.log('\n=== ALL 5 HARD GATES PASSED! Dist bundle generated at: ===');
 console.log(distPath);
