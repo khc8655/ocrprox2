@@ -4,6 +4,27 @@
 
 ---
 
+## [v20261114-02] - 2026-11-14
+
+### Added
+- **管理控制台供应商与模型快速创建**：
+  - 在 `#viewProviders` 中新增「＋ 添加供应商」按钮与内嵌配置面板，内置 OpenAI、Anthropic、Gemini、DeepSeek、OpenRouter、SiliconFlow、Groq、xAI 等快速预设与自定义协议配置，支持自动填充及初始密钥添加；
+  - 在 `#viewModels` 中新增「＋ 添加模型」按钮与内嵌配置面板（KB 模式自动隐藏），支持逻辑模型名称、候选供应商下拉与上游目标模型配置；
+  - 严格保持 **0 inline style** 属性与 JavaScript 样式操作，优化构建内联压缩，确保单文件控制台体积控制在 80,000 字节以内（~75.47 KB）。
+
+### Fixed
+- **EdgeOne Hub 密钥校验与模型探测契约对齐与掩码反查**：
+  - 修复 `shared/admin/app.js` 统一传递 `api_key` 与 `key`，兼容 Go 完整节点与 EdgeOne Hub 契约；
+  - `edgeone-hub/api/admin/verify-key.js` 与 `probe-models.js` 新增对前端传递脱敏密钥（`●●●`）的自动反查机制，依据 `provider` 与 `key_label` 从 KV 存储中提取真实密钥并补全 Base URL 与协议类型，彻底解决控制台保存后无法校验及探测的可用性缺陷。
+
+### Changed
+- **VM 节点一键安装与预设链接优化**：
+  - `deploy/install.sh`：当未指定 `--bin` 且本地未找到对应架构二进制时，自动从 GitHub Releases 下载对应架构最新静态二进制并完成 systemd 配置；
+  - `README.md`：在 §6.2 中补充清晰的 GitHub Releases 访问链接；
+  - `shared/presets/openrouter.json`：更新 `HTTP-Referer` 为 `https://github.com/khc8655/ocrprox2`。
+
+---
+
 ## [v20261114-01] - 2026-11-14
 
 ### Added

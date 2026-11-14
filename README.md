@@ -196,7 +196,7 @@ sudo systemctl status llmproxy-full
 
 #### 方式二：直接运行预编译静态二进制（免安装）
 
-从 GitHub Releases 下载对应架构的免依赖单文件二进制：
+从 GitHub Releases (https://github.com/khc8655/ocrprox2/releases) 下载对应架构的免依赖单文件二进制：
 
 **1. 极简节点 (`lite`) 纯环境变量单行启动**：
 ```bash

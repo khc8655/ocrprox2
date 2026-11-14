@@ -1,13 +1,12 @@
 {
-  "version": "v20261114-01",
-  "semver": "2.0.1",
+  "version": "v20261114-02",
+  "semver": "2.0.2",
   "release_date": "2026-11-14",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.0.1 — EdgeOne Makers V8 Isolate 运行时适配、AST 显式路由扫描、hubsync 租约宽限兼容与工程治理升级",
+  "title": "LLMProxy2 (OCRProxy v2) 2.0.2 — 控制台添加供应商与模型能力、EdgeOne Hub 掩码密钥自动反查与一键安装自动回退",
   "changelog": [
-    "EdgeOne 纯 Web Standard 运行时适配：去除 edge-functions 及中枢库中 node:* 内置模块与全局 Buffer 依赖，转为 Web Crypto 与标准 Fetch API",
-    "EdgeOne Makers AST 显式路由扫描重构：移除 export * from 间接导出，显式声明 export function onRequest* 解决线上 404",
-    "Go hubsync 协议兼容性增强：支持中枢下发的 Unix 秒级/毫秒级数字时间戳与 ISO8601 字符串租约宽限期解析",
-    "工程治理规范与测试发布升级：确立 T1~T4 四层测试金字塔与五步双轨发版 SOP，收敛统一 docs/ 设计文档体系，硬化 G6 门禁与安全红线"
+    "管理控制台供应商与模型快速创建：补齐「＋ 添加供应商」与「＋ 添加模型」入口及内嵌表单，支持 8 大主流供应商快速预设模板，严格遵循零内联样式与包体积 <= 80KB 硬门禁",
+    "EdgeOne 中枢掩码密钥自动反查与契约对齐：verifyKey 与 probeModels 对齐支持 api_key / key 双字段，中枢端支持根据 provider + key_label 自动从 KV 反查未脱敏密钥执行连通性校验与模型探测",
+    "Linux VM 一键部署与分发体验优化：deploy/install.sh 支持未编译本地二进制时自动从 GitHub Releases 下载最新静态二进制，完善 README §6.2 发布链接与 OpenRouter 预设 Referer 修正"
   ]
 }

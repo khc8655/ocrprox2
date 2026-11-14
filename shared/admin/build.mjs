@@ -70,32 +70,60 @@ console.log('   ✓ Zero left-border stripes verified (100% compliant)');
 
 // 6. Inlining into single bundle
 console.log('\n5. Inlining CSS & JS into standalone bundle...');
-html = html.replace('<link rel="stylesheet" href="css/app.css">', `<style>\n${css}\n</style>`);
-html = html.replace('<script src="js/host.js"></script>', `<script>\n${hostJs}\n</script>`);
-html = html.replace('<script src="js/app.js"></script>', `<script>\n${appJs}\n</script>`);
+const minCss = css
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\s+/g, ' ')
+  .replace(/\s*([{}:;,])\s*/g, '$1')
+  .replace(/;}/g, '}')
+  .trim();
+function cleanJs(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .split('\n')
+    .map(line => {
+      const m = line.match(/^(\s*)(.*)$/);
+      if (!m) return line.trimEnd();
+      const indent = m[1].replace(/ {4}/g, '  ').replace(/\t/g, '  ');
+      return (indent + m[2]).trimEnd();
+    })
+    .filter(line => line.length > 0)
+    .join('\n');
+}
+const cleanHostJs = cleanJs(hostJs);
+const cleanAppJs = cleanJs(appJs);
+let bundledHtml = html.replace(/<!--[\s\S]*?-->/g, '');
+bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', `<style>\n${minCss}\n</style>`);
+bundledHtml = bundledHtml.replace('<script src="js/host.js"></script>', `<script>\n${cleanHostJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/app.js"></script>', `<script>\n${cleanAppJs}\n</script>`);
 
 mkdirSync(distDir, { recursive: true });
 const distPath = join(distDir, 'index.html');
-writeFileSync(distPath, html, 'utf8');
+writeFileSync(distPath, bundledHtml, 'utf8');
 
-// 7. Gate 4: Bundle size <= 80KB
-console.log('\n6. Verifying Gate 4: Bundle size (<= 80KB)...');
+const internalAssetHtml = join(projectRoot, 'internal/admin/assets/index.html');
+if (existsSync(dirname(internalAssetHtml))) {
+  writeFileSync(internalAssetHtml, bundledHtml, 'utf8');
+}
+
+// 7. Gate 4: Bundle size <= 80,000 bytes
+console.log('\n6. Verifying Gate 4: Bundle size (<= 80,000 bytes)...');
 const stat = statSync(distPath);
 const sizeKb = (stat.size / 1024).toFixed(2);
 console.log(`   Bundle size: ${stat.size} bytes (${sizeKb} KB)`);
 
-if (stat.size > 80 * 1024) {
-  console.error(`   ✗ FAILED: Bundle size ${sizeKb} KB exceeds 80KB limit!`);
+if (stat.size > 80000) {
+  console.error(`   ✗ FAILED: Bundle size ${stat.size} bytes (${sizeKb} KB) exceeds 80,000 bytes limit!`);
   process.exit(1);
 }
-console.log(`   ✓ Bundle size ${sizeKb} KB <= 80 KB limit (100% compliant)`);
+console.log(`   ✓ Bundle size ${stat.size} bytes (${sizeKb} KB) <= 80,000 bytes limit (100% compliant)`);
 
 // 8. Generate edge-functions/admin.js (EdgeOne Hub Console)
 console.log('\n7. Generating edge-functions/admin.js (EdgeOne Hub Console)...');
 const edgeFuncDir = join(projectRoot, 'edge-functions');
 mkdirSync(edgeFuncDir, { recursive: true });
 
-let hubHtml = html.replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>');
+let hubHtml = bundledHtml.replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>');
 
 const safeHtml = hubHtml.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 

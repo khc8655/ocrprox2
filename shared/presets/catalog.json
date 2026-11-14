@@ -200,7 +200,7 @@
       "version": "1.0.0",
       "updated_at": "2026-10-18",
       "update_notes": "OpenRouter 官方预设，收录 7 大热门免费模型 (:free) 与 OpenAI/Anthropic 双端点及 402 欠费识别",
-      "rule_hash": "9172f2c3a65f",
+      "rule_hash": "f94b8a59c02e",
       "protocol": "openai",
       "base_url": "https://openrouter.ai/api/v1",
       "anthropic_base_url": "https://openrouter.ai/api/v1",

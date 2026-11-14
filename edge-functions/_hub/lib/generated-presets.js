@@ -818,7 +818,7 @@ export const PRESET_MAP = {
         }
       ],
       "inject_headers": {
-        "HTTP-Referer": "https://github.com/khc8655/ocrproxy",
+        "HTTP-Referer": "https://github.com/khc8655/ocrprox2",
         "X-Title": "OCRProxy"
       },
       "reasoning": {

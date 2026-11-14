@@ -539,6 +539,48 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.ok(calledUrl.startsWith('https://api.deepseek.com'));
       assert.ok(calledUrl.endsWith('/models'));
     });
+
+    test('Resolves stored unmasked key when UI sends masked key with provider and key_label', async () => {
+      const kv = new MockKV();
+      await kv.put(
+        CONFIG_KV_KEY,
+        JSON.stringify({
+          _version: 1,
+          providers: {
+            deepseek: {
+              name: 'DeepSeek',
+              base_url: 'https://api.deepseek.com/v1',
+              api_keys: [
+                { id: 'k1', label: 'prod-ds', key: 'sk-real-deepseek-unmasked-token-999', enabled: true },
+              ],
+            },
+          },
+        })
+      );
+      const testEnv = { ...TEST_ENV, agent_kv: kv };
+
+      let calledHeaders = {};
+      const mockFetch = async (url, opts) => {
+        calledHeaders = opts.headers || {};
+        return new Response(JSON.stringify({ data: [{ id: 'deepseek-chat' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      };
+
+      const verifyReq = makeAdminReq('POST', '/api/admin/verify-key', {
+        provider: 'deepseek',
+        key_label: 'prod-ds',
+        api_key: 'sk-●●●●●●999',
+      });
+
+      const resp = await handleVerifyKey(verifyReq, testEnv, mockFetch);
+      assert.equal(resp.status, 200);
+      const data = await resp.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.valid, true);
+      assert.equal(calledHeaders.authorization, 'Bearer sk-real-deepseek-unmasked-token-999');
+    });
   });
 
   describe('7. Model List Probing (handleProbeModels)', () => {
@@ -631,6 +673,47 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(data.status, 403);
       assert.equal(data.error.includes(secret), false, 'API key must NOT be leaked');
       assert.ok(data.error.includes('[REDACTED]'));
+    });
+
+    test('Resolves stored unmasked key when UI sends masked key with provider', async () => {
+      const kv = new MockKV();
+      await kv.put(
+        CONFIG_KV_KEY,
+        JSON.stringify({
+          _version: 1,
+          providers: {
+            deepseek: {
+              name: 'DeepSeek',
+              base_url: 'https://api.deepseek.com/v1',
+              api_keys: [
+                { id: 'k1', label: 'prod-ds', key: 'sk-real-deepseek-unmasked-token-999', enabled: true },
+              ],
+            },
+          },
+        })
+      );
+      const testEnv = { ...TEST_ENV, agent_kv: kv };
+
+      let calledHeaders = {};
+      const mockFetch = async (url, opts) => {
+        calledHeaders = opts.headers || {};
+        return new Response(JSON.stringify({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      };
+
+      const probeReq = makeAdminReq('POST', '/api/admin/probe-models', {
+        provider: 'deepseek',
+        api_key: 'sk-●●●●●●999',
+      });
+
+      const resp = await handleProbeModels(probeReq, testEnv, mockFetch);
+      assert.equal(resp.status, 200);
+      const data = await resp.json();
+      assert.equal(data.ok, true);
+      assert.deepEqual(data.models, ['deepseek-chat', 'deepseek-reasoner']);
+      assert.equal(calledHeaders.authorization, 'Bearer sk-real-deepseek-unmasked-token-999');
     });
   });
 

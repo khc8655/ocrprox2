@@ -44,6 +44,7 @@
     setupCapabilities();
     setupTheme();
     setupNavigation();
+    setupCreationForms();
     await loadData();
   }
 
@@ -165,6 +166,106 @@
           });
           await loadActivityData();
         });
+      });
+    }
+  }
+
+  const PRESETS_META = {
+    openai: ['openai', 'OpenAI', 'https://api.openai.com/v1', 'openai-completions'],
+    anthropic: ['anthropic', 'Anthropic', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+    gemini: ['gemini', 'Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
+    deepseek: ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'openai-completions'],
+    openrouter: ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
+    siliconflow: ['siliconflow', 'SiliconFlow', 'https://api.siliconflow.cn/v1', 'openai-completions'],
+    groq: ['groq', 'Groq', 'https://api.groq.com/openai/v1', 'openai-completions'],
+    xai: ['xai', 'xAI', 'https://api.x.ai/v1', 'openai-completions'],
+  };
+
+  function setupCreationForms() {
+    const pForm = document.getElementById('addProviderForm');
+    const mForm = document.getElementById('addModelForm');
+    const toggle = (el, show) => {
+      if (!el) return;
+      el.hidden = show !== undefined ? !show : !el.hidden;
+      el.classList.toggle('hidden', el.hidden);
+    };
+
+    document.getElementById('btnAddProvider')?.addEventListener('click', () => toggle(pForm));
+    document.getElementById('btnCancelAddProvider')?.addEventListener('click', () => toggle(pForm, false));
+
+    document.getElementById('newProvPreset')?.addEventListener('change', (e) => {
+      const m = PRESETS_META[e.target.value];
+      if (m) {
+        document.getElementById('newProvId').value = m[0];
+        document.getElementById('newProvName').value = m[1];
+        document.getElementById('newProvBaseUrl').value = m[2];
+        document.getElementById('newProvApiType').value = m[3];
+      }
+    });
+
+    document.getElementById('btnConfirmAddProvider')?.addEventListener('click', async () => {
+      const id = (document.getElementById('newProvId')?.value || '').trim();
+      const name = (document.getElementById('newProvName')?.value || '').trim() || id;
+      const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
+      const apiType = document.getElementById('newProvApiType')?.value || 'openai-completions';
+      const keyAlias = (document.getElementById('newProvKeyAlias')?.value || '').trim() || 'k1';
+      const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+
+      if (!id) return toast('请输入供应商标识 ID', 'warn');
+      if (!baseUrl) return toast('请输入 Base URL', 'warn');
+
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.providers = state.config.providers || {};
+      if (state.config.providers[id]) return toast(`供应商 ${id} 已存在`, 'warn');
+
+      const api_keys = apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin: 'local' }] : [];
+      state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: 'local', api_keys };
+      state.activeEditorKey = `p_${id}`;
+      toggle(pForm, false);
+      await persistConfig('供应商创建成功');
+    });
+
+    document.getElementById('btnAddModel')?.addEventListener('click', () => {
+      toggle(mForm);
+      if (mForm && !mForm.hidden) populateModelProvidersDropdown();
+    });
+    document.getElementById('btnCancelAddModel')?.addEventListener('click', () => toggle(mForm, false));
+
+    document.getElementById('btnConfirmAddModel')?.addEventListener('click', async () => {
+      const mName = (document.getElementById('newModelName')?.value || '').trim();
+      const prov = (document.getElementById('newModelProvider')?.value || '').trim();
+      const target = (document.getElementById('newModelTarget')?.value || '').trim() || mName;
+
+      if (!mName) return toast('请输入逻辑模型名称', 'warn');
+
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.agent_models = state.config.agent_models || {};
+
+      const firstKey = state.config?.providers?.[prov]?.api_keys?.[0];
+      const keyLabel = firstKey?.label || firstKey?.id || 'k1';
+      const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
+
+      state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
+      state.activeEditorKey = `m_${mName}`;
+      toggle(mForm, false);
+      await persistConfig('模型添加成功');
+    });
+  }
+
+  function populateModelProvidersDropdown() {
+    const sel = document.getElementById('newModelProvider');
+    if (!sel) return;
+    sel.innerHTML = '';
+    const provs = Object.keys(state.config?.providers || {}).sort();
+    if (provs.length === 0) {
+      sel.innerHTML = '<option value="">(暂无供应商)</option>';
+    } else {
+      provs.forEach((pId) => {
+        const pName = state.config.providers[pId]?.name || pId;
+        const opt = document.createElement('option');
+        opt.value = pId;
+        opt.textContent = `${pName} (${pId})`;
+        sel.appendChild(opt);
       });
     }
   }
@@ -583,9 +684,11 @@
           const apiFn = window.HOST.api?.verifyKey || window.HOST.verifyKey;
           const res = await apiFn({
             provider: pId,
+            api_key: k.key,
             key: k.key,
             key_label: keyLabel,
             base_url: baseUrl,
+            api_type: p.api_type || 'openai-completions',
           });
           if (res && (res.ok || res.latency_ms !== undefined || res.ms !== undefined)) {
             const latency = res.latency_ms ?? res.ms ?? res.latency ?? 0;
@@ -614,7 +717,9 @@
         const res = await apiFn({
           provider: pId,
           base_url: baseUrl,
+          api_key: firstKey,
           key: firstKey,
+          api_type: p.api_type || 'openai-completions',
           api_keys: p.api_keys,
         });
         if (res && (res.ok || Array.isArray(res.models) || res.count !== undefined)) {
@@ -876,6 +981,11 @@
     container.innerHTML = '';
 
     const isAgent = (state.config?.settings?.run_mode || 'agent') === 'agent';
+    const btnAddModel = document.getElementById('btnAddModel');
+    if (btnAddModel) {
+      btnAddModel.hidden = !isAgent;
+      btnAddModel.classList.toggle('hidden', !isAgent);
+    }
     if (isAgent) {
       renderAgentModels(container);
     } else {

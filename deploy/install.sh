@@ -81,19 +81,24 @@ elif [ -f "$PROJECT_ROOT/dist/$BINARY_NAME" ]; then
 elif [ -f "$PROJECT_ROOT/dist/llmproxy" ]; then
   RESOLVED_BIN="$PROJECT_ROOT/dist/llmproxy"
 else
-  RESOLVED_BIN=""
-fi
-
-if [ -z "$RESOLVED_BIN" ]; then
-  echo "Error: Compiled binary not found for $BINARY_NAME in $PROJECT_ROOT/dist/."
-  echo "Please run 'npm run build:release' first or specify --bin=/path/to/binary."
-  exit 1
+  DOWNLOAD_URL="https://github.com/khc8655/ocrprox2/releases/latest/download/llmproxy-linux-${GOARCH}"
+  echo "Local binary not found. Downloading from ${DOWNLOAD_URL}..."
+  TMP_BIN="/tmp/llmproxy-linux-${GOARCH}-$$"
+  if curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN"; then
+    chmod +x "$TMP_BIN"
+    RESOLVED_BIN="$TMP_BIN"
+  else
+    echo "Error: Compiled binary not found for $BINARY_NAME in $PROJECT_ROOT/dist/ and download failed."
+    echo "Please run 'npm run build:release' first or specify --bin=/path/to/binary."
+    exit 1
+  fi
 fi
 
 echo "Installing binary from $RESOLVED_BIN to $TARGET_DIR/$BIN_NAME..."
 mkdir -p "$TARGET_DIR"
 cp "$RESOLVED_BIN" "$TARGET_DIR/$BIN_NAME"
 chmod +x "$TARGET_DIR/$BIN_NAME"
+[ -n "$TMP_BIN" ] && rm -f "$TMP_BIN"
 echo "Binary installed successfully."
 
 # Setup systemd units

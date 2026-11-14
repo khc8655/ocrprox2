@@ -1,6 +1,44 @@
-import { checkAdminAuth, isMaskedSecret, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { checkAdminAuth, isMaskedSecret, resolveKvBinding, resolveEnv, loadConfig } from '../../lib/config.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { resolveModelsUrl, scrubSecrets, extractModelIds } from '../../lib/models.js';
+
+const isMaskedKey = isMaskedSecret;
+
+function findUnmaskedKey(prov, keyLabel) {
+  if (!prov) return null;
+  // 1. prov.keys map: { [key_label]: "key" }
+  if (prov.keys && typeof prov.keys === 'object' && !Array.isArray(prov.keys)) {
+    if (keyLabel && typeof prov.keys[keyLabel] === 'string' && !isMaskedKey(prov.keys[keyLabel])) {
+      return prov.keys[keyLabel];
+    }
+    for (const v of Object.values(prov.keys)) {
+      if (typeof v === 'string' && v && !isMaskedKey(v)) return v;
+      if (v && typeof v === 'object' && v.key && !isMaskedKey(v.key)) return v.key;
+    }
+  }
+  // 2. prov.keys array
+  if (Array.isArray(prov.keys)) {
+    if (keyLabel) {
+      const match = prov.keys.find(k => k && typeof k === 'object' && (k.label === keyLabel || k.id === keyLabel));
+      if (match?.key && !isMaskedKey(match.key)) return match.key;
+    }
+    for (const item of prov.keys) {
+      if (typeof item === 'string' && item && !isMaskedKey(item)) return item;
+      if (item && typeof item === 'object' && item.key && !isMaskedKey(item.key)) return item.key;
+    }
+  }
+  // 3. prov.api_keys array (standard schema)
+  if (Array.isArray(prov.api_keys)) {
+    if (keyLabel) {
+      const match = prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel));
+      if (match?.key && !isMaskedKey(match.key)) return match.key;
+    }
+    for (const item of prov.api_keys) {
+      if (item?.key && !isMaskedKey(item.key)) return item.key;
+    }
+  }
+  return null;
+}
 
 export async function handleVerifyKey(request, env, fetchImplOrOpts) {
   const authErr = checkAdminAuth(request, env);
@@ -24,17 +62,34 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
     );
   }
 
-  const { provider, api_key } = body;
-  let { base_url } = body;
+  let apiKey = typeof (body.api_key || body.key) === 'string' ? (body.api_key || body.key).trim() : '';
+  const provider = body.provider;
+  const keyLabel = body.key_label || body.keyLabel || '';
+  let baseUrl = body.base_url || body.baseUrl;
+  let apiType = body.api_type || body.apiType;
 
-  if (!api_key || typeof api_key !== 'string' || !api_key.trim()) {
+  if ((!apiKey || isMaskedKey(apiKey)) && provider) {
+    const kv = resolveKvBinding(env);
+    const config = await loadConfig(kv);
+    const prov = config?.providers?.[provider];
+    if (prov) {
+      const resolvedKey = findUnmaskedKey(prov, keyLabel);
+      if (resolvedKey) {
+        apiKey = resolvedKey;
+      }
+      baseUrl = baseUrl || prov.base_url;
+      apiType = apiType || prov.api_type;
+    }
+  }
+
+  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
     return new Response(
       JSON.stringify({ ok: false, error: 'api_key_required' }),
       { status: 400, headers: { 'content-type': 'application/json' } }
     );
   }
 
-  if (isMaskedSecret(api_key)) {
+  if (isMaskedKey(apiKey)) {
     return new Response(
       JSON.stringify({
         ok: true,
@@ -46,14 +101,14 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
     );
   }
 
-  if (!base_url && provider) {
+  if (!baseUrl && provider) {
     const presets = getPresetMap();
     if (presets[provider]?.base_url) {
-      base_url = presets[provider].base_url;
+      baseUrl = presets[provider].base_url;
     }
   }
 
-  if (!base_url || typeof base_url !== 'string' || !base_url.trim()) {
+  if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
     return new Response(
       JSON.stringify({ ok: false, error: 'base_url_required' }),
       { status: 400, headers: { 'content-type': 'application/json' } }
@@ -65,19 +120,19 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       ? fetchImplOrOpts
       : fetchImplOrOpts?.fetchImpl || env?.fetchImpl || globalThis.fetch;
 
-  const cleanKey = api_key.trim();
+  const cleanKey = apiKey.trim();
   const authHeader = cleanKey.startsWith('Bearer ') ? cleanKey : `Bearer ${cleanKey}`;
   const headers = {
     accept: 'application/json',
     authorization: authHeader,
   };
 
-  if (provider === 'anthropic' || provider === 'claude') {
+  if (provider === 'anthropic' || provider === 'claude' || apiType === 'anthropic-messages') {
     headers['x-api-key'] = cleanKey.replace(/^Bearer\s+/i, '');
     headers['anthropic-version'] = '2023-06-01';
   }
 
-  const targetUrl = resolveModelsUrl(base_url);
+  const targetUrl = resolveModelsUrl(baseUrl);
   const start = Date.now();
   let resp;
 
