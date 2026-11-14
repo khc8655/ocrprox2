@@ -1,8 +1,10 @@
 package upstream
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestJoinUpstream(t *testing.T) {
@@ -73,3 +75,27 @@ func TestReadSSE_BareJSONError(t *testing.T) {
 		t.Fatalf("expected bare error to be captured, got %q", errFound)
 	}
 }
+
+func TestUpstreamClient_StreamingTimeoutZero(t *testing.T) {
+	client := UpstreamClient(60*time.Second, true)
+	if client.Timeout != 0 {
+		t.Errorf("UpstreamClient must have Timeout == 0 for streaming responses, got %v", client.Timeout)
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	if tr.ResponseHeaderTimeout != 60*time.Second {
+		t.Errorf("expected ResponseHeaderTimeout 60s, got %v", tr.ResponseHeaderTimeout)
+	}
+	if tr.MaxIdleConns != 100 {
+		t.Errorf("expected MaxIdleConns 100, got %d", tr.MaxIdleConns)
+	}
+	if tr.MaxIdleConnsPerHost != 10 {
+		t.Errorf("expected MaxIdleConnsPerHost 10, got %d", tr.MaxIdleConnsPerHost)
+	}
+	if tr.IdleConnTimeout != 90*time.Second {
+		t.Errorf("expected IdleConnTimeout 90s, got %v", tr.IdleConnTimeout)
+	}
+}
+

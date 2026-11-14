@@ -12,13 +12,16 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
 	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
+	"github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
 	"github.com/khc8655/llmproxy2/internal/upstream"
@@ -42,13 +45,15 @@ type RouteRegistrar interface {
 
 // Server coordinates admin management endpoints.
 type Server struct {
-	authMgr    *auth.Authenticator
-	localSrc   *config.LocalSource
-	obsSink    types.ObservabilitySink
-	scheduler  *scheduler.Scheduler
-	modeSched  *modesched.ModeScheduler
-	oauthMgr   *oauth.Manager
-	httpClient *http.Client
+	authMgr       *auth.Authenticator
+	localSrc      *config.LocalSource
+	obsSink       types.ObservabilitySink
+	scheduler     *scheduler.Scheduler
+	modeSched     *modesched.ModeScheduler
+	oauthMgr      *oauth.Manager
+	httpClient    *http.Client
+	adminPassword string
+	refreshMgr    *provider.RefreshManager
 }
 
 // NewServer creates a new admin Server.
@@ -59,12 +64,23 @@ func NewServer(
 	sched *scheduler.Scheduler,
 ) *Server {
 	return &Server{
-		authMgr:    authMgr,
-		localSrc:   localSrc,
-		obsSink:    obsSink,
-		scheduler:  sched,
-		httpClient: upstream.DefaultClient(15*time.Second, true),
+		authMgr:       authMgr,
+		localSrc:      localSrc,
+		obsSink:       obsSink,
+		scheduler:     sched,
+		httpClient:    upstream.DefaultClient(15*time.Second, true),
+		adminPassword: os.Getenv("ADMIN_PASSWORD"),
 	}
+}
+
+// SetAdminPassword sets the admin password explicitly for session cookie verification.
+func (s *Server) SetAdminPassword(pass string) {
+	s.adminPassword = pass
+}
+
+// SetRefreshManager connects the provider RefreshManager to the admin server.
+func (s *Server) SetRefreshManager(rm *provider.RefreshManager) {
+	s.refreshMgr = rm
 }
 
 // SetModeScheduler connects the mode scheduler to the admin server.
@@ -101,10 +117,21 @@ func (s *Server) RegisterRoutes(r any) {
 	register("GET /admin/", s.handleIndexHTML)
 	register("GET /api/config", s.handleConfig)
 	register("POST /api/config", s.handleConfig)
+	register("PUT /api/config", s.handleConfig)
+	register("GET /api/admin/config", s.handleConfig)
+	register("POST /api/admin/config", s.handleConfig)
+	register("PUT /api/admin/config", s.handleConfig)
+	register("GET /api/admin/config/export", s.handleConfigExport)
+	register("POST /api/admin/config/import", s.handleConfigImport)
+	register("POST /api/admin/test-candidate", s.handleTestCandidate)
+	register("POST /api/admin/test-agent-model", s.handleTestAgentModel)
 	register("GET /api/admin/usage", s.handleUsage)
 	register("GET /api/admin/traces", s.handleTraces)
+	register("DELETE /api/admin/traces", s.handleTraces)
 	register("GET /api/admin/cooldowns", s.handleCooldowns)
 	register("DELETE /api/admin/cooldowns", s.handleCooldowns)
+	register("GET /api/lanes", s.handleLanes)
+	register("GET /api/admin/lanes", s.handleLanes)
 	register("GET /api/admin/mode", s.handleMode)
 	register("POST /api/admin/mode", s.handleMode)
 	register("POST /api/admin/verify-key", s.handleVerifyKey)
@@ -114,10 +141,20 @@ func (s *Server) RegisterRoutes(r any) {
 	register("POST /api/admin/oauth/start", s.handleOAuthStart)
 	register("GET /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/oauth/poll", s.handleOAuthPoll)
+	register("POST /api/admin/detect-provider", s.handleDetectProvider)
+	register("POST /api/admin/balance", s.handleBalance)
+	register("POST /api/admin/test-provider", s.handleTestProvider)
+	register("POST /api/admin/autolist-sync", s.handleAutolistSync)
+	register("GET /api/admin/presets-extra", s.handlePresetsExtra)
+	register("GET /api/admin/access-info", s.handleAccessInfo)
+	register("POST /api/admin/access-key", s.handleAccessKey)
+	register("POST /api/admin/client-key", s.handleAccessKey)
+	register("POST /api/admin/auth/login", s.handleAuthLogin)
+	register("POST /api/admin/auth/logout", s.handleAuthLogout)
 }
 
 func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request) bool {
-	if !s.authMgr.VerifyAdminAuth(r) {
+	if !s.isAdminAuthorized(r) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -255,6 +292,831 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+
+	snap, err := s.localSrc.Current(r.Context(), false)
+	nowStr := time.Now().Format("20060102_150405")
+	filename := fmt.Sprintf("llmproxy_config_%s.json", nowStr)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.WriteHeader(http.StatusOK)
+
+	if err != nil || snap == nil || snap.Config == nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":           true,
+			"_version":     0,
+			"_exported_at": time.Now().Format("2006-01-02 15:04:05"),
+			"providers":    map[string]any{},
+			"agent_models": map[string]any{},
+			"kb_models":    map[string]any{},
+			"settings":     map[string]any{},
+		})
+		return
+	}
+
+	exportData := map[string]any{
+		"ok":           true,
+		"_version":     snap.Config.Version,
+		"_exported_at": time.Now().Format("2006-01-02 15:04:05"),
+		"providers":    snap.Config.Providers,
+		"agent_models": snap.Config.AgentModels,
+		"kb_models":    snap.Config.KBModels,
+		"settings":     snap.Config.Settings,
+	}
+	if snap.Config.Vault != nil {
+		exportData["vault"] = snap.Config.Vault
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(exportData)
+}
+
+func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	// 2MB payload limit
+	if r.ContentLength > 2*1024*1024 {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "import payload too large (max 2MB)",
+		})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+
+	var rawBody map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&rawBody); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid JSON payload",
+		})
+		return
+	}
+
+	mode, _ := rawBody["mode"].(string)
+	if mode == "" {
+		mode = "merge"
+	}
+	if mode != "merge" && mode != "overwrite" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid mode: must be 'merge' or 'overwrite'",
+		})
+		return
+	}
+
+	configRaw := rawBody
+	if subCfg, ok := rawBody["config"].(map[string]any); ok && subCfg != nil {
+		configRaw = subCfg
+	}
+
+	cfgBytes, err := json.Marshal(configRaw)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "failed to encode config payload",
+		})
+		return
+	}
+
+	var incoming types.ProxyConfig
+	if err := json.Unmarshal(cfgBytes, &incoming); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid configuration structure: " + err.Error(),
+		})
+		return
+	}
+
+	if incoming.Providers == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid configuration: providers must be an object",
+		})
+		return
+	}
+
+	currentSnap, _ := s.localSrc.Current(r.Context(), false)
+	var currentCfg *types.ProxyConfig
+	if currentSnap != nil {
+		currentCfg = currentSnap.Config
+	}
+
+	var targetCfg types.ProxyConfig
+	if mode == "overwrite" || currentCfg == nil {
+		targetCfg = incoming
+		if currentCfg != nil {
+			targetCfg.Version = currentCfg.Version
+			if targetCfg.Settings.RunMode == "" {
+				targetCfg.Settings.RunMode = currentCfg.Settings.RunMode
+			}
+		}
+	} else {
+		curBytes, _ := json.Marshal(currentCfg)
+		_ = json.Unmarshal(curBytes, &targetCfg)
+
+		if targetCfg.Providers == nil {
+			targetCfg.Providers = make(map[string]*types.ProviderConfig)
+		}
+		for pID, inP := range incoming.Providers {
+			if inP == nil {
+				continue
+			}
+			exP, exists := targetCfg.Providers[pID]
+			if !exists {
+				targetCfg.Providers[pID] = inP
+				continue
+			}
+			if inP.BaseURL != "" {
+				exP.BaseURL = inP.BaseURL
+			}
+			if inP.AnthropicBaseURL != "" {
+				exP.AnthropicBaseURL = inP.AnthropicBaseURL
+			}
+			if inP.PresetID != "" {
+				exP.PresetID = inP.PresetID
+			}
+			if inP.Name != "" {
+				exP.Name = inP.Name
+			}
+			if inP.RPMPerKey > 0 {
+				exP.RPMPerKey = inP.RPMPerKey
+			}
+			if inP.AdapterRules != nil {
+				exP.AdapterRules = inP.AdapterRules
+			}
+			if inP.ModelAliases != nil {
+				if exP.ModelAliases == nil {
+					exP.ModelAliases = make(map[string]string)
+				}
+				for k, v := range inP.ModelAliases {
+					exP.ModelAliases[k] = v
+				}
+			}
+			for _, inK := range inP.APIKeys {
+				if inK == nil {
+					continue
+				}
+				found := false
+				for i, exK := range exP.APIKeys {
+					if (inK.ID != "" && exK.ID == inK.ID) || (inK.Label != "" && exK.Label == inK.Label) {
+						found = true
+						if !config.IsMaskedSecret(inK.Key) && inK.Key != "" {
+							exP.APIKeys[i].Key = inK.Key
+						}
+						exP.APIKeys[i].Enabled = inK.Enabled
+						if inK.Remark != "" {
+							exP.APIKeys[i].Remark = inK.Remark
+						}
+						break
+					}
+				}
+				if !found {
+					exP.APIKeys = append(exP.APIKeys, inK)
+				}
+			}
+		}
+
+		if incoming.AgentModels != nil {
+			if targetCfg.AgentModels == nil {
+				targetCfg.AgentModels = make(map[string]*types.AgentModelRoute)
+			}
+			for mName, inM := range incoming.AgentModels {
+				if inM == nil {
+					continue
+				}
+				exM, exists := targetCfg.AgentModels[mName]
+				if !exists {
+					targetCfg.AgentModels[mName] = inM
+					continue
+				}
+				if inM.RoutingStrategy != "" {
+					exM.RoutingStrategy = inM.RoutingStrategy
+				}
+				if inM.ActiveKey != "" {
+					exM.ActiveKey = inM.ActiveKey
+				}
+				for _, inC := range inM.Candidates {
+					if inC == nil {
+						continue
+					}
+					cExists := false
+					for _, exC := range exM.Candidates {
+						if exC != nil && exC.Provider == inC.Provider && exC.KeyLabel == inC.KeyLabel && exC.TargetModel == inC.TargetModel {
+							cExists = true
+							break
+						}
+					}
+					if !cExists {
+						exM.Candidates = append(exM.Candidates, inC)
+					}
+				}
+			}
+		}
+
+		if incoming.KBModels != nil {
+			if targetCfg.KBModels == nil {
+				targetCfg.KBModels = make(map[string][]*types.KBCandidate)
+			}
+			for cat, inList := range incoming.KBModels {
+				for _, inC := range inList {
+					if inC == nil {
+						continue
+					}
+					cExists := false
+					for _, exC := range targetCfg.KBModels[cat] {
+						if exC != nil && exC.Provider == inC.Provider && exC.Model == inC.Model && exC.KeyLabel == inC.KeyLabel {
+							cExists = true
+							break
+						}
+					}
+					if !cExists {
+						targetCfg.KBModels[cat] = append(targetCfg.KBModels[cat], inC)
+					}
+				}
+			}
+		}
+
+		curMode := targetCfg.Settings.RunMode
+		if incoming.Settings.AgentRoutingStrategy != "" {
+			targetCfg.Settings.AgentRoutingStrategy = incoming.Settings.AgentRoutingStrategy
+		}
+		if incoming.Settings.AgentFirstByteTimeoutSec > 0 {
+			targetCfg.Settings.AgentFirstByteTimeoutSec = incoming.Settings.AgentFirstByteTimeoutSec
+		}
+		if incoming.Settings.CooldownRateLimitSec > 0 {
+			targetCfg.Settings.CooldownRateLimitSec = incoming.Settings.CooldownRateLimitSec
+		}
+		if incoming.Settings.CooldownServerErrorSec > 0 {
+			targetCfg.Settings.CooldownServerErrorSec = incoming.Settings.CooldownServerErrorSec
+		}
+		if incoming.Settings.CooldownNetworkErrorSec > 0 {
+			targetCfg.Settings.CooldownNetworkErrorSec = incoming.Settings.CooldownNetworkErrorSec
+		}
+		if incoming.Settings.CooldownAuthErrorSec > 0 {
+			targetCfg.Settings.CooldownAuthErrorSec = incoming.Settings.CooldownAuthErrorSec
+		}
+		if incoming.Settings.ClientKey != "" {
+			targetCfg.Settings.ClientKey = incoming.Settings.ClientKey
+		}
+		if incoming.Settings.ProxyAPIKey != "" {
+			targetCfg.Settings.ProxyAPIKey = incoming.Settings.ProxyAPIKey
+		}
+		if len(incoming.Settings.ProxyKeys) > 0 {
+			targetCfg.Settings.ProxyKeys = incoming.Settings.ProxyKeys
+		}
+		targetCfg.Settings.RunMode = curMode
+		targetCfg.Version = currentCfg.Version
+	}
+
+	savedSnap, err := s.localSrc.SaveConfig(&targetCfg)
+	if err != nil {
+		var vce *config.VersionConflictError
+		if errors.As(err, &vce) {
+			w.WriteHeader(http.StatusConflict) // 409
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":                false,
+				"error":             "config_version_conflict",
+				"current_version":   vce.CurrentVersion,
+				"submitted_version": vce.SubmittedVersion,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":       true,
+		"success":  true,
+		"mode":     mode,
+		"message":  "配置导入成功",
+		"_version": savedSnap.Config.Version,
+	})
+}
+
+func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Provider   string `json:"provider"`
+		Key        string `json:"key"`
+		KeyLabel   string `json:"key_label"`
+		Type       string `json:"type"` // "chat" | "ocr" | "embedding" | "reranker"
+		Model      string `json:"model"`
+		ModelName  string `json:"model_name"`
+		Category   string `json:"category"`
+		AgentModel string `json:"agent_model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid JSON",
+		})
+		return
+	}
+
+	providerName := req.Provider
+	keyLabel := req.Key
+	if keyLabel == "" {
+		keyLabel = req.KeyLabel
+	}
+	model := req.Model
+	if model == "" {
+		model = req.ModelName
+	}
+	candType := strings.ToLower(req.Type)
+	if candType == "" {
+		candType = "chat"
+	}
+
+	if providerName == "" || keyLabel == "" || model == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "missing provider, key, or model",
+		})
+		return
+	}
+
+	snap, _ := s.localSrc.Current(r.Context(), false)
+	if snap == nil || snap.Config == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "config unavailable",
+		})
+		return
+	}
+
+	prov, exists := snap.Config.Providers[providerName]
+	if !exists || prov == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": fmt.Sprintf("provider '%s' not found", providerName),
+		})
+		return
+	}
+
+	var apiKey string
+	for _, k := range prov.APIKeys {
+		if k != nil && (k.Label == keyLabel || k.ID == keyLabel || k.Key == keyLabel) {
+			apiKey = k.Key
+			break
+		}
+	}
+	if apiKey == "" {
+		if !config.IsMaskedSecret(keyLabel) && len(keyLabel) > 5 {
+			apiKey = keyLabel
+		}
+	}
+
+	if apiKey == "" || config.IsMaskedSecret(apiKey) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": fmt.Sprintf("key '%s' not found or secret is masked", keyLabel),
+		})
+		return
+	}
+
+	baseURL := prov.BaseURL
+	if baseURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "provider base_url is empty",
+		})
+		return
+	}
+
+	var targetURL string
+	var reqBodyBytes []byte
+
+	switch candType {
+	case "embedding":
+		targetURL = upstream.JoinUpstream(baseURL, "embeddings")
+		reqBodyBytes, _ = json.Marshal(map[string]any{
+			"model": model,
+			"input": "test",
+		})
+	case "reranker":
+		targetURL = upstream.JoinUpstream(baseURL, "rerank")
+		reqBodyBytes, _ = json.Marshal(map[string]any{
+			"model":     model,
+			"query":     "test",
+			"documents": []string{"a"},
+		})
+	case "ocr":
+		const png1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+		targetURL = upstream.JoinUpstream(baseURL, "chat/completions")
+		reqBodyBytes, _ = json.Marshal(map[string]any{
+			"model": model,
+			"messages": []map[string]any{
+				{
+					"role": "user",
+					"content": []map[string]any{
+						{"type": "text", "text": "Extract text"},
+						{"type": "image_url", "image_url": map[string]string{"url": png1x1}},
+					},
+				},
+			},
+			"max_tokens": 64,
+			"stream":     false,
+		})
+	default: // chat
+		targetURL = upstream.JoinUpstream(baseURL, "chat/completions")
+		reqBodyBytes, _ = json.Marshal(map[string]any{
+			"model": model,
+			"messages": []map[string]any{
+				{"role": "user", "content": "Hi"},
+			},
+			"max_tokens": 16,
+			"stream":     false,
+		})
+	}
+
+	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBodyBytes))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		})
+		return
+	}
+	upReq.Header.Set("Content-Type", "application/json")
+
+	if prov.AdapterRules != nil && prov.AdapterRules.AuthHeader != "" && prov.AdapterRules.AuthPrefix != "" {
+		upReq.Header.Set(prov.AdapterRules.AuthHeader, prov.AdapterRules.AuthPrefix+apiKey)
+	} else if strings.EqualFold(providerName, "vertex") || strings.Contains(strings.ToLower(baseURL), "aiplatform.googleapis.com") {
+		upReq.Header.Set("x-goog-api-key", apiKey)
+	} else {
+		upReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := s.httpClient
+	if client == nil {
+		client = upstream.DefaultClient(20*time.Second, true)
+	}
+
+	start := time.Now()
+	resp, err := client.Do(upReq)
+	ms := time.Since(start).Milliseconds()
+
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":         false,
+			"success":    false,
+			"status":     http.StatusBadGateway,
+			"ms":         ms,
+			"latency_ms": ms,
+			"model":      model,
+			"error":      err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	isOK := resp.StatusCode >= 200 && resp.StatusCode < 300
+
+	if isOK {
+		if s.scheduler != nil {
+			s.scheduler.Cooldowns().ClearKey(providerName, keyLabel)
+		}
+	}
+
+	textSnippet := ""
+	var parsedResp map[string]any
+	if err := json.Unmarshal(respBody, &parsedResp); err == nil {
+		if choices, ok := parsedResp["choices"].([]any); ok && len(choices) > 0 {
+			if cMap, ok := choices[0].(map[string]any); ok {
+				if msg, ok := cMap["message"].(map[string]any); ok {
+					if c, ok := msg["content"].(string); ok {
+						textSnippet = c
+					}
+				}
+			}
+		}
+	}
+	if textSnippet == "" && len(respBody) > 0 && isOK {
+		textSnippet = string(respBody)
+		if len(textSnippet) > 100 {
+			textSnippet = textSnippet[:100]
+		}
+	}
+
+	var errMsg string
+	if !isOK {
+		errMsg = string(respBody)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200]
+		}
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":         isOK,
+		"success":    isOK,
+		"status":     resp.StatusCode,
+		"ms":         ms,
+		"latency_ms": ms,
+		"model":      model,
+		"text":       textSnippet,
+		"error":      errMsg,
+	})
+}
+
+func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	var req struct {
+		Model string `json:"model"`
+		Name  string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "invalid JSON",
+		})
+		return
+	}
+
+	modelName := req.Model
+	if modelName == "" {
+		modelName = req.Name
+	}
+	if modelName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "missing model name",
+		})
+		return
+	}
+
+	snap, _ := s.localSrc.Current(r.Context(), false)
+	if snap == nil || snap.Config == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": "config unavailable",
+		})
+		return
+	}
+
+	route, ok := snap.Config.AgentModels[modelName]
+	if !ok || route == nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":    false,
+			"error": fmt.Sprintf("agent model '%s' not found", modelName),
+		})
+		return
+	}
+
+	var candidates []*types.RouteCandidate
+	for _, c := range route.Candidates {
+		if c != nil && c.Enabled {
+			candidates = append(candidates, c)
+		}
+	}
+	if len(candidates) == 0 {
+		for _, c := range route.Candidates {
+			if c != nil {
+				candidates = append(candidates, c)
+			}
+		}
+	}
+
+	type ProbeResult struct {
+		Provider  string `json:"provider"`
+		Key       string `json:"key"`
+		Model     string `json:"model"`
+		OK        bool   `json:"ok"`
+		Status    int    `json:"status"`
+		LatencyMS int64  `json:"latency_ms"`
+		Error     string `json:"error,omitempty"`
+	}
+
+	results := make([]ProbeResult, len(candidates))
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+
+	for i, c := range candidates {
+		wg.Add(1)
+		go func(idx int, cand *types.RouteCandidate) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			prov := snap.Config.Providers[cand.Provider]
+			if prov == nil {
+				results[idx] = ProbeResult{
+					Provider: cand.Provider,
+					Key:      cand.KeyLabel,
+					Model:    modelName,
+					OK:       false,
+					Error:    "provider not found",
+				}
+				return
+			}
+
+			var apiKey string
+			for _, k := range prov.APIKeys {
+				if k != nil && (k.Label == cand.KeyLabel || k.ID == cand.KeyLabel) {
+					apiKey = k.Key
+					break
+				}
+			}
+			if apiKey == "" || config.IsMaskedSecret(apiKey) {
+				results[idx] = ProbeResult{
+					Provider: cand.Provider,
+					Key:      cand.KeyLabel,
+					Model:    modelName,
+					OK:       false,
+					Error:    "api key unresolvable or masked",
+				}
+				return
+			}
+
+			targetModel := cand.TargetModel
+			if targetModel == "" {
+				targetModel = modelName
+			}
+			targetURL := upstream.JoinUpstream(prov.BaseURL, "chat/completions")
+
+			testBody, _ := json.Marshal(map[string]any{
+				"model": targetModel,
+				"messages": []map[string]any{
+					{"role": "user", "content": "Hi"},
+				},
+				"max_tokens": 16,
+				"stream":     false,
+			})
+
+			upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(testBody))
+			if err != nil {
+				results[idx] = ProbeResult{
+					Provider: cand.Provider,
+					Key:      cand.KeyLabel,
+					Model:    targetModel,
+					OK:       false,
+					Error:    err.Error(),
+				}
+				return
+			}
+			upReq.Header.Set("Content-Type", "application/json")
+			if prov.AdapterRules != nil && prov.AdapterRules.AuthHeader != "" && prov.AdapterRules.AuthPrefix != "" {
+				upReq.Header.Set(prov.AdapterRules.AuthHeader, prov.AdapterRules.AuthPrefix+apiKey)
+			} else if strings.EqualFold(cand.Provider, "vertex") || strings.Contains(strings.ToLower(prov.BaseURL), "aiplatform.googleapis.com") {
+				upReq.Header.Set("x-goog-api-key", apiKey)
+			} else {
+				upReq.Header.Set("Authorization", "Bearer "+apiKey)
+			}
+
+			client := s.httpClient
+			if client == nil {
+				client = upstream.DefaultClient(15*time.Second, true)
+			}
+
+			start := time.Now()
+			resp, err := client.Do(upReq)
+			lat := time.Since(start).Milliseconds()
+
+			if err != nil {
+				results[idx] = ProbeResult{
+					Provider:  cand.Provider,
+					Key:       cand.KeyLabel,
+					Model:     targetModel,
+					OK:        false,
+					LatencyMS: lat,
+					Error:     err.Error(),
+				}
+				return
+			}
+			defer resp.Body.Close()
+
+			isOK := resp.StatusCode >= 200 && resp.StatusCode < 300
+			errStr := ""
+			if !isOK {
+				errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				errStr = string(errBytes)
+				if len(errStr) > 200 {
+					errStr = errStr[:200]
+				}
+				if errStr == "" {
+					errStr = fmt.Sprintf("HTTP %d", resp.StatusCode)
+				}
+			} else {
+				if s.scheduler != nil {
+					s.scheduler.Cooldowns().ClearKey(cand.Provider, cand.KeyLabel)
+				}
+			}
+
+			results[idx] = ProbeResult{
+				Provider:  cand.Provider,
+				Key:       cand.KeyLabel,
+				Model:     targetModel,
+				OK:        isOK,
+				Status:    resp.StatusCode,
+				LatencyMS: lat,
+				Error:     errStr,
+			}
+		}(i, c)
+	}
+
+	wg.Wait()
+
+	okCount := 0
+	for _, res := range results {
+		if res.OK {
+			okCount++
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":         okCount > 0,
+		"success":    okCount > 0,
+		"model":      modelName,
+		"total":      len(results),
+		"passed":     okCount,
+		"results":    results,
+		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
+	})
+}
+
+func (s *Server) handleLanes(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	type LaneItem struct {
+		Lane    string `json:"lane"`
+		Name    string `json:"name,omitempty"`
+		Busy    int    `json:"busy"`
+		Waiting int    `json:"waiting"`
+		Limit   int    `json:"limit"`
+	}
+
+	var snap map[string]scheduler.Lane
+	if s.scheduler != nil {
+		snap = s.scheduler.SnapshotLanes()
+	} else {
+		snap = make(map[string]scheduler.Lane)
+	}
+
+	lanes := make([]LaneItem, 0, len(snap))
+	for k, v := range snap {
+		lanes = append(lanes, LaneItem{
+			Lane:    k,
+			Name:    k,
+			Busy:    v.Busy,
+			Waiting: v.Waiting,
+			Limit:   v.Limit,
+		})
+	}
+	sort.Slice(lanes, func(i, j int) bool { return lanes[i].Lane < lanes[j].Lane })
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":       true,
+		"lanes":    lanes,
+		"lane_map": snap,
+	})
+}
+
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -281,10 +1143,25 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodDelete {
+		type traceClearer interface {
+			ClearTraces()
+		}
+		if tc, ok := s.obsSink.(traceClearer); ok {
+			tc.ClearTraces()
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"message": "traces cleared",
+		})
+		return
+	}
+
 	onlyFailed := r.URL.Query().Get("failed") == "1" || r.URL.Query().Get("failed") == "true"
 	traces := s.obsSink.RecentTraces(onlyFailed)
 
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":     true,
 		"traces": traces,

@@ -54,6 +54,61 @@
       }
     },
 
+    showLogin() {
+      const scr = document.getElementById('loginScreen');
+      if (scr) {
+        scr.hidden = false;
+        scr.classList.remove('hidden');
+        const err = document.getElementById('loginError');
+        if (err) {
+          err.hidden = true;
+          err.classList.add('hidden');
+          err.textContent = '';
+        }
+        const pwd = document.getElementById('loginPassword');
+        if (pwd) pwd.focus();
+      }
+    },
+
+    hideLogin() {
+      const scr = document.getElementById('loginScreen');
+      if (scr) {
+        scr.hidden = true;
+        scr.classList.add('hidden');
+      }
+    },
+
+    async login(password) {
+      HOST.setToken(password);
+      // 1. Try login on full node
+      try {
+        const res = await fetch('/api/admin/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'authorization': `Bearer ${password}` },
+          body: JSON.stringify({ password }),
+        });
+        if (res.ok) {
+          HOST.hideLogin();
+          return { ok: true };
+        }
+      } catch (_) {}
+
+      // 2. Validate token against /api/config
+      try {
+        const testRes = await fetch('/api/config', {
+          headers: { 'authorization': `Bearer ${password}` },
+        });
+        if (testRes.status === 401) {
+          HOST.setToken('');
+          return { ok: false, error: '管理员凭据错误，请重试' };
+        }
+        HOST.hideLogin();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || '网络连接失败' };
+      }
+    },
+
     async request(path, options = {}) {
       const headers = {
         'content-type': 'application/json',
@@ -71,12 +126,7 @@
       });
 
       if (res.status === 401) {
-        const entered = prompt('请输入管理员密码 (ADMIN_PASSWORD):');
-        if (entered) {
-          HOST.setToken(entered);
-          headers['authorization'] = `Bearer ${entered}`;
-          return fetch(path, { ...options, headers });
-        }
+        HOST.showLogin();
       }
 
       return res;
@@ -140,6 +190,27 @@
       return res.json();
     },
 
+    async clearTraces() {
+      const res = await HOST.request('/api/admin/traces', { method: 'DELETE' });
+      return res.json();
+    },
+
+    async getLanes() {
+      const res = await HOST.request('/api/lanes');
+      return res.json();
+    },
+
+    async getCooldowns() {
+      const res = await HOST.request('/api/admin/cooldowns');
+      return res.json();
+    },
+
+    async clearCooldowns(target) {
+      const path = target ? `/api/admin/cooldowns?target=${encodeURIComponent(target)}` : '/api/admin/cooldowns';
+      const res = await HOST.request(path, { method: 'DELETE' });
+      return res.json();
+    },
+
     async switchMode(mode) {
       const res = await HOST.request('/api/admin/mode', {
         method: 'POST',
@@ -169,6 +240,116 @@
         return await res.json();
       } catch (_) {
         return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async detectProvider(data) {
+      const res = await HOST.request('/api/admin/detect-provider', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async checkBalance(data) {
+      const res = await HOST.request('/api/admin/balance', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async getPresetsExtra() {
+      const res = await HOST.request('/api/admin/presets-extra');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false };
+      }
+    },
+
+    async syncAutoList(data) {
+      const res = await HOST.request('/api/admin/autolist-sync', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async startOAuth(data) {
+      const res = await HOST.request('/api/admin/oauth/start', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+
+    async pollOAuth(data) {
+      const res = await HOST.request('/api/admin/oauth/poll', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+
+    async testCandidate(data) {
+      const res = await HOST.request('/api/admin/test-candidate', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+
+    async testAgentModel(data) {
+      const res = await HOST.request('/api/admin/test-agent-model', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+
+    async exportConfig() {
+      return HOST.request('/api/admin/config/export');
+    },
+
+    async importConfig(data) {
+      const res = await HOST.request('/api/admin/config/import', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+
+    async getAccessInfo() {
+      const res = await HOST.request('/api/admin/access-info');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false };
+      }
+    },
+
+    async updateAccessKey(data) {
+      const res = await HOST.request('/api/admin/access-key', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok };
       }
     },
 

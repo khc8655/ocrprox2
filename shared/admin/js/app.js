@@ -1,6 +1,6 @@
 /**
  * app.js — Magpie Minimalist Admin UI Controller
- * Zero inline style, no slide-over panels, zero left-border stripes, inline row editors.
+ * Zero inline style, zero left-border stripes, inline row editors.
  */
 
 (function () {
@@ -9,10 +9,13 @@
     nodes: [],
     usage: null,
     traces: [],
+    lanes: {},
+    cooldowns: {},
     activeTab: 'providers',
     activeEditorKey: null,
     filterOnlyRetried: false,
     currentPeriod: 'today',
+    lanesTimer: null,
   };
 
   function toast(msg, type = 'info') {
@@ -41,11 +44,63 @@
 
   // --- Initializer ---
   async function init() {
+    setupLoginScreen();
     setupCapabilities();
     setupTheme();
+    setupPrivacyMask();
+    setupKeyboardShortcuts();
     setupNavigation();
     setupCreationForms();
     await loadData();
+    startLanesPolling();
+  }
+
+  // --- 1. In-Page Magpie Login Overlay (M14) ---
+  function setupLoginScreen() {
+    const loginForm = document.getElementById('loginForm');
+    const pwdInput = document.getElementById('loginPassword');
+    const errEl = document.getElementById('loginError');
+    const badge = document.getElementById('loginHostBadge');
+
+    if (badge) {
+      badge.textContent = window.HOST.kind === 'hub' ? 'Hub' : 'Full';
+    }
+
+    if (loginForm) {
+      loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pwd = (pwdInput?.value || '').trim();
+        if (!pwd) {
+          if (errEl) {
+            errEl.textContent = '请输入管理员密码';
+            errEl.hidden = false;
+            errEl.classList.remove('hidden');
+          }
+          return;
+        }
+
+        const res = await window.HOST.login(pwd);
+        if (res.ok) {
+          toast('登录成功', 'ok');
+          if (errEl) {
+            errEl.hidden = true;
+            errEl.classList.add('hidden');
+          }
+          await loadData();
+        } else {
+          if (errEl) {
+            errEl.textContent = res.error || '密码验证失败，请重试';
+            errEl.hidden = false;
+            errEl.classList.remove('hidden');
+          }
+        }
+      });
+    }
+
+    // Auto-prompt login if no token set
+    if (!window.HOST.getToken()) {
+      window.HOST.showLogin();
+    }
   }
 
   function setupCapabilities() {
@@ -55,7 +110,6 @@
     const brandRole = document.getElementById('brandRole');
     if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
 
-    // Show/hide nav buttons based on capabilities
     const navModels = document.getElementById('navModels');
     const navNodes = document.getElementById('navNodes');
     const navActivity = document.getElementById('navActivity');
@@ -102,6 +156,81 @@
     }
   }
 
+  // --- 2. Privacy Masking & Keyboard Shortcuts (M15) ---
+  function setupPrivacyMask() {
+    const btn = document.getElementById('btnPrivacyMask');
+    if (!btn) return;
+    const isMasked = localStorage.getItem('llmproxy_privacy_mask') === '1';
+    if (isMasked) {
+      document.body.classList.add('privacy-masked');
+      btn.textContent = '🙈';
+    }
+
+    btn.addEventListener('click', () => {
+      const active = document.body.classList.toggle('privacy-masked');
+      localStorage.setItem('llmproxy_privacy_mask', active ? '1' : '0');
+      btn.textContent = active ? '🙈' : '👁️';
+      toast(active ? '隐私遮罩已开启' : '隐私遮罩已关闭', 'info');
+    });
+  }
+
+  function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const pForm = document.getElementById('addProviderForm');
+        const mForm = document.getElementById('addModelForm');
+        const nForm = document.getElementById('issueNodeForm');
+        let closedSomething = false;
+        if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
+        if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
+        if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
+        if (state.activeEditorKey) {
+          state.activeEditorKey = null;
+          closedSomething = true;
+          if (state.activeTab === 'providers') renderProvidersList();
+          else if (state.activeTab === 'models') renderModelsList();
+          else if (state.activeTab === 'nodes') renderNodesList();
+          else if (state.activeTab === 'activity') renderTracesList();
+        }
+        if (closedSomething) toast('已取消操作并关闭编辑器', 'info');
+      } else if (e.key === '/') {
+        const targetTag = (e.target.tagName || '').toLowerCase();
+        if (targetTag !== 'input' && targetTag !== 'textarea' && targetTag !== 'select') {
+          const firstInput = document.querySelector(`section:not([hidden]) input:not([readonly])`);
+          if (firstInput) {
+            e.preventDefault();
+            firstInput.focus();
+          }
+        }
+      }
+    });
+  }
+
+  // --- 3. Live Concurrency Lanes & Cooldowns Polling (M11) ---
+  function startLanesPolling() {
+    if (!window.HOST.capabilities.runModes) return;
+    if (state.lanesTimer) clearInterval(state.lanesTimer);
+
+    const poll = async () => {
+      if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
+      if (state.activeTab !== 'providers' && state.activeTab !== 'models') return;
+      try {
+        const [lanesRes, cdRes] = await Promise.all([
+          window.HOST.getLanes(),
+          window.HOST.getCooldowns(),
+        ]);
+        if (lanesRes && lanesRes.ok) {
+          state.lanes = lanesRes.lane_map || {};
+        }
+        if (cdRes) {
+          state.cooldowns = cdRes;
+        }
+      } catch (_) {}
+    };
+
+    state.lanesTimer = setInterval(poll, 3000);
+  }
+
   function setupNavigation() {
     const seg = document.getElementById('navSeg');
     if (!seg) return;
@@ -116,7 +245,7 @@
     if (logoutBtn) {
       logoutBtn.addEventListener('click', () => {
         window.HOST.setToken('');
-        location.reload();
+        window.HOST.showLogin();
       });
     }
 
@@ -150,6 +279,7 @@
       btnSyncKeys.addEventListener('click', handleSyncFromVault);
     }
 
+    // Analytics Period Selector
     const periodSeg = document.getElementById('activityPeriodSeg');
     if (periodSeg) {
       periodSeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -158,28 +288,163 @@
           if (!p || p === state.currentPeriod) return;
           state.currentPeriod = p;
           periodSeg.querySelectorAll('.seg-btn').forEach((b) => {
-            if (b.getAttribute('data-period') === p) {
-              b.classList.add('active');
-            } else {
-              b.classList.remove('active');
-            }
+            if (b.getAttribute('data-period') === p) b.classList.add('active');
+            else b.classList.remove('active');
           });
           await loadActivityData();
         });
       });
     }
+
+    // Analytics 3-Dimension Breakdown Sub-Tabs (M10)
+    const dimSeg = document.getElementById('usageDimensionSeg');
+    if (dimSeg) {
+      dimSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const dim = btn.getAttribute('data-dim');
+          if (!dim) return;
+          window.USAGE.state.subTab = dim;
+          dimSeg.querySelectorAll('.seg-btn').forEach((b) => {
+            if (b.getAttribute('data-dim') === dim) b.classList.add('active');
+            else b.classList.remove('active');
+          });
+          if (state.usage) window.USAGE.renderBreakdown(state.usage);
+        });
+      });
+    }
+
+    const btnClearTraces = document.getElementById('btnClearTraces');
+    if (btnClearTraces) {
+      btnClearTraces.addEventListener('click', async () => {
+        if (!confirm('确定清空所有请求轨迹与监控日志吗？')) return;
+        try {
+          const res = await window.HOST.clearTraces();
+          if (res && res.ok) {
+            toast('轨迹已清空', 'ok');
+            await loadActivityData();
+          }
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      });
+    }
+
+    const btnFilterRetried = document.getElementById('btnFilterRetried');
+    if (btnFilterRetried) {
+      btnFilterRetried.addEventListener('click', () => {
+        state.filterOnlyRetried = !state.filterOnlyRetried;
+        btnFilterRetried.classList.toggle('active', state.filterOnlyRetried);
+        renderTracesList();
+      });
+    }
   }
 
+  // --- 4. Presets & cURL Auto-Parser (M3, M4) ---
   const PRESETS_META = {
-    openai: ['openai', 'OpenAI', 'https://api.openai.com/v1', 'openai-completions'],
-    anthropic: ['anthropic', 'Anthropic', 'https://api.anthropic.com/v1', 'anthropic-messages'],
-    gemini: ['gemini', 'Gemini', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
-    deepseek: ['deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', 'openai-completions'],
+    openai: ['openai', 'OpenAI (官方)', 'https://api.openai.com/v1', 'openai-completions'],
+    anthropic: ['anthropic', 'Anthropic (官方)', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+    gemini: ['gemini', 'Google Gemini (OpenAI兼容)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
+    deepseek: ['deepseek', 'DeepSeek (官方)', 'https://api.deepseek.com/v1', 'openai-completions'],
     openrouter: ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
-    siliconflow: ['siliconflow', 'SiliconFlow', 'https://api.siliconflow.cn/v1', 'openai-completions'],
-    groq: ['groq', 'Groq', 'https://api.groq.com/openai/v1', 'openai-completions'],
+    groq: ['groq', 'Groq Cloud', 'https://api.groq.com/openai/v1', 'openai-completions'],
     xai: ['xai', 'xAI', 'https://api.x.ai/v1', 'openai-completions'],
+    'minimax-global': ['minimax', 'MiniMax (Global)', 'https://api.minimaxi.chat/v1', 'openai-completions'],
+    'minimax-cn': ['minimax', 'MiniMax (国内)', 'https://api.minimax.chat/v1', 'openai-completions'],
+    'kimi-cn': ['kimi', 'Kimi / Moonshot (国内)', 'https://api.moonshot.cn/v1', 'openai-completions'],
+    'kimi-global': ['kimi', 'Kimi / Moonshot (Global)', 'https://api.moonshot.ai/v1', 'openai-completions'],
+    zhipu: ['zhipu', '智谱 BigModel (PayG)', 'https://open.bigmodel.cn/api/paas/v4', 'openai-completions'],
+    'zhipu-coding': ['zhipu', '智谱 Coding', 'https://open.bigmodel.cn/api/coding/paas/v4', 'openai-completions'],
+    volcengine: ['volcengine', '火山方舟 Ark (PayG)', 'https://ark.cn-beijing.volces.com/api/v3', 'openai-completions'],
+    'volcengine-coding': ['volcengine', '火山方舟 Coding', 'https://ark.cn-beijing.volces.com/api/coding/v3', 'openai-completions'],
+    'stepfun-cn': ['stepfun', '阶跃星辰 Stepfun (国内)', 'https://api.stepfun.com/v1', 'openai-completions'],
+    'stepfun-global': ['stepfun', '阶跃星辰 Stepfun (Global)', 'https://api.stepfun.ai/v1', 'openai-completions'],
+    alibaba: ['alibaba', '阿里百炼 / DashScope (国内)', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
+    'alibaba-intl': ['alibaba', '阿里百炼 / DashScope (国际)', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
+    siliconflow: ['siliconflow', 'SiliconFlow (硅基流动)', 'https://api.siliconflow.cn/v1', 'openai-completions'],
+    ollama: ['ollama', 'Ollama (本地)', 'http://localhost:11434/v1', 'openai-completions'],
   };
+
+  // Robust cURL Command Parser (M3)
+  function parseCurl(text) {
+    let s = String(text || '').trim();
+    const head = /^curl(?:\.exe)?(?=\s)/i.exec(s);
+    if (!head) return null;
+    s = s.slice(head[0].length).replace(/(?:\\|\^|`)[ \t]*\r?\n/g, ' ');
+
+    const words = [];
+    let w = null;
+    for (let i = 0; i < s.length;) {
+      const c = s[i];
+      if (/\s/.test(c)) { if (w !== null) words.push(w); w = null; i++; continue; }
+      w ??= '';
+      if (c === "'") {
+        let j = i + 1;
+        const k = s.indexOf("'", j);
+        if (k < 0) { w += s.slice(j); break; }
+        w += s.slice(j, k);
+        i = k + 1;
+      } else if (c === '"') {
+        for (i++; i < s.length && s[i] !== '"'; i++) {
+          if (s[i] === '\\' && i + 1 < s.length) i++;
+          w += s[i] ?? '';
+        }
+        i++;
+      } else {
+        w += c;
+        i++;
+      }
+    }
+    if (w !== null) words.push(w);
+
+    let url = '';
+    const headers = [];
+    let body = '';
+
+    for (let i = 0; i < words.length; i++) {
+      const x = words[i];
+      let opt = x, val = null;
+      if (/^-[Hd]/.test(x)) { opt = x.slice(0, 2); val = x.slice(2); }
+      else if (/^(-H|--header|-d|--data|--data-raw|--json|--url)$/.test(x)) val = words[++i] ?? '';
+      else if (x.startsWith('-')) continue;
+      else { if (!url) url = x; continue; }
+
+      if (opt === '-H' || opt === '--header') headers.push(val);
+      else if (opt === '--url') url = val;
+      else if (/^(-d|--data(-raw)?|--json)$/.test(opt)) body = val;
+    }
+
+    let key = '';
+    for (const h of headers) {
+      const m = /^\s*(authorization|x-api-key|x-goog-api-key|api-key)\s*:\s*(.*?)\s*$/i.exec(h);
+      if (m) {
+        const val = m[1].toLowerCase() === 'authorization' ? m[2].replace(/^bearer\s+/i, '') : m[2];
+        if (val && !/^\$|^<.*>|your[_-]?key/i.test(val)) {
+          key = val.trim();
+          break;
+        }
+      }
+    }
+
+    let protocol = 'openai-completions';
+    let base = url;
+    if (/\/messages\b/i.test(url)) {
+      protocol = 'anthropic-messages';
+      base = url.replace(/\/messages.*$/i, '');
+    } else if (/\/chat\/completions\b/i.test(url)) {
+      protocol = 'openai-completions';
+      base = url.replace(/\/chat\/completions.*$/i, '');
+    } else if (/\/v1beta\b/i.test(url) || /generativelanguage/i.test(url)) {
+      protocol = 'gemini';
+    }
+
+    let model = '';
+    try {
+      const parsedBody = JSON.parse(body.replace(/\\"/g, '"'));
+      if (typeof parsedBody?.model === 'string') model = parsedBody.model.trim();
+    } catch (_) {}
+
+    return { url, base, protocol, key, model };
+  }
 
   function setupCreationForms() {
     const pForm = document.getElementById('addProviderForm');
@@ -192,6 +457,60 @@
 
     document.getElementById('btnAddProvider')?.addEventListener('click', () => toggle(pForm));
     document.getElementById('btnCancelAddProvider')?.addEventListener('click', () => toggle(pForm, false));
+
+    // cURL Paste Toggle & Input (M3)
+    const btnToggleCurl = document.getElementById('btnToggleCurlPaste');
+    const curlInput = document.getElementById('curlPasteInput');
+    if (btnToggleCurl && curlInput) {
+      btnToggleCurl.addEventListener('click', () => {
+        curlInput.hidden = !curlInput.hidden;
+        curlInput.classList.toggle('hidden', curlInput.hidden);
+        if (!curlInput.hidden) curlInput.focus();
+      });
+
+      curlInput.addEventListener('input', () => {
+        const parsed = parseCurl(curlInput.value);
+        if (parsed) {
+          if (parsed.base) document.getElementById('newProvBaseUrl').value = parsed.base;
+          if (parsed.key) document.getElementById('newProvApiKey').value = parsed.key;
+          if (parsed.protocol) document.getElementById('newProvApiType').value = parsed.protocol;
+          if (parsed.model) {
+            const mId = document.getElementById('newProvId');
+            if (mId && !mId.value) mId.value = parsed.model.split('/')[0].split('-')[0];
+          }
+          toast('已从 cURL 自动解析填充 Base URL 与密钥！', 'ok');
+        }
+      });
+    }
+
+    // Auto-detect protocols button in Add Provider (M1)
+    const btnDetect = document.getElementById('btnDetectProvider');
+    if (btnDetect) {
+      btnDetect.addEventListener('click', async () => {
+        const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
+        const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+        if (!baseUrl) return toast('请先输入 Base URL', 'warn');
+        toast('正在探测上游支持协议与延迟...', 'info');
+        try {
+          const res = await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
+          if (res && res.ok) {
+            toast(`探测成功！已发现协议支持 (延迟: ${res.latency_ms || 0}ms)`, 'ok');
+            if (res.base_url) document.getElementById('newProvBaseUrl').value = res.base_url;
+            if (res.protocol) document.getElementById('newProvApiType').value = res.protocol;
+          } else {
+            // Fallback probe
+            const probe = await window.HOST.probeModels({ base_url: baseUrl, api_key: apiKey });
+            if (probe && (probe.ok || probe.count)) {
+              toast(`探测成功: 发现 ${probe.count || probe.models?.length || 0} 个可用模型`, 'ok');
+            } else {
+              toast(`协议探测完成: Base URL 有效`, 'info');
+            }
+          }
+        } catch (e) {
+          toast(`探测完成: ${e.message}`, 'info');
+        }
+      });
+    }
 
     document.getElementById('newProvPreset')?.addEventListener('change', (e) => {
       const m = PRESETS_META[e.target.value];
@@ -323,13 +642,8 @@
     const btnAgent = document.getElementById('modeBtnAgent');
     const btnKB = document.getElementById('modeBtnKB');
     if (btnAgent && btnKB) {
-      if (isAgent) {
-        btnAgent.classList.add('active');
-        btnKB.classList.remove('active');
-      } else {
-        btnAgent.classList.remove('active');
-        btnKB.classList.add('active');
-      }
+      btnAgent.classList.toggle('active', isAgent);
+      btnKB.classList.toggle('active', !isAgent);
     }
   }
 
@@ -378,7 +692,10 @@
       ]);
       if (usageRes && usageRes.ok) {
         state.usage = usageRes;
-        renderUsageStats();
+        window.USAGE.renderKPIs(usageRes);
+        window.USAGE.renderStackedBarChart(usageRes);
+        window.USAGE.renderHeatmap(usageRes);
+        window.USAGE.renderBreakdown(usageRes);
       }
       if (tracesRes && tracesRes.ok) {
         state.traces = tracesRes.traces || [];
@@ -536,7 +853,7 @@
     }
   }
 
-  // --- View: Providers ---
+  // --- View: Providers (M1~M6, U2, U4) ---
   function renderProvidersList() {
     const container = document.getElementById('providersList');
     if (!container) return;
@@ -558,6 +875,19 @@
       const keyCount = (p.api_keys || []).length;
       const isLocal = p.origin === 'local';
       const isExpanded = state.activeEditorKey === `p_${pId}`;
+      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+
+      // Check live lanes concurrency for this provider
+      let busyCount = 0;
+      let waitCount = 0;
+      if (state.lanes) {
+        for (const [laneKey, laneVal] of Object.entries(state.lanes)) {
+          if (laneKey.startsWith(pId + ':') || laneKey === pId) {
+            busyCount += laneVal.Busy || 0;
+            waitCount += laneVal.Waiting || 0;
+          }
+        }
+      }
 
       const row = document.createElement('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
@@ -569,8 +899,11 @@
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
+          ${brandIcon}
           <span>${escapeHtml(p.name || pId)}</span>
           ${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
+          ${busyCount > 0 ? `<span class="pill pill--busy">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
+          ${p._balance ? `<span class="pill pill--green">${escapeHtml(p._balance)}</span>` : ''}
         </div>
         <div class="sub">${escapeHtml(p.base_url || '未配置 Base URL')}</div>
       `;
@@ -614,7 +947,10 @@
           <input class="input" id="ed_p_name_${pId}" value="${escapeHtml(p.name || pId)}">
         </div>
         <div class="form-group">
-          <label class="form-label">Base URL (OpenAI 协议)</label>
+          <div class="section-bar">
+            <label class="form-label">Base URL (OpenAI 协议)</label>
+            <button class="btn btn--sm" id="btn_detect_ed_${pId}" type="button">自动探测协议</button>
+          </div>
           <input class="input input--code" id="ed_p_base_${pId}" value="${escapeHtml(p.base_url || '')}">
         </div>
         <div class="form-group">
@@ -627,17 +963,61 @@
         </div>
       </div>
 
+      <!-- Advanced Settings Toggle (QuotaResetAt, RPMPerKey, AutoInclude, BalanceURL) -->
+      <details class="headers-details mt-2">
+        <summary class="form-label">⚙️ 高级配置 (配额刷新、余额查询与自动纳管)</summary>
+        <div class="editor-grid mt-2">
+          <div class="form-group">
+            <label class="form-label">每日重置时间 (quota_reset_at)</label>
+            <input class="input" id="ed_p_reset_${pId}" value="${escapeHtml(p.quota_reset_at || '00:00+08:00')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">单 Key RPM 限制 (rpm_per_key)</label>
+            <input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">
+          </div>
+          <div class="form-group">
+            <label class="form-label">自定义余额查询 URL (balance_url)</label>
+            <input class="input input--code" id="ed_p_bal_url_${pId}" value="${escapeHtml(p.balance_url || '')}" placeholder="https://api.../user/balance">
+          </div>
+          <div class="form-group">
+            <label class="form-label">余额提取 JSONPath (balance_path)</label>
+            <input class="input input--code" id="ed_p_bal_path_${pId}" value="${escapeHtml(p.balance_path || '')}" placeholder="$.balance">
+          </div>
+        </div>
+        <div class="section-bar mt-2 flex-end">
+          <button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button>
+        </div>
+      </details>
+
       <div class="section-bar mt-4">
         <span class="form-label">API 密钥池 (${keys.length})</span>
+        <div class="fields">
+          <button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button>
+          <button class="btn btn--sm btn--primary" id="btn_oauth_start_${pId}" type="button">OAuth 扫码登录</button>
+        </div>
       </div>
 
+      <!-- OAuth inline prompt box -->
+      <div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden>
+        <div class="snippet-header">
+          <span class="form-label">MiniMax OAuth 设备授权码:</span>
+          <span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span>
+        </div>
+        <div class="text-sm mt-1">
+          请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a>
+          并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong>
+        </div>
+      </div>
+
+      <!-- Per-Key Table (U2) -->
       <table class="sub-table">
         <thead>
           <tr>
-            <th>状态</th>
+            <th>启用</th>
             <th>标签</th>
             <th>Key 密文</th>
             <th>归属</th>
+            <th>冷却状态</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -649,40 +1029,65 @@
           <input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)">
         </div>
         <div class="form-group">
-          <input class="input input--code" id="new_key_val_${pId}" placeholder="粘贴完整 API Key">
+          <input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key">
         </div>
         <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_key_${pId}">＋ 添加 Key</button>
+          <button class="btn btn--primary" id="btn_add_key_${pId}" type="button">＋ 添加 Key</button>
         </div>
       </div>
 
+      <!-- Model Probing & Pills Area (U2) -->
+      <div class="section-bar mt-4">
+        <span class="form-label">模型探测与一键纳管</span>
+        <div class="fields">
+          <button class="btn btn--sm" id="btn_check_balance_${pId}" type="button">查询余额</button>
+          <button class="btn btn--sm btn--primary" id="btn_probe_prov_${pId}" type="button">探测模型</button>
+        </div>
+      </div>
+      <div id="probe_pills_container_${pId}" class="hidden" hidden>
+        <div class="section-bar mt-1">
+          <input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型...">
+          <span class="text-muted text-xs" id="probe_pills_count_${pId}"></span>
+        </div>
+        <div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div>
+      </div>
+
       <div class="section-bar mt-4 flex-end gap-2">
-        <button class="btn" id="btn_probe_prov_${pId}">探测模型</button>
-        <button class="btn btn--danger" id="btn_del_prov_${pId}">删除此供应商</button>
-        <button class="btn btn--primary" id="btn_save_prov_${pId}">保存供应商配置</button>
+        <button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>
+        <button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button>
       </div>
     `;
 
     const tbody = wrap.querySelector(`#p_keys_tbody_${pId}`);
     keys.forEach((k, idx) => {
       const tr = document.createElement('tr');
+      const keyTarget = `${pId}:${k.label || k.id || `key-${idx}`}`;
+      const isCooldown = state.cooldowns?.[keyTarget] || false;
+
       tr.innerHTML = `
-        <td><span class="dot ${k.enabled ? 'dot--ok' : 'dot--err'}"></span></td>
+        <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
         <td><strong>${escapeHtml(k.label || k.id || `key-${idx}`)}</strong></td>
-        <td><span class="tabular">${escapeHtml(k.key)}</span></td>
+        <td><span class="tabular privacy-mask">${escapeHtml(k.key)}</span></td>
         <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
         <td>
-          <button class="btn btn--sm btn_verify_k" data-idx="${idx}">校验</button>
-          <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}">删除</button>
+          <span class="pill ${isCooldown ? 'pill--amber' : 'pill--green'}">${isCooldown ? '冷却中' : '就绪'}</span>
+        </td>
+        <td>
+          <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
+          <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
         </td>
       `;
+
+      tr.querySelector('.k_enable_cb').addEventListener('change', (e) => {
+        k.enabled = e.target.checked;
+      });
+
       tr.querySelector('.btn_verify_k').addEventListener('click', async () => {
         const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
         const keyLabel = k.label || k.id || `key-${idx}`;
         toast(`正在校验 Key [${keyLabel}]...`, 'info');
         try {
-          const apiFn = window.HOST.api?.verifyKey || window.HOST.verifyKey;
-          const res = await apiFn({
+          const res = await window.HOST.verifyKey({
             provider: pId,
             api_key: k.key,
             key: k.key,
@@ -690,59 +1095,198 @@
             base_url: baseUrl,
             api_type: p.api_type || 'openai-completions',
           });
-          if (res && (res.ok || res.latency_ms !== undefined || res.ms !== undefined)) {
-            const latency = res.latency_ms ?? res.ms ?? res.latency ?? 0;
-            toast(`Key [${keyLabel}] 校验成功: 延迟 ${latency}ms`, 'ok');
+          if (res && (res.ok || res.valid || res.latency_ms !== undefined)) {
+            const lat = res.latency_ms ?? res.ms ?? 0;
+            toast(`Key [${keyLabel}] 校验成功: 延迟 ${lat}ms`, 'ok');
           } else {
-            const errMsg = res?.error?.message || res?.error || '密钥无效或网络不可达';
-            toast(`Key [${keyLabel}] 校验失败: ${errMsg}`, 'err');
+            toast(`Key [${keyLabel}] 校验失败: ${res?.error || '无效凭据'}`, 'err');
           }
         } catch (e) {
           toast(`校验异常: ${e.message}`, 'err');
         }
       });
+
       tr.querySelector('.btn_del_k').addEventListener('click', () => {
         p.api_keys.splice(idx, 1);
         renderProvidersList();
       });
+
       tbody.appendChild(tr);
     });
 
+    // Check Balance (M2)
+    wrap.querySelector(`#btn_check_balance_${pId}`).addEventListener('click', async () => {
+      const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+      const firstKey = p.api_keys?.[0]?.key || '';
+      const balUrl = wrap.querySelector(`#ed_p_bal_url_${pId}`)?.value.trim() || p.balance_url || '';
+      const balPath = wrap.querySelector(`#ed_p_bal_path_${pId}`)?.value.trim() || p.balance_path || '';
+
+      toast(`正在查询供应商 ${pId} 余额...`, 'info');
+      try {
+        const res = await window.HOST.checkBalance({
+          provider: pId,
+          base_url: baseUrl,
+          api_key: firstKey,
+          balance_url: balUrl,
+          balance_path: balPath,
+        });
+        if (res && (res.ok || res.balance !== undefined)) {
+          const bal = res.formatted || res.balance || '正常可用';
+          p._balance = String(bal);
+          toast(`余额查询成功: ${bal}`, 'ok');
+          renderProvidersList();
+        } else {
+          toast(`余额查询不可用: ${res?.error || '上游无余额接口'}`, 'warn');
+        }
+      } catch (e) {
+        toast(`查询异常: ${e.message}`, 'err');
+      }
+    });
+
+    // Batch Test All Keys (U2)
+    wrap.querySelector(`#btn_batch_test_keys_${pId}`).addEventListener('click', async () => {
+      toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
+      let succ = 0;
+      const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+      for (const k of keys) {
+        try {
+          const r = await window.HOST.verifyKey({
+            provider: pId,
+            api_key: k.key,
+            base_url: baseUrl,
+            key_label: k.label,
+          });
+          if (r && (r.ok || r.valid)) succ++;
+        } catch (_) {}
+      }
+      toast(`一键测试完成: ${succ}/${keys.length} 把 Key 正常可用`, succ === keys.length ? 'ok' : 'warn');
+    });
+
+    // OAuth Device Flow (U4)
+    wrap.querySelector(`#btn_oauth_start_${pId}`).addEventListener('click', async () => {
+      toast('正在发起 OAuth 设备登录请求...', 'info');
+      try {
+        const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
+        if (res && (res.ok || res.device_code)) {
+          const box = wrap.querySelector(`#oauth_box_${pId}`);
+          box.hidden = false;
+          box.classList.remove('hidden');
+          const link = wrap.querySelector(`#oauth_link_${pId}`);
+          link.href = res.verification_uri || 'https://api.minimax.chat';
+          link.textContent = res.verification_uri || '前往授权页面';
+          wrap.querySelector(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
+
+          // Poll OAuth
+          const intervalSec = (res.interval || 5) * 1000;
+          const pollTimer = setInterval(async () => {
+            try {
+              const pollRes = await window.HOST.pollOAuth({
+                device_code: res.device_code,
+                endpoint: 'https://api.minimax.chat/oauth/token',
+              });
+              if (pollRes && (pollRes.ok || pollRes.access_token)) {
+                clearInterval(pollTimer);
+                wrap.querySelector(`#oauth_status_${pId}`).textContent = '授权成功！';
+                p.api_keys = p.api_keys || [];
+                p.api_keys.push({
+                  id: `k_oauth_${Date.now().toString(36)}`,
+                  label: 'oauth-token',
+                  key: pollRes.access_token,
+                  enabled: true,
+                  origin: 'local',
+                });
+                await persistConfig('OAuth 授权成功，密钥已保存');
+              }
+            } catch (_) {}
+          }, intervalSec);
+          setTimeout(() => clearInterval(pollTimer), (res.expires_in || 300) * 1000);
+        } else {
+          toast(res?.error || '发起 OAuth 失败', 'err');
+        }
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    });
+
+    // Probe Models and Clickable Pills (U2)
     wrap.querySelector(`#btn_probe_prov_${pId}`).addEventListener('click', async () => {
       const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
       toast(`正在探测供应商 ${pId} 模型...`, 'info');
       try {
-        const apiFn = window.HOST.api?.probeModels || window.HOST.probeModels;
-        const res = await apiFn({
+        const res = await window.HOST.probeModels({
           provider: pId,
           base_url: baseUrl,
           api_key: firstKey,
-          key: firstKey,
           api_type: p.api_type || 'openai-completions',
-          api_keys: p.api_keys,
         });
-        if (res && (res.ok || Array.isArray(res.models) || res.count !== undefined)) {
-          const count = res.count ?? (Array.isArray(res.models) ? res.models.length : 0);
-          toast(`探测成功: 发现 ${count} 个可用模型`, 'ok');
+        const models = res?.models || [];
+        if (models.length > 0) {
+          toast(`探测成功: 发现 ${models.length} 个可用模型`, 'ok');
+          const cont = wrap.querySelector(`#probe_pills_container_${pId}`);
+          cont.hidden = false;
+          cont.classList.remove('hidden');
+          const list = wrap.querySelector(`#probe_pills_list_${pId}`);
+          list.innerHTML = '';
+          wrap.querySelector(`#probe_pills_count_${pId}`).textContent = `共 ${models.length} 个，点击一键纳管`;
+
+          const renderPills = (filter = '') => {
+            list.innerHTML = '';
+            const filtered = models.filter((m) => m.toLowerCase().includes(filter.toLowerCase())).slice(0, 48);
+            filtered.forEach((modelName) => {
+              const pill = document.createElement('span');
+              pill.className = 'probe-pill';
+              pill.textContent = modelName;
+              pill.title = `点击一键纳管 ${modelName} 到 Agent 路由`;
+              pill.addEventListener('click', async () => {
+                state.config.agent_models = state.config.agent_models || {};
+                const firstKeyLabel = p.api_keys?.[0]?.label || 'k1';
+                state.config.agent_models[modelName] = {
+                  routing_strategy: 'sticky_failover',
+                  active_key: '',
+                  enabled: true,
+                  candidates: [
+                    { provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
+                  ],
+                };
+                await persistConfig(`已成功纳管模型: ${modelName}`);
+              });
+              list.appendChild(pill);
+            });
+          };
+
+          renderPills();
+          wrap.querySelector(`#probe_pills_filter_${pId}`).addEventListener('input', (e) => {
+            renderPills(e.target.value);
+          });
         } else {
-          const errMsg = res?.error?.message || res?.error || '未发现可用模型';
-          toast(`探测失败: ${errMsg}`, 'err');
+          toast('未探测到可用模型列表', 'warn');
         }
       } catch (e) {
         toast(`探测异常: ${e.message}`, 'err');
       }
     });
 
-    wrap.querySelector(`#btn_add_key_${pId}`).addEventListener('click', () => {
-      const lblInput = wrap.querySelector(`#new_key_lbl_${pId}`);
-      const valInput = wrap.querySelector(`#new_key_val_${pId}`);
-      const lbl = lblInput.value.trim();
-      const val = valInput.value.trim();
-      if (!lbl || !val) {
-        toast('请填写 Key 标签和密钥内容', 'warn');
-        return;
+    // AutoList Sync
+    wrap.querySelector(`#btn_autolist_sync_${pId}`).addEventListener('click', async () => {
+      toast('正在同步模型列表并纳管...', 'info');
+      try {
+        const res = await window.HOST.syncAutoList({ provider: pId });
+        if (res && res.ok) {
+          toast('模型同步纳管成功！', 'ok');
+          await loadData();
+        } else {
+          toast('已触发自动纳管请求', 'info');
+        }
+      } catch (e) {
+        toast(e.message, 'err');
       }
+    });
+
+    wrap.querySelector(`#btn_add_key_${pId}`).addEventListener('click', () => {
+      const lbl = wrap.querySelector(`#new_key_lbl_${pId}`).value.trim();
+      const val = wrap.querySelector(`#new_key_val_${pId}`).value.trim();
+      if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
       p.api_keys = p.api_keys || [];
       p.api_keys.push({
         id: `k_${Date.now().toString(36)}`,
@@ -759,6 +1303,11 @@
       p.base_url = wrap.querySelector(`#ed_p_base_${pId}`).value.trim();
       p.anthropic_base_url = wrap.querySelector(`#ed_p_ant_${pId}`).value.trim();
       p.preset_id = wrap.querySelector(`#ed_p_preset_${pId}`).value.trim();
+      p.quota_reset_at = wrap.querySelector(`#ed_p_reset_${pId}`).value.trim();
+      const rpm = Number(wrap.querySelector(`#ed_p_rpm_${pId}`).value);
+      if (rpm > 0) p.rpm_per_key = rpm;
+      p.balance_url = wrap.querySelector(`#ed_p_bal_url_${pId}`).value.trim();
+      p.balance_path = wrap.querySelector(`#ed_p_bal_path_${pId}`).value.trim();
 
       await persistConfig('供应商保存成功');
     });
@@ -950,10 +1499,7 @@
     const role = document.getElementById('issueNodeRole').value;
     const leaseTtl = Number(document.getElementById('issueNodeTTL').value) || 86400;
 
-    if (!name) {
-      toast('请输入节点名称', 'warn');
-      return;
-    }
+    if (!name) return toast('请输入节点名称', 'warn');
 
     try {
       const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl });
@@ -974,7 +1520,7 @@
     }
   }
 
-  // --- View: Models (Full mode) ---
+  // --- View: Models & KB Pipeline Visual Editor (U1, U5, M16) ---
   function renderModelsList() {
     const container = document.getElementById('modelsList');
     if (!container) return;
@@ -989,7 +1535,7 @@
     if (isAgent) {
       renderAgentModels(container);
     } else {
-      renderKBModels(container);
+      renderKBPipelines(container);
     }
   }
 
@@ -1009,6 +1555,7 @@
       const m = models[mName] || {};
       const cCount = (m.candidates || []).length;
       const isExpanded = state.activeEditorKey === `m_${mName}`;
+      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
 
       const row = document.createElement('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
@@ -1020,8 +1567,10 @@
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
+          ${brandIcon}
           <span>${escapeHtml(mName)}</span>
           <span class="pill pill--accent">${escapeHtml(m.routing_strategy || 'sticky_failover')}</span>
+          ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
         </div>
         <div class="sub">首选 Key: ${escapeHtml(m.active_key || '未指定')} · 候选池: ${cCount} 个</div>
       `;
@@ -1029,9 +1578,29 @@
       const fields = document.createElement('div');
       fields.className = 'fields';
       fields.innerHTML = `
+        <button class="btn btn--sm btn_test_agent_m" data-model="${escapeHtml(mName)}" type="button">测试路由</button>
         <span class="pill">${cCount} 候选</span>
         <span class="caret">▾</span>
       `;
+
+      // Agent Model Route Test Button (U5)
+      fields.querySelector('.btn_test_agent_m').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        toast(`正在测试模型 ${mName} 路由...`, 'info');
+        try {
+          const res = await window.HOST.testAgentModel({ model: mName });
+          if (res && res.ok) {
+            const lat = res.latency_ms || res.ms || 0;
+            m._lastTestLatency = lat;
+            toast(`测试通过！耗时: ${lat}ms (优胜: ${res.winner_provider || '直连'})`, 'ok');
+            renderAgentModels(container);
+          } else {
+            toast(`测试失败: ${res?.error || '路由无响应'}`, 'err');
+          }
+        } catch (err) {
+          toast(`测试异常: ${err.message}`, 'err');
+        }
+      });
 
       row.appendChild(dot);
       row.appendChild(who);
@@ -1115,8 +1684,9 @@
     const tbody = wrap.querySelector(`#m_cands_tbody_${mName}`);
     candidates.forEach((c, idx) => {
       const tr = document.createElement('tr');
+      const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
       tr.innerHTML = `
-        <td><strong>${escapeHtml(c.provider)}</strong></td>
+        <td>${brandIco}<strong>${escapeHtml(c.provider)}</strong></td>
         <td><span class="pill">${escapeHtml(c.key_label)}</span></td>
         <td><span class="tabular">${escapeHtml(c.target_model || '原名')}</span></td>
         <td><span class="tabular">${c.weight || 1}</span></td>
@@ -1135,10 +1705,7 @@
       const prov = wrap.querySelector(`#new_c_prov_${mName}`).value.trim();
       const lbl = wrap.querySelector(`#new_c_lbl_${mName}`).value.trim();
       const target = wrap.querySelector(`#new_c_target_${mName}`).value.trim();
-      if (!prov || !lbl) {
-        toast('请填写供应商和 Key 标签', 'warn');
-        return;
-      }
+      if (!prov || !lbl) return toast('请填写供应商和 Key 标签', 'warn');
       candidates.push({
         provider: prov,
         key_label: lbl,
@@ -1165,143 +1732,185 @@
     return wrap;
   }
 
-  function renderKBModels(container) {
-    const categories = ['chat', 'embedding', 'reranker', 'ocr'];
-    categories.forEach((cat) => {
+  // KB 4-Pipeline Visual Editor (U1, M16)
+  function renderKBPipelines(container) {
+    const pipelines = [
+      { id: 'chat', name: '对话流水线', path: '/v1/chat/completions', desc: 'RAG 生成对话专用高并发通道' },
+      { id: 'embedding', name: '向量嵌入流水线', path: '/v1/embeddings', desc: '文档分块高吞吐向量化' },
+      { id: 'reranker', name: '重排流水线', path: '/v1/rerank', desc: '多候选语义重排打分' },
+      { id: 'ocr', name: '图文解析流水线', path: '/v1/ocr', desc: '文档图像多模态 OCR 提取' },
+    ];
+
+    state.config.kb_models = state.config.kb_models || {};
+
+    pipelines.forEach((pl) => {
+      const cands = state.config.kb_models[pl.id] || [];
+      const isExpanded = state.activeEditorKey === `kb_${pl.id}`;
+
       const row = document.createElement('div');
-      row.className = 'row';
-      row.innerHTML = `
-        <span class="dot dot--ok"></span>
-        <div class="who">
-          <div class="name"><span>/v1/${cat}</span> <span class="pill pill--accent">KB 模式固定</span></div>
-          <div class="sub">知识库专用高并发流水线</div>
-        </div>
-      `;
-      container.appendChild(row);
-    });
-  }
-
-  function formatTokenCount(num) {
-    if (!num) return '0';
-    if (num >= 1000000) return `${Math.round((num / 1000000) * 10) / 10}M`;
-    if (num >= 1000) return `${Math.round((num / 1000) * 10) / 10}k`;
-    return Number(num).toLocaleString();
-  }
-
-  // --- View: Activity (Full mode) ---
-  function renderUsageStats() {
-    const totals = state.usage?.totals;
-    const summary = state.usage?.summary;
-
-    const requests = totals?.requests ?? summary?.total_requests ?? 0;
-    const failed = totals?.failed ?? summary?.failed_requests ?? 0;
-    const success = totals?.success ?? summary?.success_requests ?? (requests - failed);
-    const inTokens = totals?.input_tokens ?? summary?.total_in_tokens ?? 0;
-    const outTokens = totals?.output_tokens ?? summary?.total_out_tokens ?? 0;
-    const totalTokens = inTokens + outTokens;
-    const avgTtft = totals?.avg_ttft_ms ?? summary?.avg_ttft_ms ?? 0;
-
-    const setVal = (id, val) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = val !== undefined ? val : '-';
-    };
-
-    setVal('statRequests', Number(requests).toLocaleString());
-    setVal('statSuccess', requests > 0 ? `${Math.round((success / requests) * 1000) / 10}%` : '-');
-    setVal('statTokens', formatTokenCount(totalTokens));
-    setVal('statTTFT', avgTtft ? `${Math.round(avgTtft)}ms` : '-');
-
-    renderUsageModels();
-  }
-
-  function renderUsageModels() {
-    const container = document.getElementById('usageModelsList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    const rawModels = state.usage?.models;
-    let modelsList = [];
-
-    if (Array.isArray(rawModels)) {
-      modelsList = rawModels.map((m) => {
-        const reqs = m.requests || 0;
-        const succs = m.successes ?? (m.success_rate !== undefined ? Math.round(reqs * m.success_rate) : (reqs - (m.failed || 0)));
-        const rate = m.success_rate !== undefined ? m.success_rate : (reqs > 0 ? succs / reqs : 0);
-        const inT = m.input_tokens ?? m.in_tokens ?? 0;
-        const outT = m.output_tokens ?? m.out_tokens ?? 0;
-        return {
-          model: m.model || m.name || 'unknown',
-          requests: reqs,
-          successRate: rate,
-          inTokens: inT,
-          outTokens: outT,
-          totalTokens: inT + outT,
-          cacheTokens: m.cache_read_tokens || 0,
-          avgTtft: m.avg_ttft_ms ?? 0,
-        };
-      });
-    } else if (rawModels && typeof rawModels === 'object') {
-      modelsList = Object.entries(rawModels).map(([modelName, s]) => {
-        const reqs = s.requests || 0;
-        const succs = s.successes ?? s.success ?? (reqs - (s.failed || 0));
-        const rate = s.success_rate !== undefined ? s.success_rate : (reqs > 0 ? succs / reqs : 0);
-        const inT = s.input_tokens ?? s.in_tokens ?? 0;
-        const outT = s.output_tokens ?? s.out_tokens ?? 0;
-        const avgTtft = s.avg_ttft_ms ?? (s.total_ms && reqs > 0 ? Math.round(s.total_ms / reqs) : 0);
-        return {
-          model: modelName,
-          requests: reqs,
-          successRate: rate,
-          inTokens: inT,
-          outTokens: outT,
-          totalTokens: inT + outT,
-          cacheTokens: s.cache_read_tokens || 0,
-          avgTtft: avgTtft,
-        };
-      });
-    }
-
-    if (modelsList.length === 0) {
-      const emptyRow = document.createElement('div');
-      emptyRow.className = 'row text-muted';
-      emptyRow.textContent = '当前周期暂无模型用量记录';
-      container.appendChild(emptyRow);
-      return;
-    }
-
-    modelsList.sort((a, b) => b.requests - a.requests);
-
-    for (const m of modelsList) {
-      const row = document.createElement('div');
-      row.className = 'row';
+      row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
       const dot = document.createElement('span');
-      dot.className = `dot ${m.successRate >= 0.99 ? 'dot--ok' : m.successRate >= 0.9 ? 'dot--warn' : 'dot--err'}`;
+      dot.className = `dot ${cands.length > 0 ? 'dot--ok' : 'dot--warn'}`;
 
       const who = document.createElement('div');
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
-          <span>${escapeHtml(m.model)}</span>
-          <span class="pill">${m.requests.toLocaleString()} 次</span>
-          <span class="pill pill--accent">${formatTokenCount(m.totalTokens)} tok</span>
+          <span>${pl.path}</span>
+          <span class="pill pill--accent">${pl.name}</span>
+          <span class="pill">${cands.length} 候选实例</span>
         </div>
-        <div class="sub">成功率: ${(m.successRate * 100).toFixed(1)}% · 缓存: ${formatTokenCount(m.cacheTokens)}${m.avgTtft ? ' · TTFT ' + Math.round(m.avgTtft) + 'ms' : ''}</div>
+        <div class="sub">${pl.desc}</div>
       `;
 
       const fields = document.createElement('div');
       fields.className = 'fields';
       fields.innerHTML = `
-        <span class="pill tabular">${(m.successRate * 100).toFixed(1)}%</span>
+        <span class="caret">▾</span>
       `;
 
       row.appendChild(dot);
       row.appendChild(who);
       row.appendChild(fields);
+
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('button') || ev.target.closest('input')) return;
+        state.activeEditorKey = isExpanded ? null : `kb_${pl.id}`;
+        renderModelsList();
+      });
+
       container.appendChild(row);
-    }
+
+      if (isExpanded) {
+        const editor = document.createElement('div');
+        editor.className = 'editor';
+        editor.appendChild(buildKBPipelineEditor(pl.id, pl, cands));
+        container.appendChild(editor);
+      }
+    });
   }
 
+  function buildKBPipelineEditor(cat, pl, cands) {
+    const wrap = document.createElement('div');
+
+    wrap.innerHTML = `
+      <div class="section-bar">
+        <span class="form-label">${pl.name} (${pl.path}) 候选池列表</span>
+      </div>
+
+      <table class="sub-table">
+        <thead>
+          <tr>
+            <th>启用</th>
+            <th>供应商</th>
+            <th>Key 标签</th>
+            <th>目标模型 ID</th>
+            <th>并发限制</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="kb_cands_tbody_${cat}"></tbody>
+      </table>
+
+      <div class="editor-grid mt-3">
+        <div class="form-group">
+          <input class="input" id="new_kb_prov_${cat}" placeholder="供应商 ID">
+        </div>
+        <div class="form-group">
+          <input class="input" id="new_kb_key_${cat}" placeholder="Key 标签">
+        </div>
+        <div class="form-group">
+          <input class="input" id="new_kb_model_${cat}" placeholder="上游真实模型 ID">
+        </div>
+        <div class="form-group">
+          <input class="input" id="new_kb_conc_${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
+        </div>
+        <div class="form-group flex-end">
+          <button class="btn btn--primary" id="btn_add_kb_cand_${cat}" type="button">＋ 添加候选</button>
+        </div>
+      </div>
+
+      <div class="section-bar mt-4 flex-end gap-2">
+        <button class="btn btn--primary" id="btn_save_kb_${cat}" type="button">保存流水线配置</button>
+      </div>
+    `;
+
+    const tbody = wrap.querySelector(`#kb_cands_tbody_${cat}`);
+    cands.forEach((c, idx) => {
+      const tr = document.createElement('tr');
+      const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
+      tr.innerHTML = `
+        <td><input type="checkbox" class="kb_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td>
+        <td>${brandIco}<strong>${escapeHtml(c.provider)}</strong></td>
+        <td><span class="pill">${escapeHtml(c.key_label || c.key)}</span></td>
+        <td><span class="tabular">${escapeHtml(c.model)}</span></td>
+        <td><span class="tabular">${c.max_concurrency || c.max_conc || 4}</span></td>
+        <td>
+          <button class="btn btn--sm btn_test_kb_cand" data-idx="${idx}" type="button">测试管道</button>
+          <button class="btn btn--sm btn--danger btn_del_kb_cand" data-idx="${idx}" type="button">移除</button>
+        </td>
+      `;
+
+      tr.querySelector('.kb_c_en').addEventListener('change', (e) => {
+        c.enabled = e.target.checked;
+      });
+
+      // Test candidate endpoint (POST /api/admin/test-candidate)
+      tr.querySelector('.btn_test_kb_cand').addEventListener('click', async () => {
+        toast(`正在烟雾测试 [${cat}] 候选 ${c.provider}/${c.model}...`, 'info');
+        try {
+          const res = await window.HOST.testCandidate({
+            provider: c.provider,
+            key_label: c.key_label || c.key,
+            model: c.model,
+            type: cat,
+          });
+          if (res && res.ok) {
+            toast(`管道测试通过！延迟: ${res.latency_ms || res.ms || 0}ms`, 'ok');
+          } else {
+            toast(`测试失败: ${res?.error || '无响应'}`, 'err');
+          }
+        } catch (e) {
+          toast(`测试异常: ${e.message}`, 'err');
+        }
+      });
+
+      tr.querySelector('.btn_del_kb_cand').addEventListener('click', () => {
+        cands.splice(idx, 1);
+        renderModelsList();
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    wrap.querySelector(`#btn_add_kb_cand_${cat}`).addEventListener('click', () => {
+      const prov = wrap.querySelector(`#new_kb_prov_${cat}`).value.trim();
+      const kLbl = wrap.querySelector(`#new_kb_key_${cat}`).value.trim();
+      const mdl = wrap.querySelector(`#new_kb_model_${cat}`).value.trim();
+      const conc = Number(wrap.querySelector(`#new_kb_conc_${cat}`).value) || 4;
+
+      if (!prov || !mdl) return toast('请填写供应商与模型 ID', 'warn');
+      cands.push({
+        provider: prov,
+        key_label: kLbl,
+        model: mdl,
+        max_concurrency: conc,
+        enabled: true,
+      });
+      state.config.kb_models[cat] = cands;
+      renderModelsList();
+    });
+
+    wrap.querySelector(`#btn_save_kb_${cat}`).addEventListener('click', async () => {
+      state.config.kb_models[cat] = cands;
+      await persistConfig('知识库流水线配置保存成功');
+    });
+
+    return wrap;
+  }
+
+  // --- View: Activity & Traces (M7~M10, M12) ---
   function renderTracesList() {
     const container = document.getElementById('tracesList');
     if (!container) return;
@@ -1309,7 +1918,7 @@
 
     const traces = state.traces || [];
     const filtered = state.filterOnlyRetried
-      ? traces.filter((t) => t.status >= 400 || (t.tries && t.tries.length > 1))
+      ? traces.filter((t) => t.status >= 400 || (t.tries && t.tries.length > 1) || (t.retried_ms || 0) > 0)
       : traces;
 
     if (filtered.length === 0) {
@@ -1324,7 +1933,8 @@
       const isExpanded = state.activeEditorKey === `tr_${t.id}`;
       const triesCount = (t.tries || []).length;
       const isOk = t.status >= 200 && t.status < 300;
-      const hasRetries = triesCount > 1;
+      const hasRetries = triesCount > 1 || (t.retried_ms || 0) > 0;
+      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(t.winner_provider || t.req_model) : '';
 
       const row = document.createElement('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
@@ -1336,6 +1946,7 @@
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
+          ${brandIcon}
           <span>${formatTime(t.ts)}</span>
           <span class="tabular">${escapeHtml(t.req_model)}</span>
           <span class="text-muted">→</span>
@@ -1366,53 +1977,17 @@
       if (isExpanded) {
         const editor = document.createElement('div');
         editor.className = 'editor';
-        editor.appendChild(buildTraceEditor(t));
+        editor.appendChild(window.USAGE.buildTraceWaterfall(t));
         container.appendChild(editor);
       }
     }
   }
 
-  function buildTraceEditor(t) {
-    const wrap = document.createElement('div');
-    const tries = t.tries || [];
-
-    wrap.innerHTML = `
-      <div class="mb-2 text-sm text-muted">
-        <strong>端点:</strong> ${escapeHtml(t.endpoint)} · 
-        <strong>Token:</strong> 入 ${t.in_tokens || 0} / 出 ${t.out_tokens || 0} / 缓存 ${t.cache_read_tokens || 0} · 
-        <strong>TTFT:</strong> ${t.ttft_ms || 0}ms · <strong>总耗时:</strong> ${t.total_ms || 0}ms
-      </div>
-      <div class="form-label mb-1">故障转移与重试回放 (Tries[]):</div>
-      <div id="tries_container_${t.id}"></div>
-    `;
-
-    const triesCont = wrap.querySelector(`#tries_container_${t.id}`);
-    tries.forEach((tr) => {
-      const trRow = document.createElement('div');
-      trRow.className = 'try-row';
-      const isSuccess = tr.status >= 200 && tr.status < 300;
-      trRow.innerHTML = `
-        <span class="dot ${isSuccess ? 'dot--ok' : 'dot--err'}"></span>
-        <div class="flex-1">
-          <div>
-            <strong>Try #${tr.attempt}</strong>: 
-            <span>${escapeHtml(tr.provider)} / ${escapeHtml(tr.key_id)}</span> 
-            <span class="pill ${isSuccess ? 'pill--green' : 'pill--red'}">HTTP ${tr.status}</span>
-            <span class="tabular">(${tr.ms}ms${tr.ttft_ms ? ', TTFT ' + tr.ttft_ms + 'ms' : ''})</span>
-            ${tr.cooldown_applied_sec ? `<span class="pill pill--amber">触发冷却 ${tr.cooldown_applied_sec}s</span>` : ''}
-          </div>
-          ${tr.error_snippet ? `<div class="text-danger text-sm mt-1">${escapeHtml(tr.error_snippet)}</div>` : ''}
-        </div>
-      `;
-      triesCont.appendChild(trRow);
-    });
-
-    return wrap;
-  }
-
-  // --- View: Settings ---
+  // --- View: Settings (M16, U3, U4) ---
   function renderSettingsView() {
     const s = state.config?.settings || {};
+    const isFull = window.HOST.capabilities.runModes;
+
     const setVal = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.value = val !== undefined ? val : '';
@@ -1424,6 +1999,123 @@
     setVal('cfgCooldown5xx', s.cooldown_server_error_sec || 30);
     setVal('cfgCooldownNet', s.cooldown_network_error_sec || 15);
     setVal('cfgCooldownAuth', s.cooldown_auth_error_sec || 86400);
+
+    // Full role Gateway Access Center (M16)
+    const gwBox = document.getElementById('gatewayAccessCenter');
+    const modeBox = document.getElementById('modeScheduleBox');
+    const backupBox = document.getElementById('configBackupBox');
+
+    if (gwBox) gwBox.hidden = !isFull;
+    if (modeBox) modeBox.hidden = !isFull;
+    if (backupBox) backupBox.hidden = !isFull;
+
+    if (isFull) {
+      const baseOrigin = location.origin || 'http://127.0.0.1:3425';
+      const localBase = `${baseOrigin}/v1`;
+      const clientKey = s.client_key || s.proxy_api_key || 'sk-proxy-key';
+
+      const gwBaseUrl = document.getElementById('gwBaseUrl');
+      if (gwBaseUrl) gwBaseUrl.value = localBase;
+
+      const gwClientKey = document.getElementById('gwClientKey');
+      if (gwClientKey) gwClientKey.value = clientKey;
+
+      const snippetClaude = document.getElementById('snippetClaude');
+      if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${clientKey}"`;
+
+      const snippetCursor = document.getElementById('snippetCursor');
+      if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${clientKey}"`;
+
+      document.getElementById('btnGenClientKey')?.addEventListener('click', () => {
+        const rand = `sk-proxy-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+        if (gwClientKey) gwClientKey.value = rand;
+        if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
+        if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
+      });
+
+      document.getElementById('btnSaveClientKey')?.addEventListener('click', async () => {
+        const k = (gwClientKey?.value || '').trim();
+        s.client_key = k;
+        s.proxy_api_key = k;
+        await window.HOST.updateAccessKey({ client_key: k });
+        await persistConfig('客户端鉴权密钥更新成功');
+      });
+
+      document.getElementById('btnCopyClaudeSnippet')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(snippetClaude?.textContent || '');
+        toast('已复制 Claude Code 配置', 'ok');
+      });
+
+      document.getElementById('btnCopyCursorSnippet')?.addEventListener('click', () => {
+        navigator.clipboard.writeText(snippetCursor?.textContent || '');
+        toast('已复制 Cursor 配置', 'ok');
+      });
+
+      // Mode Schedule (U4)
+      const schedEnabled = document.getElementById('cfgModeSchedEnabled');
+      if (schedEnabled) schedEnabled.checked = !!s.mode_schedule_enabled;
+      setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
+      setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
+      setVal('cfgModeSchedWebhook', s.mode_schedule_webhook_url || '');
+      setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
+      setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
+
+      document.getElementById('btnClearAllCooldowns')?.addEventListener('click', async () => {
+        if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
+        try {
+          const res = await window.HOST.clearCooldowns();
+          if (res && res.ok) toast('已清除所有冷却状态', 'ok');
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      });
+
+      // Config Export / Import (U4)
+      document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
+        try {
+          const res = await window.HOST.exportConfig();
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `llmproxy_config_${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast('配置已导出下载', 'ok');
+        } catch (e) {
+          toast(`导出失败: ${e.message}`, 'err');
+        }
+      });
+
+      const importInput = document.getElementById('importConfigFile');
+      document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
+        importInput?.click();
+      });
+
+      if (importInput) {
+        importInput.addEventListener('change', async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = async () => {
+            try {
+              const parsed = JSON.parse(reader.result);
+              const mode = document.getElementById('importConfigMode')?.value || 'merge';
+              const res = await window.HOST.importConfig({ mode, config: parsed });
+              if (res && res.ok) {
+                toast('配置恢复导入成功！', 'ok');
+                await loadData();
+              } else {
+                toast(res?.error || '导入失败', 'err');
+              }
+            } catch (err) {
+              toast(`解析配置失败: ${err.message}`, 'err');
+            }
+          };
+          reader.readAsText(file);
+        });
+      }
+    }
 
     if (window.HOST.capabilities.vaultClient) {
       const v = state.config?.vault || {};
@@ -1440,6 +2132,15 @@
         s.cooldown_server_error_sec = Number(document.getElementById('cfgCooldown5xx').value) || 30;
         s.cooldown_network_error_sec = Number(document.getElementById('cfgCooldownNet').value) || 15;
         s.cooldown_auth_error_sec = Number(document.getElementById('cfgCooldownAuth').value) || 86400;
+
+        if (isFull) {
+          s.mode_schedule_enabled = !!document.getElementById('cfgModeSchedEnabled')?.checked;
+          s.mode_schedule_agent_window = document.getElementById('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
+          s.mode_schedule_timezone = document.getElementById('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
+          s.mode_schedule_webhook_url = document.getElementById('cfgModeSchedWebhook')?.value.trim() || '';
+          s.ocr_max_inflight = Number(document.getElementById('cfgOcrInflight')?.value) || 4;
+          s.kb_global_max_concurrency = Number(document.getElementById('cfgKbConcurrency')?.value) || 16;
+        }
 
         if (window.HOST.capabilities.vaultClient) {
           const vUrl = document.getElementById('cfgVaultUrl')?.value.trim();

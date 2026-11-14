@@ -26,6 +26,33 @@
     }
   ],
   "properties": {
+    "client_key": {
+      "group": "routing",
+      "label": "客户端代理鉴权密钥",
+      "hint": "客户端访问代理 API 时的鉴权密钥 (等同 PROXY_API_KEY)",
+      "type": "string",
+      "default": "",
+      "roles": ["lite", "full"]
+    },
+    "proxy_api_key": {
+      "group": "routing",
+      "label": "客户端代理密钥 (1代兼容)",
+      "hint": "1 代兼容客户端鉴权密钥",
+      "type": "string",
+      "default": "",
+      "roles": ["lite", "full"]
+    },
+    "proxy_keys": {
+      "group": "routing",
+      "label": "多客户端代理密钥列表",
+      "hint": "允许多把客户端密钥同时鉴权",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "roles": ["lite", "full"]
+    },
     "run_mode": {
       "group": "routing",
       "label": "当前运行模式",

@@ -73,3 +73,61 @@ func TestVerifyAdminAuth_AntiBruteforce(t *testing.T) {
 		t.Fatalf("expected blocked IP to fail even with correct password")
 	}
 }
+
+func TestUpdateClientKeys_MultiKeyAndHotReload(t *testing.T) {
+	a := NewAuthenticator("initial-key", "admin-pass")
+
+	// 1. Initial key works
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer initial-key")
+	if !a.VerifyClientKey(req) {
+		t.Errorf("expected initial key to succeed")
+	}
+
+	// 2. Extra key doesn't work yet
+	req2 := httptest.NewRequest("GET", "/v1/models", nil)
+	req2.Header.Set("Authorization", "Bearer extra-key-1")
+	if a.VerifyClientKey(req2) {
+		t.Errorf("expected extra key to fail before update")
+	}
+
+	// 3. Hot update with new primary and multiple extra keys
+	a.UpdateClientKeys("primary-v2", []string{"extra-key-1", "extra-key-2", "  extra-key-3  "})
+
+	// Primary key works
+	req3 := httptest.NewRequest("GET", "/v1/models", nil)
+	req3.Header.Set("Authorization", "Bearer primary-v2")
+	if !a.VerifyClientKey(req3) {
+		t.Errorf("expected new primary key to succeed")
+	}
+
+	// Old initial key now fails
+	if a.VerifyClientKey(req) {
+		t.Errorf("expected old initial key to fail after update")
+	}
+
+	// All extra keys succeed (via header or query param)
+	for _, ek := range []string{"extra-key-1", "extra-key-2", "extra-key-3"} {
+		r := httptest.NewRequest("GET", "/v1/models", nil)
+		r.Header.Set("Authorization", "Bearer "+ek)
+		if !a.VerifyClientKey(r) {
+			t.Errorf("expected extra key %q to succeed via Authorization header", ek)
+		}
+
+		// Also test X-Api-Key
+		rx := httptest.NewRequest("GET", "/v1/models", nil)
+		rx.Header.Set("X-Api-Key", ek)
+		if !a.VerifyClientKey(rx) {
+			t.Errorf("expected extra key %q to succeed via X-Api-Key", ek)
+		}
+	}
+
+	// Check GetClientKeys
+	prim, extras := a.GetClientKeys()
+	if prim != "primary-v2" {
+		t.Errorf("expected primary-v2, got %s", prim)
+	}
+	if len(extras) != 3 || extras[2] != "extra-key-3" {
+		t.Errorf("expected 3 trimmed extras, got %v", extras)
+	}
+}

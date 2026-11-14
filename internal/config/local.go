@@ -52,6 +52,25 @@ type LocalSource struct {
 	configPath string
 	passphrase string
 	snapshot   atomic.Pointer[types.RuntimeSnapshot]
+	listeners  []ConfigChangeFunc
+}
+
+// ConfigChangeFunc is called when a configuration is loaded or updated.
+type ConfigChangeFunc func(cfg *types.ProxyConfig)
+
+// OnConfigChange registers a callback to be invoked whenever configuration changes or is reloaded.
+func (s *LocalSource) OnConfigChange(fn ConfigChangeFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.listeners = append(s.listeners, fn)
+}
+
+func (s *LocalSource) notifyListeners(cfg *types.ProxyConfig) {
+	for _, l := range s.listeners {
+		if l != nil {
+			l(cfg)
+		}
+	}
 }
 
 // NewLocalSource initializes a LocalSource.
@@ -142,6 +161,76 @@ func (s *LocalSource) UpdateRunMode(mode types.RunMode) (*types.RuntimeSnapshot,
 
 	clonedCfg.Settings.RunMode = mode
 	return s.saveConfigLocked(&clonedCfg)
+}
+
+// PersistKeyEntry atomically updates the given KeyEntry (matching by ID, Label, or OAuthMeta) in the current config and saves to proxy_config.enc.
+func (s *LocalSource) PersistKeyEntry(ctx context.Context, updatedKey *types.KeyEntry) error {
+	if updatedKey == nil {
+		return errors.New("config: nil key entry")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentSnap := s.snapshot.Load()
+	if currentSnap == nil || currentSnap.Config == nil {
+		return errors.New("config: no config loaded")
+	}
+
+	// Deep clone current config
+	raw, err := json.Marshal(currentSnap.Config)
+	if err != nil {
+		return err
+	}
+	var clonedCfg types.ProxyConfig
+	if err := json.Unmarshal(raw, &clonedCfg); err != nil {
+		return err
+	}
+
+	found := false
+	for _, prov := range clonedCfg.Providers {
+		if prov == nil {
+			continue
+		}
+		for i, k := range prov.APIKeys {
+			if k == nil {
+				continue
+			}
+			matched := false
+			if updatedKey.ID != "" && k.ID == updatedKey.ID {
+				matched = true
+			} else if updatedKey.Label != "" && k.Label == updatedKey.Label {
+				matched = true
+			} else if updatedKey.OAuthMeta != nil && k.OAuthMeta != nil &&
+				updatedKey.OAuthMeta.Provider != "" && updatedKey.OAuthMeta.Provider == k.OAuthMeta.Provider &&
+				updatedKey.OAuthMeta.ClientID != "" && updatedKey.OAuthMeta.ClientID == k.OAuthMeta.ClientID {
+				matched = true
+			}
+
+			if matched {
+				k.Key = updatedKey.Key
+				if updatedKey.OAuthMeta != nil {
+					if k.OAuthMeta == nil {
+						k.OAuthMeta = &types.OAuthMeta{}
+					}
+					*k.OAuthMeta = *updatedKey.OAuthMeta
+				}
+				prov.APIKeys[i] = k
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return errors.New("config: key entry to persist not found in config")
+	}
+
+	_, err = s.saveConfigLocked(&clonedCfg)
+	return err
 }
 
 // MergeVaultConfig merges vault-provided providers and keys into local configuration.
@@ -236,6 +325,24 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			existingP.Enabled = vp.Enabled
 			existingP.Origin = "vault"
 			existingP.RuleHash = vp.RuleHash
+			if vp.RPMPerKey > 0 {
+				existingP.RPMPerKey = vp.RPMPerKey
+			}
+			if vp.QuotaResetAt != "" {
+				existingP.QuotaResetAt = vp.QuotaResetAt
+			}
+			if vp.RefreshEvery != "" {
+				existingP.RefreshEvery = vp.RefreshEvery
+			}
+			if vp.AutoInclude != "" {
+				existingP.AutoInclude = vp.AutoInclude
+			}
+			if vp.BalanceURL != "" {
+				existingP.BalanceURL = vp.BalanceURL
+			}
+			if vp.BalancePath != "" {
+				existingP.BalancePath = vp.BalancePath
+			}
 			if vp.ModelAliases != nil {
 				existingP.ModelAliases = make(map[string]string)
 				for k, v := range vp.ModelAliases {
@@ -334,6 +441,20 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 			if vkCopy.ID == "" && updatedVaultKeys[foundIndex].ID != "" {
 				vkCopy.ID = updatedVaultKeys[foundIndex].ID
 			}
+			// If incoming key has masked secret, keep existing real key
+			if IsMaskedSecret(vkCopy.Key) && !IsMaskedSecret(updatedVaultKeys[foundIndex].Key) {
+				vkCopy.Key = updatedVaultKeys[foundIndex].Key
+			}
+			// If existing key had a refreshed token with newer expiry, preserve it
+			if updatedVaultKeys[foundIndex].OAuthMeta != nil && vkCopy.OAuthMeta != nil {
+				if updatedVaultKeys[foundIndex].OAuthMeta.ExpiresAt > vkCopy.OAuthMeta.ExpiresAt {
+					vkCopy.Key = updatedVaultKeys[foundIndex].Key
+					*vkCopy.OAuthMeta = *updatedVaultKeys[foundIndex].OAuthMeta
+				}
+			} else if updatedVaultKeys[foundIndex].OAuthMeta != nil && vkCopy.OAuthMeta == nil {
+				m := *updatedVaultKeys[foundIndex].OAuthMeta
+				vkCopy.OAuthMeta = &m
+			}
 			updatedVaultKeys[foundIndex] = &vkCopy
 		} else {
 			updatedVaultKeys = append(updatedVaultKeys, &vkCopy)
@@ -407,6 +528,7 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.Runtim
 	}
 
 	s.snapshot.Store(newSnap)
+	s.notifyListeners(newCfg)
 	return newSnap, nil
 }
 
@@ -415,8 +537,11 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 		return
 	}
 
-	// Build lookup for existing keys: provider_id/key_id or label -> real key
-	realKeys := make(map[string]string)
+	type keyInfo struct {
+		Key       string
+		OAuthMeta *types.OAuthMeta
+	}
+	realKeys := make(map[string]keyInfo)
 	for pID, p := range source.Providers {
 		if p == nil {
 			continue
@@ -425,11 +550,16 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 			if k == nil || k.Key == "" || IsMaskedSecret(k.Key) {
 				continue
 			}
+			ki := keyInfo{Key: k.Key}
+			if k.OAuthMeta != nil {
+				m := *k.OAuthMeta
+				ki.OAuthMeta = &m
+			}
 			if k.ID != "" {
-				realKeys[pID+":id:"+k.ID] = k.Key
+				realKeys[pID+":id:"+k.ID] = ki
 			}
 			if k.Label != "" {
-				realKeys[pID+":lbl:"+k.Label] = k.Key
+				realKeys[pID+":lbl:"+k.Label] = ki
 			}
 		}
 	}
@@ -440,20 +570,35 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 			continue
 		}
 		for _, k := range p.APIKeys {
-			if k == nil || !IsMaskedSecret(k.Key) {
+			if k == nil {
 				continue
 			}
-			// Masked! Try to recover
+			var ki keyInfo
+			var found bool
 			if k.ID != "" {
 				if rk, ok := realKeys[pID+":id:"+k.ID]; ok {
-					k.Key = rk
-					continue
+					ki = rk
+					found = true
 				}
 			}
-			if k.Label != "" {
+			if !found && k.Label != "" {
 				if rk, ok := realKeys[pID+":lbl:"+k.Label]; ok {
-					k.Key = rk
-					continue
+					ki = rk
+					found = true
+				}
+			}
+
+			if found {
+				if IsMaskedSecret(k.Key) {
+					k.Key = ki.Key
+				}
+				if ki.OAuthMeta != nil {
+					if k.OAuthMeta == nil {
+						m := *ki.OAuthMeta
+						k.OAuthMeta = &m
+					} else if k.OAuthMeta.RefreshToken == "" && ki.OAuthMeta.RefreshToken != "" {
+						k.OAuthMeta.RefreshToken = ki.OAuthMeta.RefreshToken
+					}
 				}
 			}
 		}
@@ -496,5 +641,6 @@ func (s *LocalSource) loadFromDisk() (*types.RuntimeSnapshot, error) {
 	}
 
 	s.snapshot.Store(snap)
+	s.notifyListeners(&cfg)
 	return snap, nil
 }

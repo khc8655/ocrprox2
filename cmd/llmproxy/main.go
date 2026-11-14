@@ -2,20 +2,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +27,7 @@ import (
 	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/obs"
+	"github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/router"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
@@ -36,7 +37,28 @@ var (
 	version    = "v20261108-01"
 	commit     = "dev"
 	AppVersion = "2.0.0"
+
+	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
 )
+
+const maxRequestBodySize = 20 << 20 // 20 MB hard limit (P3)
+
+func writePayloadTooLarge(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusRequestEntityTooLarge)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
+			"message": "payload too large: request body exceeds 20MB limit",
+			"type":    "invalid_request_error",
+			"code":    "payload_too_large",
+		},
+	})
+}
 
 func init() {
 	// Step 1: Disable core dumps immediately on startup
@@ -90,8 +112,35 @@ func main() {
 	}
 	defer obsMgr.Close()
 
-	// Initialize Authenticator
-	authMgr := auth.NewAuthenticator(*clientKeyFlag, *adminPassFlag)
+	// Initialize Authenticator (D6: supports hot-reload & multi-keys)
+	cliClientKey := *clientKeyFlag
+	authMgr := auth.NewAuthenticator(cliClientKey, *adminPassFlag)
+
+	// Helper to dynamically update Authenticator from settings while preserving CLI/env flag precedence
+	updateAuthFromSettings := func(cfg *types.ProxyConfig) {
+		if cfg == nil {
+			return
+		}
+		primary := cliClientKey
+		var extras []string
+		if primary == "" {
+			if cfg.Settings.ClientKey != "" {
+				primary = cfg.Settings.ClientKey
+			} else if cfg.Settings.ProxyAPIKey != "" {
+				primary = cfg.Settings.ProxyAPIKey
+			}
+			extras = cfg.Settings.ProxyKeys
+		} else {
+			if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
+				extras = append(extras, cfg.Settings.ClientKey)
+			}
+			if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
+				extras = append(extras, cfg.Settings.ProxyAPIKey)
+			}
+			extras = append(extras, cfg.Settings.ProxyKeys...)
+		}
+		authMgr.UpdateClientKeys(primary, extras)
+	}
 
 	// Initialize Config Source according to Role
 	var configSrc types.ConfigSource
@@ -111,21 +160,75 @@ func main() {
 			log.Fatalf("local config source error: %v", err)
 		}
 		configSrc = localSrc
+
+		// Register hot-reload callback and sync initial settings
+		localSrc.OnConfigChange(updateAuthFromSettings)
+		if snap, _ := localSrc.Current(context.Background(), false); snap != nil && snap.Config != nil {
+			updateAuthFromSettings(snap.Config)
+		}
 	}
 
 	// Initialize Core Scheduler
 	sched := scheduler.NewScheduler(configSrc, obsMgr, *allowPrivateFlag)
+	if role == types.RoleFull {
+		if err := sched.InitBans(role, *configDirFlag); err != nil {
+			log.Printf("warn: failed to initialize persistent key bans: %v", err)
+		}
+	}
 
 	// Initialize KB Pipeline, ModeScheduler, and OAuth for Full mode
 	var kbPipeline *kb.Pipeline
 	var modeSched *modesched.ModeScheduler
 	var oauthMgr *oauth.Manager
+	var refreshMgr *provider.RefreshManager
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
 	if role == types.RoleFull {
+		refreshMgr = provider.NewRefreshManager(nil, func(providerID string, models []string, err error) {
+			if err != nil {
+				log.Printf("warn: autolist refresh provider %s failed: %v", providerID, err)
+				return
+			}
+			log.Printf("info: autolist refreshed %d models for provider %s", len(models), providerID)
+		})
+		refreshMgr.Start(runCtx)
+
+		syncRefreshProviders := func(cfg *types.ProxyConfig) {
+			if cfg == nil || refreshMgr == nil {
+				return
+			}
+			for _, prov := range cfg.Providers {
+				if prov == nil {
+					continue
+				}
+				if prov.RefreshEvery != "" && prov.RefreshEvery != "off" {
+					apiKey := ""
+					if len(prov.APIKeys) > 0 && prov.APIKeys[0] != nil {
+						apiKey = prov.APIKeys[0].Key
+					}
+					_ = refreshMgr.Register(prov, apiKey)
+				} else {
+					refreshMgr.Unregister(prov.ID)
+				}
+			}
+		}
+
+		if localSrc != nil {
+			localSrc.OnConfigChange(syncRefreshProviders)
+			if snap, _ := localSrc.Current(context.Background(), false); snap != nil && snap.Config != nil {
+				syncRefreshProviders(snap.Config)
+			}
+		}
+
 		oauthMgr = oauth.NewManager(*allowPrivateFlag)
+		// Wire OAuth token refresh persistence to localSrc (D4)
+		if localSrc != nil {
+			oauthMgr.SetPersistFunc(func(ctx context.Context, entry *types.KeyEntry) error {
+				return localSrc.PersistKeyEntry(ctx, entry)
+			})
+		}
 		sched.SetOAuthRefresher(oauthMgr)
 
 		kbPipeline = kb.NewPipeline(configSrc, kb.DefaultMaxOCR, kb.DefaultMaxGlobal, *allowPrivateFlag)
@@ -294,26 +397,47 @@ func main() {
 		}
 
 		var bodyBytes []byte
-		isLarge := r.ContentLength > 1*1024*1024
+		// Enforce hard 20MB limit (P3): immediate check for ContentLength if known
+		if r.ContentLength > maxRequestBodySize {
+			writePayloadTooLarge(w)
+			return
+		}
+
+		// Wrap body with http.MaxBytesReader to enforce 20MB limit on chunked/streamed bodies (P3)
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+		// Acquire reusable buffer from pool (P3: zero allocations & reusable byte buffers)
+		buf := bufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer func() {
+			if buf.Cap() <= 4<<20 { // Return buffers <= 4MB to pool
+				bufferPool.Put(buf)
+			}
+		}()
+
+		_, err := buf.ReadFrom(r.Body)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writePayloadTooLarge(w)
+				return
+			}
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		bodyBytes = buf.Bytes()
+
+		isLarge := len(bodyBytes) > 1*1024*1024
 		if isLarge {
 			select {
 			case largeBodySem <- struct{}{}:
 				defer func() {
-					bodyBytes = nil
-					runtime.GC()
 					<-largeBodySem
 				}()
 			case <-r.Context().Done():
 				http.Error(w, "request cancelled", http.StatusRequestTimeout)
 				return
 			}
-		}
-
-		var err error
-		bodyBytes, err = io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "failed to read body", http.StatusBadRequest)
-			return
 		}
 
 		type quickRequest struct {
@@ -378,6 +502,11 @@ func main() {
 	if role == types.RoleFull {
 		wrapKBMode := func(handler http.HandlerFunc) http.HandlerFunc {
 			return wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+				if r.ContentLength > maxRequestBodySize {
+					writePayloadTooLarge(w)
+					return
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 				mode := getEffectiveMode(r.Context())
 				if mode == types.ModeAgent {
 					w.Header().Set("Content-Type", "application/json")
@@ -404,6 +533,8 @@ func main() {
 		adminSrv := admin.NewServer(authMgr, localSrc, obsMgr, sched)
 		adminSrv.SetModeScheduler(modeSched)
 		adminSrv.SetOAuthManager(oauthMgr)
+		adminSrv.SetRefreshManager(refreshMgr)
+		adminSrv.SetAdminPassword(*adminPassFlag)
 		adminSrv.RegisterRoutes(mux)
 	}
 
@@ -459,6 +590,11 @@ func main() {
 	<-sigChan
 	log.Println("shutting down llmproxy...")
 	runCancel()
+
+	if refreshMgr != nil {
+		log.Println("stopping provider refresh manager...")
+		refreshMgr.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

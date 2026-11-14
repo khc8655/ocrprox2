@@ -400,3 +400,191 @@ func TestLocalSource_UpdateRunMode(t *testing.T) {
 		t.Errorf("expected loaded version 2, got %d", snapLoaded.Config.Version)
 	}
 }
+
+func TestLocalSource_PersistKeyEntry_Restart(t *testing.T) {
+	tmpDir := t.TempDir()
+	pass := "persist-test-pass"
+
+	src, err := NewLocalSource(tmpDir, pass)
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	initialCfg := &types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"minimax": {
+				ID:      "minimax",
+				Name:    "MiniMax",
+				BaseURL: "https://api.minimaxi.com",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{
+						ID:       "key-oauth-1",
+						Label:    "mm-code",
+						Key:      "initial-access-token",
+						Enabled:  true,
+						AuthType: "oauth_device",
+						OAuthMeta: &types.OAuthMeta{
+							Provider:     "minimax",
+							ClientID:     "client-xyz",
+							RefreshToken: "initial-refresh-token",
+							ExpiresAt:    1000,
+						},
+					},
+				},
+			},
+		},
+		Settings: types.RuntimeSettings{RunMode: types.ModeAgent},
+	}
+
+	_, err = src.SaveConfig(initialCfg)
+	if err != nil {
+		t.Fatalf("SaveConfig err: %v", err)
+	}
+
+	// Update OAuth token via PersistKeyEntry
+	updatedKey := &types.KeyEntry{
+		ID:       "key-oauth-1",
+		Label:    "mm-code",
+		Key:      "rotated-access-token-999",
+		Enabled:  true,
+		AuthType: "oauth_device",
+		OAuthMeta: &types.OAuthMeta{
+			Provider:     "minimax",
+			ClientID:     "client-xyz",
+			RefreshToken: "rotated-refresh-token-999",
+			ExpiresAt:    8000,
+		},
+	}
+
+	err = src.PersistKeyEntry(context.Background(), updatedKey)
+	if err != nil {
+		t.Fatalf("PersistKeyEntry err: %v", err)
+	}
+
+	// Simulate complete process restart with fresh LocalSource
+	restartedSrc, err := NewLocalSource(tmpDir, pass)
+	if err != nil {
+		t.Fatalf("restart NewLocalSource err: %v", err)
+	}
+
+	snap, err := restartedSrc.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("restarted Current err: %v", err)
+	}
+
+	loadedKey := snap.Config.Providers["minimax"].APIKeys[0]
+	if loadedKey.Key != "rotated-access-token-999" {
+		t.Errorf("expected rotated key on restart, got %q", loadedKey.Key)
+	}
+	if loadedKey.OAuthMeta.RefreshToken != "rotated-refresh-token-999" {
+		t.Errorf("expected rotated refresh token on restart, got %q", loadedKey.OAuthMeta.RefreshToken)
+	}
+	if loadedKey.OAuthMeta.ExpiresAt != 8000 {
+		t.Errorf("expected ExpiresAt 8000, got %d", loadedKey.OAuthMeta.ExpiresAt)
+	}
+}
+
+func TestLocalSource_OnConfigChange_Listener(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	calledCount := 0
+	var lastCfg *types.ProxyConfig
+	src.OnConfigChange(func(cfg *types.ProxyConfig) {
+		calledCount++
+		lastCfg = cfg
+	})
+
+	_, err = src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p1": {ID: "p1", BaseURL: "https://p1.api", Enabled: true},
+		},
+		Settings: types.RuntimeSettings{
+			ClientKey: "new-client-key",
+			ProxyKeys: []string{"extra-1", "extra-2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig err: %v", err)
+	}
+
+	if calledCount != 1 {
+		t.Errorf("expected listener called once, got %d", calledCount)
+	}
+	if lastCfg == nil || lastCfg.Settings.ClientKey != "new-client-key" {
+		t.Errorf("listener did not receive updated settings: %+v", lastCfg)
+	}
+}
+
+func TestLocalSource_MergeVaultConfig_PreservesMagpieFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	// Initial config with vault provider
+	_, err = src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"deepseek": {
+				ID:      "deepseek",
+				BaseURL: "https://api.deepseek.com",
+				Origin:  "vault",
+				APIKeys: []*types.KeyEntry{{ID: "k1", Key: "sk-1", Origin: "vault"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig err: %v", err)
+	}
+
+	// Merge incoming vault update with Magpie fields
+	vaultProviders := map[string]*types.ProviderConfig{
+		"deepseek": {
+			ID:           "deepseek",
+			BaseURL:      "https://api.deepseek.com",
+			Enabled:      true,
+			RPMPerKey:    60,
+			QuotaResetAt: "00:00+08:00",
+			RefreshEvery: "6h",
+			AutoInclude:  "^deepseek-.*",
+			BalanceURL:   "https://api.deepseek.com/user/balance",
+			BalancePath:  "$.balance",
+			APIKeys: []*types.KeyEntry{
+				{ID: "k1", Key: "sk-1-updated", Enabled: true},
+			},
+		},
+	}
+
+	snap, err := src.MergeVaultConfig(vaultProviders)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig err: %v", err)
+	}
+
+	p := snap.Config.Providers["deepseek"]
+	if p.RPMPerKey != 60 {
+		t.Errorf("expected RPMPerKey 60, got %d", p.RPMPerKey)
+	}
+	if p.QuotaResetAt != "00:00+08:00" {
+		t.Errorf("expected QuotaResetAt '00:00+08:00', got %q", p.QuotaResetAt)
+	}
+	if p.RefreshEvery != "6h" {
+		t.Errorf("expected RefreshEvery '6h', got %q", p.RefreshEvery)
+	}
+	if p.AutoInclude != "^deepseek-.*" {
+		t.Errorf("expected AutoInclude '^deepseek-.*', got %q", p.AutoInclude)
+	}
+	if p.BalanceURL != "https://api.deepseek.com/user/balance" {
+		t.Errorf("expected BalanceURL, got %q", p.BalanceURL)
+	}
+	if p.BalancePath != "$.balance" {
+		t.Errorf("expected BalancePath, got %q", p.BalancePath)
+	}
+}

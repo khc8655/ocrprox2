@@ -4,6 +4,41 @@
 
 ---
 
+## [v20261114-03] - 2026-11-14
+
+### Added
+- **Magpie 供应商智能引擎深度移植 (Detect, Balance, Test & AutoList)**：
+  - 新增 `internal/provider` 引擎：内置 16+ 主流 AI 供应商自动探测与端点嗅探（OpenAI / Anthropic / Gemini / DeepSeek / OpenRouter / SiliconFlow / Groq / xAI / Cohere / Mistral / Together / Ollama 等）；
+  - 支持多币种账户余额实时查询（`balance_url` + `balance_path`）与凭据活性自动探测（`test-candidate`）；
+  - 定时模型列表全量刷新与自动纳管正则匹配（`RefreshManager` / `refresh_every` / `auto_include`）。
+- **Magpie 极简单页 Web UI 现代化升级 (240 KB 纯原生零框架控制台)**：
+  - 引入 16+ 厂商高精度矢量 SVG 图标集（`shared/admin/js/icons.js`）；
+  - 新增 Token 消耗与吞吐时序条形直方图（`shared/admin/js/usage.js`）与 GitHub 风格 53 周活动热力图；
+  - 新增 KB 模式 4 大流水线（Chat / Embedding / Reranker / OCR）独立可视化编辑器面板；
+  - 新增客户端接入网关控制中心（Gateway Access Center），一键切换并复制 curl / Python / OpenAI SDK 接入代码与临时/永久凭证；
+  - 保持 0 inline style、0 drawer、0 left-border 铁律，将单文件打包预算扩展至 `<= 240 KB`（`245,760 bytes`）。
+- **v1 协议全量对齐与多模态扩展**：
+  - `/v1/ocr`：完整支持 Base64 / URL 图片预读与 Vision 模型多模态 OCR 识别流水线，支持流式并发零拷贝与 20MB 超大图片保护；
+  - `<thought>` 思维链标签流式过滤器（`internal/adapters/stream_filter.go`）：针对 DeepSeek-R1 / Qwen 等思考模型，支持将 `<thought>` 标签内容实时剥离或重定向为推理字段；
+  - 流式 SSE 统计注入：严格遵循 OpenAI 标准在最后一个 SSE chunk 中注入 `usage` 块，确保客户端与中枢精准统计输入/输出/推理/缓存 Token。
+- **持久化封禁与高可用冷却系统 (`key_bans.json`)**：
+  - 实现持久化封禁机制：当 Full 节点遇到 401 认证失败或 410 永久失效时，自动将受限凭据持久化写入 `--config-dir/key_bans.json`；
+  - 进程重启后自动加载历史有效封禁记录，并在 `GET /api/admin/cooldowns` 中精确呈现，杜绝服务重启造成无效 Key 反复拨号；
+  - Lite 节点保持 0 磁盘 I/O 运行设计。
+
+### Fixed
+- **核心调度器与主入口装配加固**：
+  - 修复 `cmd/llmproxy/main.go` 中 `sched.InitBans` 缺少调用的问题，确保 Full 模式节点启动时正确挂载持久化封禁文件；
+  - 优化高并发流式代理内存开销，实施 OOM 有界缓冲区保护，杜绝长会话流式代理内存泄露；
+  - 严格限制跨私网穿透规则，确保 `--allow-private` 仅在显式声明时允许本地回环与私网上游。
+
+### Changed
+- **VM 运维与部署脚本强化**：
+  - 升级 `deploy/install.sh` 与 `llmproxy-ctl`：增强系统环境检测、自动更新通道、服务健康检查与无损热重载（SIGHUP / systemctl reload）；
+  - 完善 EdgeOne Makers 中枢与 VM 本地节点独立演进架构，解耦中枢 KV 存储与本地节点私有密钥。
+
+---
+
 ## [v20261114-02] - 2026-11-14
 
 ### Added

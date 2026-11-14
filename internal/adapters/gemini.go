@@ -104,7 +104,19 @@ func SanitizeGeminiSchema(schema any) any {
 
 // SplitThoughts splits text containing <thought>...</thought> into reasoning and answer.
 func SplitThoughts(text string) (reasoning string, answer string) {
-	if !strings.Contains(text, ThoughtOpenTag) {
+	return SplitThoughtsWithMarker(text, "thought")
+}
+
+// SplitThoughtsWithMarker splits text containing <marker>...</marker> into reasoning and answer.
+func SplitThoughtsWithMarker(text string, marker string) (reasoning string, answer string) {
+	if marker == "" {
+		marker = "thought"
+	}
+	marker = strings.Trim(marker, "<>/")
+	openTag := "<" + marker + ">"
+	closeTag := "</" + marker + ">"
+
+	if !strings.Contains(text, openTag) {
 		return "", text
 	}
 
@@ -113,21 +125,21 @@ func SplitThoughts(text string) (reasoning string, answer string) {
 
 	rest := text
 	for len(rest) > 0 {
-		i := strings.Index(rest, ThoughtOpenTag)
+		i := strings.Index(rest, openTag)
 		if i < 0 {
 			answerParts = append(answerParts, rest)
 			break
 		}
 		answerParts = append(answerParts, rest[:i])
-		rest = rest[i+len(ThoughtOpenTag):]
+		rest = rest[i+len(openTag):]
 
-		j := strings.Index(rest, ThoughtCloseTag)
+		j := strings.Index(rest, closeTag)
 		if j < 0 {
 			reasoningParts = append(reasoningParts, rest)
 			break
 		}
 		reasoningParts = append(reasoningParts, rest[:j])
-		rest = rest[j+len(ThoughtCloseTag):]
+		rest = rest[j+len(closeTag):]
 	}
 
 	return strings.TrimSpace(strings.Join(reasoningParts, "")),
@@ -139,19 +151,50 @@ type ThoughtStreamSplitter struct {
 	InThought  bool
 	Hold       string
 	AfterClose bool
+	OpenTag    string
+	CloseTag   string
+}
+
+// NewThoughtStreamSplitter creates a new ThoughtStreamSplitter with a configurable marker tag.
+func NewThoughtStreamSplitter(marker string) *ThoughtStreamSplitter {
+	if marker == "" {
+		marker = "thought"
+	}
+	marker = strings.Trim(marker, "<>/")
+	return &ThoughtStreamSplitter{
+		OpenTag:  "<" + marker + ">",
+		CloseTag: "</" + marker + ">",
+	}
+}
+
+func (s *ThoughtStreamSplitter) getOpenTag() string {
+	if s.OpenTag != "" {
+		return s.OpenTag
+	}
+	return ThoughtOpenTag
+}
+
+func (s *ThoughtStreamSplitter) getCloseTag() string {
+	if s.CloseTag != "" {
+		return s.CloseTag
+	}
+	return ThoughtCloseTag
 }
 
 func (s *ThoughtStreamSplitter) Feed(chunk string) (reasoning string, content string) {
 	buf := s.Hold + chunk
 	s.Hold = ""
 
+	openTag := s.getOpenTag()
+	closeTag := s.getCloseTag()
+
 	var rParts []string
 	var aParts []string
 
 	for len(buf) > 0 {
-		tag := ThoughtOpenTag
+		tag := openTag
 		if s.InThought {
-			tag = ThoughtCloseTag
+			tag = closeTag
 		}
 
 		i := strings.Index(buf, tag)
@@ -209,6 +252,16 @@ func (s *ThoughtStreamSplitter) Feed(chunk string) (reasoning string, content st
 	}
 
 	return strings.Join(rParts, ""), ans
+}
+
+// Flush emits any remaining buffered text when stream ends.
+func (s *ThoughtStreamSplitter) Flush() (reasoning string, content string) {
+	h := s.Hold
+	s.Hold = ""
+	if s.InThought {
+		return h, ""
+	}
+	return "", h
 }
 
 // ApplyGeminiThinking configures Gemini 2.5 thinking_budget or 3.x thinking_level.

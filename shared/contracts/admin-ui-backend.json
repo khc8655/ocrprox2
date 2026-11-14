@@ -226,6 +226,138 @@
         "provider": "string",
         "provider_config": "object"
       }
+    },
+    "detect_provider": {
+      "method": "POST",
+      "path": "/api/admin/detect-provider",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "request": {
+        "base_url": "string (optional)",
+        "api_key": "string (optional)",
+        "provider": "string (optional)"
+      },
+      "response": {
+        "ok": true,
+        "base_url": "string",
+        "normalized_base_url": "string",
+        "protocols": "array of strings",
+        "results": "object"
+      }
+    },
+    "balance": {
+      "method": "POST",
+      "path": "/api/admin/balance",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "request": {
+        "provider": "string (optional)",
+        "key_label": "string (optional)",
+        "api_key": "string (optional)",
+        "base_url": "string (optional)",
+        "balance_url": "string (optional)",
+        "balance_path": "string (optional)",
+        "preset_id": "string (optional)"
+      },
+      "response": {
+        "ok": true,
+        "balance": "object"
+      }
+    },
+    "test_provider": {
+      "method": "POST",
+      "path": "/api/admin/test-provider",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "request": {
+        "provider": "string",
+        "key_label": "string (optional)",
+        "model": "string (optional)",
+        "protocol": "string (optional)",
+        "batch": "boolean (optional)"
+      },
+      "response": {
+        "ok": true,
+        "results": "array of objects"
+      }
+    },
+    "autolist_sync": {
+      "method": "POST",
+      "path": "/api/admin/autolist-sync",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "request": {
+        "provider": "string",
+        "auto_include": "string (optional)",
+        "apply": "boolean (optional)"
+      },
+      "response": {
+        "ok": true,
+        "models": "array of strings",
+        "matched": "array of strings",
+        "added": "array of strings"
+      }
+    },
+    "presets_extra": {
+      "method": "GET",
+      "path": "/api/admin/presets-extra",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "response": {
+        "ok": true,
+        "presets": "array of objects"
+      }
+    },
+    "access_info": {
+      "method": "GET",
+      "path": "/api/admin/access-info",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "response": {
+        "ok": true,
+        "mode": "string",
+        "client_key_configured": "boolean",
+        "client_key_masked": "string",
+        "proxy_keys_count": "integer",
+        "endpoints": "array of strings",
+        "models": "array of strings"
+      }
+    },
+    "access_key": {
+      "method": "POST",
+      "path": "/api/admin/access-key",
+      "auth": "ADMIN_PASSWORD",
+      "roles": ["full"],
+      "request": {
+        "client_key": "string (optional)",
+        "generate": "boolean (optional)"
+      },
+      "response": {
+        "ok": true,
+        "client_key": "string",
+        "masked": "string"
+      }
+    },
+    "auth_login": {
+      "method": "POST",
+      "path": "/api/admin/auth/login",
+      "auth": "NONE",
+      "roles": ["full"],
+      "request": {
+        "password": "string"
+      },
+      "response": {
+        "ok": true
+      }
+    },
+    "auth_logout": {
+      "method": "POST",
+      "path": "/api/admin/auth/logout",
+      "auth": "NONE",
+      "roles": ["full"],
+      "response": {
+        "ok": true
+      }
     }
   }
 }

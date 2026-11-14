@@ -1,12 +1,14 @@
 {
-  "version": "v20261114-02",
-  "semver": "2.0.2",
+  "version": "v20261114-03",
+  "semver": "2.1.0",
   "release_date": "2026-11-14",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.0.2 — 控制台添加供应商与模型能力、EdgeOne Hub 掩码密钥自动反查与一键安装自动回退",
+  "title": "LLMProxy2 (OCRProxy v2) 2.1.0 — Magpie 供应商检测与余额引擎、极简 240KB Web 控制台、流式/OOM/持久化加固与 v1 全模态对齐",
   "changelog": [
-    "管理控制台供应商与模型快速创建：补齐「＋ 添加供应商」与「＋ 添加模型」入口及内嵌表单，支持 8 大主流供应商快速预设模板，严格遵循零内联样式与包体积 <= 80KB 硬门禁",
-    "EdgeOne 中枢掩码密钥自动反查与契约对齐：verifyKey 与 probeModels 对齐支持 api_key / key 双字段，中枢端支持根据 provider + key_label 自动从 KV 反查未脱敏密钥执行连通性校验与模型探测",
-    "Linux VM 一键部署与分发体验优化：deploy/install.sh 支持未编译本地二进制时自动从 GitHub Releases 下载最新静态二进制，完善 README §6.2 发布链接与 OpenRouter 预设 Referer 修正"
+    "Go 流式与持久化加固：实现 key_bans.json 持久化封禁与服务重启无感加载，优化流式代理 OOM 有界缓冲区保护与 300s 预算优先流式 Peek",
+    "v1 协议与多模态全量对齐：支持 /v1/ocr 视觉多模态流水线与 20MB 超大图零拷贝并发处理，新增 <thought> 思维链实时流式分离器与 OpenAI 标准 SSE 尾包 usage 注入",
+    "Magpie 供应商智能引擎深度移植：实现 16+ 主流厂商自动嗅探检测、多币种实时余额查询、凭据健康度探测及模型列表自动纳管与定时刷新引擎",
+    "Magpie 极简单页 Web 控制台现代化升级：引入全套高精度 SVG 矢量图标集、Token 消耗直方图与 53 周活动热力图、KB 模式 4 大流水线可视化编辑器与网关客户端接入控制中心，严格遵循零内联样式与 <= 240KB 打包门禁",
+    "部署运维自动化升级：优化 deploy/install.sh 与 llmproxy-ctl CLI，增强自动架构检测、跨版本平滑升级与热重载，完善 EdgeOne Makers 与 VM 节点解耦演进"
   ]
 }

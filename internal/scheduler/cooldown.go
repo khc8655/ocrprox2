@@ -1,28 +1,191 @@
 // Package scheduler provides routing strategies, multi-level cooldowns,
-// the Magpie forbiddenAlike algorithm, and streaming first-byte peeking.
+// the Magpie forbiddenAlike algorithm, persistent long bans, and streaming first-byte peeking.
 package scheduler
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/khc8655/llmproxy2/internal/filelock"
 	"github.com/khc8655/llmproxy2/internal/obs"
+	"github.com/khc8655/llmproxy2/internal/steady"
 )
 
-// CooldownManager tracks temporary and permanent cooldowns.
+// CooldownManager tracks temporary, persistent, and permanent cooldowns.
 type CooldownManager struct {
 	mu        sync.RWMutex
 	cooldowns map[string]time.Time // key: "p:{provider}:k:{keyID}" or "p:{provider}:m:{model}" -> expiresAt
 	permanent map[string]bool      // for 410 Gone
+	banFile   string               // path to key_bans.json (empty for RoleLite, non-empty for RoleFull)
+}
+
+// PersistedBan represents a single persistent ban entry written to key_bans.json.
+type PersistedBan struct {
+	Target    string `json:"target"`
+	ExpiresAt string `json:"expires_at,omitempty"` // RFC3339
+	Permanent bool   `json:"permanent,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	KeyID     string `json:"key_id,omitempty"`
+	Model     string `json:"model,omitempty"`
+}
+
+// PersistedBansData represents the JSON envelope for key_bans.json.
+type PersistedBansData struct {
+	Version int                     `json:"_version"`
+	Bans    map[string]PersistedBan `json:"bans"`
 }
 
 // NewCooldownManager creates a CooldownManager.
-func NewCooldownManager() *CooldownManager {
-	return &CooldownManager{
+// If banFile is non-empty (RoleFull), it loads valid unexpired bans from disk.
+// If banFile is omitted or empty (RoleLite), zero disk I/O occurs.
+func NewCooldownManager(banFile ...string) *CooldownManager {
+	filePath := ""
+	if len(banFile) > 0 {
+		filePath = banFile[0]
+	}
+	cm := &CooldownManager{
 		cooldowns: make(map[string]time.Time),
 		permanent: make(map[string]bool),
+		banFile:   filePath,
 	}
+	if filePath != "" {
+		_ = cm.loadBansLocked()
+	}
+	return cm
+}
+
+// SetBanFile configures the persistent ban file path and reloads valid bans.
+// If path is empty, persistent disk I/O is disabled.
+func (m *CooldownManager) SetBanFile(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.banFile = path
+	if path != "" {
+		return m.loadBansLocked()
+	}
+	return nil
+}
+
+// BanFile returns the active ban file path.
+func (m *CooldownManager) BanFile() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.banFile
+}
+
+// LoadBans reloads unexpired bans from the configured ban file.
+func (m *CooldownManager) LoadBans() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.loadBansLocked()
+}
+
+func (m *CooldownManager) loadBansLocked() error {
+	if m.banFile == "" {
+		return nil
+	}
+	unlock, _ := filelock.Lock(m.banFile+".lock", filelock.Wait)
+	defer unlock()
+
+	data, err := steady.ReadFile(m.banFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	var envelope PersistedBansData
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	for target, ban := range envelope.Bans {
+		if ban.Permanent {
+			m.permanent[target] = true
+			continue
+		}
+		if ban.ExpiresAt != "" {
+			exp, err := time.Parse(time.RFC3339, ban.ExpiresAt)
+			if err == nil && now.Before(exp) {
+				m.cooldowns[target] = exp
+			}
+		}
+	}
+	return nil
+}
+
+// SaveBans persists active bans (>= 300s or permanent) to key_bans.json.
+func (m *CooldownManager) SaveBans() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveBansLocked()
+}
+
+func (m *CooldownManager) saveBansLocked() error {
+	if m.banFile == "" {
+		return nil
+	}
+	dir := filepath.Dir(m.banFile)
+	if dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0o700)
+	}
+
+	unlock, _ := filelock.Lock(m.banFile+".lock", filelock.Wait)
+	defer unlock()
+
+	now := time.Now()
+	bans := make(map[string]PersistedBan)
+
+	// Persist active cooldowns >= 300s
+	for target, exp := range m.cooldowns {
+		if now.Before(exp) {
+			dur := exp.Sub(now)
+			if dur >= 300*time.Second {
+				entry := parseCooldownTarget(target)
+				bans[target] = PersistedBan{
+					Target:    target,
+					ExpiresAt: exp.Format(time.RFC3339),
+					Permanent: false,
+					Provider:  entry.Provider,
+					KeyID:     entry.KeyID,
+					Model:     entry.Model,
+				}
+			}
+		}
+	}
+
+	// Persist permanent bans (410 Gone)
+	for target := range m.permanent {
+		entry := parseCooldownTarget(target)
+		bans[target] = PersistedBan{
+			Target:    target,
+			Permanent: true,
+			Provider:  entry.Provider,
+			KeyID:     entry.KeyID,
+			Model:     entry.Model,
+		}
+	}
+
+	envelope := PersistedBansData{
+		Version: 1,
+		Bans:    bans,
+	}
+
+	b, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return err
+	}
+	return steady.WriteFile(m.banFile, b, 0o600)
 }
 
 // KeyTarget returns key-level target identifier.
@@ -66,6 +229,61 @@ func (m *CooldownManager) IsCooledDown(provider, model, keyID string) bool {
 	return false
 }
 
+// ParseNextQuotaReset parses a daily reset time string (e.g. "00:00+08:00", "08:00", "08:00:00", "12:00-05:00")
+// and returns the next upcoming time.Time for that daily reset.
+func ParseNextQuotaReset(resetAt string, now time.Time) (time.Time, error) {
+	resetAt = strings.TrimSpace(resetAt)
+	if resetAt == "" {
+		return time.Time{}, errors.New("scheduler: empty quota_reset_at")
+	}
+
+	var hour, min, sec int
+	var loc *time.Location
+
+	if t, err := time.Parse("15:04:05-07:00", resetAt); err == nil {
+		hour, min, sec = t.Hour(), t.Minute(), t.Second()
+		loc = t.Location()
+	} else if t, err := time.Parse("15:04-07:00", resetAt); err == nil {
+		hour, min, sec = t.Hour(), t.Minute(), t.Second()
+		loc = t.Location()
+	} else if t, err := time.Parse("15:04:05", resetAt); err == nil {
+		hour, min, sec = t.Hour(), t.Minute(), t.Second()
+		loc = now.Location()
+	} else if t, err := time.Parse("15:04", resetAt); err == nil {
+		hour, min, sec = t.Hour(), t.Minute(), t.Second()
+		loc = now.Location()
+	} else {
+		return time.Time{}, fmt.Errorf("scheduler: unrecognized quota_reset_at format: %q", resetAt)
+	}
+
+	nowInLoc := now.In(loc)
+	target := time.Date(nowInLoc.Year(), nowInLoc.Month(), nowInLoc.Day(), hour, min, sec, 0, loc)
+	if !target.After(now) {
+		target = target.AddDate(0, 0, 1)
+	}
+	return target, nil
+}
+
+// ApplyQuotaCooldown applies a cooldown until the next daily quota reset specified by resetAt (e.g. "00:00+08:00").
+func (m *CooldownManager) ApplyQuotaCooldown(provider, model, keyID, resetAt string) (appliedSec int, target string, err error) {
+	now := time.Now()
+	nextReset, err := ParseNextQuotaReset(resetAt, now)
+	if err != nil {
+		return 0, "", err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	target = KeyModelTarget(provider, keyID, model)
+	m.cooldowns[target] = nextReset
+	appliedSec = int(nextReset.Sub(now).Seconds())
+	if m.banFile != "" && appliedSec >= 300 {
+		_ = m.saveBansLocked()
+	}
+	return appliedSec, target, nil
+}
+
 // ApplyCooldown applies cooldown according to status code and error type.
 func (m *CooldownManager) ApplyCooldown(
 	provider, model, keyID string,
@@ -81,36 +299,54 @@ func (m *CooldownManager) ApplyCooldown(
 	case status == 410: // Permanent Gone
 		target = KeyTarget(provider, keyID)
 		m.permanent[target] = true
+		if m.banFile != "" {
+			_ = m.saveBansLocked()
+		}
 		return 86400 * 365, target
 
 	case status == 401 || status == 402 || status == 403: // Key-level auth/billing
 		target = KeyTarget(provider, keyID)
 		sec := int(durAuth.Seconds())
 		m.cooldowns[target] = now.Add(durAuth)
+		if m.banFile != "" && sec >= 300 {
+			_ = m.saveBansLocked()
+		}
 		return sec, target
 
 	case status == 400 || status == 422: // Suspected client payload error: key-level only, do NOT cool down model!
 		target = KeyTarget(provider, keyID)
 		sec := int(durRateLimit.Seconds())
 		m.cooldowns[target] = now.Add(durRateLimit)
+		if m.banFile != "" && sec >= 300 {
+			_ = m.saveBansLocked()
+		}
 		return sec, target
 
 	case status == 429: // Rate limit is per Key/Model quota (RPM/TPM), NOT entire provider model!
 		target = KeyModelTarget(provider, keyID, model)
 		sec := int(durRateLimit.Seconds())
 		m.cooldowns[target] = now.Add(durRateLimit)
+		if m.banFile != "" && sec >= 300 {
+			_ = m.saveBansLocked()
+		}
 		return sec, target
 
 	case status >= 500 && status != 504: // Model-level server error
 		target = ModelTarget(provider, model)
 		sec := int(durServerError.Seconds())
 		m.cooldowns[target] = now.Add(durServerError)
+		if m.banFile != "" && sec >= 300 {
+			_ = m.saveBansLocked()
+		}
 		return sec, target
 
 	default: // Network timeout / connection error (e.g. 504)
 		target = ModelTarget(provider, model)
 		sec := int(durNetwork.Seconds())
 		m.cooldowns[target] = now.Add(durNetwork)
+		if m.banFile != "" && sec >= 300 {
+			_ = m.saveBansLocked()
+		}
 		return sec, target
 	}
 }
@@ -119,8 +355,14 @@ func (m *CooldownManager) ApplyCooldown(
 func (m *CooldownManager) Clear(target string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	hadPerm := m.permanent[target]
+	exp, hadExp := m.cooldowns[target]
 	delete(m.cooldowns, target)
 	delete(m.permanent, target)
+
+	if m.banFile != "" && (hadPerm || (hadExp && time.Until(exp) >= 300*time.Second)) {
+		_ = m.saveBansLocked()
+	}
 }
 
 // ClearKey removes cooldown for a specific key (including all model variants).
@@ -128,13 +370,28 @@ func (m *CooldownManager) ClearKey(provider, keyID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	kt := KeyTarget(provider, keyID)
-	delete(m.cooldowns, kt)
-	delete(m.permanent, kt)
+	hadChanges := false
+	if m.permanent[kt] {
+		delete(m.permanent, kt)
+		hadChanges = true
+	}
+	if exp, ok := m.cooldowns[kt]; ok {
+		delete(m.cooldowns, kt)
+		if time.Until(exp) >= 300*time.Second {
+			hadChanges = true
+		}
+	}
 	prefix := kt + ":"
-	for k := range m.cooldowns {
+	for k, exp := range m.cooldowns {
 		if strings.HasPrefix(k, prefix) {
 			delete(m.cooldowns, k)
+			if time.Until(exp) >= 300*time.Second {
+				hadChanges = true
+			}
 		}
+	}
+	if m.banFile != "" && hadChanges {
+		_ = m.saveBansLocked()
 	}
 }
 

@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -302,5 +303,421 @@ func TestPrepareRequest_LargePayload_FastPath(t *testing.T) {
 	}
 	if !strings.Contains(string(mutated3[:100]), `"stream":true`) {
 		t.Errorf("expected body to have stream:true, got %s", string(mutated3[:100]))
+	}
+}
+
+func TestThoughtStreamSplitter_ChunkBoundaries(t *testing.T) {
+	splitter := NewThoughtStreamSplitter("thought")
+
+	// Chunks splitting <thought> and </thought> across arbitrary boundaries
+	chunks := []string{"<tho", "ught>reasoning", "</tho", "ught>final"}
+	var reasoningParts []string
+	var contentParts []string
+
+	for _, ch := range chunks {
+		r, c := splitter.Feed(ch)
+		if r != "" {
+			reasoningParts = append(reasoningParts, r)
+		}
+		if c != "" {
+			contentParts = append(contentParts, c)
+		}
+	}
+
+	fr, fc := splitter.Flush()
+	if fr != "" {
+		reasoningParts = append(reasoningParts, fr)
+	}
+	if fc != "" {
+		contentParts = append(contentParts, fc)
+	}
+
+	totalReasoning := strings.Join(reasoningParts, "")
+	totalContent := strings.Join(contentParts, "")
+
+	if totalReasoning != "reasoning" {
+		t.Errorf("expected reasoning 'reasoning', got %q", totalReasoning)
+	}
+	if totalContent != "final" {
+		t.Errorf("expected content 'final', got %q", totalContent)
+	}
+}
+
+func TestThoughtStreamSplitter_CustomMarker(t *testing.T) {
+	splitter := NewThoughtStreamSplitter("thinking")
+
+	chunks := []string{"<thin", "king>deep thoughts</thinking>\n\nAnswer starts here"}
+	var rAll, cAll strings.Builder
+
+	for _, ch := range chunks {
+		r, c := splitter.Feed(ch)
+		rAll.WriteString(r)
+		cAll.WriteString(c)
+	}
+
+	if rAll.String() != "deep thoughts" {
+		t.Errorf("expected 'deep thoughts', got %q", rAll.String())
+	}
+	// Verify leading newlines after closing tag are stripped
+	if cAll.String() != "Answer starts here" {
+		t.Errorf("expected 'Answer starts here', got %q", cAll.String())
+	}
+}
+
+func TestThoughtStreamSplitter_Flush(t *testing.T) {
+	// 1. Partial open tag at stream end
+	s1 := NewThoughtStreamSplitter("thought")
+	r1, c1 := s1.Feed("Hello world <tho")
+	fr1, fc1 := s1.Flush()
+	if (c1 + fc1) != "Hello world <tho" {
+		t.Errorf("expected flush to emit held partial tag, got %q", c1+fc1)
+	}
+	if (r1 + fr1) != "" {
+		t.Errorf("expected empty reasoning, got %q", r1+fr1)
+	}
+
+	// 2. Partial close tag at stream end while in thought
+	s2 := NewThoughtStreamSplitter("thought")
+	s2.Feed("<thought>thinking deeply </tho")
+	fr2, fc2 := s2.Flush()
+	if (fr2) != "</tho" {
+		t.Errorf("expected flush to emit held partial close tag in reasoning, got %q", fr2)
+	}
+	if fc2 != "" {
+		t.Errorf("expected empty content, got %q", fc2)
+	}
+}
+
+func TestThoughtStreamFilter_SSEIntegration(t *testing.T) {
+	filter := NewThoughtStreamFilter("thought")
+
+	chunk1 := []byte("data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"<tho\"}}]}\n\n")
+	chunk2 := []byte("data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ught>I am thinking</tho\"}}]}\n\n")
+	chunk3 := []byte("data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ught>Here is the response.\"}}]}\n\n")
+	chunk4 := []byte("data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+	chunk5 := []byte("data: [DONE]\n\n")
+
+	var allOutput bytes.Buffer
+	allOutput.Write(filter.FilterChunk(chunk1))
+	allOutput.Write(filter.FilterChunk(chunk2))
+	allOutput.Write(filter.FilterChunk(chunk3))
+	allOutput.Write(filter.FilterChunk(chunk4))
+	allOutput.Write(filter.FilterChunk(chunk5))
+	allOutput.Write(filter.Flush())
+
+	outStr := allOutput.String()
+	if !strings.Contains(outStr, `"reasoning_content":"I am thinking"`) {
+		t.Errorf("expected reasoning_content in output, got: %s", outStr)
+	}
+	if !strings.Contains(outStr, `"content":"Here is the response."`) {
+		t.Errorf("expected answer content in output, got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "data: [DONE]") {
+		t.Errorf("expected [DONE] in output, got: %s", outStr)
+	}
+}
+
+func TestDenyDeveloperRole(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			DenyDeveloperRole: true,
+		},
+	}
+
+	req := `{
+		"model": "gpt-4o",
+		"messages": [
+			{"role": "developer", "content": "You are a coding assistant."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	m0 := msgs[0].(map[string]any)
+	if m0["role"] != "system" {
+		t.Errorf("expected developer role to be converted to system, got %v", m0["role"])
+	}
+}
+
+func TestMergeSystem(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			DenyDeveloperRole: true,
+			MergeSystem:       true,
+		},
+	}
+
+	req := `{
+		"model": "gpt-4o",
+		"messages": [
+			{"role": "developer", "content": "Developer prompt."},
+			{"role": "user", "content": "Question 1"},
+			{"role": "system", "content": "System prompt."}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages after merge, got %d", len(msgs))
+	}
+
+	m0 := msgs[0].(map[string]any)
+	if m0["role"] != "system" {
+		t.Errorf("expected first message to be system, got %v", m0["role"])
+	}
+	expectedContent := "Developer prompt.\n\nSystem prompt."
+	if m0["content"] != expectedContent {
+		t.Errorf("expected merged content %q, got %q", expectedContent, m0["content"])
+	}
+
+	m1 := msgs[1].(map[string]any)
+	if m1["role"] != "user" {
+		t.Errorf("expected second message to be user, got %v", m1["role"])
+	}
+}
+
+func TestStripEmpty(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			StripEmpty: true,
+		},
+	}
+
+	req := `{
+		"model": "gpt-4o",
+		"messages": [
+			{"role": "system", "content": ""},
+			{"role": "user", "content": "   "},
+			{"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "test"}}]},
+			{"role": "user", "content": [{"type": "text", "text": ""}, {"type": "image_url", "image_url": {"url": "http://img"}}]},
+			{"role": "user", "content": "valid message"}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	// Empty system and empty user should be stripped
+	// Assistant with tool_calls must be preserved
+	// User with image must be preserved (empty text stripped)
+	// Valid user message preserved
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %v", len(msgs), msgs)
+	}
+
+	m0 := msgs[0].(map[string]any)
+	if m0["role"] != "assistant" || m0["tool_calls"] == nil {
+		t.Errorf("expected assistant message with tool_calls, got %v", m0)
+	}
+
+	m1 := msgs[1].(map[string]any)
+	parts := m1["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part after stripping empty text part, got %d", len(parts))
+	}
+	part0 := parts[0].(map[string]any)
+	if part0["type"] != "image_url" {
+		t.Errorf("expected image_url part preserved, got %v", part0)
+	}
+
+	m2 := msgs[2].(map[string]any)
+	if m2["content"] != "valid message" {
+		t.Errorf("expected valid message, got %v", m2["content"])
+	}
+}
+
+func TestThinkingPolicy_Strip(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			ThinkingPolicy: "strip",
+		},
+	}
+
+	req := `{
+		"model": "claude-3-7-sonnet",
+		"messages": [
+			{
+				"role": "assistant",
+				"reasoning_content": "some reasoning",
+				"reasoning": {"detail": "old"},
+				"content": [
+					{"type": "thinking", "thinking": "internal thought"},
+					{"type": "text", "text": "Hello world"}
+				]
+			}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	m0 := msgs[0].(map[string]any)
+
+	if _, ok := m0["reasoning_content"]; ok {
+		t.Errorf("expected reasoning_content to be stripped")
+	}
+	if _, ok := m0["reasoning"]; ok {
+		t.Errorf("expected reasoning to be stripped")
+	}
+
+	content := m0["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
+	}
+	block := content[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "Hello world" {
+		t.Errorf("expected text block, got %v", block)
+	}
+}
+
+func TestThinkingPolicy_StrictSignature(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			ThinkingPolicy: "strict_signature",
+		},
+	}
+
+	req := `{
+		"model": "claude-3-7-sonnet",
+		"messages": [
+			{
+				"role": "assistant",
+				"content": [
+					{"type": "thinking", "thinking": "unsigned thought", "signature": ""},
+					{"type": "thinking", "thinking": "signed thought", "signature": "valid_sig_123"},
+					{"type": "text", "text": "Hello"}
+				]
+			}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	m0 := msgs[0].(map[string]any)
+	content := m0["content"].([]any)
+
+	// Unsigned thinking should be dropped; signed thinking and text preserved
+	if len(content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(content))
+	}
+
+	b0 := content[0].(map[string]any)
+	if b0["type"] != "thinking" || b0["signature"] != "valid_sig_123" {
+		t.Errorf("expected signed thinking block, got %v", b0)
+	}
+
+	b1 := content[1].(map[string]any)
+	if b1["type"] != "text" || b1["text"] != "Hello" {
+		t.Errorf("expected text block, got %v", b1)
+	}
+}
+
+func TestThinkingPolicy_PassbackRequired(t *testing.T) {
+	engine := NewDefaultEngine()
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			ThinkingPolicy: "passback_required",
+		},
+	}
+
+	req := `{
+		"model": "gemini-3.0-pro",
+		"messages": [
+			{
+				"role": "assistant",
+				"content": [
+					{"type": "thinking", "thinking": "internal thought", "signature": "sig_abc"}
+				],
+				"tool_calls": [
+					{
+						"id": "call_123:::sig_tool_456",
+						"type": "function",
+						"function": {"name": "search", "arguments": "{}"}
+					}
+				]
+			}
+		]
+	}`
+
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(mutated, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs := out["messages"].([]any)
+	m0 := msgs[0].(map[string]any)
+	content := m0["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("expected thinking block preserved, got %d", len(content))
+	}
+
+	tcs := m0["tool_calls"].([]any)
+	tc0 := tcs[0].(map[string]any)
+	// Tool call id stripped to base id, signature restored in extra_content.google.thought_signature
+	if tc0["id"] != "call_123" {
+		t.Errorf("expected id 'call_123', got %v", tc0["id"])
+	}
+	ec, ok := tc0["extra_content"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected extra_content in tool_call, got nil")
+	}
+	g := ec["google"].(map[string]any)
+	if g["thought_signature"] != "sig_tool_456" {
+		t.Errorf("expected restored thought_signature 'sig_tool_456', got %v", g["thought_signature"])
 	}
 }

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -159,6 +163,32 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 
 	// Inference
 	handleInference := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxRequestBodySize {
+			writePayloadTooLarge(w)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+		buf := bufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer func() {
+			if buf.Cap() <= 4<<20 {
+				bufferPool.Put(buf)
+			}
+		}()
+
+		_, err := buf.ReadFrom(r.Body)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writePayloadTooLarge(w)
+				return
+			}
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+		bodyBytes := buf.Bytes()
+
 		effectiveMode := getEffectiveMode(r.Context())
 		isMessagesOrResponses := strings.HasSuffix(r.URL.Path, "/messages") || strings.HasSuffix(r.URL.Path, "/responses")
 		if effectiveMode == types.ModeKB && isMessagesOrResponses {
@@ -173,7 +203,6 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 			return
 		}
 
-		bodyBytes, _ := io.ReadAll(r.Body)
 		var q struct {
 			Model  string `json:"model"`
 			Stream bool   `json:"stream"`
@@ -398,5 +427,335 @@ func TestVersionVariables(t *testing.T) {
 	}
 	if AppVersion != "2.0.0" {
 		t.Errorf("unexpected AppVersion: %s", AppVersion)
+	}
+}
+
+func TestMaxBodyLimit_20MB_ContentLength_And_Chunked(t *testing.T) {
+	authMgr := auth.NewAuthenticator("test-client-key", "")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !authMgr.VerifyClientKey(r) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		// Enforce hard 20MB limit (P3)
+		if r.ContentLength > maxRequestBodySize {
+			writePayloadTooLarge(w)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+		buf := bufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer func() {
+			if buf.Cap() <= 4<<20 {
+				bufferPool.Put(buf)
+			}
+		}()
+
+		_, err := buf.ReadFrom(r.Body)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writePayloadTooLarge(w)
+				return
+			}
+			http.Error(w, "failed to read body", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// 1. ContentLength > 20MB -> 413 Payload Too Large
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"chat"}`))
+	req.Header.Set("Authorization", "Bearer test-client-key")
+	req.ContentLength = 21 * 1024 * 1024 // 21MB
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized ContentLength, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "payload_too_large") {
+		t.Errorf("expected payload_too_large in response, got %s", rec.Body.String())
+	}
+
+	// 2. Chunked transfer encoding (ContentLength == -1) exceeding 20MB -> 413
+	oversizedReader := io.LimitReader(newPatternReader(), 20<<20+1024)
+	req2 := httptest.NewRequest("POST", "/v1/chat/completions", oversizedReader)
+	req2.Header.Set("Authorization", "Bearer test-client-key")
+	req2.ContentLength = -1 // Chunked / unknown length
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for chunked transfer exceeding 20MB, got %d", rec2.Code)
+	}
+	if !strings.Contains(rec2.Body.String(), "payload_too_large") {
+		t.Errorf("expected payload_too_large in response, got %s", rec2.Body.String())
+	}
+
+	// 3. Normal request < 20MB -> 200 OK
+	normalBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
+	req3 := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(normalBody))
+	req3.Header.Set("Authorization", "Bearer test-client-key")
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("expected 200 for normal request, got %d: %s", rec3.Code, rec3.Body.String())
+	}
+}
+
+// newPatternReader generates an infinite stream of repetitive bytes.
+type patternReader struct{}
+
+func newPatternReader() io.Reader { return &patternReader{} }
+
+func (p *patternReader) Read(b []byte) (n int, err error) {
+	for i := range b {
+		b[i] = 'A'
+	}
+	return len(b), nil
+}
+
+func TestFullMode_AuthHotReloadAndMultiKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	cliKey := "cli-primary-key"
+	authMgr := auth.NewAuthenticator(cliKey, "admin-pass")
+
+	localSrc, err := config.NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	// Wire auth update from settings (matching main.go logic)
+	updateAuthFromSettings := func(cfg *types.ProxyConfig) {
+		if cfg == nil {
+			return
+		}
+		primary := cliKey
+		var extras []string
+		if primary == "" {
+			if cfg.Settings.ClientKey != "" {
+				primary = cfg.Settings.ClientKey
+			} else if cfg.Settings.ProxyAPIKey != "" {
+				primary = cfg.Settings.ProxyAPIKey
+			}
+			extras = cfg.Settings.ProxyKeys
+		} else {
+			if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
+				extras = append(extras, cfg.Settings.ClientKey)
+			}
+			if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
+				extras = append(extras, cfg.Settings.ProxyAPIKey)
+			}
+			extras = append(extras, cfg.Settings.ProxyKeys...)
+		}
+		authMgr.UpdateClientKeys(primary, extras)
+	}
+	localSrc.OnConfigChange(updateAuthFromSettings)
+
+	// Save initial config with ProxyKeys
+	_, err = localSrc.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p1": {ID: "p1", BaseURL: "https://mock.api", Enabled: true},
+		},
+		Settings: types.RuntimeSettings{
+			ClientKey: "settings-client-key",
+			ProxyKeys: []string{"extra-token-1", "extra-token-2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig err: %v", err)
+	}
+
+	// Verify CLI key takes primary precedence
+	rCLI := httptest.NewRequest("GET", "/v1/models", nil)
+	rCLI.Header.Set("Authorization", "Bearer cli-primary-key")
+	if !authMgr.VerifyClientKey(rCLI) {
+		t.Errorf("expected cli-primary-key to authenticate")
+	}
+
+	// Verify extra keys from settings authenticate
+	rExtra1 := httptest.NewRequest("GET", "/v1/models", nil)
+	rExtra1.Header.Set("Authorization", "Bearer extra-token-1")
+	if !authMgr.VerifyClientKey(rExtra1) {
+		t.Errorf("expected extra-token-1 to authenticate")
+	}
+
+	rExtra2 := httptest.NewRequest("GET", "/v1/models", nil)
+	rExtra2.Header.Set("Authorization", "Bearer extra-token-2")
+	if !authMgr.VerifyClientKey(rExtra2) {
+		t.Errorf("expected extra-token-2 to authenticate")
+	}
+
+	// Verify settings-client-key also authenticates as extra
+	rSettings := httptest.NewRequest("GET", "/v1/models", nil)
+	rSettings.Header.Set("Authorization", "Bearer settings-client-key")
+	if !authMgr.VerifyClientKey(rSettings) {
+		t.Errorf("expected settings-client-key to authenticate")
+	}
+
+	// Dynamic update: reload with changed ProxyKeys (pass current version 1 for CAS)
+	_, err = localSrc.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p1": {ID: "p1", BaseURL: "https://mock.api", Enabled: true},
+		},
+		Settings: types.RuntimeSettings{
+			ProxyKeys: []string{"extra-token-3"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig v2 err: %v", err)
+	}
+
+	// extra-token-3 now works
+	rExtra3 := httptest.NewRequest("GET", "/v1/models", nil)
+	rExtra3.Header.Set("Authorization", "Bearer extra-token-3")
+	if !authMgr.VerifyClientKey(rExtra3) {
+		t.Errorf("expected extra-token-3 to authenticate after hot reload")
+	}
+
+	// extra-token-1 should now fail
+	if authMgr.VerifyClientKey(rExtra1) {
+		t.Errorf("expected extra-token-1 to fail after being removed in hot reload")
+	}
+}
+
+func TestFullMode_InitBans_401PersistsAndReloads(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Mock upstream returning 401 Unauthorized
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid API key","type":"authentication_error"}}`))
+	}))
+	defer mockUpstream.Close()
+
+	// 2. Local config source in tmpDir
+	localSrc, err := config.NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("local source error: %v", err)
+	}
+
+	_, err = localSrc.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p-auth": {
+				ID:      "p-auth",
+				BaseURL: mockUpstream.URL,
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "k-bad", Label: "k-bad", Key: "sk-invalid", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"auth-model": {
+				Enabled: true,
+				Candidates: []*types.RouteCandidate{
+					{Provider: "p-auth", TargetModel: "m1", KeyLabel: "k-bad", Enabled: true},
+				},
+			},
+		},
+		Settings: types.RuntimeSettings{
+			RunMode: types.ModeAgent,
+		},
+	})
+	if err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+
+	authMgr := auth.NewAuthenticator("client-key", "admin-pass")
+	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
+	defer obsMgr.Close()
+
+	// 3. Scheduler with RoleFull and InitBans wired
+	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
+	role := types.RoleFull
+	if role == types.RoleFull {
+		if err := sched.InitBans(role, tmpDir); err != nil {
+			t.Fatalf("sched.InitBans error: %v", err)
+		}
+	}
+
+	// 4. Dispatch a request to auth-model -> upstream returns 401
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"auth-model","messages":[{"role":"user","content":"test"}]}`))
+	_ = sched.Dispatch(context.Background(), "/v1/chat/completions", []byte(`{"model":"auth-model","messages":[{"role":"user","content":"test"}]}`), "auth-model", false, rec, req)
+
+	// Verify candidate key p-auth:k-bad is cooled down
+	if !sched.Cooldowns().IsCooledDown("p-auth", "m1", "k-bad") {
+		t.Fatalf("expected candidate p-auth:k-bad to be cooled down after 401")
+	}
+
+	// 5. Verify key_bans.json was written to tmpDir
+	banFilePath := filepath.Join(tmpDir, "key_bans.json")
+	data, err := os.ReadFile(banFilePath)
+	if err != nil {
+		t.Fatalf("expected key_bans.json to exist in config-dir after 401, got err: %v", err)
+	}
+
+	var persisted scheduler.PersistedBansData
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("failed to unmarshal key_bans.json: %v", err)
+	}
+	expectedTarget := "p:p-auth:k:k-bad"
+	if _, ok := persisted.Bans[expectedTarget]; !ok {
+		t.Fatalf("expected target %q in key_bans.json, got: %+v", expectedTarget, persisted.Bans)
+	}
+
+	// 6. Simulate restart: create a new Scheduler with the same config-dir & role
+	sched2 := scheduler.NewScheduler(localSrc, obsMgr, true)
+	if role == types.RoleFull {
+		if err := sched2.InitBans(role, tmpDir); err != nil {
+			t.Fatalf("sched2.InitBans error: %v", err)
+		}
+	}
+
+	// Verify ban is restored in-memory on new scheduler
+	if !sched2.Cooldowns().IsCooledDown("p-auth", "m1", "k-bad") {
+		t.Fatalf("expected candidate p-auth:k-bad to remain cooled down on reloaded scheduler")
+	}
+
+	// Verify via Admin API GET /api/admin/cooldowns
+	adminSrv2 := admin.NewServer(authMgr, localSrc, obsMgr, sched2)
+	adminMux := http.NewServeMux()
+	adminSrv2.RegisterRoutes(adminMux)
+
+	cdReq := httptest.NewRequest("GET", "/api/admin/cooldowns", nil)
+	cdReq.Header.Set("Authorization", "Bearer admin-pass")
+	cdRec := httptest.NewRecorder()
+	adminMux.ServeHTTP(cdRec, cdReq)
+
+	if cdRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/admin/cooldowns, got %d: %s", cdRec.Code, cdRec.Body.String())
+	}
+
+	var cdResp map[string]any
+	if err := json.Unmarshal(cdRec.Body.Bytes(), &cdResp); err != nil {
+		t.Fatalf("failed to parse /api/admin/cooldowns response: %v", err)
+	}
+	if cdResp["ok"] != true {
+		t.Fatalf("expected ok: true in cooldowns response, got: %+v", cdResp)
+	}
+	total, _ := cdResp["total"].(float64)
+	if total < 1 {
+		t.Fatalf("expected at least 1 cooldown in admin response, got %v", total)
+	}
+
+	// 7. Verify Lite mode: banFile remains empty and no disk bans are loaded or written
+	schedLite := scheduler.NewScheduler(localSrc, obsMgr, true)
+	liteRole := types.RoleLite
+	if liteRole == types.RoleFull {
+		_ = schedLite.InitBans(liteRole, tmpDir)
+	}
+	if schedLite.Cooldowns().BanFile() != "" {
+		t.Errorf("expected Lite mode banFile to be empty, got %q", schedLite.Cooldowns().BanFile())
 	}
 }

@@ -36,6 +36,7 @@ func (b *TraceBuffer) Record(t types.RequestTrace) {
 }
 
 // Recent returns up to 60 traces in reverse chronological order (newest first).
+// Recent returns up to 60 traces in reverse chronological order (newest first).
 func (b *TraceBuffer) Recent(onlyFailedOrRetried bool) []types.RequestTrace {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -59,3 +60,13 @@ func (b *TraceBuffer) Recent(onlyFailedOrRetried bool) []types.RequestTrace {
 
 	return out
 }
+
+// Clear empties the ring buffer.
+func (b *TraceBuffer) Clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.traces = make([]types.RequestTrace, TraceCapacity)
+	b.head = 0
+	b.count = 0
+}
+

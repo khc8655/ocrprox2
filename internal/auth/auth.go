@@ -21,10 +21,11 @@ const (
 
 // Authenticator handles client key and admin password authentication with anti-bruteforce defense.
 type Authenticator struct {
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	failedAttempts map[string][]time.Time
 	blockedIPs     map[string]time.Time
 	clientKey      string
+	extraKeys      []string
 	adminPassword  string
 }
 
@@ -43,6 +44,29 @@ func (a *Authenticator) SetClientKey(key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.clientKey = key
+}
+
+// UpdateClientKeys dynamically updates the primary client key and additional proxy keys.
+func (a *Authenticator) UpdateClientKeys(primary string, extra []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.clientKey = primary
+	a.extraKeys = make([]string, 0, len(extra))
+	for _, k := range extra {
+		trimmed := strings.TrimSpace(k)
+		if trimmed != "" {
+			a.extraKeys = append(a.extraKeys, trimmed)
+		}
+	}
+}
+
+// GetClientKeys returns the current primary key and extra keys.
+func (a *Authenticator) GetClientKeys() (string, []string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	copied := make([]string, len(a.extraKeys))
+	copy(copied, a.extraKeys)
+	return a.clientKey, copied
 }
 
 // SetAdminPassword updates the admin password dynamically.
@@ -116,14 +140,23 @@ func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 		return false
 	}
 
-	a.mu.Lock()
+	a.mu.RLock()
 	ck := a.clientKey
+	extras := make([]string, len(a.extraKeys))
+	copy(extras, a.extraKeys)
 	ap := a.adminPassword
-	a.mu.Unlock()
+	a.mu.RUnlock()
 
 	// Check against configured CLIENT_KEY
 	if ck != "" && ConstantTimeCompare(token, ck) {
 		return true
+	}
+
+	// Check against extra proxy keys
+	for _, ek := range extras {
+		if ek != "" && ConstantTimeCompare(token, ek) {
+			return true
+		}
 	}
 
 	// Also allow ADMIN_PASSWORD as override/management testing

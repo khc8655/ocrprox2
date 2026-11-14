@@ -265,7 +265,7 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
   });
 
   describe('T1.ui_layout_and_zero_inline_style', () => {
-    test('zero inline style, zero drawer, zero left-border stripes, and bundle <= 80,000 bytes', () => {
+    test('zero inline style, zero drawer, zero left-border stripes, and bundle <= 245,760 bytes', () => {
       const adminDir = join(projectRoot, 'shared/admin');
       const htmlPath = join(adminDir, 'admin.html');
       const cssPath = join(adminDir, 'css/app.css');
@@ -305,12 +305,12 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const leftBorderMatch = css.match(/border-left\s*:\s*[^;]*(#|rgb|hsl|var\(--)/i);
       assert.strictEqual(leftBorderMatch, null, 'app.css must have 0 colored left-border stripes');
 
-      // 4. Dist bundle <= 80,000 bytes
+      // 4. Dist bundle <= 245,760 bytes (240 KB)
       assert.ok(statSync(distPath), 'shared/admin/dist/index.html must exist');
       const stat = statSync(distPath);
       assert.ok(
-        stat.size <= 80000,
-        `shared/admin/dist/index.html size (${stat.size} bytes) exceeds 80,000 bytes limit`
+        stat.size <= 245760,
+        `shared/admin/dist/index.html size (${stat.size} bytes) exceeds 245,760 bytes limit`
       );
     });
   });

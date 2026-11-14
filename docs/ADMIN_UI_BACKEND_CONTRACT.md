@@ -211,3 +211,181 @@
   ]
 }
 ```
+
+---
+
+## 六、 Full 节点供应商引擎扩展 API 契约 (Round 3/4)
+
+全部接口受 `ADMIN_PASSWORD` 或有效 Session Cookie 保护：
+
+### 6.1 多协议探测与基准地址规范化 `POST /api/admin/detect-provider`
+- **Request**:
+```json
+{
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "provider": "openai"
+}
+```
+> 若提供 `provider` 且 `api_key` 为空或脱敏占位符，自动从 `LocalSource` 读取已保存的明文 Key。
+- **Response (`200 OK`)**:
+```json
+{
+  "ok": true,
+  "base_url": "https://api.openai.com/v1",
+  "normalized_base_url": "https://api.openai.com/v1",
+  "protocols": ["chat", "responses"],
+  "results": {
+    "chat": { "protocol": "chat", "endpoint": "https://api.openai.com/v1/chat/completions", "ok": true, "status": 200, "ms": 234 },
+    "responses": { "protocol": "responses", "endpoint": "https://api.openai.com/v1/responses", "ok": true, "status": 200, "ms": 210 }
+  }
+}
+```
+
+### 6.2 实时余额与额度查询 `POST /api/admin/balance`
+- **Request**:
+```json
+{
+  "provider": "deepseek",
+  "key_label": "hk-key-01",
+  "api_key": "sk-...",
+  "base_url": "https://api.deepseek.com/v1",
+  "balance_url": "https://api.deepseek.com/user/balance",
+  "balance_path": "",
+  "preset_id": "deepseek"
+}
+```
+- **Response (`200 OK`)**:
+```json
+{
+  "ok": true,
+  "balance": {
+    "amount": "¥128.50",
+    "currency": "CNY",
+    "total": 128.5,
+    "granted": 28.5,
+    "topped_up": 100.0,
+    "account_wide": true
+  }
+}
+```
+
+### 6.3 探活与多 Key 并行健康检测 `POST /api/admin/test-provider`
+- **Request**:
+```json
+{
+  "provider": "openai",
+  "key_label": "main",
+  "model": "gpt-4o-mini",
+  "protocol": "chat",
+  "batch": true
+}
+```
+> 若 `batch: true`，对该供应商所有 Key 并行检测并返回每把 Key 的延迟与状态；检测成功的 Key 会自动通过 `CooldownManager` 清除冷却封禁。
+- **Response (`200 OK`)**:
+```json
+{
+  "ok": true,
+  "results": [
+    { "key_id": "k1", "key_label": "main", "masked": "sk-...1234", "ok": true, "status": 200, "ms": 180, "model": "gpt-4o-mini" }
+  ]
+}
+```
+
+### 6.4 模型自动拉取与通配符筛选同步 `POST /api/admin/autolist-sync`
+- **Request**:
+```json
+{
+  "provider": "deepseek",
+  "auto_include": "deepseek-*",
+  "apply": true
+}
+```
+> 若 `apply: true`，将过滤出的缺失模型自动添加至 `agent_models` 并持久化到 `LocalSource`。
+- **Response (`200 OK`)**:
+```json
+{
+  "ok": true,
+  "models": ["deepseek-chat", "deepseek-reasoner"],
+  "matched": ["deepseek-chat", "deepseek-reasoner"],
+  "added": ["deepseek-chat"]
+}
+```
+
+### 6.5 预设库全量模板查询 `GET /api/admin/presets-extra`
+- **Response (`200 OK`)**:
+```json
+{
+  "ok": true,
+  "presets": [
+    { "id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "protocols": ["chat", "responses"] }
+  ]
+}
+```
+
+### 6.6 节点访问信息与 API 凭据管理
+- **获取节点接入信息 `GET /api/admin/access-info`**:
+```json
+{
+  "ok": true,
+  "mode": "agent",
+  "client_key_configured": true,
+  "client_key_masked": "sk-...9876",
+  "proxy_keys_count": 2,
+  "endpoints": ["/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/models"],
+  "models": ["claude-3-7-sonnet", "deepseek-chat", "gpt-4o-mini"]
+}
+```
+- **配置或自动生成访问凭据 `POST /api/admin/access-key`**（别名 `POST /api/admin/client-key`）:
+```json
+{
+  "client_key": "",
+  "generate": true
+}
+```
+返回 `{ "ok": true, "client_key": "sk-llmproxy-...", "masked": "sk-...abcd" }`，并实时热更新 `authMgr`。
+
+---
+
+## 七、 Magpie 无头 Web 安全认证契约 (`M14`)
+
+基于 `magpie/internal/gui/web.go` 设计原则，支持 Cookie 与 HTTP Bearer 双轨鉴权，既无缝支持前后端脚本调用，又保障现代浏览器无感会话安全：
+
+### 7.1 Web 登录 `POST /api/admin/auth/login`
+- **免鉴权**，使用请求体中的密码进行防暴力破解恒定时间 SHA-256 对比：
+- **Request**:
+```json
+{
+  "password": "your_admin_password"
+}
+```
+- **Response (`200 OK`)**:
+  - `Set-Cookie: llmproxy_admin_session=<hmac_token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`
+```json
+{
+  "ok": true
+}
+```
+
+### 7.2 Web 登出 `POST /api/admin/auth/logout`
+- **Response (`200 OK`)**:
+  - `Set-Cookie: llmproxy_admin_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=-1`
+```json
+{
+  "ok": true
+}
+```
+
+### 7.3 `isAdminAuthorized(r)` 双轨校验逻辑
+1. 优先检查请求头 `Authorization: Bearer <password>`（保持 100% 脚本兼容）。
+2. 若无请求头或校验未通过，检查是否携带合法 `llmproxy_admin_session` Cookie（HMAC 密钥绑定当前管理员密码，密码修改自动全端失效）。
+3. 无凭据或两者均非法时，记录失败 IP 并严格执行防暴力破解冷却阶梯（10 分钟内连续 5 次失败封禁 10 分钟）。
+
+---
+
+## 八、 前端单文件构建预算与门禁规范
+
+- 前端控制台源码统一位于 `shared/admin/`，通过 `node shared/admin/build.mjs` 构建为内嵌单一单页 HTML（输出至 `shared/admin/dist/index.html` 与 `internal/admin/assets/index.html`）。
+- 打包体积硬门禁：**`≤ 240 KB`（`245,760 bytes`）**（执行 G4 门禁校验与 T1 合同测试）。
+- 零内联样式（严禁 `style="` 与 `.style.xxx`）、零 Drawer 抽屉（全部行内展开 `.editor`）、零彩色左边框条、原生 `[hidden]` 显隐控制。
+

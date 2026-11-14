@@ -33,16 +33,24 @@ type ProxyConfig struct {
 	Vault       *VaultClientConfig          `json:"vault,omitempty"` // 仅 Full 模式保存中枢连接配置
 }
 
-// ProviderConfig 供应商配置（兼容 1 代字段）
+// ProviderConfig 供应商配置（兼容 1 代字段 + Magpie 探活/余额/自动刷新扩展）
 type ProviderConfig struct {
 	ID               string            `json:"id,omitempty"`
 	Name             string            `json:"name,omitempty"`
 	PresetID         string            `json:"preset_id,omitempty"`
+	APIType          string            `json:"api_type,omitempty"`
+	Protocols        []string          `json:"protocols,omitempty"`
 	BaseURL          string            `json:"base_url"`
 	AnthropicBaseURL string            `json:"anthropic_base_url,omitempty"`
 	Enabled          bool              `json:"enabled"`
 	Origin           string            `json:"origin,omitempty"` // "vault" (中枢共享) | "local" (仅本端私有，Hub绝不下发)
 	RuleHash         string            `json:"rule_hash,omitempty"`
+	RPMPerKey        int               `json:"rpm_per_key,omitempty"`
+	QuotaResetAt     string            `json:"quota_reset_at,omitempty"`  // Magpie 每日配额重置时间，如 "00:00+08:00"
+	RefreshEvery     string            `json:"refresh_every,omitempty"`   // Magpie 模型列表定时刷新周期，如 "6h"
+	AutoInclude      string            `json:"auto_include,omitempty"`    // Magpie 新模型自动纳管正则
+	BalanceURL       string            `json:"balance_url,omitempty"`     // 自定义余额查询 URL
+	BalancePath      string            `json:"balance_path,omitempty"`    // 自定义余额 JSONPath 提取表达式
 	APIKeys          []*KeyEntry       `json:"api_keys"`
 	ModelAliases     map[string]string `json:"model_aliases,omitempty"`
 	AdapterRules     *AdapterRules     `json:"adapter_rules,omitempty"`
@@ -54,6 +62,9 @@ type KeyEntry struct {
 	Label     string     `json:"label"`           // 1 代兼容标签名（如 "hk-pool-01"）
 	Key       string     `json:"key"`             // 明文 API Key 或 OAuth AccessToken（Lite 销毁时需原地清零字节）
 	Enabled   bool       `json:"enabled"`
+	Remark    string     `json:"remark,omitempty"`
+	Weight    int        `json:"weight,omitempty"`
+	MaxRPM    int        `json:"max_rpm,omitempty"`
 	Origin    string     `json:"origin,omitempty"`    // "vault" | "local"
 	AuthType  string     `json:"auth_type,omitempty"` // "api_key" (默认) | "oauth_device"
 	OAuthMeta *OAuthMeta `json:"oauth_meta,omitempty"`
@@ -96,20 +107,23 @@ type KBCandidate struct {
 
 // RuntimeSettings 与 shared/config/settings.schema.json 一一对齐的规范化设置项
 type RuntimeSettings struct {
-	RunMode                     RunMode `json:"run_mode"`                        // "agent" | "kb"
-	AgentRoutingStrategy        string  `json:"agent_routing_strategy"`          // "sticky_failover" | "round_robin" | "manual"
-	AgentFirstByteTimeoutSec    int     `json:"agent_first_byte_timeout_sec"`    // 默认 120
-	CooldownRateLimitSec        int     `json:"cooldown_rate_limit_sec"`         // 429 模型级冷却秒数，默认 15
-	CooldownServerErrorSec      int     `json:"cooldown_server_error_sec"`       // 5xx 模型级冷却秒数，默认 30
-	CooldownNetworkErrorSec     int     `json:"cooldown_network_error_sec"`      // 网络超时冷却秒数，默认 15
-	CooldownAuthErrorSec        int     `json:"cooldown_auth_error_sec"`         // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
-	OCRMaxInflight              int     `json:"ocr_max_inflight"`                // KB OCR 预读信号量上限，默认 4
-	KBGlobalMaxConcurrency      int     `json:"kb_global_max_concurrency"`       // KB 全局并发上限，默认 16
-	ModeScheduleEnabled         bool    `json:"mode_schedule_enabled"`           // 是否开启时段自动切换
-	ModeScheduleAgentWindow     string  `json:"mode_schedule_agent_window"`      // 如 "08:30-22:30"
-	ModeScheduleTimezone        string  `json:"mode_schedule_timezone"`          // 如 "Asia/Shanghai"
-	ModeScheduleWebhookURL      string  `json:"mode_schedule_webhook_url,omitempty"`
-	ModeScheduleWebhookSecret   string  `json:"mode_schedule_webhook_secret,omitempty"`
+	RunMode                     RunMode  `json:"run_mode"`                        // "agent" | "kb"
+	ClientKey                   string   `json:"client_key,omitempty"`            // 客户端鉴权密钥 (等同 PROXY_API_KEY)
+	ProxyAPIKey                 string   `json:"proxy_api_key,omitempty"`         // 1 代兼容字段名
+	ProxyKeys                   []string `json:"proxy_keys,omitempty"`            // 多客户端鉴权密钥列表
+	AgentRoutingStrategy        string   `json:"agent_routing_strategy"`          // "sticky_failover" | "round_robin" | "manual"
+	AgentFirstByteTimeoutSec    int      `json:"agent_first_byte_timeout_sec"`    // 默认 120
+	CooldownRateLimitSec        int      `json:"cooldown_rate_limit_sec"`         // 429 模型级冷却秒数，默认 15
+	CooldownServerErrorSec      int      `json:"cooldown_server_error_sec"`       // 5xx 模型级冷却秒数，默认 30
+	CooldownNetworkErrorSec     int      `json:"cooldown_network_error_sec"`      // 网络超时冷却秒数，默认 15
+	CooldownAuthErrorSec        int      `json:"cooldown_auth_error_sec"`         // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
+	OCRMaxInflight              int      `json:"ocr_max_inflight"`                // KB OCR 预读信号量上限，默认 4
+	KBGlobalMaxConcurrency      int      `json:"kb_global_max_concurrency"`       // KB 全局并发上限，默认 16
+	ModeScheduleEnabled         bool     `json:"mode_schedule_enabled"`           // 是否开启时段自动切换
+	ModeScheduleAgentWindow     string   `json:"mode_schedule_agent_window"`      // 如 "08:30-22:30"
+	ModeScheduleTimezone        string   `json:"mode_schedule_timezone"`          // 如 "Asia/Shanghai"
+	ModeScheduleWebhookURL      string   `json:"mode_schedule_webhook_url,omitempty"`
+	ModeScheduleWebhookSecret   string   `json:"mode_schedule_webhook_secret,omitempty"`
 }
 
 // VaultClientConfig Full 节点连接 EdgeOne Hub 的客户端配置
@@ -134,6 +148,10 @@ type AdapterRules struct {
 	ThoughtTagMarker       string            `json:"thought_tag_marker,omitempty"`       // Vertex AI "<thought>" 流式状态机切分标记
 	AnthropicStrictSig     bool              `json:"anthropic_strict_signature,omitempty"`
 	AnthropicPassbackReq   bool              `json:"anthropic_passback_required,omitempty"`
+	DenyDeveloperRole      bool              `json:"deny_developer_role,omitempty"`      // 1 代兼容：developer 角色自动转为 system
+	MergeSystem            bool              `json:"merge_system,omitempty"`             // 1 代兼容：合并多条 system 消息
+	StripEmpty             bool              `json:"strip_empty,omitempty"`              // 1 代兼容：剥离空文本消息
+	ThinkingPolicy         string            `json:"thinking_policy,omitempty"`          // "strip" | "strict_signature" | "passback_required"
 }
 
 // RuntimeSnapshot 不可变内存快照（由 atomic.Pointer[RuntimeSnapshot] 持有，支持零锁并发读取）
@@ -180,39 +198,50 @@ type ConfigSource interface {
 	HealthState() (status string, state string, leaseValid bool, configVer int64)
 }
 
-// 2. Try & RequestTrace 借鉴自 Magpie trace.go (traceKeep = 60)，记录单次请求的完整多跳故障转移故事
+// 2. Try & RequestTrace 借鉴自 Magpie trace.go (traceKeep = 60) 与 usage.go，记录单次请求的完整多跳故障转移故事与全链路瀑布耗时
 type Try struct {
-	Attempt            int    `json:"attempt"`
-	Provider           string `json:"provider"`
-	KeyID              string `json:"key_id"`
-	Model              string `json:"model"`
-	Status             int    `json:"status"`
-	Millis             int64  `json:"ms"`
-	TTFTMillis         int64  `json:"ttft_ms,omitempty"`
-	Reason             string `json:"reason,omitempty"` // "rate_limit" | "server_error" | "auth_error" | "network_error" | "client_error"
-	CooldownAppliedSec int    `json:"cooldown_applied_sec,omitempty"`
-	ErrorSnippet       string `json:"error_snippet,omitempty"` // 经 applog.Scrub 脱敏后的前 240 字节错误摘要
+	Attempt            int               `json:"attempt"`
+	Provider           string            `json:"provider"`
+	KeyID              string            `json:"key_id"`
+	Model              string            `json:"model"`
+	Status             int               `json:"status"`
+	Millis             int64             `json:"ms"`
+	TTFTMillis         int64             `json:"ttft_ms,omitempty"`
+	Reason             string            `json:"reason,omitempty"` // "rate_limit" | "server_error" | "auth_error" | "network_error" | "client_error"
+	CooldownAppliedSec int               `json:"cooldown_applied_sec,omitempty"`
+	ErrorSnippet       string            `json:"error_snippet,omitempty"` // 经 applog.Scrub 脱敏后的前 240 字节错误摘要
+	RespHeaders        map[string]string `json:"resp_headers,omitempty"`  // 经脱敏的上游响应头
 }
 
 type RequestTrace struct {
-	ID              string `json:"id"`
-	Timestamp       int64  `json:"ts"`
-	Mode            string `json:"mode"`     // "agent" | "kb"
-	Endpoint        string `json:"endpoint"` // "/v1/chat/completions" | "/v1/messages" | "/v1/ocr" ...
-	ReqModel        string `json:"req_model"`
-	ServedModel     string `json:"served_model"`
-	WinnerProvider  string `json:"winner_provider,omitempty"`
-	WinnerKey       string `json:"winner_key,omitempty"`
-	Status          int    `json:"status"`
-	Stream          bool   `json:"stream"`
-	InTokens        int    `json:"in_tokens"`
-	OutTokens       int    `json:"out_tokens"`
-	CacheReadTokens int    `json:"cache_read_tokens,omitempty"`
-	ReasoningTokens int    `json:"reasoning_tokens,omitempty"`
-	TTFTMillis      int64  `json:"ttft_ms"`
-	TotalMillis     int64  `json:"total_ms"`
-	RetriedMillis   int64  `json:"retried_ms,omitempty"`
-	Tries           []Try  `json:"tries"`
+	ID                 string            `json:"id"`
+	Timestamp          int64             `json:"ts"`
+	Mode               string            `json:"mode"`     // "agent" | "kb"
+	Endpoint           string            `json:"endpoint"` // "/v1/chat/completions" | "/v1/messages" | "/v1/ocr" ...
+	ReqModel           string            `json:"req_model"`
+	ServedModel        string            `json:"served_model"`
+	WinnerProvider     string            `json:"winner_provider,omitempty"`
+	WinnerKey          string            `json:"winner_key,omitempty"`
+	Status             int               `json:"status"`
+	Stream             bool              `json:"stream"`
+	InTokens           int               `json:"in_tokens"`
+	OutTokens          int               `json:"out_tokens"`
+	CacheReadTokens    int               `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens   int               `json:"cache_write_tokens,omitempty"`
+	CacheWrite1hTokens int               `json:"cache_write_1h_tokens,omitempty"`
+	ReasoningTokens    int               `json:"reasoning_tokens,omitempty"`
+	TTFTMillis         int64             `json:"ttft_ms"`
+	FlowMillis         int64             `json:"flow_ms,omitempty"`    // 首字到达至流结束的纯生成时间（用于计算真实 tok/s TPS）
+	OwnMillis          int64             `json:"own_ms,omitempty"`     // 网关内部开销耗时
+	QueuedMillis       int64             `json:"queued_ms,omitempty"`  // 并发排队等待耗时
+	SentMillis         int64             `json:"sent_ms,omitempty"`    // 建连与发送耗时
+	TotalMillis        int64             `json:"total_ms"`
+	RetriedMillis      int64             `json:"retried_ms,omitempty"`
+	UpBytes            int               `json:"up_bytes,omitempty"`   // 上行字节数
+	DownBytes          int               `json:"down_bytes,omitempty"` // 下行字节数
+	StopReason         string            `json:"stop_reason,omitempty"`
+	ReqHeaders         map[string]string `json:"req_headers,omitempty"` // 经脱敏的客户端请求头
+	Tries              []Try             `json:"tries"`
 }
 
 // 3. ObservabilitySink 可观测性统一写入接口（由 W3 的 internal/obs 实现）

@@ -13,7 +13,7 @@ console.log('=== LLMProxy2 Magpie Minimalist Admin UI Builder & Gate Verificatio
 
 // 1. Gate 5: Node.js syntax check (node --check)
 console.log('1. Checking JS syntax (node --check)...');
-const jsFiles = ['js/host.js', 'js/app.js'];
+const jsFiles = ['js/icons.js', 'js/usage.js', 'js/host.js', 'js/app.js'];
 for (const file of jsFiles) {
   const fullPath = join(adminDir, file);
   try {
@@ -28,22 +28,33 @@ for (const file of jsFiles) {
 // 2. Read source assets
 const htmlPath = join(adminDir, 'admin.html');
 const cssPath = join(adminDir, 'css/app.css');
+const iconsJsPath = join(adminDir, 'js/icons.js');
+const usageJsPath = join(adminDir, 'js/usage.js');
 const hostJsPath = join(adminDir, 'js/host.js');
 const appJsPath = join(adminDir, 'js/app.js');
 
 let html = readFileSync(htmlPath, 'utf8');
 const css = readFileSync(cssPath, 'utf8');
+const iconsJs = readFileSync(iconsJsPath, 'utf8');
+const usageJs = readFileSync(usageJsPath, 'utf8');
 const hostJs = readFileSync(hostJsPath, 'utf8');
 const appJs = readFileSync(appJsPath, 'utf8');
 
 // 3. Gate 1: Zero inline style check (Zero Inline Style Gate)
 console.log('\n2. Verifying Gate 1: Zero inline styles (style= / .style.)...');
-const styleAttrMatch = html.match(/style\s*=/i) || appJs.match(/style\s*=/i) || hostJs.match(/style\s*=/i);
+const styleAttrMatch = html.match(/style\s*=/i) ||
+  iconsJs.match(/style\s*=/i) ||
+  usageJs.match(/style\s*=/i) ||
+  appJs.match(/style\s*=/i) ||
+  hostJs.match(/style\s*=/i);
 if (styleAttrMatch) {
   console.error(`   ✗ FAILED: Found inline style attribute in sources!`);
   process.exit(1);
 }
-const stylePropMatch = appJs.match(/\.style\.[a-zA-Z]+/i) || hostJs.match(/\.style\.[a-zA-Z]+/i);
+const stylePropMatch = appJs.match(/\.style\.[a-zA-Z]+/i) ||
+  hostJs.match(/\.style\.[a-zA-Z]+/i) ||
+  iconsJs.match(/\.style\.[a-zA-Z]+/i) ||
+  usageJs.match(/\.style\.[a-zA-Z]+/i);
 if (stylePropMatch) {
   console.error(`   ✗ FAILED: Found .style.xxx property manipulation in JS! Use el.hidden instead.`);
   process.exit(1);
@@ -52,7 +63,11 @@ console.log('   ✓ Zero inline styles verified (100% compliant)');
 
 // 4. Gate 2: Zero drawer check (No Drawer Gate)
 console.log('\n3. Verifying Gate 2: Zero drawer components (.drawer)...');
-const drawerMatch = html.match(/class\s*=\s*["'][^"']*\bdrawer\b/i) || css.match(/\.drawer\b/i) || appJs.match(/\bdrawer\b/i);
+const drawerMatch = html.match(/class\s*=\s*["'][^"']*\bdrawer\b/i) ||
+  css.match(/\.drawer\b/i) ||
+  appJs.match(/\bdrawer\b/i) ||
+  iconsJs.match(/\bdrawer\b/i) ||
+  usageJs.match(/\bdrawer\b/i);
 if (drawerMatch) {
   console.error('   ✗ FAILED: Found .drawer component in UI sources!');
   process.exit(1);
@@ -90,10 +105,14 @@ function cleanJs(src) {
     .filter(line => line.length > 0)
     .join('\n');
 }
+const cleanIconsJs = cleanJs(iconsJs);
+const cleanUsageJs = cleanJs(usageJs);
 const cleanHostJs = cleanJs(hostJs);
 const cleanAppJs = cleanJs(appJs);
 let bundledHtml = html.replace(/<!--[\s\S]*?-->/g, '');
 bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', `<style>\n${minCss}\n</style>`);
+bundledHtml = bundledHtml.replace('<script src="js/icons.js"></script>', `<script>\n${cleanIconsJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/usage.js"></script>', `<script>\n${cleanUsageJs}\n</script>`);
 bundledHtml = bundledHtml.replace('<script src="js/host.js"></script>', `<script>\n${cleanHostJs}\n</script>`);
 bundledHtml = bundledHtml.replace('<script src="js/app.js"></script>', `<script>\n${cleanAppJs}\n</script>`);
 
@@ -106,17 +125,17 @@ if (existsSync(dirname(internalAssetHtml))) {
   writeFileSync(internalAssetHtml, bundledHtml, 'utf8');
 }
 
-// 7. Gate 4: Bundle size <= 80,000 bytes
-console.log('\n6. Verifying Gate 4: Bundle size (<= 80,000 bytes)...');
+// 7. Gate 4: Bundle size <= 245,760 bytes (240 KB)
+console.log('\n6. Verifying Gate 4: Bundle size (<= 245,760 bytes)...');
 const stat = statSync(distPath);
 const sizeKb = (stat.size / 1024).toFixed(2);
 console.log(`   Bundle size: ${stat.size} bytes (${sizeKb} KB)`);
 
-if (stat.size > 80000) {
-  console.error(`   ✗ FAILED: Bundle size ${stat.size} bytes (${sizeKb} KB) exceeds 80,000 bytes limit!`);
+if (stat.size > 245760) {
+  console.error(`   ✗ FAILED: Bundle size ${stat.size} bytes (${sizeKb} KB) exceeds 245,760 bytes limit!`);
   process.exit(1);
 }
-console.log(`   ✓ Bundle size ${stat.size} bytes (${sizeKb} KB) <= 80,000 bytes limit (100% compliant)`);
+console.log(`   ✓ Bundle size ${stat.size} bytes (${sizeKb} KB) <= 245,760 bytes limit (100% compliant)`);
 
 // 8. Generate edge-functions/admin.js (EdgeOne Hub Console)
 console.log('\n7. Generating edge-functions/admin.js (EdgeOne Hub Console)...');

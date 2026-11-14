@@ -534,3 +534,314 @@ main.corridor {
 .text-danger { color: var(--red); }
 .text-sm { font-size: 11.5px; }
 .text-xs { font-size: 11px; }
+
+/* Brand Vector Icon (<span class="ico">) */
+.ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.ico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* In-Page Magpie Login Overlay (M14) */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(18, 18, 22, 0.65);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.login-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: var(--shadow-pop);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.login-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-error {
+  padding: 8px 12px;
+  background: var(--red-soft);
+  color: var(--red);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.login-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 8px;
+  font-size: 13px;
+}
+
+/* Privacy Masking (M15) */
+body.privacy-masked .privacy-mask,
+body.privacy-masked .tabular-secret,
+body.privacy-masked td:nth-child(3) .tabular,
+body.privacy-masked input[readonly].input--code {
+  filter: blur(5px);
+  user-select: none;
+  transition: filter 0.15s ease;
+}
+
+body.privacy-masked .privacy-mask:hover,
+body.privacy-masked input[readonly].input--code:hover {
+  filter: none;
+}
+
+/* Concurrency & Lane Status Badges (M11) */
+.pill--busy {
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.pill--limit {
+  background: var(--red-soft);
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* Interactive SVG Stacked Bar Histogram (M9) */
+.chart-box {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+
+.chart-svg {
+  width: 100%;
+  max-width: 720px;
+  height: 140px;
+  display: block;
+}
+
+.chart-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.chart-rect {
+  transition: opacity 0.15s ease;
+}
+
+.chart-rect--in {
+  fill: #6366f1;
+}
+
+.chart-rect--out {
+  fill: #a5b4fc;
+}
+
+.chart-label {
+  fill: var(--muted);
+  font-size: 9.5px;
+  font-family: var(--code);
+}
+
+.chart-bar-group:hover .chart-rect {
+  opacity: 0.82;
+}
+
+/* 53-Week Contribution Heatmap (M9) */
+.heatmap-box {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+
+.heatmap-svg {
+  width: 100%;
+  max-width: 636px;
+  height: 84px;
+  display: block;
+}
+
+.heat-cell {
+  transition: opacity 0.15s;
+}
+
+.heat-cell:hover {
+  opacity: 0.75;
+}
+
+.heat-l0 { fill: var(--pill); }
+.heat-l1 { fill: #c7d2fe; }
+.heat-l2 { fill: #818cf8; }
+.heat-l3 { fill: #4f46e5; }
+.heat-l4 { fill: #312e81; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .heat-l0 { fill: #2a2a30; }
+  :root:not([data-theme="light"]) .heat-l1 { fill: #312e81; }
+  :root:not([data-theme="light"]) .heat-l2 { fill: #4338ca; }
+  :root:not([data-theme="light"]) .heat-l3 { fill: #6366f1; }
+  :root:not([data-theme="light"]) .heat-l4 { fill: #a5b4fc; }
+}
+
+:root[data-theme="dark"] .heat-l0 { fill: #2a2a30; }
+:root[data-theme="dark"] .heat-l1 { fill: #312e81; }
+:root[data-theme="dark"] .heat-l2 { fill: #4338ca; }
+:root[data-theme="dark"] .heat-l3 { fill: #6366f1; }
+:root[data-theme="dark"] .heat-l4 { fill: #a5b4fc; }
+
+/* Trace Waterfall Breakdown (M8, M12) */
+.waterfall-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.wf-item {
+  font-size: 11.5px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-label {
+  color: var(--muted);
+}
+
+.wf-item--total {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.trace-headers-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.headers-details {
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.headers-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.headers-pre {
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--card-2);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Model Probe Pills (U2) */
+.probe-pills-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.probe-pill {
+  font-size: 11px;
+  font-family: var(--code);
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--pill);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.probe-pill:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Gateway Access Snippets (M16) */
+.snippet-box {
+  background: var(--card-2);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.snippet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.snippet-code {
+  display: block;
+  font-family: var(--code);
+  font-size: 11.5px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}

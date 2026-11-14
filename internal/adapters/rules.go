@@ -41,7 +41,9 @@ func (e *DefaultEngine) PrepareRequest(
 	if len(reqBody) > 512*1024 {
 		needsComplex := false
 		if rules != nil {
-			if rules.GeminiCompat || rules.StripReasoningEnabled || len(rules.StripParams) > 0 || len(rules.RenameParams) > 0 || len(rules.OverrideParams) > 0 {
+			if rules.GeminiCompat || rules.StripReasoningEnabled || len(rules.StripParams) > 0 || len(rules.RenameParams) > 0 || len(rules.OverrideParams) > 0 ||
+				rules.DenyDeveloperRole || rules.MergeSystem || rules.StripEmpty || rules.ThinkingPolicy != "" ||
+				rules.AnthropicStrictSig || rules.AnthropicPassbackReq {
 				needsComplex = true
 			}
 		}
@@ -184,8 +186,15 @@ func (e *DefaultEngine) PrepareRequest(
 			bodyMap[k] = v
 		}
 
-		// 8. Gemini Compatibility
+		// 8. Messages normalization & Thinking Policy
+		if msgs, ok := bodyMap["messages"].([]any); ok && len(msgs) > 0 {
+			activeModel, _ := bodyMap["model"].(string)
+			bodyMap["messages"] = NormalizeMessages(msgs, rules, activeModel)
+		}
+
+		// 9. Gemini Compatibility
 		activeModel, _ := bodyMap["model"].(string)
+		keepSigs := rules.GeminiCompat || strings.Contains(strings.ToLower(activeModel), "gemini") || rules.ThinkingPolicy == "passback_required" || rules.AnthropicPassbackReq
 		if rules.GeminiCompat || strings.Contains(strings.ToLower(activeModel), "gemini") {
 			ApplyGeminiThinking(bodyMap, activeModel)
 			RestoreSignatures(bodyMap, true)
@@ -203,7 +212,7 @@ func (e *DefaultEngine) PrepareRequest(
 				}
 			}
 		} else {
-			RestoreSignatures(bodyMap, false)
+			RestoreSignatures(bodyMap, keepSigs)
 		}
 	}
 
@@ -248,7 +257,11 @@ func (e *DefaultEngine) TransformNonStreamResponse(
 
 	// 3. Gemini Thought Splitting for non-stream
 	if rules.ThoughtTagMarker != "" || rules.GeminiCompat {
-		splitNonStreamThoughts(data)
+		marker := rules.ThoughtTagMarker
+		if marker == "" {
+			marker = "thought"
+		}
+		splitNonStreamThoughts(data, marker)
 	}
 
 	return json.Marshal(data)
@@ -327,11 +340,17 @@ func rescueToolCalls(data map[string]any) {
 	}
 }
 
-func splitNonStreamThoughts(data map[string]any) {
+func splitNonStreamThoughts(data map[string]any, marker string) {
 	choices, ok := data["choices"].([]any)
 	if !ok {
 		return
 	}
+
+	if marker == "" {
+		marker = "thought"
+	}
+	marker = strings.Trim(marker, "<>/")
+	openTag := "<" + marker + ">"
 
 	for _, chObj := range choices {
 		ch, ok := chObj.(map[string]any)
@@ -343,13 +362,213 @@ func splitNonStreamThoughts(data map[string]any) {
 			continue
 		}
 		content, ok := msg["content"].(string)
-		if ok && strings.Contains(content, ThoughtOpenTag) {
-			r, a := SplitThoughts(content)
+		if ok && strings.Contains(content, openTag) {
+			r, a := SplitThoughtsWithMarker(content, marker)
 			if r != "" {
 				msg["reasoning_content"] = r
 			}
 			msg["content"] = a
 		}
+	}
+}
+
+// NormalizeMessages applies DenyDeveloperRole, StripEmpty, MergeSystem, and ThinkingPolicy to messages.
+func NormalizeMessages(msgs []any, rules *types.AdapterRules, modelName string) []any {
+	if rules == nil || len(msgs) == 0 {
+		return msgs
+	}
+
+	denyDev := rules.DenyDeveloperRole
+	mergeSys := rules.MergeSystem
+	stripEmpty := rules.StripEmpty
+	thinkingPolicy := rules.ThinkingPolicy
+	if thinkingPolicy == "" {
+		if rules.AnthropicStrictSig {
+			thinkingPolicy = "strict_signature"
+		} else if rules.AnthropicPassbackReq {
+			thinkingPolicy = "passback_required"
+		}
+	}
+
+	var systemParts []string
+	var intermediate []map[string]any
+
+	for _, mObj := range msgs {
+		m, ok := mObj.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		mCopy := make(map[string]any, len(m))
+		for k, v := range m {
+			mCopy[k] = v
+		}
+
+		role, _ := mCopy["role"].(string)
+		if denyDev && role == "developer" {
+			role = "system"
+			mCopy["role"] = "system"
+		}
+
+		if role == "assistant" && thinkingPolicy != "" {
+			applyThinkingPolicy(mCopy, thinkingPolicy)
+		}
+
+		if stripEmpty && isMessageEmpty(mCopy) {
+			continue
+		}
+
+		if mergeSys && role == "system" {
+			contentStr := extractTextFromContent(mCopy["content"])
+			if strings.TrimSpace(contentStr) != "" {
+				systemParts = append(systemParts, strings.TrimSpace(contentStr))
+			}
+		} else {
+			intermediate = append(intermediate, mCopy)
+		}
+	}
+
+	if mergeSys {
+		var result []any
+		if len(systemParts) > 0 {
+			result = append(result, map[string]any{
+				"role":    "system",
+				"content": strings.Join(systemParts, "\n\n"),
+			})
+		}
+		for _, m := range intermediate {
+			result = append(result, m)
+		}
+		return result
+	}
+
+	result := make([]any, len(intermediate))
+	for i, m := range intermediate {
+		result[i] = m
+	}
+	return result
+}
+
+// isMessageEmpty checks if a message should be stripped under StripEmpty rule.
+// It drops empty text messages while preserving messages with tool_calls or non-text parts (e.g. images).
+func isMessageEmpty(m map[string]any) bool {
+	// Preserve if message has tool calls
+	if tcs, ok := m["tool_calls"].([]any); ok && len(tcs) > 0 {
+		return false
+	}
+
+	content := m["content"]
+	if content == nil {
+		return true
+	}
+
+	switch c := content.(type) {
+	case string:
+		return strings.TrimSpace(c) == ""
+	case []any:
+		var nonEmpties []any
+		for _, part := range c {
+			switch p := part.(type) {
+			case string:
+				if strings.TrimSpace(p) != "" {
+					nonEmpties = append(nonEmpties, p)
+				}
+			case map[string]any:
+				partType, _ := p["type"].(string)
+				if partType == "text" {
+					txt, _ := p["text"].(string)
+					if strings.TrimSpace(txt) != "" {
+						nonEmpties = append(nonEmpties, p)
+					}
+				} else {
+					// image_url, input_audio, document, etc.
+					nonEmpties = append(nonEmpties, p)
+				}
+			default:
+				nonEmpties = append(nonEmpties, p)
+			}
+		}
+		if len(nonEmpties) == 0 {
+			return true
+		}
+		m["content"] = nonEmpties
+		return false
+	default:
+		return false
+	}
+}
+
+// applyThinkingPolicy handles "strip", "strict_signature", and "passback_required".
+func applyThinkingPolicy(m map[string]any, policy string) {
+	switch policy {
+	case "strip":
+		delete(m, "reasoning_content")
+		delete(m, "reasoning")
+		if contentList, ok := m["content"].([]any); ok {
+			var newContent []any
+			for _, part := range contentList {
+				if pMap, ok := part.(map[string]any); ok {
+					if pType, _ := pMap["type"].(string); pType == "thinking" {
+						continue
+					}
+				}
+				newContent = append(newContent, part)
+			}
+			m["content"] = newContent
+		}
+	case "strict_signature":
+		if contentList, ok := m["content"].([]any); ok {
+			var newContent []any
+			for _, part := range contentList {
+				if pMap, ok := part.(map[string]any); ok {
+					if pType, _ := pMap["type"].(string); pType == "thinking" {
+						sig, _ := pMap["signature"].(string)
+						if strings.TrimSpace(sig) == "" {
+							continue // drop unsigned thinking block
+						}
+					}
+				}
+				newContent = append(newContent, part)
+			}
+			m["content"] = newContent
+		}
+	case "passback_required":
+		// Preserves thinking blocks and required signatures {id}:::{sig}
+	}
+}
+
+// extractTextFromContent extracts textual representation from content (string or slice of parts).
+func extractTextFromContent(c any) string {
+	if c == nil {
+		return ""
+	}
+	switch v := c.(type) {
+	case string:
+		return v
+	case []any:
+		var sb strings.Builder
+		for _, part := range v {
+			switch p := part.(type) {
+			case string:
+				if sb.Len() > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(strings.TrimSpace(p))
+			case map[string]any:
+				if pType, _ := p["type"].(string); pType == "text" {
+					txt, _ := p["text"].(string)
+					if strings.TrimSpace(txt) != "" {
+						if sb.Len() > 0 {
+							sb.WriteString("\n")
+						}
+						sb.WriteString(strings.TrimSpace(txt))
+					}
+				}
+			}
+		}
+		return sb.String()
+	default:
+		return ""
 	}
 }
 

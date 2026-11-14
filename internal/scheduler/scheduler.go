@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,11 @@ type Scheduler struct {
 	cooldowns      *CooldownManager
 	obsSink        types.ObservabilitySink
 	httpClient     *http.Client
+	allowPrivate   bool
+	clientsMu      sync.RWMutex
+	clients        map[int]*http.Client // cached by firstByteTimeoutSec -> client
+	lanes          *LaneTracker
+	rpmLimiter     *RPMLimiter
 	rrIndex        map[string]int
 	oauthRefresher OAuthRefresher
 }
@@ -56,7 +62,11 @@ func NewScheduler(
 		engine:       adapters.NewDefaultEngine(),
 		cooldowns:    NewCooldownManager(),
 		obsSink:      obsSink,
-		httpClient:   upstream.DefaultClient(120*time.Second, allowPrivate),
+		httpClient:   upstream.UpstreamClient(120*time.Second, allowPrivate),
+		allowPrivate: allowPrivate,
+		clients:      make(map[int]*http.Client),
+		lanes:        NewLaneTracker(),
+		rpmLimiter:   NewRPMLimiter(60 * time.Second),
 		rrIndex:      make(map[string]int),
 	}
 }
@@ -77,6 +87,57 @@ func (s *Scheduler) getOAuthRefresher() OAuthRefresher {
 // Cooldowns returns the active cooldown manager.
 func (s *Scheduler) Cooldowns() *CooldownManager {
 	return s.cooldowns
+}
+
+// Lanes returns the active lane tracker.
+func (s *Scheduler) Lanes() *LaneTracker {
+	return s.lanes
+}
+
+// SnapshotLanes returns a snapshot of active lanes for /api/lanes.
+func (s *Scheduler) SnapshotLanes() map[string]Lane {
+	if s.lanes == nil {
+		return make(map[string]Lane)
+	}
+	return s.lanes.Snapshot()
+}
+
+// RPM returns the per-key sliding window RPM limiter.
+func (s *Scheduler) RPM() *RPMLimiter {
+	return s.rpmLimiter
+}
+
+// SetBanFile configures the persistent ban file path.
+func (s *Scheduler) SetBanFile(path string) error {
+	return s.cooldowns.SetBanFile(path)
+}
+
+// InitBans initializes persistent bans based on role and configDir.
+func (s *Scheduler) InitBans(role types.Role, configDir string) error {
+	if role == types.RoleFull && configDir != "" {
+		return s.cooldowns.SetBanFile(filepath.Join(configDir, "key_bans.json"))
+	}
+	return s.cooldowns.SetBanFile("")
+}
+
+func (s *Scheduler) getClient(firstByteSec int) *http.Client {
+	if firstByteSec <= 0 {
+		firstByteSec = 120
+	}
+	s.clientsMu.RLock()
+	c, ok := s.clients[firstByteSec]
+	s.clientsMu.RUnlock()
+	if ok {
+		return c
+	}
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	if c, ok = s.clients[firstByteSec]; ok {
+		return c
+	}
+	c = upstream.UpstreamClient(time.Duration(firstByteSec)*time.Second, s.allowPrivate)
+	s.clients[firstByteSec] = c
+	return c
 }
 
 // CandidateKey represents an actionable route key target.
@@ -185,6 +246,28 @@ func (s *Scheduler) OrderCandidates(
 	}
 }
 
+// sanitizeHeaders redacts sensitive auth tokens and cleans up headers for observability.
+func sanitizeHeaders(h http.Header) map[string]string {
+	if h == nil {
+		return nil
+	}
+	res := make(map[string]string, len(h))
+	for k, vals := range h {
+		if len(vals) == 0 {
+			continue
+		}
+		joined := strings.Join(vals, ", ")
+		lk := strings.ToLower(k)
+		if lk == "authorization" || lk == "proxy-authorization" || lk == "x-api-key" || lk == "cookie" || lk == "set-cookie" || strings.Contains(lk, "token") || strings.Contains(lk, "secret") {
+			joined = "[REDACTED]"
+		} else {
+			joined = obs.ScrubString(joined)
+		}
+		res[k] = joined
+	}
+	return res
+}
+
 // Dispatch executes the scheduled request with 300s budget, failover, peek, and forbiddenAlike.
 func (s *Scheduler) Dispatch(
 	ctx context.Context,
@@ -197,6 +280,7 @@ func (s *Scheduler) Dispatch(
 ) error {
 	reqStart := time.Now()
 	traceID := fmt.Sprintf("req-%d", reqStart.UnixNano())
+	reqHeaders := sanitizeHeaders(r.Header)
 
 	// Hard total budget: 300s
 	budgetCtx, cancel := context.WithTimeout(ctx, HardBudgetTimeout)
@@ -259,6 +343,13 @@ func (s *Scheduler) Dispatch(
 		durAuth = 86400 * time.Second
 	}
 
+	firstByteSec := settings.AgentFirstByteTimeoutSec
+	if firstByteSec <= 0 {
+		firstByteSec = 120
+	}
+	durFirstByte := time.Duration(firstByteSec) * time.Second
+	client := s.getClient(firstByteSec)
+
 	var tries []types.Try
 	var attempts []TryAttempt
 	var lastStatus int
@@ -275,10 +366,24 @@ func (s *Scheduler) Dispatch(
 			keyID = cand.KeyEntry.Label
 		}
 
-		// Check cooldown
+		// 1. Pre-flight per-key sliding-window RPM rate limiter check
+		rpmLimit := cand.KeyEntry.MaxRPM
+		if rpmLimit <= 0 && cand.Provider != nil {
+			rpmLimit = cand.Provider.RPMPerKey
+		}
+		if rpmLimit > 0 && !s.rpmLimiter.TryAcquire(cand.KeyTag, rpmLimit) {
+			// Over quota! Skip key cleanly before dialing upstream
+			continue
+		}
+
+		// 2. Check cooldown
 		if s.cooldowns.IsCooledDown(cand.Provider.ID, cand.TargetModel, keyID) {
 			continue
 		}
+
+		// 3. Concurrency tracking: start waiting
+		queuedStart := time.Now()
+		cancelWait := s.lanes.StartWaiting(cand.KeyTag)
 
 		tryStart := time.Now()
 
@@ -287,6 +392,7 @@ func (s *Scheduler) Dispatch(
 			refresher := s.getOAuthRefresher()
 			if refresher != nil {
 				if refErr := refresher.EnsureValidToken(budgetCtx, cand.KeyEntry, ""); refErr != nil {
+					cancelWait()
 					lastStatus = http.StatusUnauthorized
 					lastErrSnippet = refErr.Error()
 					cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusUnauthorized, durRateLimit, durServerError, durNetwork, durAuth)
@@ -315,6 +421,7 @@ func (s *Scheduler) Dispatch(
 			clientStream,
 		)
 		if prepErr != nil {
+			cancelWait()
 			continue
 		}
 
@@ -328,6 +435,7 @@ func (s *Scheduler) Dispatch(
 
 		upReq, reqErr := http.NewRequestWithContext(budgetCtx, http.MethodPost, targetURL, bytes.NewReader(mutatedBody))
 		if reqErr != nil {
+			cancelWait()
 			continue
 		}
 
@@ -349,11 +457,22 @@ func (s *Scheduler) Dispatch(
 			upReq.Header.Set(hk, hv)
 		}
 
+		// Concurrency tracking: acquire busy slot
+		queuedMillis := time.Since(queuedStart).Milliseconds()
+		cancelWait()
+
+		releaseBusy := s.lanes.Acquire(cand.KeyTag, rpmLimit)
+		var relOnce sync.Once
+		rel := func() { relOnce.Do(releaseBusy) }
+
 		// Execute HTTP call
-		resp, callErr := s.httpClient.Do(upReq)
+		sendStart := time.Now()
+		resp, callErr := client.Do(upReq)
+		sentMillis := time.Since(sendStart).Milliseconds()
 		tryElapsed := time.Since(tryStart).Milliseconds()
 
 		if callErr != nil {
+			rel()
 			lastStatus = 504
 			lastErrSnippet = callErr.Error()
 			cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, 504, durRateLimit, durServerError, durNetwork, durAuth)
@@ -372,13 +491,21 @@ func (s *Scheduler) Dispatch(
 		}
 
 		lastStatus = resp.StatusCode
+		tryRespHeaders := sanitizeHeaders(resp.Header)
 
 		if resp.StatusCode != http.StatusOK {
 			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 			resp.Body.Close()
+			rel()
 			lastErrSnippet = string(errBytes)
 
 			cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
+			// Check if QuotaResetAt is configured for daily reset on quota limit
+			if cand.Provider.QuotaResetAt != "" && (resp.StatusCode == 429 || resp.StatusCode == 402) {
+				if sec, _, err := s.cooldowns.ApplyQuotaCooldown(cand.Provider.ID, cand.TargetModel, keyID, cand.Provider.QuotaResetAt); err == nil {
+					cooldownSec = sec
+				}
+			}
 
 			reason := "server_error"
 			if resp.StatusCode == 429 {
@@ -407,6 +534,7 @@ func (s *Scheduler) Dispatch(
 				Reason:             reason,
 				CooldownAppliedSec: cooldownSec,
 				ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+				RespHeaders:        tryRespHeaders,
 			})
 
 			// Check Magpie forbiddenAlike
@@ -415,7 +543,32 @@ func (s *Scheduler) Dispatch(
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(resp.StatusCode)
 				_, _ = w.Write(errBytes)
-				s.recordFinalTrace(traceID, reqModel, cand, tries, resp.StatusCode, tryElapsed, clientStream)
+
+				totalMillis := time.Since(reqStart).Milliseconds()
+				ownMillis := totalMillis - (sentMillis + tryElapsed)
+				if ownMillis < 0 {
+					ownMillis = 0
+				}
+				s.recordFinalTrace(types.RequestTrace{
+					ID:             traceID,
+					Timestamp:      time.Now().Unix(),
+					Mode:           "agent",
+					Endpoint:       endpoint,
+					ReqModel:       reqModel,
+					ServedModel:    cand.TargetModel,
+					WinnerProvider: cand.Provider.ID,
+					WinnerKey:      cand.KeyEntry.Label,
+					Status:         resp.StatusCode,
+					Stream:         clientStream,
+					OwnMillis:      ownMillis,
+					QueuedMillis:   queuedMillis,
+					SentMillis:     sentMillis,
+					TotalMillis:    totalMillis,
+					UpBytes:        len(mutatedBody),
+					DownBytes:      len(errBytes),
+					ReqHeaders:     reqHeaders,
+					Tries:          tries,
+				})
 				return nil
 			}
 
@@ -426,7 +579,7 @@ func (s *Scheduler) Dispatch(
 		// Upstream returned 200 OK!
 		// Case A: Streaming request
 		if clientStream || upstreamStream {
-			peekRes, peekErr := PeekUntilPayload(resp.Body, KeepaliveInterval, func() {
+			peekRes, peekErr := PeekFirstChunk(budgetCtx, resp.Body, KeepaliveInterval, durFirstByte, func() {
 				// Pre-commit keepalive
 				if f, ok := w.(http.Flusher); ok {
 					_, _ = w.Write([]byte(": keep-alive\n\n"))
@@ -434,9 +587,18 @@ func (s *Scheduler) Dispatch(
 				}
 			})
 
+			ttftMillis := time.Since(reqStart).Milliseconds()
+			tryTTFT := time.Since(tryStart).Milliseconds()
+
 			if peekErr != nil || peekRes.IsError {
 				resp.Body.Close()
-				lastErrSnippet = peekRes.ErrorSnippet
+				rel()
+				lastErrSnippet = ""
+				if peekRes != nil {
+					lastErrSnippet = peekRes.ErrorSnippet
+				} else if peekErr != nil {
+					lastErrSnippet = peekErr.Error()
+				}
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, 502, durRateLimit, durServerError, durNetwork, durAuth)
 				tries = append(tries, types.Try{
 					Attempt:            i + 1,
@@ -445,9 +607,11 @@ func (s *Scheduler) Dispatch(
 					Model:              cand.TargetModel,
 					Status:             502,
 					Millis:             tryElapsed,
+					TTFTMillis:         tryTTFT,
 					Reason:             "stream_peek_error",
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					RespHeaders:        tryRespHeaders,
 				})
 				continue
 			}
@@ -457,6 +621,7 @@ func (s *Scheduler) Dispatch(
 				// Client asked for non-stream, but provider was stream_only: aggregate to JSON!
 				aggBytes, aggErr := adapters.AggregateStreamToJSON(peekRes.CombinedBody)
 				resp.Body.Close()
+				rel()
 				if aggErr != nil {
 					continue
 				}
@@ -464,15 +629,58 @@ func (s *Scheduler) Dispatch(
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(aggBytes)
 				s.updateStickyKey(route, cand)
+
+				usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
+				var aggMap map[string]any
+				if json.Unmarshal(aggBytes, &aggMap) == nil {
+					usageTracker.ParseJSON(aggMap)
+				}
+				usageTracker.Finish()
+
+				totalMillis := time.Since(reqStart).Milliseconds()
+				ownMillis := totalMillis - (sentMillis + tryElapsed)
+				if ownMillis < 0 {
+					ownMillis = 0
+				}
 				tries = append(tries, types.Try{
-					Attempt:  i + 1,
-					Provider: cand.Provider.ID,
-					KeyID:    cand.KeyEntry.Label,
-					Model:    cand.TargetModel,
-					Status:   200,
-					Millis:   tryElapsed,
+					Attempt:     i + 1,
+					Provider:    cand.Provider.ID,
+					KeyID:       cand.KeyEntry.Label,
+					Model:       cand.TargetModel,
+					Status:      200,
+					Millis:      tryElapsed,
+					TTFTMillis:  tryTTFT,
+					RespHeaders: tryRespHeaders,
 				})
-				s.recordFinalTrace(traceID, reqModel, cand, tries, 200, tryElapsed, clientStream)
+				s.recordFinalTrace(types.RequestTrace{
+					ID:                 traceID,
+					Timestamp:          time.Now().Unix(),
+					Mode:               "agent",
+					Endpoint:           endpoint,
+					ReqModel:           reqModel,
+					ServedModel:        cand.TargetModel,
+					WinnerProvider:     cand.Provider.ID,
+					WinnerKey:          cand.KeyEntry.Label,
+					Status:             200,
+					Stream:             clientStream,
+					InTokens:           usageTracker.InTokens,
+					OutTokens:          usageTracker.OutTokens,
+					CacheReadTokens:    usageTracker.CacheReadTokens,
+					CacheWriteTokens:   usageTracker.CacheWriteTokens,
+					CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+					ReasoningTokens:    usageTracker.ReasoningTokens,
+					StopReason:         usageTracker.StopReason,
+					TTFTMillis:         ttftMillis,
+					FlowMillis:         0,
+					OwnMillis:          ownMillis,
+					QueuedMillis:       queuedMillis,
+					SentMillis:         sentMillis,
+					TotalMillis:        totalMillis,
+					UpBytes:            len(mutatedBody),
+					DownBytes:          len(aggBytes),
+					ReqHeaders:         reqHeaders,
+					Tries:              tries,
+				})
 				return nil
 			}
 
@@ -488,38 +696,110 @@ func (s *Scheduler) Dispatch(
 				flusher.Flush()
 			}
 
+			// Stream Filter for <thought> tags
+			var streamFilter *adapters.ThoughtStreamFilter
+			if cand.Provider != nil && cand.Provider.AdapterRules != nil {
+				streamFilter = adapters.NewStreamFilterFromRules(cand.Provider.AdapterRules)
+			}
+
+			// Real-Time SSE Usage & StopReason Tracker
+			usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
+
+			downBytes := 0
 			// Pipe stream
 			buf := make([]byte, 32*1024)
 			for {
 				n, readErr := peekRes.CombinedBody.Read(buf)
 				if n > 0 {
-					_, _ = w.Write(buf[:n])
-					if hasFlusher {
-						flusher.Flush()
+					rawChunk := buf[:n]
+					usageTracker.FeedChunk(rawChunk)
+
+					writeBytes := rawChunk
+					if streamFilter != nil {
+						writeBytes = streamFilter.FilterChunk(rawChunk)
+					}
+
+					if len(writeBytes) > 0 {
+						downBytes += len(writeBytes)
+						_, _ = w.Write(writeBytes)
+						if hasFlusher {
+							flusher.Flush()
+						}
 					}
 				}
 				if readErr != nil {
 					break
 				}
 			}
+			if streamFilter != nil {
+				flushBytes := streamFilter.Flush()
+				if len(flushBytes) > 0 {
+					downBytes += len(flushBytes)
+					_, _ = w.Write(flushBytes)
+					if hasFlusher {
+						flusher.Flush()
+					}
+				}
+			}
 			resp.Body.Close()
+			rel()
+
+			usageTracker.Finish()
+
+			flowMillis := usageTracker.FlowMillis
+			totalMillis := time.Since(reqStart).Milliseconds()
+			ownMillis := totalMillis - (sentMillis + flowMillis)
+			if ownMillis < 0 {
+				ownMillis = 0
+			}
 
 			s.updateStickyKey(route, cand)
 			tries = append(tries, types.Try{
-				Attempt:  i + 1,
-				Provider: cand.Provider.ID,
-				KeyID:    cand.KeyEntry.Label,
-				Model:    cand.TargetModel,
-				Status:   200,
-				Millis:   tryElapsed,
+				Attempt:     i + 1,
+				Provider:    cand.Provider.ID,
+				KeyID:       cand.KeyEntry.Label,
+				Model:       cand.TargetModel,
+				Status:      200,
+				Millis:      time.Since(tryStart).Milliseconds(),
+				TTFTMillis:  tryTTFT,
+				RespHeaders: tryRespHeaders,
 			})
-			s.recordFinalTrace(traceID, reqModel, cand, tries, 200, tryElapsed, clientStream)
+			s.recordFinalTrace(types.RequestTrace{
+				ID:                 traceID,
+				Timestamp:          time.Now().Unix(),
+				Mode:               "agent",
+				Endpoint:           endpoint,
+				ReqModel:           reqModel,
+				ServedModel:        cand.TargetModel,
+				WinnerProvider:     cand.Provider.ID,
+				WinnerKey:          cand.KeyEntry.Label,
+				Status:             200,
+				Stream:             clientStream,
+				InTokens:           usageTracker.InTokens,
+				OutTokens:          usageTracker.OutTokens,
+				CacheReadTokens:    usageTracker.CacheReadTokens,
+				CacheWriteTokens:   usageTracker.CacheWriteTokens,
+				CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+				ReasoningTokens:    usageTracker.ReasoningTokens,
+				StopReason:         usageTracker.StopReason,
+				TTFTMillis:         ttftMillis,
+				FlowMillis:         flowMillis,
+				OwnMillis:          ownMillis,
+				QueuedMillis:       queuedMillis,
+				SentMillis:         sentMillis,
+				TotalMillis:        totalMillis,
+				UpBytes:            len(mutatedBody),
+				DownBytes:          downBytes,
+				ReqHeaders:         reqHeaders,
+				Tries:              tries,
+			})
 			return nil
 		}
 
 		// Case B: Non-streaming request
 		respBody, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		rel()
 		if readErr != nil {
 			continue
 		}
@@ -533,16 +813,58 @@ func (s *Scheduler) Dispatch(
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(respBody)
 
+		usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
+		var respMap map[string]any
+		if json.Unmarshal(respBody, &respMap) == nil {
+			usageTracker.ParseJSON(respMap)
+		}
+		usageTracker.Finish()
+
 		s.updateStickyKey(route, cand)
+		totalMillis := time.Since(reqStart).Milliseconds()
+		ownMillis := totalMillis - (sentMillis + tryElapsed)
+		if ownMillis < 0 {
+			ownMillis = 0
+		}
 		tries = append(tries, types.Try{
-			Attempt:  i + 1,
-			Provider: cand.Provider.ID,
-			KeyID:    cand.KeyEntry.Label,
-			Model:    cand.TargetModel,
-			Status:   200,
-			Millis:   tryElapsed,
+			Attempt:     i + 1,
+			Provider:    cand.Provider.ID,
+			KeyID:       cand.KeyEntry.Label,
+			Model:       cand.TargetModel,
+			Status:      200,
+			Millis:      tryElapsed,
+			TTFTMillis:  tryElapsed,
+			RespHeaders: tryRespHeaders,
 		})
-		s.recordFinalTrace(traceID, reqModel, cand, tries, 200, tryElapsed, clientStream)
+		s.recordFinalTrace(types.RequestTrace{
+			ID:                 traceID,
+			Timestamp:          time.Now().Unix(),
+			Mode:               "agent",
+			Endpoint:           endpoint,
+			ReqModel:           reqModel,
+			ServedModel:        cand.TargetModel,
+			WinnerProvider:     cand.Provider.ID,
+			WinnerKey:          cand.KeyEntry.Label,
+			Status:             200,
+			Stream:             clientStream,
+			InTokens:           usageTracker.InTokens,
+			OutTokens:          usageTracker.OutTokens,
+			CacheReadTokens:    usageTracker.CacheReadTokens,
+			CacheWriteTokens:   usageTracker.CacheWriteTokens,
+			CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+			ReasoningTokens:    usageTracker.ReasoningTokens,
+			StopReason:         usageTracker.StopReason,
+			TTFTMillis:         tryElapsed,
+			FlowMillis:         0,
+			OwnMillis:          ownMillis,
+			QueuedMillis:       queuedMillis,
+			SentMillis:         sentMillis,
+			TotalMillis:        totalMillis,
+			UpBytes:            len(mutatedBody),
+			DownBytes:          len(respBody),
+			ReqHeaders:         reqHeaders,
+			Tries:              tries,
+		})
 		return nil
 	}
 
@@ -574,6 +896,19 @@ func (s *Scheduler) Dispatch(
 			"type":    "upstream_error",
 		},
 	})
+
+	s.recordFinalTrace(types.RequestTrace{
+		ID:          traceID,
+		Timestamp:   time.Now().Unix(),
+		Mode:        "agent",
+		Endpoint:    endpoint,
+		ReqModel:    reqModel,
+		Status:      status,
+		Stream:      clientStream,
+		TotalMillis: time.Since(reqStart).Milliseconds(),
+		ReqHeaders:  reqHeaders,
+		Tries:       tries,
+	})
 	return ErrAllRetriesExhausted
 }
 
@@ -583,39 +918,8 @@ func (s *Scheduler) updateStickyKey(route *types.AgentModelRoute, cand *Candidat
 	}
 }
 
-func (s *Scheduler) recordFinalTrace(
-	traceID string,
-	reqModel string,
-	cand *CandidateKey,
-	tries []types.Try,
-	status int,
-	elapsed int64,
-	stream bool,
-) {
-	if s.obsSink == nil {
-		return
+func (s *Scheduler) recordFinalTrace(trace types.RequestTrace) {
+	if s.obsSink != nil {
+		s.obsSink.RecordRequest(trace)
 	}
-	served := ""
-	winnerProv := ""
-	winnerKey := ""
-	if cand != nil {
-		served = cand.TargetModel
-		winnerProv = cand.Provider.ID
-		winnerKey = cand.KeyEntry.Label
-	}
-
-	s.obsSink.RecordRequest(types.RequestTrace{
-		ID:             traceID,
-		Timestamp:      time.Now().Unix(),
-		Mode:           "agent",
-		Endpoint:       "/v1/chat/completions",
-		ReqModel:       reqModel,
-		ServedModel:    served,
-		WinnerProvider: winnerProv,
-		WinnerKey:      winnerKey,
-		Status:         status,
-		Stream:         stream,
-		TotalMillis:    elapsed,
-		Tries:          tries,
-	})
 }
