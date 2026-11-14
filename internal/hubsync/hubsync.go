@@ -205,8 +205,8 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 		var env struct {
 			OK            bool            `json:"ok"`
 			ConfigVersion int64           `json:"config_version"`
-			LeaseUntil    string          `json:"lease_until"`
-			GraceUntil    string          `json:"grace_until"`
+			LeaseUntil    any             `json:"lease_until"`
+			GraceUntil    any             `json:"grace_until"`
 			LeaseTTL      int64           `json:"lease_ttl"`
 			GraceTTL      int64           `json:"grace_ttl"`
 			Payload       json.RawMessage `json:"payload"`
@@ -231,12 +231,12 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 		}
 
 		leaseHeader := resp.Header.Get("X-Lease-Until")
-		if leaseHeader == "" && env.LeaseUntil != "" {
-			leaseHeader = env.LeaseUntil
+		if leaseHeader == "" && env.LeaseUntil != nil {
+			leaseHeader = fmt.Sprint(env.LeaseUntil)
 		}
 		graceHeader := resp.Header.Get("X-Grace-Until")
-		if graceHeader == "" && env.GraceUntil != "" {
-			graceHeader = env.GraceUntil
+		if graceHeader == "" && env.GraceUntil != nil {
+			graceHeader = fmt.Sprint(env.GraceUntil)
 		}
 
 		leaseUntil := parseLeaseHeader(leaseHeader, DefaultLeaseDuration)
