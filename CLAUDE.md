@@ -4,15 +4,11 @@
 
 ---
 
-## 0. 主从 Agent 协作开发模式（最高调度准则）
+## 0. 开发工作流说明
 
-1. **主 Agent（总架构师与总验收官）职责**：
-   - 负责全局架构规划、规范文档维护、按 [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md) 拆解并下发无冲突子任务（`W0` ~ `W6`）；
-   - **主 Agent 不直接编写业务实现代码**，全部代码实现与单元/集成测试交由子代理（Subagents）执行；
-   - 待子代理完成开发与自测后，由主 Agent 负责**最终统一集成验证、契约审查与 G1~G6 门禁终审**。
-2. **子 Agent（代码与测试执行官）配置规范**：
-   - 调用 `invoke_subagent` 时，`TypeName: "self"` 默认指定 **`Model: "inherit"`**（继承当前主会话模型，如 **Gemini 4 Hydrogen**，避免回落到较慢的 `flash`；仅当工具底层约束如 `browser` 等必须指定时除外）；
-   - 每个子 Agent 严格限制在其分配的 `Workstream`（`W0`~`W6`）独占文件目录内编写代码并运行 `-race` 测试验证，严禁跨界修改其它 Workstream 的文件。
+- 本仓库取消强制“主从 Agent 编排”机制，恢复默认的标准开发与测试流程；
+- 如无特殊需要，由当前主会话直接负责设计、编码、测试与门禁验证（不再强制拆分子代理）；若按需使用并行工具或浏览器工具，均采用平台默认策略。
+- 模块接口与目录边界仍可参考 [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md) 中锁定的 `internal/types/types.go` 核心契约。
 
 ---
 
