@@ -11,7 +11,7 @@
    - **主 Agent 不直接编写业务实现代码**，全部代码实现与单元/集成测试交由子代理（Subagents）执行；
    - 待子代理完成开发与自测后，由主 Agent 负责**最终统一集成验证、契约审查与 G1~G6 门禁终审**。
 2. **子 Agent（代码与测试执行官）配置规范**：
-   - 调用 `invoke_subagent` 时，统一指定 **`Model: "flash"`（对应 Gemini Flash High 档位）** 与 `TypeName: "self"`；
+   - 调用 `invoke_subagent` 时，`TypeName: "self"` 默认指定 **`Model: "inherit"`**（继承当前主会话模型，如 **Gemini 4 Hydrogen**，避免回落到较慢的 `flash`；仅当工具底层约束如 `browser` 等必须指定时除外）；
    - 每个子 Agent 严格限制在其分配的 `Workstream`（`W0`~`W6`）独占文件目录内编写代码并运行 `-race` 测试验证，严禁跨界修改其它 Workstream 的文件。
 
 ---
