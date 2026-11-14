@@ -4,20 +4,12 @@
 
 ---
 
-## 0. 开发工作流说明
-
-- 本仓库取消强制“主从 Agent 编排”机制，恢复默认的标准开发与测试流程；
-- 如无特殊需要，由当前主会话直接负责设计、编码、测试与门禁验证（不再强制拆分子代理）；若按需使用并行工具或浏览器工具，均采用平台默认策略。
-- 模块接口与目录边界仍可参考 [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md) 中锁定的 `internal/types/types.go` 核心契约。
-
----
-
 ## 1. 冲突裁决优先级（最高铁律）
 
 当文档、注释或历史方案出现不一致时，严格按以下优先级裁决：
 
 1. **可执行契约与 Schema**：`internal/types/types.go` + `shared/config/settings.schema.json` + `shared/config/runtime-profiles.json` + `shared/contracts/*.json` + 自动化门禁测试（`tests/` & `go test ./...`）
-2. **多 Agent 协作与接口锁死蓝图**：[`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md)（定义了全局唯一 Go 结构体、跨包接口签名与 W0~W6 物理文件所有权边界，任何 Agent 开工前必读！）
+2. **核心接口与模块契约蓝图**：[`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md)（定义了全局唯一 Go 结构体、跨包接口签名与模块文件边界）
 3. **核心规范文档**：[`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md)、[`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md)、[`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md)、[`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md)、[`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md)、[`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md)
 4. **工程准则**：[`ARCHITECTURE_STANDARDS.md`](file:///Users/xk/Documents/llmproxy2/ARCHITECTURE_STANDARDS.md)
 5. **其它说明文档**：`README.md`、历史归档或旧草案
