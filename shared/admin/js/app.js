@@ -1437,7 +1437,7 @@
         <span class="form-label">API 密钥池 (${keys.length})</span>
         <div class="fields">
           <button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button>
-          <button class="btn btn--sm btn--primary" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
+          <button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
         </div>
       </div>
 

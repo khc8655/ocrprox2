@@ -4,6 +4,17 @@
 
 ---
 
+## [v20261115-04] - 2026-11-15
+
+### Fixed
+- **UI 单主按钮层级**：供应商折叠编辑区内的「OAuth 扫码登录」由 `btn--sm btn--primary` 降级为标准 `btn btn--sm`，消除同一编辑区内两个实心主按钮并存，恢复 `UI_DESIGN_SPEC.md` §6.2（`.btn--sm` 禁用于主操作）与 §6.3.1（每视图/编辑区最多 1 个 `.btn--primary`）。
+- 依据发布产物复测：provider 行展开态可见 `.btn--primary` 由 3 个（页头 + OAuth + 保存）收敛为 2 个，编辑区内仅保留「保存供应商配置」1 个主按钮。
+
+### Verified
+- 按 `docs/UI_DESIGN_SPEC.md` 全项视觉回归通过：零内联样式 `[style]`=0、零 `.drawer`、零左边框彩条、零 emoji、KHC 令牌 `#1664FF`/`#3B82F6`、`.btn/.input` 32px、`.btn--sm` 26px、checkbox 14×14、圆角 6px、20px 左基准线、375px 零横向溢出、双主题持久化、行内 `.editor` 展开无布局跳动、单文件 196,863 B ≤ 240 KB。
+
+---
+
 ## [v20261115-03] - 2026-11-15
 
 ### Added
