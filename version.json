@@ -1,14 +1,12 @@
 {
-  "version": "v20261114-03",
-  "semver": "2.1.0",
-  "release_date": "2026-11-14",
+  "version": "v20261115-01",
+  "semver": "2.1.1",
+  "release_date": "2026-11-15",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.1.0 — Magpie 供应商检测与余额引擎、极简 240KB Web 控制台、流式/OOM/持久化加固与 v1 全模态对齐",
+  "title": "LLMProxy2 (OCRProxy v2) 2.1.1 — 管理端防自锁与 429 契约修复、自动探测协议按钮恢复及密钥健康度账本修正",
   "changelog": [
-    "Go 流式与持久化加固：实现 key_bans.json 持久化封禁与服务重启无感加载，优化流式代理 OOM 有界缓冲区保护与 300s 预算优先流式 Peek",
-    "v1 协议与多模态全量对齐：支持 /v1/ocr 视觉多模态流水线与 20MB 超大图零拷贝并发处理，新增 <thought> 思维链实时流式分离器与 OpenAI 标准 SSE 尾包 usage 注入",
-    "Magpie 供应商智能引擎深度移植：实现 16+ 主流厂商自动嗅探检测、多币种实时余额查询、凭据健康度探测及模型列表自动纳管与定时刷新引擎",
-    "Magpie 极简单页 Web 控制台现代化升级：引入全套高精度 SVG 矢量图标集、Token 消耗直方图与 53 周活动热力图、KB 模式 4 大流水线可视化编辑器与网关客户端接入控制中心，严格遵循零内联样式与 <= 240KB 打包门禁",
-    "部署运维自动化升级：优化 deploy/install.sh 与 llmproxy-ctl CLI，增强自动架构检测、跨版本平滑升级与热重载，完善 EdgeOne Makers 与 VM 节点解耦演进"
+    "管理端自锁修复（P1）：无凭据请求不再计入防爆破失败阶梯；锁定期返回 429 Too Many Requests + Retry-After，未登录首屏不再预取 /api/config",
+    "供应商详情面板自动探测协议修复（P2）：补齐 btn_detect_ed_<id> 行内事件委托并回填归一化 Base URL",
+    "密钥健康度与体验加固（P3）：usage.jsonl 新增 try_failed 记录故障转移中失败的上游尝试，新建供应商 Key 改为 password 输入框，显式 IPv4 绑定消除误导性双栈 warn"
   ]
 }
