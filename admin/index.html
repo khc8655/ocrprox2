@@ -297,6 +297,7 @@ const res = await fetch(path, {
 headers,
 });
 if (res.status === 401) {
+HOST.setToken('');
 HOST.showLogin();
 }
 return res;

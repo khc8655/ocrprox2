@@ -219,6 +219,10 @@
       });
 
       if (res.status === 401) {
+        // Drop the stale credential: otherwise the 3s lane poll keeps retrying
+        // with a bad token, and 5 such hits put the admin IP into the 10-minute
+        // anti-bruteforce lockout — even for the correct password.
+        HOST.setToken('');
         HOST.showLogin();
       }
 
