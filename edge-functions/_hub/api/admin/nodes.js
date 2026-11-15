@@ -34,10 +34,9 @@ JSON.stringify({ ok: false, error: 'node_not_found' }),
 { status: 404, headers: { 'content-type': 'application/json' } }
 );
 }
-const status = res.ok ? 200 : (res.http_status === 401 ? 401 : 200);
 return new Response(
 JSON.stringify(res),
-{ status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+{ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
 );
 }
 if (method === 'GET' && !targetId) {

@@ -44,10 +44,11 @@ export async function handleNodesRequest(request, env, kv, params) {
         { status: 404, headers: { 'content-type': 'application/json' } }
       );
     }
-    const status = res.ok ? 200 : (res.http_status === 401 ? 401 : 200);
+    // Return HTTP 200 with structured node state even if the downstream node is revoked or offline,
+    // so the admin UI does not mistake a downstream 401 for an invalid ADMIN_PASSWORD session.
     return new Response(
       JSON.stringify(res),
-      { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+      { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
     );
   }
 

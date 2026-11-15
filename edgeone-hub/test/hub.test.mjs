@@ -1276,8 +1276,10 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
         const revokedPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token2), envWithEnc, mockKv);
         assert.strictEqual(revokedPull.status, 401);
         const stRevoked = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
+        assert.strictEqual(stRevoked.status, 200, 'Admin status proxy must return 200 JSON (not 401) when downstream node is disabled');
         const stRevokedBody = await stRevoked.json();
         assert.strictEqual(stRevokedBody.state, 'offline');
+        assert.strictEqual(stRevokedBody.http_status, 401);
       } finally {
         globalThis.fetch = origFetch;
       }
