@@ -100,12 +100,16 @@ function cleanJs(src) {
     .filter(line => line.length > 0)
     .join('\n');
 }
-const cleanIconsJs = cleanJs(iconsJs);
+const cleanIconsJs = cleanJs(iconsJs)
+  .replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '')
+  .replace(/<title>[^<]*<\/title>/g, '')
+  .replace(/\\"/g, "'");
 const cleanUsageJs = cleanJs(usageJs);
 const cleanHostJs = cleanJs(hostJs);
 const cleanAppJs = cleanJs(appJs);
 let bundledHtml = html
   .replace(/<!--[\s\S]*?-->/g, '')
+  .replace(/>\s+</g, '><')
   .split('\n')
   .map(line => line.trim())
   .filter(Boolean)
@@ -144,7 +148,8 @@ mkdirSync(edgeFuncDir, { recursive: true });
 
 let hubHtml = bundledHtml
   .replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>')
-  .replace(`<script>\n${cleanUsageJs}\n</script>`, '');
+  .replace(`<script>\n${cleanUsageJs}\n</script>`, '')
+  .replace(/<div id="fullOverviewBox" hidden>[\s\S]*?<\/section>/, '</section>');
 
 const safeHtml = hubHtml.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 
@@ -209,7 +214,7 @@ function syncDirectory(srcDir, destDir) {
       syncDirectory(srcPath, destPath);
     } else if (entry.isFile() && entry.name.endsWith('.js')) {
       const content = readFileSync(srcPath, 'utf8');
-      writeFileSync(destPath, content, 'utf8');
+      writeFileSync(destPath, entry.name === 'generated-presets.js' ? content : cleanJs(content), 'utf8');
     }
   }
 }
