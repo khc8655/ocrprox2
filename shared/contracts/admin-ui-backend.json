@@ -46,6 +46,8 @@
         "ok": "boolean",
         "_version": "integer",
         "providers": "object",
+        "search_providers": "object",
+        "search_selection": "object ({ search: string[], fetch: string })",
         "agent_models": "object",
         "settings": "object"
       }
@@ -61,6 +63,8 @@
       "request": {
         "_version": "integer",
         "providers": "object",
+        "search_providers": "object (optional)",
+        "search_selection": "object (optional, { search: string[], fetch: string })",
         "agent_models": "object",
         "settings": "object"
       },
@@ -100,8 +104,10 @@
         "grace_ttl": "integer",
         "scope": {
           "models": "array of strings",
-          "providers": "array of strings"
-        }
+          "providers": "array of strings",
+          "search_providers": "array of strings (optional, default ['*'])"
+        },
+        "status_url": "string (optional https/http URL)"
       },
       "response": {
         "ok": true,
@@ -138,6 +144,25 @@
       "roles": [
         "hub"
       ]
+    },
+    "nodes_status": {
+      "method": "GET",
+      "path": "/api/admin/nodes/:id/status",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "params": {
+        "refresh": "1 | true (optional, bypass 15s cache)"
+      },
+      "response": {
+        "ok": "boolean",
+        "state": "online | stale | offline",
+        "cached": "boolean",
+        "stale": "boolean",
+        "status": "object (optional node runtime status payload)",
+        "cached_status": "object (optional stale fallback payload)"
+      }
     },
     "node_config": {
       "method": "POST",

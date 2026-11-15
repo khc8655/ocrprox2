@@ -1,5 +1,53 @@
-import { generateNodeToken, hashToken, constantTimeCompare } from './crypto.js';
+import {
+generateNodeToken,
+hashToken,
+constantTimeCompare,
+encryptNodeToken,
+decryptNodeToken,
+resolveNodeEncryptSecret,
+} from './crypto.js';
+import { ConfigValidationError } from './config.js';
 export const NODES_KV_KEY = 'relay_nodes';
+const STATUS_CACHE_TTL_MS = 15_000;
+function sanitizeNode(n) {
+const copy = { ...n };
+delete copy.token_sha256;
+delete copy.node_token_enc;
+copy.has_status_url = Boolean(n.status_url);
+const scope = n.scope && typeof n.scope === 'object' ? n.scope : {};
+copy.scope = {
+models: Array.isArray(scope.models) ? scope.models : ['*'],
+providers: Array.isArray(scope.providers) ? scope.providers : ['*'],
+search_providers: Array.isArray(scope.search_providers) ? scope.search_providers : ['*'],
+};
+return copy;
+}
+function sanitizeStatusUrl(raw) {
+if (raw === undefined || raw === null) return '';
+const trimmed = String(raw).trim();
+if (!trimmed) return '';
+let parsed;
+try {
+parsed = new URL(trimmed);
+} catch (_) {
+throw new ConfigValidationError('status_url must be a valid http(s) URL');
+}
+if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+throw new ConfigValidationError('status_url must use http or https');
+}
+if (parsed.username || parsed.password) {
+throw new ConfigValidationError('status_url must not contain credentials');
+}
+return trimmed.replace(/\/+$/, '');
+}
+function buildBootstrapEnv(node, rawToken, hubUrl) {
+const providers = Array.isArray(node.scope?.providers) ? node.scope.providers : ['*'];
+const searchProviders = Array.isArray(node.scope?.search_providers) ? node.scope.search_providers : ['*'];
+if (providers.length === 0 && searchProviders.length > 0) {
+return `HUB_URL=${hubUrl} NODE_TOKEN=${rawToken}`;
+}
+return `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
+}
 export async function loadNodes(kv) {
 let raw = null;
 if (kv) {
@@ -30,17 +78,16 @@ await kv.setItem(NODES_KV_KEY, serialized);
 }
 export async function listNodes(kv) {
 const nodes = await loadNodes(kv);
-return nodes.map((n) => {
-const copy = { ...n };
-delete copy.token_sha256;
-return copy;
-});
+return nodes.map(sanitizeNode);
 }
-export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') {
+export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', env = {}) {
 const nodes = await loadNodes(kv);
 const rawToken = generateNodeToken();
 const tokenSha = hashToken(rawToken);
 const tokenPrefix = rawToken.slice(0, 17) + '...';
+const encSecret = resolveNodeEncryptSecret(env);
+const tokenEnc = await encryptNodeToken(rawToken, encSecret);
+const statusUrl = sanitizeStatusUrl(params.status_url);
 const nodeId = `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 const nowIso = new Date().toISOString();
 const node = {
@@ -50,27 +97,30 @@ role: params.role === 'full' ? 'full' : 'lite',
 enabled: true,
 token_prefix: tokenPrefix,
 token_sha256: tokenSha,
+node_token_enc: tokenEnc,
+status_url: statusUrl,
 lease_ttl: Number(params.lease_ttl) || 86400,
 grace_ttl: Number(params.grace_ttl) || 3600,
 scope: {
 models: Array.isArray(params.scope?.models) ? params.scope.models : ['*'],
 providers: Array.isArray(params.scope?.providers) ? params.scope.providers : ['*'],
+search_providers: Array.isArray(params.scope?.search_providers)
+? params.scope.search_providers
+: ['*'],
 },
 created_at: nowIso,
 last_seen: null,
 last_ip: null,
 last_config_version: 0,
-last_binary_version: 'v2.1.2',
+last_binary_version: 'v2.1.3',
 sync_count: 0,
 hit_304_count: 0,
 };
 nodes.push(node);
 await saveNodes(nodes, kv);
-const bootstrapEnv = `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
-const publicNode = { ...node };
-delete publicNode.token_sha256;
+const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
 return {
-node: publicNode,
+node: sanitizeNode(node),
 node_token: rawToken,
 bootstrap_env: bootstrapEnv,
 };
@@ -81,22 +131,32 @@ const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
 const node = nodes[idx];
 if (patch.name !== undefined) node.name = String(patch.name);
-if (patch.enabled !== undefined) node.enabled = Boolean(patch.enabled);
+if (patch.enabled !== undefined) {
+node.enabled = Boolean(patch.enabled);
+if (!node.enabled) {
+delete node.cached_status;
+}
+}
 if (patch.lease_ttl !== undefined) node.lease_ttl = Number(patch.lease_ttl);
 if (patch.grace_ttl !== undefined) node.grace_ttl = Number(patch.grace_ttl);
+if (patch.status_url !== undefined) {
+node.status_url = sanitizeStatusUrl(patch.status_url);
+}
 if (patch.scope !== undefined && typeof patch.scope === 'object') {
+const existingScope = node.scope && typeof node.scope === 'object' ? node.scope : {};
 node.scope = {
-models: Array.isArray(patch.scope.models) ? patch.scope.models : node.scope.models,
-providers: Array.isArray(patch.scope.providers) ? patch.scope.providers : node.scope.providers,
+models: Array.isArray(patch.scope.models) ? patch.scope.models : (existingScope.models || ['*']),
+providers: Array.isArray(patch.scope.providers) ? patch.scope.providers : (existingScope.providers || ['*']),
+search_providers: Array.isArray(patch.scope.search_providers)
+? patch.scope.search_providers
+: (existingScope.search_providers || ['*']),
 };
 }
 nodes[idx] = node;
 await saveNodes(nodes, kv);
-const publicNode = { ...node };
-delete publicNode.token_sha256;
-return publicNode;
+return sanitizeNode(node);
 }
-export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com') {
+export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', env = {}) {
 const nodes = await loadNodes(kv);
 const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
@@ -104,11 +164,14 @@ const node = nodes[idx];
 const rawToken = generateNodeToken();
 const tokenSha = hashToken(rawToken);
 const tokenPrefix = rawToken.slice(0, 17) + '...';
+const tokenEnc = await encryptNodeToken(rawToken, resolveNodeEncryptSecret(env));
 node.token_sha256 = tokenSha;
 node.token_prefix = tokenPrefix;
+node.node_token_enc = tokenEnc;
+delete node.cached_status;
 nodes[idx] = node;
 await saveNodes(nodes, kv);
-const bootstrapEnv = `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
+const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
 return {
 node_token: rawToken,
 bootstrap_env: bootstrapEnv,
@@ -157,4 +220,129 @@ if (lastTime > 0 && meta?.is304 && now - lastTime < 60_000) return;
 node.last_seen = new Date(now).toISOString();
 if (configVer) node.last_config_version = configVer;
 await saveNodes(nodes, kv);
+}
+export async function fetchNodeStatus(nodeId, kv, env = {}, options = {}) {
+const nodes = await loadNodes(kv);
+const idx = nodes.findIndex((n) => n.id === nodeId);
+if (idx === -1) return null;
+const node = nodes[idx];
+if (node.enabled === false) {
+return {
+ok: false,
+state: 'offline',
+stale: false,
+http_status: 401,
+error: 'node_revoked_or_invalid',
+last_seen: node.last_status_ok_at || node.last_seen || null,
+};
+}
+if (!node.status_url) {
+return {
+ok: false,
+state: 'offline',
+stale: false,
+error: 'status_url_not_configured',
+last_seen: node.last_status_ok_at || node.last_seen || null,
+};
+}
+const nowMs = Date.now();
+const cached = node.cached_status;
+if (!options.refresh && cached && cached.fetched_at_ms && nowMs - cached.fetched_at_ms < STATUS_CACHE_TTL_MS) {
+return {
+ok: true,
+state: 'online',
+stale: false,
+cached: true,
+fetched_at: cached.fetched_at,
+status: cached.status,
+last_seen: node.last_status_ok_at || node.last_seen || null,
+};
+}
+let rawToken = '';
+try {
+rawToken = await decryptNodeToken(node.node_token_enc, resolveNodeEncryptSecret(env));
+} catch (_) {
+rawToken = '';
+}
+if (!rawToken) {
+return {
+ok: false,
+state: cached ? 'stale' : 'offline',
+stale: Boolean(cached),
+error: 'node_token_unavailable_rotate_required',
+last_seen: node.last_status_ok_at || node.last_seen || null,
+cached_status: cached ? cached.status : null,
+};
+}
+const doFetch = options.fetchImpl || globalThis.fetch;
+if (typeof doFetch !== 'function') {
+return {
+ok: false,
+state: cached ? 'stale' : 'offline',
+stale: Boolean(cached),
+error: 'fetch_unavailable',
+last_seen: node.last_status_ok_at || node.last_seen || null,
+cached_status: cached ? cached.status : null,
+};
+}
+const cleanBase = node.status_url.replace(/\/+$/, '');
+const targetUrl = cleanBase.endsWith('/node/status') ? cleanBase : `${cleanBase}/node/status`;
+try {
+const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+const timer = controller ? setTimeout(() => controller.abort(), 4500) : null;
+let resp;
+try {
+resp = await doFetch(targetUrl, {
+method: 'GET',
+headers: {
+Authorization: `Bearer ${rawToken}`,
+Accept: 'application/json',
+},
+signal: controller ? controller.signal : undefined,
+});
+} finally {
+if (timer) clearTimeout(timer);
+}
+if (!resp.ok) {
+const errCode = resp.status === 401 ? 'node_revoked_or_invalid' : `upstream_http_${resp.status}`;
+return {
+ok: false,
+state: cached ? 'stale' : 'offline',
+stale: Boolean(cached),
+http_status: resp.status,
+error: errCode,
+last_seen: node.last_status_ok_at || node.last_seen || null,
+cached_status: cached ? cached.status : null,
+};
+}
+const data = await resp.json();
+const fetchedAt = new Date(nowMs).toISOString();
+node.last_status_ok_at = fetchedAt;
+node.cached_status = {
+fetched_at: fetchedAt,
+fetched_at_ms: nowMs,
+status: data,
+};
+nodes[idx] = node;
+await saveNodes(nodes, kv);
+return {
+ok: true,
+state: 'online',
+stale: false,
+cached: false,
+fetched_at: fetchedAt,
+status: data,
+last_seen: fetchedAt,
+};
+} catch (err) {
+const safeMsg = String(err?.message || 'unreachable').replace(rawToken, '***');
+return {
+ok: false,
+state: cached ? 'stale' : 'offline',
+stale: Boolean(cached),
+error: safeMsg || 'unreachable',
+last_seen: node.last_status_ok_at || node.last_seen || null,
+cached_status: cached ? cached.status : null,
+};
+}
 }

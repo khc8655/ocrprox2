@@ -148,6 +148,61 @@ type CandidateKey struct {
 	KeyTag      string // e.g. "minimax:hk-01"
 }
 
+// DescribeRouteCandidates explains, per configured candidate, why it cannot be
+// used. Attached to the 503 body so "no candidate keys available" is diagnosable
+// (typically after disabling/removing a key that a route still references).
+func DescribeRouteCandidates(route *types.AgentModelRoute, providers map[string]*types.ProviderConfig) []string {
+	var notes []string
+	for _, cand := range route.Candidates {
+		label := cand.KeyLabel
+		if label == "" {
+			label = "*"
+		}
+		desc := cand.Provider + "/" + label
+		if !cand.Enabled {
+			notes = append(notes, desc+" (candidate disabled)")
+			continue
+		}
+		p, ok := providers[cand.Provider]
+		if !ok {
+			notes = append(notes, desc+" (provider missing)")
+			continue
+		}
+		if !p.Enabled {
+			notes = append(notes, desc+" (provider disabled)")
+			continue
+		}
+		if cand.KeyLabel == "" {
+			usable := false
+			for _, k := range p.APIKeys {
+				if k != nil && k.Enabled && k.Key != "" {
+					usable = true
+					break
+				}
+			}
+			if !usable {
+				notes = append(notes, desc+" (no enabled key)")
+			}
+			continue
+		}
+		found, usable := false, false
+		for _, k := range p.APIKeys {
+			if k != nil && k.Label == cand.KeyLabel {
+				found = true
+				usable = k.Enabled && k.Key != ""
+				break
+			}
+		}
+		switch {
+		case !found:
+			notes = append(notes, desc+" (key not found)")
+		case !usable:
+			notes = append(notes, desc+" (key disabled)")
+		}
+	}
+	return notes
+}
+
 // OrderCandidates sorts candidate keys according to route strategy.
 func (s *Scheduler) OrderCandidates(
 	route *types.AgentModelRoute,
@@ -314,11 +369,15 @@ func (s *Scheduler) Dispatch(
 
 	candidates := s.OrderCandidates(route, snap.Config.Providers, reqModel)
 	if len(candidates) == 0 {
+		msg := fmt.Sprintf("no candidate keys available for model %q", reqModel)
+		if notes := DescribeRouteCandidates(route, snap.Config.Providers); len(notes) > 0 {
+			msg += ": " + strings.Join(notes, "; ")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{
-				"message": "no candidate keys available for model",
+				"message": msg,
 				"type":    "service_unavailable",
 			},
 		})
@@ -339,8 +398,11 @@ func (s *Scheduler) Dispatch(
 		durNetwork = 15 * time.Second
 	}
 	durAuth := time.Duration(settings.CooldownAuthErrorSec) * time.Second
-	if durAuth == 0 {
-		durAuth = 86400 * time.Second
+	// 0 explicitly disables the 401/402/403 key ban; a negative value is clamped
+	// to the same meaning. Schema default (86400) supplies the 24h ban, so an
+	// unset field still bans — only an explicit 0 opts out.
+	if durAuth < 0 {
+		durAuth = 0
 	}
 
 	firstByteSec := settings.AgentFirstByteTimeoutSec
@@ -354,6 +416,10 @@ func (s *Scheduler) Dispatch(
 	var attempts []TryAttempt
 	var lastStatus int
 	var lastErrSnippet string
+	// Why candidates were skipped before any upstream attempt. Surfaced when every
+	// candidate is unavailable so the client gets a diagnosable error instead of
+	// an empty "all candidate keys failed: ".
+	var skips []string
 
 	for i, cand := range candidates {
 		// Check budget
@@ -373,11 +439,13 @@ func (s *Scheduler) Dispatch(
 		}
 		if rpmLimit > 0 && !s.rpmLimiter.TryAcquire(cand.KeyTag, rpmLimit) {
 			// Over quota! Skip key cleanly before dialing upstream
+			skips = append(skips, fmt.Sprintf("%s (RPM limit)", keyID))
 			continue
 		}
 
 		// 2. Check cooldown
 		if s.cooldowns.IsCooledDown(cand.Provider.ID, cand.TargetModel, keyID) {
+			skips = append(skips, fmt.Sprintf("%s (cooling down %s)", keyID, s.cooldowns.RemainingFor(cand.Provider.ID, cand.TargetModel, keyID)))
 			continue
 		}
 
@@ -889,10 +957,14 @@ func (s *Scheduler) Dispatch(
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
+	reason := lastErrSnippet
+	if reason == "" && len(skips) > 0 {
+		reason = "skipped: " + strings.Join(skips, "; ")
+	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{
-			"message": fmt.Sprintf("all candidate keys failed: %s", lastErrSnippet),
+			"message": fmt.Sprintf("all candidate keys failed: %s", reason),
 			"type":    "upstream_error",
 		},
 	})

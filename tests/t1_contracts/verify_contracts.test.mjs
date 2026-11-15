@@ -415,6 +415,58 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const modelCandidates = projected.agent_models['test-model'].candidates;
       assert.strictEqual(modelCandidates.length, 1, 'Candidates referencing local providers must be stripped');
       assert.strictEqual(modelCandidates[0].provider, 'hub_public');
+
+      // Search providers projection + scope + zero-leak checks
+      const searchConfig = {
+        ...testConfig,
+        search_providers: {
+          brave: {
+            id: 'brave',
+            name: 'Brave Search',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search'],
+            adapter: 'brave',
+            api_keys: [
+              { id: 'k1', label: 'k1', key: 'BSA-vault-secret', enabled: true, origin: 'vault' },
+              { id: 'k_loc', label: 'k_loc', key: 'BSA-local-leak', enabled: true, origin: 'local' },
+            ],
+          },
+          tavily: {
+            id: 'tavily',
+            name: 'Tavily',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search', 'fetch'],
+            adapter: 'tavily',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'tvly-vault-secret', enabled: true, origin: 'vault' }],
+          },
+          local_only: {
+            id: 'local_only',
+            name: 'Local Private Search',
+            enabled: true,
+            origin: 'local',
+            capabilities: ['search', 'fetch'],
+            adapter: 'jina',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'jina-local-secret', enabled: true, origin: 'local' }],
+          },
+        },
+        search_selection: {
+          search: ['brave', 'tavily', 'local_only'],
+          fetch: 'local_only',
+        },
+      };
+
+      const mcpNode = {
+        id: 'node_mcp',
+        scope: { providers: [], models: [], search_providers: ['brave'] },
+      };
+      const mcpProjected = projectConfigForNode(mcpNode, searchConfig, {});
+      assert.deepStrictEqual(Object.keys(mcpProjected.providers), [], 'Empty LLM scope must project zero LLM providers');
+      assert.deepStrictEqual(Object.keys(mcpProjected.search_providers), ['brave'], 'Only scoped vault search provider may project');
+      assert.strictEqual(mcpProjected.search_providers.brave.api_keys.length, 1, 'origin=local search key must be stripped');
+      assert.strictEqual(mcpProjected.search_providers.brave.api_keys[0].key, 'BSA-vault-secret');
+      assert.deepStrictEqual(mcpProjected.search_selection, { search: ['brave'], fetch: '' }, 'Selection must be filtered to projected search providers');
     });
 
     test('pure Web Standard gate: edgeone-hub/lib, edgeone-hub/api, and edge-functions have zero node: imports and zero Buffer', () => {

@@ -1117,6 +1117,49 @@ input[type="checkbox"] {
   color: var(--khc-text-1);
 }
 
+/* Check / Radio Chip Group (Search Capabilities & Selection) */
+.check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+}
+
+.check-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  background-color: var(--khc-surface-card);
+  font-size: 12px;
+  color: var(--khc-text-1);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--khc-duration-fast) var(--khc-ease-out),
+              background-color var(--khc-duration-fast) var(--khc-ease-out);
+}
+
+.check-chip:hover {
+  border-color: var(--khc-border-2);
+}
+
+.check-chip input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.textarea--json {
+  min-height: 84px;
+  font-family: var(--khc-font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 /* Utilities */
 .flex-1 { flex: 1; min-width: 0; }
 .flex-end { display: flex; justify-content: flex-end; align-items: flex-end; }

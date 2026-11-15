@@ -40,8 +40,10 @@
       "grace_ttl": 3600,
       "scope": {
         "models": ["*"],
-        "providers": ["minimax", "deepseek", "openrouter"]
+        "providers": ["minimax", "deepseek", "openrouter"],
+        "search_providers": ["brave", "tavily"]
       },
+      "status_url": "https://search-mcp.example.com/admin/status",
       "created_at": "2026-11-08T08:00:00Z",
       "last_seen": "2026-11-08T08:30:12Z",
       "last_config_version": 137,
@@ -76,9 +78,10 @@
 ```
 
 ### 2.3 注销/吊销、恢复、轮换与删除节点
-- **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
+- **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600, "status_url": "..." }`
 - **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`，旧 Token 立即失效。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
+- **按需拉取节点状态**：`GET /api/admin/nodes/:id/status[?refresh=1]` → Hub 使用内部解密的 `node_token` 向节点 `status_url` 拉取运行时状态（15 秒 KV 缓存、4.5 秒超时，不向浏览器暴露 `node_token` / `token_sha256`）。
 
 ---
 

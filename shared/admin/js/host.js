@@ -38,10 +38,9 @@
     },
   }[hostKind] || capabilities.full;
 
-  function normalizeImportedConfig(raw, defaultOrigin) {
-    const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
-    const providers = {};
-    for (const [pId, p] of Object.entries(src.providers || {})) {
+  function normalizeProviderMap(rawMap, defaultOrigin) {
+    const out = {};
+    for (const [pId, p] of Object.entries(rawMap || {})) {
       if (!p || typeof p !== 'object') continue;
       let apiKeys = Array.isArray(p.api_keys) ? p.api_keys.map((k) => ({ ...k })) : [];
       if (apiKeys.length === 0 && p.keys && typeof p.keys === 'object') {
@@ -53,15 +52,27 @@
           origin: (typeof secret === 'object' && secret.origin) || p.origin || defaultOrigin || 'vault',
         }));
       }
-      providers[pId] = {
+      out[pId] = {
         ...p,
         name: p.name || pId,
         enabled: p.enabled !== false,
         origin: p.origin || defaultOrigin || 'vault',
         api_keys: apiKeys,
       };
-      delete providers[pId].keys;
+      delete out[pId].keys;
     }
+    return out;
+  }
+
+  function normalizeImportedConfig(raw, defaultOrigin) {
+    const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
+    const providers = normalizeProviderMap(src.providers, defaultOrigin);
+    const searchProviders = normalizeProviderMap(src.search_providers, defaultOrigin);
+    const rawSel = src.search_selection && typeof src.search_selection === 'object' ? src.search_selection : {};
+    const searchSelection = {
+      search: Array.isArray(rawSel.search) ? rawSel.search.map((s) => String(s || '').trim()).filter(Boolean) : [],
+      fetch: typeof rawSel.fetch === 'string' ? rawSel.fetch.trim() : '',
+    };
 
     const agentModels = {};
     for (const [mName, m] of Object.entries(src.agent_models || {})) {
@@ -99,6 +110,8 @@
 
     return {
       providers,
+      search_providers: searchProviders,
+      search_selection: searchSelection,
       agent_models: agentModels,
       kb_models: kbModels,
       settings: src.settings && typeof src.settings === 'object' ? { ...src.settings } : {},
@@ -257,6 +270,12 @@
       const res = await HOST.request(`/api/admin/nodes/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
+      return res.json();
+    },
+
+    async getNodeStatus(id, refresh = false) {
+      const qs = refresh ? '?refresh=1' : '';
+      const res = await HOST.request(`/api/admin/nodes/${encodeURIComponent(id)}/status${qs}`);
       return res.json();
     },
 
@@ -423,6 +442,8 @@
           ? {
               _version: cur?._version || 1,
               providers: norm.providers,
+              search_providers: norm.search_providers,
+              search_selection: norm.search_selection,
               agent_models: norm.agent_models,
               kb_models: norm.kb_models,
               settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
@@ -430,6 +451,10 @@
           : {
               ...cur,
               providers: { ...(cur?.providers || {}), ...norm.providers },
+              search_providers: { ...(cur?.search_providers || {}), ...norm.search_providers },
+              search_selection: norm.search_selection?.search?.length || norm.search_selection?.fetch
+                ? norm.search_selection
+                : (cur?.search_selection || { search: [], fetch: '' }),
               agent_models: { ...(cur?.agent_models || {}), ...norm.agent_models },
               kb_models: { ...(cur?.kb_models || {}), ...norm.kb_models },
               settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },

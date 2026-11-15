@@ -979,4 +979,308 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.match(etag, /^"[0-9a-f]{16}"$/, 'ETag must be 16 hex chars wrapped in quotes');
     });
   });
+
+  describe('10. Search Providers Control Plane, Kernel Guard & Validation (§8.1/§8.3)', () => {
+    let mockKv;
+
+    beforeEach(() => {
+      mockKv = new MockKV();
+    });
+
+    test('Backward compatibility: legacy config without search_* loads safely', async () => {
+      await mockKv.put(CONFIG_KV_KEY, JSON.stringify({
+        _version: 5,
+        providers: { openai: { name: 'OpenAI', enabled: true, api_keys: [] } },
+        agent_models: {},
+        settings: {},
+      }));
+      const res = await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, mockKv);
+      assert.strictEqual(res.status, 200);
+      const data = await res.json();
+      assert.deepStrictEqual(data.search_providers, {});
+      assert.deepStrictEqual(data.search_selection, { search: [], fetch: '' });
+    });
+
+    test('Validation rejects malformed search_providers/search_selection with HTTP 400', async () => {
+      const badCases = [
+        {
+          _version: 1,
+          providers: {},
+          search_providers: { 'Bad_ID': { id: 'Bad_ID', name: 'Bad', capabilities: ['search'], adapter: 'brave' } },
+        },
+        {
+          _version: 1,
+          providers: {},
+          search_providers: { custom: { id: 'custom', name: 'NoSpec', capabilities: ['search'] } },
+        },
+        {
+          _version: 1,
+          providers: {},
+          search_providers: {
+            evil: {
+              id: 'evil',
+              name: 'Header Inject',
+              capabilities: ['search'],
+              base_url: 'https://api.example.com',
+              request: { method: 'POST', path: '/search', headers: { 'X-Bad': 'a\r\nb' } },
+            },
+          },
+        },
+        {
+          _version: 1,
+          providers: {},
+          search_providers: {
+            brave: { id: 'brave', name: 'Brave', capabilities: ['search'], adapter: 'brave', api_keys: [] },
+          },
+          search_selection: { search: ['brave'], fetch: 'brave' }, // fetch capability mismatch!
+        },
+        {
+          _version: 1,
+          providers: {},
+          search_providers: {
+            brave: {
+              id: 'brave',
+              name: 'Brave',
+              capabilities: ['search'],
+              adapter: 'brave',
+              api_keys: [{ id: 'k1', label: 'k1', key: '   ', enabled: true }],
+            },
+          },
+        },
+      ];
+
+      for (const payload of badCases) {
+        const res = await handleConfigRequest(makeAdminReq('POST', '/api/config', payload), TEST_ENV, mockKv);
+        assert.strictEqual(res.status, 400, `Expected 400 for payload ${JSON.stringify(payload)}`);
+      }
+    });
+
+    test('Masking, Kernel Guard restoration & empty-key draft provider persistence', async () => {
+      // Save search provider with real secret + draft provider without keys
+      const createRes = await handleConfigRequest(makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {},
+        search_providers: {
+          brave: {
+            id: 'brave',
+            name: 'Brave Search',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search'],
+            adapter: 'brave',
+            base_url: 'https://api.search.brave.com',
+            timeout_ms: 15000,
+            api_keys: [{ id: 'k1', label: 'k1', key: 'BSA-super-real-secret-999', enabled: true, origin: 'vault' }],
+          },
+          'draft-custom': {
+            id: 'draft-custom',
+            name: 'Draft Custom',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search'],
+            base_url: 'https://search.custom.test',
+            request: { method: 'GET', path: '/q', query_param: 'q' },
+            response: { results_path: 'items', fields: { title: 't', url: 'u', snippet: 's' } },
+            api_keys: [],
+          },
+        },
+        search_selection: { search: ['brave', 'draft-custom'], fetch: '' },
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(createRes.status, 200);
+      const createdBody = await createRes.json();
+      const created = createdBody.config || createdBody;
+      assert.ok(created.search_providers.brave.api_keys[0].key.includes('●'), 'Returned key must be masked');
+
+      // Re-submit masked key via Kernel Guard
+      const updateRes = await handleConfigRequest(makeAdminReq('POST', '/api/config', {
+        _version: created._version || createdBody._version,
+        providers: {},
+        search_providers: {
+          ...created.search_providers,
+          brave: {
+            ...created.search_providers.brave,
+            timeout_ms: 12000,
+          },
+        },
+        search_selection: created.search_selection,
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(updateRes.status, 200);
+
+      // Verify stored KV still holds real plaintext key
+      const storedRaw = JSON.parse(await mockKv.get(CONFIG_KV_KEY));
+      assert.strictEqual(storedRaw.search_providers.brave.api_keys[0].key, 'BSA-super-real-secret-999');
+      assert.strictEqual(storedRaw.search_providers.brave.timeout_ms, 12000);
+    });
+  });
+
+  describe('11. Search Node Projection, Encrypted Status Token & On-Demand Pull (§8.2/§8.3)', () => {
+    let mockKv;
+
+    beforeEach(() => {
+      mockKv = new MockKV();
+    });
+
+    test('Full lifecycle: MCP node issue -> projection -> key update invalidates ETag -> 304 -> rotate -> revoke -> status pull', async () => {
+      // 1. Seed Hub config with search + LLM providers (including local key)
+      await handleConfigRequest(makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            enabled: true,
+            origin: 'vault',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'sk-llm-only-001', enabled: true, origin: 'vault' }],
+          },
+        },
+        search_providers: {
+          brave: {
+            id: 'brave',
+            name: 'Brave',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search'],
+            adapter: 'brave',
+            api_keys: [
+              { id: 'k1', label: 'k1', key: 'BSA-node-secret-v1', enabled: true, origin: 'vault' },
+              { id: 'k_loc', label: 'k_loc', key: 'BSA-local-stay-hub', enabled: true, origin: 'local' },
+            ],
+          },
+          jina: {
+            id: 'jina',
+            name: 'Jina',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search', 'fetch'],
+            adapter: 'jina',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'jina-secret-001', enabled: true, origin: 'vault' }],
+          },
+        },
+        search_selection: { search: ['brave', 'jina'], fetch: 'jina' },
+      }), TEST_ENV, mockKv);
+
+      // 2. Issue Search MCP lite node with HUB_ENCRYPT_KEY + status_url
+      const envWithEnc = { ...TEST_ENV, HUB_ENCRYPT_KEY: 'hub-aes-secret-phrase-for-test' };
+      const issueRes = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        name: 'khcsearch-mcp-01',
+        role: 'lite',
+        lease_ttl: 3600,
+        scope: { providers: [], models: [], search_providers: ['brave', 'jina'] },
+        status_url: 'https://mcp.example.com/admin/status',
+      }), envWithEnc, mockKv);
+      assert.strictEqual(issueRes.status, 200);
+      const issued = await issueRes.json();
+      const nodeId = issued.node.id;
+      const token1 = issued.node_token;
+
+      // Browser list must NEVER see node_token_enc or token_sha256
+      const listRes = await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), envWithEnc, mockKv);
+      const listData = await listRes.json();
+      assert.strictEqual(listData.nodes[0].node_token_enc, undefined);
+      assert.strictEqual(listData.nodes[0].token_sha256, undefined);
+      assert.strictEqual(listData.nodes[0].status_url, 'https://mcp.example.com/admin/status');
+
+      // 3. Initial pull returns 200 with search_providers (no local keys, no LLM providers)
+      const pull1 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1), envWithEnc, mockKv);
+      assert.strictEqual(pull1.status, 200);
+      const etag1 = pull1.headers.get('ETag');
+      const pData1 = await pull1.json();
+      assert.deepStrictEqual(Object.keys(pData1.payload.providers), []);
+      assert.strictEqual(pData1.payload.search_providers.brave.api_keys.length, 1);
+      assert.strictEqual(pData1.payload.search_providers.brave.api_keys[0].key, 'BSA-node-secret-v1');
+      assert.deepStrictEqual(pData1.payload.search_selection, { search: ['brave', 'jina'], fetch: 'jina' });
+
+      // 4. Conditional pull with ETag -> 304 zero bytes
+      const pull304 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), envWithEnc, mockKv);
+      assert.strictEqual(pull304.status, 304);
+      assert.strictEqual((await pull304.text()).length, 0);
+
+      // 5. Update Brave API key -> next pull with old ETag returns 200 + updated key
+      const curCfg = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), envWithEnc, mockKv)).json();
+      curCfg.search_providers.brave.api_keys[0].key = 'BSA-node-secret-v2';
+      await handleConfigRequest(makeAdminReq('POST', '/api/config', curCfg), envWithEnc, mockKv);
+
+      const pull2 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), envWithEnc, mockKv);
+      assert.strictEqual(pull2.status, 200);
+      assert.notStrictEqual(pull2.headers.get('ETag'), etag1);
+      const pData2 = await pull2.json();
+      assert.strictEqual(pData2.payload.search_providers.brave.api_keys[0].key, 'BSA-node-secret-v2');
+
+      // 6. On-demand status pull via EdgeOne dynamic route /api/admin/nodes/[id]/status.js
+      const edgeStatusModule = await import('../../edge-functions/api/admin/nodes/[id]/status.js');
+      const origFetch = globalThis.fetch;
+      let fetchCalls = 0;
+      let seenAuthHeader = '';
+      try {
+        globalThis.fetch = async (url, init) => {
+          fetchCalls++;
+          seenAuthHeader = init?.headers?.Authorization || init?.headers?.authorization || '';
+          return new Response(JSON.stringify({
+            version: 'mcp-1.0.0',
+            uptime_sec: 1200,
+            search_count: 42,
+            crawl_count: 7,
+            resting_keys: [],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        };
+
+        const stRes1 = await edgeStatusModule.onRequestGet({
+          request: makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status`),
+          env: envWithEnc,
+          agent_kv: mockKv,
+          params: { id: nodeId },
+        });
+        assert.strictEqual(stRes1.status, 200);
+        const stBody1 = await stRes1.json();
+        assert.strictEqual(stBody1.ok, true);
+        assert.strictEqual(stBody1.state, 'online');
+        assert.strictEqual(stBody1.cached, false);
+        assert.strictEqual(stBody1.status.search_count, 42);
+        assert.strictEqual(seenAuthHeader, `Bearer ${token1}`);
+        assert.strictEqual(fetchCalls, 1);
+
+        // Cached within 15s -> no upstream fetch
+        const stRes2 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status`), envWithEnc, mockKv);
+        const stBody2 = await stRes2.json();
+        assert.strictEqual(stBody2.cached, true);
+        assert.strictEqual(fetchCalls, 1);
+
+        // ?refresh=1 forces live pull
+        const stRes3 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
+        const stBody3 = await stRes3.json();
+        assert.strictEqual(stBody3.cached, false);
+        assert.strictEqual(fetchCalls, 2);
+
+        // Rotate token -> status pull must authenticate with rotated token, old token gets 401
+        const rotRes = await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/${nodeId}/rotate`), envWithEnc, mockKv);
+        const rotData = await rotRes.json();
+        const token2 = rotData.node_token;
+
+        const oldPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1), envWithEnc, mockKv);
+        assert.strictEqual(oldPull.status, 401);
+
+        const stRes4 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
+        assert.strictEqual(stRes4.status, 200);
+        assert.strictEqual(seenAuthHeader, `Bearer ${token2}`);
+
+        // Upstream outage -> stale fallback from cache
+        globalThis.fetch = async () => {
+          throw new Error('ECONNREFUSED');
+        };
+        const stStale = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
+        const stStaleBody = await stStale.json();
+        assert.strictEqual(stStaleBody.state, 'stale');
+        assert.strictEqual(stStaleBody.stale, true);
+
+        // Disable node -> 401 on config pull + offline status without calling upstream
+        await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, { enabled: false }), envWithEnc, mockKv);
+        const revokedPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token2), envWithEnc, mockKv);
+        assert.strictEqual(revokedPull.status, 401);
+        const stRevoked = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
+        const stRevokedBody = await stRevoked.json();
+        assert.strictEqual(stRevokedBody.state, 'offline');
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+  });
 });

@@ -4,6 +4,7 @@ saveConfigWithCAS,
 toMaskedConfig,
 checkAdminAuth,
 CASConflictError,
+ConfigValidationError,
 resolveKvBinding,
 resolveEnv,
 } from '../lib/config.js';
@@ -53,6 +54,12 @@ current_version: Number(err.currentVersion ?? 1),
 submitted_version: err.submittedVersion !== undefined ? err.submittedVersion : null,
 }),
 { status: 409, headers: { 'content-type': 'application/json' } }
+);
+}
+if (err instanceof ConfigValidationError || err?.name === 'ConfigValidationError' || err?.status === 400) {
+return new Response(
+JSON.stringify({ ok: false, error: err.message || 'validation_failed' }),
+{ status: 400, headers: { 'content-type': 'application/json' } }
 );
 }
 return new Response(

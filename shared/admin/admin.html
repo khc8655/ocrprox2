@@ -20,6 +20,7 @@
           <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
           <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
           <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
+          <button class="seg-btn" id="navSearch" data-tab="search" type="button" hidden>搜索服务</button>
           <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
           <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
         </div>
@@ -102,6 +103,31 @@
                 </tr>
               </thead>
               <tbody id="hubNodeStatsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">搜索节点实时状态</h2>
+              <div class="card-sub">按需拉取配置了状态回调地址 (status_url) 的节点快照（15 秒缓存）</div>
+            </div>
+            <button class="btn btn--sm" id="btnRefreshSearchNodeStatuses" type="button">刷新全部状态</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>节点名称</th>
+                  <th>运行状态</th>
+                  <th>版本 / 运行时长</th>
+                  <th>Search / Crawl</th>
+                  <th>休眠 Key / 最近错误</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="hubSearchNodeStatusBody"></tbody>
             </table>
           </div>
         </div>
@@ -357,6 +383,22 @@
             <label class="form-label">租约时长 (秒)</label>
             <input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
           </div>
+          <div class="form-group">
+            <label class="form-label">允许 LLM 供应商 (逗号分隔，* 全量，[] 无)</label>
+            <input class="input input--code" id="issueNodeProvs" value="*" placeholder="* 或 []">
+          </div>
+          <div class="form-group">
+            <label class="form-label">允许 LLM 模型 (逗号分隔，* 全量，[] 无)</label>
+            <input class="input input--code" id="issueNodeModels" value="*" placeholder="* 或 []">
+          </div>
+          <div class="form-group">
+            <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
+            <input class="input input--code" id="issueNodeSearchProvs" value="*" placeholder="* 或 brave,tavily">
+          </div>
+          <div class="form-group form-group--span2">
+            <label class="form-label">状态回调地址 status_url (可选，仅 https/http)</label>
+            <input class="input input--code" id="issueNodeStatusUrl" placeholder="例如 https://search-mcp.example.com/admin/status">
+          </div>
         </div>
         <div class="form-actions">
           <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
@@ -377,6 +419,126 @@
       </div>
 
       <div class="card" id="nodesList"></div>
+    </section>
+
+    <!-- 4b. 搜索服务 (Hub) -->
+    <section id="viewSearch" hidden>
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">搜索服务与提供商</h1>
+          <p class="view-sub">集中管理 Search / Fetch 提供商密钥池、声明式协议配置与节点筛选下发策略</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn--primary" id="btnAddSearchProvider" type="button">添加搜索提供商</button>
+        </div>
+      </div>
+
+      <div class="card card-pad" id="addSearchProviderForm" hidden>
+        <div class="section-bar">
+          <h2 class="card-title">新增搜索提供商</h2>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">快速填充模板 (可选)</label>
+            <select class="select" id="newSearchPreset"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">提供商 ID (小写字母/数字/连字符)</label>
+            <input class="input input--code" id="newSearchId" placeholder="例如 brave">
+          </div>
+          <div class="form-group">
+            <label class="form-label">显示名称</label>
+            <input class="input" id="newSearchName" placeholder="例如 Brave Search">
+          </div>
+          <div class="form-group">
+            <label class="form-label">作用域 (origin)</label>
+            <select class="select" id="newSearchOrigin">
+              <option value="vault">vault (共享下发至节点)</option>
+              <option value="local">local (仅本中枢留存)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">内置适配器 adapter (可选)</label>
+            <input class="input input--code" id="newSearchAdapter" placeholder="如 brave, tavily, jina">
+          </div>
+          <div class="form-group">
+            <label class="form-label">超时毫秒 (timeout_ms)</label>
+            <input class="input tabular" id="newSearchTimeoutMs" type="number" value="15000" placeholder="15000">
+          </div>
+          <div class="form-group form-group--span2">
+            <label class="form-label">Base URL (可选)</label>
+            <input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.search.brave.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">能力 (capabilities)</label>
+            <div class="check-group">
+              <label class="check-chip"><input type="checkbox" id="newSearchCapSearch" checked> search</label>
+              <label class="check-chip"><input type="checkbox" id="newSearchCapFetch"> fetch</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">初始 Key 标签</label>
+            <input class="input" id="newSearchKeyAlias" placeholder="例如 k1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">初始 API Key (可选，留空存为未配置)</label>
+            <input class="input input--code privacy-mask" id="newSearchApiKey" placeholder="粘贴 API Key (可选)">
+          </div>
+        </div>
+
+        <details class="headers-details mt-3">
+          <summary class="form-label">声明式协议配置 (未填 adapter 时必填 request 或 fetch JSON)</summary>
+          <div class="form-grid mt-2">
+            <div class="form-group">
+              <label class="form-label">request (JSON)</label>
+              <textarea class="textarea textarea--json" id="newSearchRequestJson" placeholder='{"method":"POST","path":"/search","headers":{"Authorization":"Bearer {{api_key}}"}}'></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">response 映射 (JSON)</label>
+              <textarea class="textarea textarea--json" id="newSearchResponseJson" placeholder='{"results_path":"results","fields":{"title":"title","url":"url","snippet":"content"}}'></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">fetch 端点配置 (JSON)</label>
+              <textarea class="textarea textarea--json" id="newSearchFetchJson" placeholder='{"method":"GET","path":"/{{url}}","response":{"content_path":"data.content"}}'></textarea>
+            </div>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button class="btn" id="btnCancelAddSearchProvider" type="button">取消</button>
+          <button class="btn btn--primary" id="btnConfirmAddSearchProvider" type="button">保存搜索提供商</button>
+        </div>
+      </div>
+
+      <div class="card card-pad" id="searchSelectionCard">
+        <div class="section-bar">
+          <div>
+            <h2 class="card-title">全局启用筛选策略 (search_selection)</h2>
+            <div class="card-sub" id="searchSelectionSummary">正在加载筛选策略...</div>
+          </div>
+          <button class="btn" id="btnSaveSearchSelection" type="button">保存启用策略</button>
+        </div>
+        <div class="form-grid form-grid--2">
+          <div class="form-group">
+            <label class="form-label">Search 能力提供商 (多选)</label>
+            <div class="check-group" id="searchSelectionSearchGroup"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fetch 能力提供商 (单选互斥)</label>
+            <div class="check-group" id="searchSelectionFetchGroup"></div>
+          </div>
+        </div>
+        <p class="text-xs text-muted mt-2">控制平面仅集中下发密钥与策略；连接测试与请求执行请在各数据平面节点（如 /admin/providers/:id/test）进行。</p>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-ico" id="searchProvSearchIcon"></span>
+          <input class="input search-input" id="searchProvSearchInput" placeholder="搜索提供商 ID、名称、适配器或 Base URL">
+        </div>
+      </div>
+
+      <div class="card" id="searchProvidersList"></div>
     </section>
 
     <!-- 5. 系统设置 -->
@@ -460,8 +622,8 @@
             <input class="input tabular" id="cfgCooldownNet" type="number" placeholder="15">
           </div>
           <div class="form-group">
-            <label class="form-label">401/403 鉴权失败冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldownAuth" type="number" placeholder="86400">
+            <label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label>
+            <input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400">
           </div>
         </div>
       </div>

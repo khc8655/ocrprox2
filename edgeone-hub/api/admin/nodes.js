@@ -5,6 +5,7 @@ import {
   patchNode,
   rotateNodeToken,
   deleteNode,
+  fetchNodeStatus,
 } from '../../lib/nodes.js';
 
 export async function handleNodesRequest(request, env, kv, params) {
@@ -26,10 +27,31 @@ export async function handleNodesRequest(request, env, kv, params) {
     (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'rotate') ||
     (params && params.action === 'rotate') ||
     url.pathname.endsWith('/rotate');
+  const isStatus =
+    (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'status') ||
+    (params && params.action === 'status') ||
+    url.pathname.endsWith('/status');
 
   const hubUrl = `${url.protocol}//${url.host}`;
 
-  // 1. GET /api/admin/nodes
+  // 1. GET /api/admin/nodes/:id/status
+  if (method === 'GET' && targetId && isStatus) {
+    const refresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
+    const res = await fetchNodeStatus(targetId, kv, env, { refresh });
+    if (!res) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'node_not_found' }),
+        { status: 404, headers: { 'content-type': 'application/json' } }
+      );
+    }
+    const status = res.ok ? 200 : (res.http_status === 401 ? 401 : 200);
+    return new Response(
+      JSON.stringify(res),
+      { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+    );
+  }
+
+  // 2. GET /api/admin/nodes
   if (method === 'GET' && !targetId) {
     const nodes = await listNodes(kv);
     return new Response(
@@ -38,28 +60,38 @@ export async function handleNodesRequest(request, env, kv, params) {
     );
   }
 
-  // 2. POST /api/admin/nodes (Issue)
+  // 3. POST /api/admin/nodes (Issue)
   if (method === 'POST' && !targetId) {
     let body = {};
     try {
       body = await request.json();
     } catch (_) {}
 
-    const res = await issueNode(body, kv, hubUrl);
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        node: res.node,
-        node_token: res.node_token,
-        bootstrap_env: res.bootstrap_env,
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } }
-    );
+    try {
+      const res = await issueNode(body, kv, hubUrl, env);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          node: res.node,
+          node_token: res.node_token,
+          bootstrap_env: res.bootstrap_env,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    } catch (err) {
+      if (err?.status === 400) {
+        return new Response(
+          JSON.stringify({ ok: false, error: err.message }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      throw err;
+    }
   }
 
-  // 3. POST /api/admin/nodes/:id/rotate
+  // 4. POST /api/admin/nodes/:id/rotate
   if (method === 'POST' && targetId && isRotate) {
-    const res = await rotateNodeToken(targetId, kv, hubUrl);
+    const res = await rotateNodeToken(targetId, kv, hubUrl, env);
     if (!res) {
       return new Response(
         JSON.stringify({ ok: false, error: 'node_not_found' }),
@@ -76,24 +108,34 @@ export async function handleNodesRequest(request, env, kv, params) {
     );
   }
 
-  // 4. PATCH /api/admin/nodes/:id (Update / Revoke / Restore)
+  // 5. PATCH /api/admin/nodes/:id (Update / Revoke / Restore)
   if (method === 'PATCH' && targetId) {
     let body = {};
     try {
       body = await request.json();
     } catch (_) {}
 
-    const updated = await patchNode(targetId, body, kv);
-    if (!updated) {
+    try {
+      const updated = await patchNode(targetId, body, kv);
+      if (!updated) {
+        return new Response(
+          JSON.stringify({ ok: false, error: 'node_not_found' }),
+          { status: 404, headers: { 'content-type': 'application/json' } }
+        );
+      }
       return new Response(
-        JSON.stringify({ ok: false, error: 'node_not_found' }),
-        { status: 404, headers: { 'content-type': 'application/json' } }
+        JSON.stringify({ ok: true, node: updated }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
       );
+    } catch (err) {
+      if (err?.status === 400) {
+        return new Response(
+          JSON.stringify({ ok: false, error: err.message }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      throw err;
     }
-    return new Response(
-      JSON.stringify({ ok: true, node: updated }),
-      { status: 200, headers: { 'content-type': 'application/json' } }
-    );
   }
 
   // 5. DELETE /api/admin/nodes/:id

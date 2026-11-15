@@ -229,6 +229,31 @@ func (m *CooldownManager) IsCooledDown(provider, model, keyID string) bool {
 	return false
 }
 
+// RemainingFor returns how long the key/model stays cooled down (0 when not cooled).
+// Used to explain why a request skipped a candidate instead of dialing it.
+func (m *CooldownManager) RemainingFor(provider, model, keyID string) time.Duration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	now := time.Now()
+	longest := time.Duration(0)
+	for _, target := range []string{
+		KeyTarget(provider, keyID),
+		KeyModelTarget(provider, keyID, model),
+		ModelTarget(provider, model),
+	} {
+		if until, ok := m.cooldowns[target]; ok {
+			if d := until.Sub(now); d > longest {
+				longest = d
+			}
+		}
+	}
+	if longest > 0 {
+		return longest.Round(time.Second)
+	}
+	return 0
+}
+
 // ParseNextQuotaReset parses a daily reset time string (e.g. "00:00+08:00", "08:00", "08:00:00", "12:00-05:00")
 // and returns the next upcoming time.Time for that daily reset.
 func ParseNextQuotaReset(resetAt string, now time.Time) (time.Time, error) {
@@ -306,6 +331,10 @@ func (m *CooldownManager) ApplyCooldown(
 
 	case status == 401 || status == 402 || status == 403: // Key-level auth/billing
 		target = KeyTarget(provider, keyID)
+		if durAuth <= 0 {
+			// Explicitly disabled (cooldown_auth_error_sec = 0): no ban, no entry.
+			return 0, target
+		}
 		sec := int(durAuth.Seconds())
 		m.cooldowns[target] = now.Add(durAuth)
 		if m.banFile != "" && sec >= 300 {

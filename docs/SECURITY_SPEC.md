@@ -46,7 +46,7 @@
 3. **401 内存即时销毁（`PurgeMemory()`）**：
    - 当条件拉取收到中枢返回的 `401`/`403`（节点被吊销）或宽限期（`grace_ttl`）耗尽时，立即执行 `PurgeMemory()`：先遍历旧 `Snapshot` 将全部 API Key 字节数组用 `0x00` 覆写清零，再将 `atomic.Pointer` 置为 `nil` 并触发 `runtime.GC()`。
 4. **物理级只读路由守卫（复用 Magpie `internal/router/readonly.go`）**：
-   - `lite` 模式在编译运行期根本不注册 `/api/admin/*` 路由处理器；
+   - `lite` 模式在编译运行期根本不注册 `/api/admin/*` 路由处理器；运行时对 `/admin`、`/api/config`、`/api/admin/*` 等管理路径统一返回 **`403 Forbidden`**（`{"ok":false,"error":"lite_mode_forbidden"}`），不泄露任何配置内容；
    - 同时在顶层 `http.Handler` 包裹 `readOnlyGuard` 与 `routeMux`，任何未在 `allowedLiteRoutes` 白名单登记的路由或方法在单元测试阶段直接报错。
 5. **全链路自动脱敏（复用 Magpie `internal/obs/applog.go` 的 `scrub` + 1 代 Header 掩码）**：
    - 所有日志输出、崩溃栈、最近 60 条轨迹回放（`trace.go`）、`/healthz` 状态均经过 `applog.Scrub` 与 `MaskKey` 过滤，自动剥离 `Authorization`、`x-api-key`、`x-goog-api-key`、URL 中的 `?key=` 以及符合 `sk-*` / `AIza*` / `eyJ*` 特征的令牌字符串（统一打码为 `***` 或 `前4位...后4位`）。
@@ -57,11 +57,13 @@
 ## 四、 `origin` 密钥归属隔离与 Kernel Guard
 
 1. **`origin: "local"` vs `origin: "vault"` 物理隔离**：
-   - 在 EdgeOne 中枢，凡标记为 `origin === "local"` 或 `is_local === true` 的供应商与 Key，在 `POST /api/node/config`、`/api/vault/manifest`、`/api/vault/fetch` 中**一律在序列化前物理剔除**，绝不下发给任何 VM 节点。
+   - 在 EdgeOne 中枢，凡标记为 `origin === "local"` 或 `is_local === true` 的供应商、`search_providers` 与 Key，在 `POST /api/node/config`、`/api/vault/manifest`、`/api/vault/fetch` 中**一律在序列化前物理剔除**，绝不下发给任何 VM/MCP 节点；同时受 `node.scope.providers` / `node.scope.search_providers` 与 `search_selection` 过滤。
    - 在 Go Full 节点，凡从中枢同步下来的 `origin === "vault"` 供应商，其连接核心字段（`base_url`、`anthropic_base_url`）在本地 UI 锁定只读，但允许管理员追加本地私有 Key（标记为 `origin: "local"`）。
 2. **Kernel Guard（防掩码覆盖内核守卫）**：
-   - 在 EdgeOne `api/config` 与 Go Full `internal/config/local_source.go` 的保存路径中，强制检测所有传入的密钥字符串：若包含掩码字符 `●`、全星号 `***` 或与脱敏预览格式匹配，**强制回退保留原存储中的真实明文 Key**，从内核层杜绝前端误把脱敏占位符写回磁盘。
-3. **Vault URL 变更防凭据泄露守卫**：
+   - 在 EdgeOne `api/config`（含 `providers` 与 `search_providers`）与 Go Full `internal/config/local_source.go` 的保存路径中，强制检测所有传入的密钥字符串：若包含掩码字符 `●`、全星号 `***` 或与脱敏预览格式匹配，**强制回退保留原存储中的真实明文 Key**，从内核层杜绝前端误把脱敏占位符写回磁盘。
+3. **节点按需状态拉取密文封装（`node_token_enc`）**：
+   - 仅当 Hub 执行 `GET /api/admin/nodes/:id/status` 时，使用 `HUB_ENCRYPT_KEY`（未配置时回退至 `ADMIN_PASSWORD` 派生的 SHA-256 AES-256-GCM 密钥）在服务端解密 `node_token_enc` 向目标 `status_url` 发起 `Bearer` 认证请求；`node_token_enc` 与 `token_sha256` 永不返回浏览器端。
+4. **Vault URL 变更防凭据泄露守卫**：
    - 当管理员在 Full 节点修改 `vault.url`（指向新的中枢域名）时，若请求未同时提交新的明文 `vault.token`，后端强制清空旧 Token，防止旧中枢的 `NODE_TOKEN` 被发送到恶意第三方地址。
 
 ---

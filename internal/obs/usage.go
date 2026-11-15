@@ -449,11 +449,20 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			sentCount++
 		}
 
-		// Model aggregate
-		ms, ok := modelMap[r.ServedModel]
+		// Model aggregate. Failed requests never reach an upstream model, so
+		// ServedModel is empty: fall back to the requested model (then "unknown")
+		// instead of emitting an entry with no model name at all.
+		modelKey := r.ServedModel
+		if modelKey == "" {
+			modelKey = r.ReqModel
+		}
+		if modelKey == "" {
+			modelKey = "unknown"
+		}
+		ms, ok := modelMap[modelKey]
 		if !ok {
-			ms = &ModelStats{Model: r.ServedModel}
-			modelMap[r.ServedModel] = ms
+			ms = &ModelStats{Model: modelKey}
+			modelMap[modelKey] = ms
 		}
 		ms.Requests++
 		if isSuccess {

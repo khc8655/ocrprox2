@@ -16,9 +16,11 @@
     modelSubMode: 'agent',
     providerQuery: '',
     providerFilter: 'all',
+    searchQuery: '',
     modelQuery: '',
     filterOnlyRetried: false,
     currentPeriod: 'today',
+    nodeStatuses: {},
     lanesTimer: null,
     batchVerifying: false,
   };
@@ -36,6 +38,46 @@
     el.appendChild(txt);
     box.appendChild(el);
     setTimeout(() => el.remove(), 3200);
+  }
+
+  // Never render a raw secret in the key table: saved keys arrive masked from the
+  // server, but a key added in this session is still plaintext until saved.
+  function maskKeyForDisplay(raw) {
+    const s = String(raw || '');
+    if (!s) return '';
+    if (s.includes('●')) return s;
+    if (s.length <= 8) return '●●●●●●';
+    return `${s.slice(0, 3)}●●●●●●${s.slice(-4)}`;
+  }
+
+  // Short human duration for cooldown pills: 45s / 12m / 3h / 1d.
+  function formatCooldown(sec) {
+    const n = Number(sec) || 0;
+    if (n <= 0) return '';
+    if (n < 60) return `${n}s`;
+    if (n < 3600) return `${Math.round(n / 60)}m`;
+    if (n < 86400) return `${Math.round(n / 3600)}h`;
+    return `${Math.round(n / 86400)}d`;
+  }
+
+  // Which routes reference this provider/key pair? Used to warn before a key is
+  // disabled or deleted, since candidates bind to an explicit provider:key_label.
+  function routesUsingKey(providerId, keyLabel) {
+    const refs = [];
+    const agentModels = (state.config && state.config.agent_models) || {};
+    for (const [model, route] of Object.entries(agentModels)) {
+      const cands = (route && route.candidates) || [];
+      if (cands.some((c) => c && c.provider === providerId && (c.key_label === keyLabel) && c.enabled !== false)) {
+        refs.push(`Agent 模型 ${model}`);
+      }
+    }
+    const kbModels = (state.config && state.config.kb_models) || {};
+    for (const [kind, list] of Object.entries(kbModels)) {
+      if ((list || []).some((c) => c && c.provider === providerId && c.key_label === keyLabel)) {
+        refs.push(`KB 流水线 ${kind}`);
+      }
+    }
+    return refs;
   }
 
   function escapeHtml(str) {
@@ -56,6 +98,7 @@
     setIcon('loginBrandMark', 'server');
     setIcon('logoutBtn', 'logout');
     setIcon('providerSearchIcon', 'search');
+    setIcon('searchProvSearchIcon', 'search');
     setIcon('modelSearchIcon', 'search');
   }
 
@@ -136,6 +179,7 @@
     if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
 
     const navModels = document.getElementById('navModels');
+    const navSearch = document.getElementById('navSearch');
     const navNodes = document.getElementById('navNodes');
     const navActivity = document.getElementById('navActivity');
     const topVersionBox = document.getElementById('topVersionBox');
@@ -147,6 +191,7 @@
     const btnClearAllCooldowns = document.getElementById('btnClearAllCooldowns');
 
     if (navModels) navModels.hidden = false;
+    if (navSearch) navSearch.hidden = !caps.vaultHub;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
     if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
@@ -215,16 +260,19 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         const pForm = document.getElementById('addProviderForm');
+        const spForm = document.getElementById('addSearchProviderForm');
         const mForm = document.getElementById('addModelForm');
         const nForm = document.getElementById('issueNodeForm');
         let closedSomething = false;
         if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
+        if (spForm && !spForm.hidden) { spForm.hidden = true; spForm.classList.add('hidden'); closedSomething = true; }
         if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
         if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
         if (state.activeEditorKey) {
           state.activeEditorKey = null;
           closedSomething = true;
           if (state.activeTab === 'providers') renderProvidersList();
+          else if (state.activeTab === 'search') renderSearchProvidersList();
           else if (state.activeTab === 'models') renderModelsList();
           else if (state.activeTab === 'nodes') renderNodesList();
           else if (state.activeTab === 'activity') renderTracesList();
@@ -260,7 +308,14 @@
           state.lanes = lanesRes.lane_map || {};
         }
         if (cdRes) {
-          state.cooldowns = cdRes;
+          // Index cooldowns by their target key ("p:<provider>:k:<label>") so the
+          // key table can show a live 冷却中 state instead of a static 就绪.
+          const cdMap = {};
+          for (const entry of cdRes.cooldowns || []) {
+            if (entry && entry.target) cdMap[entry.target] = entry.remaining_sec || 0;
+          }
+          state.cooldowns = cdMap;
+          state.cooldownsAll = cdRes.cooldowns || [];
         }
       } catch (_) {}
     };
@@ -553,6 +608,18 @@
       });
     }
 
+    const searchProvSearch = document.getElementById('searchProvSearchInput');
+    if (searchProvSearch) {
+      searchProvSearch.addEventListener('input', (e) => {
+        state.searchQuery = (e.target.value || '').trim().toLowerCase();
+        renderSearchProvidersList();
+      });
+    }
+
+    document.getElementById('btnRefreshSearchNodeStatuses')?.addEventListener('click', () => {
+      refreshAllSearchNodeStatuses(true);
+    });
+
     const modelSubSeg = document.getElementById('modelPipelineSeg');
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -748,6 +815,126 @@
       toggle(mForm, false);
       await persistConfig('模型添加成功');
     });
+
+    setupSearchCreationForm(toggle);
+  }
+
+  const SEARCH_PRESETS_META = {
+    brave: { id: 'brave', name: 'Brave Search', adapter: 'brave', base_url: 'https://api.search.brave.com', capabilities: ['search'] },
+    tavily: { id: 'tavily', name: 'Tavily Search', adapter: 'tavily', base_url: 'https://api.tavily.com', capabilities: ['search', 'fetch'] },
+    jina: { id: 'jina', name: 'Jina Reader / Search', adapter: 'jina', base_url: 'https://s.jina.ai', capabilities: ['search', 'fetch'] },
+    serper: { id: 'serper', name: 'Serper (Google)', adapter: 'serper', base_url: 'https://google.serper.dev', capabilities: ['search'] },
+    firecrawl: { id: 'firecrawl', name: 'Firecrawl', adapter: 'firecrawl', base_url: 'https://api.firecrawl.dev', capabilities: ['search', 'fetch'] },
+  };
+
+  function parseOptionalJsonField(raw, fieldName) {
+    const txt = String(raw || '').trim();
+    if (!txt) return undefined;
+    try {
+      const parsed = JSON.parse(txt);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`${fieldName} 必须是 JSON 对象`);
+      }
+      return parsed;
+    } catch (e) {
+      throw new Error(`${fieldName} JSON 解析失败: ${e.message}`);
+    }
+  }
+
+  function setupSearchCreationForm(toggle) {
+    const presetSel = document.getElementById('newSearchPreset');
+    if (presetSel) {
+      presetSel.innerHTML = '<option value="">-- 自定义搜索提供商 --</option>';
+      Object.entries(SEARCH_PRESETS_META).forEach(([k, meta]) => {
+        const opt = document.createElement('option');
+        opt.value = k;
+        opt.textContent = meta.name;
+        presetSel.appendChild(opt);
+      });
+      presetSel.addEventListener('change', (e) => {
+        const meta = SEARCH_PRESETS_META[e.target.value];
+        if (!meta) return;
+        document.getElementById('newSearchId').value = meta.id;
+        document.getElementById('newSearchName').value = meta.name;
+        document.getElementById('newSearchAdapter').value = meta.adapter;
+        document.getElementById('newSearchBaseUrl').value = meta.base_url;
+        document.getElementById('newSearchCapSearch').checked = meta.capabilities.includes('search');
+        document.getElementById('newSearchCapFetch').checked = meta.capabilities.includes('fetch');
+      });
+    }
+
+    const spForm = document.getElementById('addSearchProviderForm');
+    document.getElementById('btnAddSearchProvider')?.addEventListener('click', () => toggle(spForm));
+    document.getElementById('btnCancelAddSearchProvider')?.addEventListener('click', () => toggle(spForm, false));
+
+    document.getElementById('btnConfirmAddSearchProvider')?.addEventListener('click', async () => {
+      const id = (document.getElementById('newSearchId')?.value || '').trim().toLowerCase();
+      const name = (document.getElementById('newSearchName')?.value || '').trim() || id;
+      const origin = document.getElementById('newSearchOrigin')?.value || 'vault';
+      const adapter = (document.getElementById('newSearchAdapter')?.value || '').trim();
+      const baseUrl = (document.getElementById('newSearchBaseUrl')?.value || '').trim();
+      const timeoutMs = Number(document.getElementById('newSearchTimeoutMs')?.value) || 15000;
+      const keyAlias = (document.getElementById('newSearchKeyAlias')?.value || '').trim() || 'k1';
+      const apiKey = (document.getElementById('newSearchApiKey')?.value || '').trim();
+
+      const capabilities = [];
+      if (document.getElementById('newSearchCapSearch')?.checked) capabilities.push('search');
+      if (document.getElementById('newSearchCapFetch')?.checked) capabilities.push('fetch');
+
+      if (!/^[a-z0-9-]+$/.test(id)) return toast('提供商 ID 仅支持小写字母、数字和连字符', 'warn');
+      if (capabilities.length === 0) return toast('请至少勾选一种能力 (search 或 fetch)', 'warn');
+
+      let reqObj;
+      let respObj;
+      let fetchObj;
+      try {
+        reqObj = parseOptionalJsonField(document.getElementById('newSearchRequestJson')?.value, 'request');
+        respObj = parseOptionalJsonField(document.getElementById('newSearchResponseJson')?.value, 'response');
+        fetchObj = parseOptionalJsonField(document.getElementById('newSearchFetchJson')?.value, 'fetch');
+      } catch (e) {
+        return toast(e.message, 'warn');
+      }
+
+      if (!adapter && !reqObj && !fetchObj) {
+        return toast('未填 adapter 时需在声明式配置中提供 request 或 fetch JSON', 'warn');
+      }
+
+      state.config = state.config || { providers: {}, agent_models: {}, search_providers: {}, search_selection: { search: [], fetch: '' } };
+      state.config.search_providers = state.config.search_providers || {};
+      if (state.config.search_providers[id]) return toast(`搜索提供商 ${id} 已存在`, 'warn');
+
+      const entry = {
+        id,
+        name,
+        enabled: true,
+        origin,
+        capabilities,
+        timeout_ms: timeoutMs,
+        api_keys: apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin }] : [],
+      };
+      if (baseUrl) entry.base_url = baseUrl;
+      if (adapter) entry.adapter = adapter;
+      if (reqObj) entry.request = reqObj;
+      if (respObj) entry.response = respObj;
+      if (fetchObj) entry.fetch = fetchObj;
+
+      state.config.search_providers[id] = entry;
+      state.activeEditorKey = `sp_${id}`;
+      toggle(spForm, false);
+      await persistConfig('搜索提供商创建成功');
+    });
+
+    document.getElementById('btnSaveSearchSelection')?.addEventListener('click', async () => {
+      const searchIds = Array.from(document.querySelectorAll('#searchSelectionSearchGroup input[type="checkbox"]:checked'))
+        .map((cb) => cb.value)
+        .filter(Boolean);
+      const fetchRadio = document.querySelector('#searchSelectionFetchGroup input[type="radio"]:checked');
+      const fetchId = fetchRadio ? fetchRadio.value : '';
+
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.search_selection = { search: searchIds, fetch: fetchId };
+      await persistConfig('全局搜索筛选策略已保存');
+    });
   }
 
   function populateModelProvidersDropdown() {
@@ -783,6 +970,7 @@
     const views = {
       models: document.getElementById('viewModels'),
       providers: document.getElementById('viewProviders'),
+      search: document.getElementById('viewSearch'),
       nodes: document.getElementById('viewNodes'),
       activity: document.getElementById('viewActivity'),
       settings: document.getElementById('viewSettings'),
@@ -792,7 +980,9 @@
       if (v) v.hidden = k !== tab;
     }
 
-    if (tab === 'activity') {
+    if (tab === 'search') {
+      renderSearchView();
+    } else if (tab === 'activity') {
       if (window.HOST.kind === 'hub') {
         renderHubOverview();
       } else if (window.HOST.capabilities.usageAndTraces) {
@@ -852,6 +1042,7 @@
 
         renderProvidersList();
         renderModelsList();
+        renderSearchView();
         renderSettingsView();
       }
 
@@ -1018,6 +1209,101 @@
           <td class="tabular">${n.last_seen ? formatTime(n.last_seen) : '未激活'}</td>
         </tr>
       `).join('');
+    }
+
+    renderHubSearchNodeStatuses(true);
+  }
+
+  const fetchingStatusIds = new Set();
+
+  async function pullSingleNodeStatus(nodeId, forceRefresh = false) {
+    if (!nodeId || fetchingStatusIds.has(nodeId)) return;
+    fetchingStatusIds.add(nodeId);
+    renderHubSearchNodeStatuses(false);
+    try {
+      const res = await window.HOST.getNodeStatus(nodeId, forceRefresh);
+      state.nodeStatuses[nodeId] = res;
+    } catch (e) {
+      state.nodeStatuses[nodeId] = { ok: false, status: 'offline', error: e.message || '拉取失败' };
+    } finally {
+      fetchingStatusIds.delete(nodeId);
+      renderHubSearchNodeStatuses(false);
+    }
+  }
+
+  async function refreshAllSearchNodeStatuses(forceRefresh = false) {
+    const targets = (state.nodes || []).filter((n) => Boolean(n.status_url));
+    if (targets.length === 0) {
+      if (forceRefresh) toast('暂无配置状态回调地址 (status_url) 的节点', 'warn');
+      renderHubSearchNodeStatuses(false);
+      return;
+    }
+    await Promise.allSettled(targets.map((n) => pullSingleNodeStatus(n.id, forceRefresh)));
+    if (forceRefresh) toast('节点实时状态已刷新', 'ok');
+  }
+
+  function renderHubSearchNodeStatuses(autoFetchIfMissing = false) {
+    const statusBody = document.getElementById('hubSearchNodeStatusBody');
+    if (!statusBody) return;
+    const targets = (state.nodes || []).filter((n) => Boolean(n.status_url));
+
+    if (targets.length === 0) {
+      statusBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无配置状态回调地址 (status_url) 的节点，可在「中转节点」页签编辑配置</td></tr>';
+      return;
+    }
+
+    if (autoFetchIfMissing) {
+      for (const n of targets) {
+        if (!state.nodeStatuses[n.id] && !fetchingStatusIds.has(n.id)) {
+          pullSingleNodeStatus(n.id, false);
+        }
+      }
+    }
+
+    statusBody.innerHTML = '';
+    for (const n of targets) {
+      const entry = state.nodeStatuses[n.id];
+      const isFetching = fetchingStatusIds.has(n.id);
+      const st = entry?.state || (entry ? (entry.ok ? 'online' : entry.cached_status ? 'stale' : 'offline') : '');
+      const runtime = entry?.status || entry?.cached_status || entry?.data || null;
+
+      let pillCls = 'pill';
+      let stText = isFetching ? '拉取中...' : '待拉取';
+      if (st === 'online') {
+        pillCls = 'pill pill--green';
+        stText = entry.cached ? '缓存在线' : '在线';
+      } else if (st === 'stale') {
+        pillCls = 'pill pill--amber';
+        stText = '缓存降级';
+      } else if (st === 'offline' || (entry && entry.ok === false)) {
+        pillCls = 'pill pill--red';
+        stText = '离线';
+      } else if (!n.enabled) {
+        pillCls = 'pill pill--red';
+        stText = '已吊销';
+      }
+
+      const ver = runtime?.version || '-';
+      const uptime = Number.isFinite(Number(runtime?.uptime_sec)) ? `${Math.floor(Number(runtime.uptime_sec) / 60)}m` : '-';
+      const counts = runtime
+        ? `${runtime.search_count ?? runtime.requests_search ?? 0} / ${runtime.crawl_count ?? runtime.requests_fetch ?? 0}`
+        : '-';
+      const resting = Array.isArray(runtime?.resting_keys) ? runtime.resting_keys.length : (runtime?.resting_keys_count ?? 0);
+      const errMsg = entry?.error || runtime?.last_error || '-';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(n.name || n.id)}</strong></td>
+        <td><span class="${pillCls}">${escapeHtml(stText)}</span></td>
+        <td class="tabular">${escapeHtml(ver)} / ${escapeHtml(uptime)}</td>
+        <td class="tabular">${escapeHtml(counts)}</td>
+        <td><span class="tabular">${resting} 休眠</span> · <span class="text-xs text-muted">${escapeHtml(errMsg)}</span></td>
+        <td><button class="btn btn--sm btn-pull-node-st" type="button">${isFetching ? '拉取中' : '刷新'}</button></td>
+      `;
+      const btn = tr.querySelector('.btn-pull-node-st');
+      btn.disabled = isFetching;
+      btn.addEventListener('click', () => pullSingleNodeStatus(n.id, true));
+      statusBody.appendChild(tr);
     }
   }
 
@@ -1513,9 +1799,11 @@
     const tbody = wrap.querySelector(`#p_keys_tbody_${pId}`);
     keys.forEach((k, idx) => {
       const tr = document.createElement('tr');
-      const keyTarget = `${pId}:${k.label || k.id || `key-${idx}`}`;
-      const isCooldown = state.cooldowns?.[keyTarget] || false;
-      let statusHtml = `<span class="pill ${isCooldown ? 'pill--amber' : 'pill--green'}">${isCooldown ? '冷却中' : '就绪'}</span>`;
+      const keyLabel = k.label || k.id || `key-${idx}`;
+      const cooldownSec = state.cooldowns?.[`p:${pId}:k:${keyLabel}`] || 0;
+      let statusHtml = cooldownSec > 0
+        ? `<span class="pill pill--amber tabular">冷却中 ${formatCooldown(cooldownSec)}</span>`
+        : '<span class="pill pill--green">就绪</span>';
       if (k.last_ok === true) {
         statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
       } else if (k.last_ok === false) {
@@ -1524,8 +1812,8 @@
 
       tr.innerHTML = `
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
-        <td><strong>${escapeHtml(k.label || k.id || `key-${idx}`)}</strong></td>
-        <td><span class="tabular privacy-mask">${escapeHtml(k.key)}</span></td>
+        <td><strong>${escapeHtml(keyLabel)}</strong></td>
+        <td><span class="tabular privacy-mask">${escapeHtml(maskKeyForDisplay(k.key))}</span></td>
         <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
         <td>${statusHtml}</td>
         <td>
@@ -1537,6 +1825,18 @@
       `;
 
       tr.querySelector('.k_enable_cb').addEventListener('change', (e) => {
+        if (!e.target.checked) {
+          const refs = routesUsingKey(pId, keyLabel);
+          if (refs.length > 0) {
+            const ok = window.confirm(
+              `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n禁用后这些路由将没有可用 Key，请求可能返回 503。仍要禁用？`
+            );
+            if (!ok) {
+              e.target.checked = true;
+              return;
+            }
+          }
+        }
         k.enabled = e.target.checked;
       });
 
@@ -1572,6 +1872,13 @@
       });
 
       tr.querySelector('.btn_del_k').addEventListener('click', () => {
+        const refs = routesUsingKey(pId, keyLabel);
+        if (refs.length > 0) {
+          const ok = window.confirm(
+            `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n删除后这些路由将没有可用 Key，请求可能返回 503。仍要删除？`
+          );
+          if (!ok) return;
+        }
         p.api_keys.splice(idx, 1);
         renderProvidersList();
       });
@@ -1787,6 +2094,360 @@
     return wrap;
   }
 
+  function parseScopeInput(rawStr) {
+    const s = String(rawStr || '').trim();
+    if (!s || s === '*') return ['*'];
+    if (s === '[]' || s.toLowerCase() === 'none') return [];
+    return s.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+
+  function formatScopeInput(arr) {
+    if (!Array.isArray(arr)) return '*';
+    if (arr.length === 0) return '[]';
+    return arr.join(', ');
+  }
+
+  // --- View: Search Providers & Selection (Hub mode) ---
+  function renderSearchView() {
+    renderSearchSelectionCard();
+    renderSearchProvidersList();
+  }
+
+  function renderSearchSelectionCard() {
+    const searchGroup = document.getElementById('searchSelectionSearchGroup');
+    const fetchGroup = document.getElementById('searchSelectionFetchGroup');
+    const summaryEl = document.getElementById('searchSelectionSummary');
+    if (!searchGroup || !fetchGroup) return;
+
+    const spMap = state.config?.search_providers || {};
+    const sel = state.config?.search_selection || { search: [], fetch: '' };
+    const selectedSearch = new Set(Array.isArray(sel.search) ? sel.search : []);
+    const selectedFetch = typeof sel.fetch === 'string' ? sel.fetch : '';
+
+    const entries = Object.entries(spMap).sort(([a], [b]) => a.localeCompare(b));
+    const searchCapable = entries.filter(([, sp]) => Array.isArray(sp?.capabilities) && sp.capabilities.includes('search'));
+    const fetchCapable = entries.filter(([, sp]) => Array.isArray(sp?.capabilities) && sp.capabilities.includes('fetch'));
+
+    if (summaryEl) {
+      const fetchLabel = selectedFetch ? (spMap[selectedFetch]?.name || selectedFetch) : '无';
+      summaryEl.textContent = `当前已选 Search: ${selectedSearch.size} 个 · 当前 Fetch: ${fetchLabel}`;
+    }
+
+    searchGroup.innerHTML = '';
+    if (searchCapable.length === 0) {
+      searchGroup.innerHTML = '<span class="text-xs text-muted">暂无具备 search 能力的提供商</span>';
+    } else {
+      for (const [spId, sp] of searchCapable) {
+        const lbl = document.createElement('label');
+        lbl.className = 'check-chip';
+        const suffix = sp.enabled === false ? ' (已停用)' : (sp.origin === 'local' ? ' (仅本地)' : (!(sp.api_keys || []).length ? ' (无Key)' : ''));
+        lbl.innerHTML = `<input type="checkbox" value="${escapeHtml(spId)}" ${selectedSearch.has(spId) ? 'checked' : ''}><span>${escapeHtml(sp.name || spId)}${escapeHtml(suffix)}</span>`;
+        searchGroup.appendChild(lbl);
+      }
+    }
+
+    fetchGroup.innerHTML = '';
+    const noneLbl = document.createElement('label');
+    noneLbl.className = 'check-chip';
+    noneLbl.innerHTML = `<input type="radio" name="searchSelectionFetch" value="" ${!selectedFetch ? 'checked' : ''}><span>不启用</span>`;
+    fetchGroup.appendChild(noneLbl);
+
+    for (const [spId, sp] of fetchCapable) {
+      const lbl = document.createElement('label');
+      lbl.className = 'check-chip';
+      const suffix = sp.enabled === false ? ' (已停用)' : (sp.origin === 'local' ? ' (仅本地)' : (!(sp.api_keys || []).length ? ' (无Key)' : ''));
+      lbl.innerHTML = `<input type="radio" name="searchSelectionFetch" value="${escapeHtml(spId)}" ${selectedFetch === spId ? 'checked' : ''}><span>${escapeHtml(sp.name || spId)}${escapeHtml(suffix)}</span>`;
+      fetchGroup.appendChild(lbl);
+    }
+  }
+
+  function renderSearchProvidersList() {
+    const container = document.getElementById('searchProvidersList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const spMap = state.config?.search_providers || {};
+    const sel = state.config?.search_selection || { search: [], fetch: '' };
+    const selectedSearch = new Set(Array.isArray(sel.search) ? sel.search : []);
+    const q = state.searchQuery || '';
+
+    const ids = Object.keys(spMap).sort().filter((spId) => {
+      if (!q) return true;
+      const sp = spMap[spId] || {};
+      return `${spId} ${sp.name || ''} ${sp.adapter || ''} ${sp.base_url || ''}`.toLowerCase().includes(q);
+    });
+
+    if (ids.length === 0) {
+      const emptyRow = document.createElement('div');
+      emptyRow.className = 'row row--static text-muted';
+      emptyRow.textContent = q ? '没有匹配的搜索提供商' : '暂无搜索提供商，请点击右上角「添加搜索提供商」';
+      container.appendChild(emptyRow);
+      return;
+    }
+
+    for (const spId of ids) {
+      const sp = spMap[spId] || {};
+      const keys = sp.api_keys || [];
+      const keyCount = keys.length;
+      const isLocal = sp.origin === 'local';
+      const isExpanded = state.activeEditorKey === `sp_${spId}`;
+      const caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
+
+      const row = document.createElement('div');
+      row.className = `row ${isExpanded ? 'expanded' : ''}`;
+
+      const dot = document.createElement('span');
+      dot.className = `dot ${sp.enabled === false ? 'dot--err' : keyCount === 0 ? 'dot--warn' : 'dot--ok'}`;
+
+      const who = document.createElement('div');
+      who.className = 'who';
+      who.innerHTML = `
+        <div class="name">
+          <span>${escapeHtml(sp.name || spId)}</span>
+          <span class="pill">${escapeHtml(spId)}</span>
+          ${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
+          ${caps.map((c) => `<span class="pill pill--accent">${escapeHtml(c)}</span>`).join('')}
+          ${sp.enabled === false ? '<span class="pill pill--red">已停用</span>' : ''}
+          ${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}
+          ${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}
+        </div>
+        <div class="sub">${escapeHtml(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${escapeHtml(sp.base_url || '未设 Base URL')}</div>
+      `;
+
+      const fields = document.createElement('div');
+      fields.className = 'fields';
+      fields.innerHTML = `
+        <span class="pill tabular">${keyCount === 0 ? '未配置密钥' : `${keyCount} 把 Key`}</span>
+        <span class="caret">▾</span>
+      `;
+
+      row.appendChild(dot);
+      row.appendChild(who);
+      row.appendChild(fields);
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('button') || ev.target.closest('input')) return;
+        state.activeEditorKey = isExpanded ? null : `sp_${spId}`;
+        renderSearchProvidersList();
+      });
+
+      container.appendChild(row);
+      if (isExpanded) {
+        const editor = document.createElement('div');
+        editor.className = 'editor';
+        editor.appendChild(buildSearchProviderEditor(spId, sp));
+        container.appendChild(editor);
+      }
+    }
+  }
+
+  function buildSearchProviderEditor(spId, sp) {
+    const wrap = document.createElement('div');
+    const keys = sp.api_keys || [];
+    const caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
+    const fmtJson = (obj) => (obj ? JSON.stringify(obj, null, 2) : '');
+
+    wrap.innerHTML = `
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">显示名称</label>
+          <input class="input" id="ed_sp_name_${spId}" value="${escapeHtml(sp.name || spId)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">作用域 (origin)</label>
+          <select class="select" id="ed_sp_origin_${spId}">
+            <option value="vault" ${sp.origin !== 'local' ? 'selected' : ''}>vault (共享下发)</option>
+            <option value="local" ${sp.origin === 'local' ? 'selected' : ''}>local (仅本中枢留存)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">内置适配器 adapter (可选)</label>
+          <input class="input input--code" id="ed_sp_adapter_${spId}" value="${escapeHtml(sp.adapter || '')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">超时毫秒 (timeout_ms)</label>
+          <input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}">
+        </div>
+        <div class="form-group form-group--span2">
+          <label class="form-label">Base URL (可选)</label>
+          <input class="input input--code" id="ed_sp_base_${spId}" value="${escapeHtml(sp.base_url || '')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">启用与能力</label>
+          <div class="check-group">
+            <label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label>
+            <label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label>
+            <label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label>
+          </div>
+        </div>
+      </div>
+
+      <details class="headers-details mt-3">
+        <summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary>
+        <div class="form-grid form-grid--2 mt-2">
+          <div class="form-group">
+            <label class="form-label">request (JSON)</label>
+            <textarea class="textarea textarea--json" id="ed_sp_req_${spId}">${escapeHtml(fmtJson(sp.request))}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">response (JSON)</label>
+            <textarea class="textarea textarea--json" id="ed_sp_resp_${spId}">${escapeHtml(fmtJson(sp.response))}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">fetch (JSON)</label>
+            <textarea class="textarea textarea--json" id="ed_sp_fetch_${spId}">${escapeHtml(fmtJson(sp.fetch))}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">quirks (JSON)</label>
+            <textarea class="textarea textarea--json" id="ed_sp_quirks_${spId}">${escapeHtml(fmtJson(sp.quirks))}</textarea>
+          </div>
+        </div>
+      </details>
+
+      <div class="section-bar mt-4">
+        <span class="form-label">API 密钥池管理 (${keys.length} 把 Key)</span>
+        <button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>启用</th>
+              <th>标签</th>
+              <th>密钥 (脱敏)</th>
+              <th>来源</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="sp_keys_tbody_${spId}"></tbody>
+        </table>
+      </div>
+      <div class="form-grid mt-3">
+        <div class="form-group">
+          <input class="input" id="new_sp_key_lbl_${spId}" placeholder="Key 标签 (如 k1)">
+        </div>
+        <div class="form-group">
+          <input class="input input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴完整 API Key">
+        </div>
+        <div class="form-group flex-end">
+          <button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button>
+        </div>
+      </div>
+
+      <p class="text-xs text-muted mt-3">配置连接测试入口由数据平面节点提供：/admin/providers/${escapeHtml(spId)}/test</p>
+
+      <div class="form-actions form-actions--split">
+        <div class="form-actions-group">
+          <button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button>
+        </div>
+        <div class="form-actions-group">
+          <button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button>
+        </div>
+      </div>
+    `;
+
+    const tbody = wrap.querySelector(`#sp_keys_tbody_${spId}`);
+    if (keys.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
+    } else {
+      keys.forEach((k, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td>
+          <td><strong>${escapeHtml(k.label || k.id || `key-${idx}`)}</strong></td>
+          <td><span class="tabular privacy-mask">${escapeHtml(k.key)}</span></td>
+          <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
+          <td><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></td>
+        `;
+        tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => {
+          k.enabled = e.target.checked;
+        });
+        tr.querySelector('.sp_btn_del_k').addEventListener('click', () => {
+          sp.api_keys.splice(idx, 1);
+          renderSearchProvidersList();
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    wrap.querySelector(`#btn_add_sp_key_${spId}`).addEventListener('click', () => {
+      const lbl = wrap.querySelector(`#new_sp_key_lbl_${spId}`).value.trim();
+      const val = wrap.querySelector(`#new_sp_key_val_${spId}`).value.trim();
+      if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
+      sp.api_keys = sp.api_keys || [];
+      sp.api_keys.push({
+        id: `k_${Date.now().toString(36)}`,
+        label: lbl,
+        key: val,
+        enabled: true,
+        origin: wrap.querySelector(`#ed_sp_origin_${spId}`)?.value || sp.origin || 'vault',
+      });
+      renderSearchProvidersList();
+    });
+
+    wrap.querySelector(`#btn_clear_sp_keys_${spId}`).addEventListener('click', () => {
+      sp.api_keys = [];
+      renderSearchProvidersList();
+      toast('已清空密钥列表，点击「保存搜索提供商」生效', 'info');
+    });
+
+    wrap.querySelector(`#btn_save_sp_${spId}`).addEventListener('click', async () => {
+      const nextCaps = [];
+      if (wrap.querySelector(`#ed_sp_cap_search_${spId}`)?.checked) nextCaps.push('search');
+      if (wrap.querySelector(`#ed_sp_cap_fetch_${spId}`)?.checked) nextCaps.push('fetch');
+      if (nextCaps.length === 0) return toast('请至少勾选一种能力 (search 或 fetch)', 'warn');
+
+      let reqObj;
+      let respObj;
+      let fetchObj;
+      let quirksObj;
+      try {
+        reqObj = parseOptionalJsonField(wrap.querySelector(`#ed_sp_req_${spId}`)?.value, 'request');
+        respObj = parseOptionalJsonField(wrap.querySelector(`#ed_sp_resp_${spId}`)?.value, 'response');
+        fetchObj = parseOptionalJsonField(wrap.querySelector(`#ed_sp_fetch_${spId}`)?.value, 'fetch');
+        quirksObj = parseOptionalJsonField(wrap.querySelector(`#ed_sp_quirks_${spId}`)?.value, 'quirks');
+      } catch (e) {
+        return toast(e.message, 'warn');
+      }
+
+      const adapter = wrap.querySelector(`#ed_sp_adapter_${spId}`)?.value.trim() || '';
+      if (!adapter && !reqObj && !fetchObj) {
+        return toast('未填 adapter 时需提供 request 或 fetch JSON 配置', 'warn');
+      }
+
+      sp.name = wrap.querySelector(`#ed_sp_name_${spId}`).value.trim() || spId;
+      sp.origin = wrap.querySelector(`#ed_sp_origin_${spId}`).value || 'vault';
+      sp.enabled = Boolean(wrap.querySelector(`#ed_sp_enabled_${spId}`)?.checked);
+      sp.capabilities = nextCaps;
+      sp.base_url = wrap.querySelector(`#ed_sp_base_${spId}`).value.trim();
+      const timeoutVal = Number(wrap.querySelector(`#ed_sp_timeout_${spId}`).value);
+      sp.timeout_ms = Number.isFinite(timeoutVal) && timeoutVal > 0 ? timeoutVal : 15000;
+      if (adapter) sp.adapter = adapter; else delete sp.adapter;
+      if (reqObj) sp.request = reqObj; else delete sp.request;
+      if (respObj) sp.response = respObj; else delete sp.response;
+      if (fetchObj) sp.fetch = fetchObj; else delete sp.fetch;
+      if (quirksObj) sp.quirks = quirksObj; else delete sp.quirks;
+
+      await persistConfig('搜索提供商配置已保存');
+    });
+
+    wrap.querySelector(`#btn_del_sp_${spId}`).addEventListener('click', async () => {
+      if (!confirm(`确定删除搜索提供商 ${spId} 吗？`)) return;
+      delete state.config.search_providers[spId];
+      if (state.config.search_selection) {
+        if (Array.isArray(state.config.search_selection.search)) {
+          state.config.search_selection.search = state.config.search_selection.search.filter((id) => id !== spId);
+        }
+        if (state.config.search_selection.fetch === spId) {
+          state.config.search_selection.fetch = '';
+        }
+      }
+      state.activeEditorKey = null;
+      await persistConfig('搜索提供商已删除');
+    });
+
+    return wrap;
+  }
+
   // --- View: Nodes (Hub mode) ---
   function renderNodesList() {
     const container = document.getElementById('nodesList');
@@ -1812,15 +2473,16 @@
 
       const who = document.createElement('div');
       who.className = 'who';
-      const modelsScope = (node.scope?.models || []).join(', ') || '*';
-      const provsScope = (node.scope?.providers || []).join(', ') || '*';
+      const modelsScope = formatScopeInput(node.scope?.models);
+      const provsScope = formatScopeInput(node.scope?.providers);
+      const searchScope = formatScopeInput(node.scope?.search_providers);
       who.innerHTML = `
         <div class="name">
           <span>${escapeHtml(node.name || node.id)}</span>
           <span class="pill pill--accent">${escapeHtml(node.role)}</span>
           ${!node.enabled ? '<span class="pill pill--red">已吊销</span>' : ''}
         </div>
-        <div class="sub">模型: ${escapeHtml(modelsScope)} · 供应商: ${escapeHtml(provsScope)} · Token: ${escapeHtml(node.token_prefix)}</div>
+        <div class="sub">模型: ${escapeHtml(modelsScope)} · 供应商: ${escapeHtml(provsScope)} · 搜索: ${escapeHtml(searchScope)} · Token: ${escapeHtml(node.token_prefix)}</div>
       `;
 
       const fields = document.createElement('div');
@@ -1866,12 +2528,20 @@
           <input class="input tabular" id="ed_node_ttl_${node.id}" type="number" value="${node.lease_ttl || 86400}">
         </div>
         <div class="form-group">
-          <label class="form-label">允许供应商 (逗号分隔，* 为全量)</label>
-          <input class="input" id="ed_node_provs_${node.id}" value="${escapeHtml((node.scope?.providers || []).join(','))}">
+          <label class="form-label">允许供应商 (逗号分隔，* 全量，[] 无)</label>
+          <input class="input input--code" id="ed_node_provs_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.providers))}">
         </div>
         <div class="form-group">
-          <label class="form-label">允许模型 (逗号分隔，* 为全量)</label>
-          <input class="input" id="ed_node_models_${node.id}" value="${escapeHtml((node.scope?.models || []).join(','))}">
+          <label class="form-label">允许模型 (逗号分隔，* 全量，[] 无)</label>
+          <input class="input input--code" id="ed_node_models_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.models))}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
+          <input class="input input--code" id="ed_node_search_provs_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.search_providers))}">
+        </div>
+        <div class="form-group form-group--span2">
+          <label class="form-label">状态回调地址 status_url (可选)</label>
+          <input class="input input--code" id="ed_node_status_url_${node.id}" value="${escapeHtml(node.status_url || '')}" placeholder="例如 https://search-mcp.example.com/admin/status">
         </div>
       </div>
 
@@ -1903,16 +2573,19 @@
     wrap.querySelector(`#btn_save_node_${node.id}`).addEventListener('click', async () => {
       const name = wrap.querySelector(`#ed_node_name_${node.id}`).value.trim();
       const leaseTtl = Number(wrap.querySelector(`#ed_node_ttl_${node.id}`).value) || 86400;
-      const provsStr = wrap.querySelector(`#ed_node_provs_${node.id}`).value.trim();
-      const modelsStr = wrap.querySelector(`#ed_node_models_${node.id}`).value.trim();
+      const provsStr = wrap.querySelector(`#ed_node_provs_${node.id}`).value;
+      const modelsStr = wrap.querySelector(`#ed_node_models_${node.id}`).value;
+      const searchProvsStr = wrap.querySelector(`#ed_node_search_provs_${node.id}`).value;
+      const statusUrl = wrap.querySelector(`#ed_node_status_url_${node.id}`).value.trim();
 
       const scope = {
-        providers: provsStr ? provsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
-        models: modelsStr ? modelsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
+        providers: parseScopeInput(provsStr),
+        models: parseScopeInput(modelsStr),
+        search_providers: parseScopeInput(searchProvsStr),
       };
 
       try {
-        const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope });
+        const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope, status_url: statusUrl });
         if (res && res.ok) {
           toast('节点配置更新成功', 'ok');
           await loadNodesData();
@@ -1973,11 +2646,23 @@
     const name = document.getElementById('issueNodeName').value.trim();
     const role = document.getElementById('issueNodeRole').value;
     const leaseTtl = Number(document.getElementById('issueNodeTTL').value) || 86400;
+    const provsRaw = document.getElementById('issueNodeProvs')?.value;
+    const modelsRaw = document.getElementById('issueNodeModels')?.value;
+    const searchProvsRaw = document.getElementById('issueNodeSearchProvs')?.value;
+    const statusUrl = (document.getElementById('issueNodeStatusUrl')?.value || '').trim();
 
     if (!name) return toast('请输入节点名称', 'warn');
 
+    const scope = {
+      providers: parseScopeInput(provsRaw),
+      models: parseScopeInput(modelsRaw),
+      search_providers: parseScopeInput(searchProvsRaw),
+    };
+
     try {
-      const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl });
+      const payload = { name, role, lease_ttl: leaseTtl, scope };
+      if (statusUrl) payload.status_url = statusUrl;
+      const res = await window.HOST.issueNode(payload);
       if (res && res.ok) {
         toast('节点签发成功！', 'ok');
         const tokenDisplay = document.getElementById('issuedTokenDisplay');
@@ -2491,7 +3176,7 @@
     setVal('cfgCooldown429', s.cooldown_rate_limit_sec || 15);
     setVal('cfgCooldown5xx', s.cooldown_server_error_sec || 30);
     setVal('cfgCooldownNet', s.cooldown_network_error_sec || 15);
-    setVal('cfgCooldownAuth', s.cooldown_auth_error_sec || 86400);
+    setVal('cfgCooldownAuth', s.cooldown_auth_error_sec ?? 86400);
 
     // Full role Gateway Access Center (M16)
     const gwBox = document.getElementById('gatewayAccessCenter');
@@ -2593,7 +3278,7 @@
         s.cooldown_rate_limit_sec = Number(document.getElementById('cfgCooldown429').value) || 15;
         s.cooldown_server_error_sec = Number(document.getElementById('cfgCooldown5xx').value) || 30;
         s.cooldown_network_error_sec = Number(document.getElementById('cfgCooldownNet').value) || 15;
-        s.cooldown_auth_error_sec = Number(document.getElementById('cfgCooldownAuth').value) || 86400;
+        s.cooldown_auth_error_sec = Math.max(0, Number(document.getElementById('cfgCooldownAuth').value) || 0);
 
         if (isFull) {
           s.mode_schedule_enabled = !!document.getElementById('cfgModeSchedEnabled')?.checked;
@@ -2652,6 +3337,7 @@
         toast(successMsg || '保存成功', 'ok');
         renderProvidersList();
         renderModelsList();
+        renderSearchView();
         renderSettingsView();
       } else {
         const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
