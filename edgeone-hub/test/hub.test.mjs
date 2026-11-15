@@ -1369,6 +1369,25 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(customBody.status, 401);
       assert.ok(!customBody.error.includes('custom-raw-secret-9999'), 'Raw secret must be scrubbed from error');
       assert.ok(!customBody.error.includes('stk_node_abcdef0123456789'), 'Node token must be scrubbed from error');
+
+      // 5. Exa adapter verification handles /search base_url without doubling /search/search
+      let exaUrl = '';
+      let exaKeyHeader = '';
+      const exaFetch = async (url, init) => {
+        exaUrl = url;
+        exaKeyHeader = init?.headers?.['x-api-key'] || '';
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      };
+      const exaRes = await handleVerifySearchKey(makeAdminReq('POST', '/api/admin/verify-search-key', {
+        provider: 'exa',
+        adapter: 'exa',
+        base_url: 'https://api.exa.ai/search',
+        api_key: 'exa-test-uuid-key-1234',
+      }), env, exaFetch);
+      assert.strictEqual(exaRes.status, 200);
+      assert.strictEqual((await exaRes.json()).valid, true);
+      assert.strictEqual(exaUrl, 'https://api.exa.ai/search');
+      assert.strictEqual(exaKeyHeader, 'exa-test-uuid-key-1234');
     });
 
     test('Node classification (kind: mcp vs llm), service_type validation, defaults, PATCH, and legacy inference', async () => {

@@ -479,18 +479,17 @@
         </div>
         <div class="form-grid">
           <div class="form-group"><label class="form-label">快速模板</label><select class="select" id="newSearchPreset"></select></div>
-          <div class="form-group"><label class="form-label">提供商 ID</label><input class="input input--code" id="newSearchId" placeholder="brave"></div>
-          <div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newSearchName" placeholder="Brave Search"></div>
-          <div class="form-group"><label class="form-label">作用域 (origin)</label><select class="select" id="newSearchOrigin"><option value="vault">vault (共享下发)</option><option value="local">local (仅本中枢)</option></select></div>
-          <div class="form-group"><label class="form-label">adapter (可选)</label><input class="input input--code" id="newSearchAdapter" placeholder="brave/tavily/jina"></div>
+          <div class="form-group"><label class="form-label">提供商 ID</label><input class="input input--code" id="newSearchId" placeholder="brave / tavily / exa"></div>
+          <div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newSearchName" placeholder="Exa Search"></div>
+          <div class="form-group"><label class="form-label">adapter (可选)</label><input class="input input--code" id="newSearchAdapter" placeholder="brave/tavily/jina/serper/firecrawl/exa"></div>
           <div class="form-group"><label class="form-label">timeout_ms</label><input class="input tabular" id="newSearchTimeoutMs" type="number" value="15000" placeholder="15000"></div>
-          <div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.search.brave.com"></div>
           <div class="form-group"><label class="form-label">能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="newSearchCapSearch" checked> search</label><label class="check-chip"><input type="checkbox" id="newSearchCapFetch"> fetch</label></div></div>
-          <div class="form-group"><label class="form-label">初始 Key 标签</label><input class="input" id="newSearchKeyAlias" placeholder="k1"></div>
-          <div class="form-group"><label class="form-label">初始 API Key (可选)</label><input class="input input--code privacy-mask" id="newSearchApiKey" placeholder="API Key"></div>
+          <div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.exa.ai"></div>
+          <div class="form-group"><label class="form-label">初始 Key 标签 (留空自动 k1, k2...)</label><input class="input" id="newSearchKeyAlias" placeholder="自动递增或填前缀"></div>
+          <div class="form-group form-group--span2"><label class="form-label">初始 API Key (可选，每行一个可批量添加多把)</label><textarea class="textarea input--code privacy-mask" id="newSearchApiKey" placeholder="粘贴 API Key（每行一个可一次添加多把）"></textarea></div>
         </div>
 
-        <details class="headers-details mt-3">
+        <details class="headers-details mt-3" id="newSearchDeclarativeDetails">
           <summary class="form-label">声明式协议配置 (无 adapter 时必填 request 或 fetch JSON；支持 {{api_key}}/{{key}}/{{query}}/{{url}})</summary>
           <div class="form-grid mt-2">
             <div class="form-group">

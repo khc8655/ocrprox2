@@ -67,6 +67,39 @@
     try { const u = new URL(t); return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password; } catch (_) { return false; }
   }
 
+  function isHubMode() {
+    return window.HOST?.kind === 'hub';
+  }
+
+  function nextKeyLabel(keys = [], prefix = 'k') {
+    const used = new Set((keys || []).map((k) => k?.label || k?.id).filter(Boolean));
+    let i = 1;
+    while (used.has(`${prefix}${i}`)) i++;
+    return `${prefix}${i}`;
+  }
+
+  function parseMultiApiKeys(raw, rawLabel, existing = [], origin = 'vault') {
+    const items = String(raw || '').split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean);
+    if (!items.length) return { keys: [] };
+    const lbl = String(rawLabel || '').trim();
+    const used = new Set((existing || []).map((k) => k?.label || k?.id).filter(Boolean));
+    if (items.length === 1 && lbl) {
+      if (used.has(lbl)) return { error: `标签 ${lbl} 已存在，请更换标签（或留空自动递增）` };
+      return { keys: [{ id: `k_${Date.now().toString(36)}`, label: lbl, key: items[0], enabled: true, origin }] };
+    }
+    const prefix = lbl ? `${lbl}-` : 'k';
+    const out = [];
+    let idx = 1;
+    for (const secret of items) {
+      while (used.has(`${prefix}${idx}`)) idx++;
+      const tag = `${prefix}${idx}`;
+      used.add(tag);
+      out.push({ id: `k_${Date.now().toString(36)}_${idx}`, label: tag, key: secret, enabled: true, origin });
+      idx++;
+    }
+    return { keys: out };
+  }
+
   function getNodeKind(n) {
     if (n?.kind === 'mcp' || n?.kind === 'llm') return n.kind;
     return (n && (n.mcp_url || n.telemetry || (Array.isArray(n.scope?.providers) && !n.scope.providers.length))) ? 'mcp' : 'llm';
@@ -896,8 +929,10 @@
       state.config.providers = state.config.providers || {};
       if (state.config.providers[id]) return toast(`供应商 ${id} 已存在`, 'warn');
 
-      const api_keys = apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin: 'local' }] : [];
-      state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: 'local', api_keys };
+      const defOrigin = isHubMode() ? 'vault' : 'local';
+      const parsed = parseMultiApiKeys(apiKey, keyAlias, [], defOrigin);
+      if (parsed.error) return toast(parsed.error, 'warn');
+      state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: defOrigin, api_keys: parsed.keys };
       state.activeEditorKey = `p_${id}`;
       toggle(pForm, false);
       await persistConfig('供应商创建成功');
@@ -938,7 +973,17 @@
     jina: { id: 'jina', name: 'Jina Reader / Search', adapter: 'jina', base_url: 'https://s.jina.ai', capabilities: ['search', 'fetch'] },
     serper: { id: 'serper', name: 'Serper (Google)', adapter: 'serper', base_url: 'https://google.serper.dev', capabilities: ['search'] },
     firecrawl: { id: 'firecrawl', name: 'Firecrawl', adapter: 'firecrawl', base_url: 'https://api.firecrawl.dev', capabilities: ['search', 'fetch'] },
+    exa: { id: 'exa', name: 'Exa Search', adapter: 'exa', base_url: 'https://api.exa.ai', capabilities: ['search', 'fetch'] },
   };
+
+  function inferSearchAdapter(id, baseUrl) {
+    if (SEARCH_PRESETS_META[id]?.adapter) return SEARCH_PRESETS_META[id].adapter;
+    try {
+      const h = new URL(String(baseUrl || '').trim()).hostname;
+      if (h === 'r.jina.ai') return 'jina';
+      return Object.values(SEARCH_PRESETS_META).find((m) => m.base_url.includes(`://${h}`))?.adapter || '';
+    } catch (_) { return ''; }
+  }
 
   function parseOptionalJsonField(raw, fieldName) {
     const txt = String(raw || '').trim();
@@ -956,6 +1001,7 @@
 
   function setupSearchCreationForm(toggle) {
     const presetSel = $('newSearchPreset');
+    const declDetails = $('newSearchDeclarativeDetails');
     if (presetSel) {
       presetSel.innerHTML = '<option value="">-- 自定义搜索提供商 --</option>';
       Object.entries(SEARCH_PRESETS_META).forEach(([k, meta]) => {
@@ -966,13 +1012,17 @@
       });
       presetSel.addEventListener('change', (e) => {
         const meta = SEARCH_PRESETS_META[e.target.value];
-        if (!meta) return;
+        if (!meta) {
+          if (declDetails) declDetails.open = true;
+          return;
+        }
         $('newSearchId').value = meta.id;
         $('newSearchName').value = meta.name;
         $('newSearchAdapter').value = meta.adapter;
         $('newSearchBaseUrl').value = meta.base_url;
         $('newSearchCapSearch').checked = meta.capabilities.includes('search');
         $('newSearchCapFetch').checked = meta.capabilities.includes('fetch');
+        if (declDetails) declDetails.open = false;
       });
     }
 
@@ -983,43 +1033,63 @@
     clk($('btnConfirmAddSearchProvider'), async () => {
       const id = ($('newSearchId')?.value || '').trim().toLowerCase();
       const name = ($('newSearchName')?.value || '').trim();
-      const origin = $('newSearchOrigin')?.value || 'vault';
-      const adapter = ($('newSearchAdapter')?.value || '').trim();
       const baseUrl = ($('newSearchBaseUrl')?.value || '').trim();
+      let adapter = ($('newSearchAdapter')?.value || '').trim();
       const timeoutRaw = $('newSearchTimeoutMs')?.value;
-      const keyAlias = ($('newSearchKeyAlias')?.value || '').trim() || 'k1';
-      const apiKey = ($('newSearchApiKey')?.value || '').trim();
+      const keyAlias = ($('newSearchKeyAlias')?.value || '').trim();
+      const apiKeyRaw = ($('newSearchApiKey')?.value || '').trim();
+      const reqRaw = $('newSearchRequestJson')?.value;
+      const respRaw = $('newSearchResponseJson')?.value;
+      const fetchRaw = $('newSearchFetchJson')?.value;
 
       const caps = [];
       if ($('newSearchCapSearch')?.checked) caps.push('search');
       if ($('newSearchCapFetch')?.checked) caps.push('fetch');
 
       if (!/^[a-z0-9-]+$/.test(id)) return toast('提供商 ID 仅支持小写字母、数字和连字符', 'warn');
+
+      state.config = state.config || { providers: {}, agent_models: {}, search_providers: {}, search_selection: { search: [], fetch: '' } };
+      state.config.search_providers = state.config.search_providers || {};
+      if (state.config.search_providers[id]) {
+        state.activeEditorKey = `sp_${id}`;
+        toggle(spForm, false);
+        renderSearchProvidersList();
+        $('searchProvidersList')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return toast(`提供商 ${id} 已存在，已在下方展开，可直接追加多把 Key`, 'info');
+      }
+
+      if (!adapter && !String(reqRaw || '').trim() && !String(fetchRaw || '').trim()) {
+        adapter = inferSearchAdapter(id, baseUrl);
+        if (adapter && $('newSearchAdapter')) $('newSearchAdapter').value = adapter;
+      }
+
       const v = validateSearchSpec({
         name,
         baseUrl,
         timeoutRaw,
         caps,
         adapter,
-        reqRaw: $('newSearchRequestJson')?.value,
-        respRaw: $('newSearchResponseJson')?.value,
-        fetchRaw: $('newSearchFetchJson')?.value,
-        secrets: [apiKey],
+        reqRaw,
+        respRaw,
+        fetchRaw,
+        secrets: apiKeyRaw.split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean),
       });
-      if (v.error) return toast(v.error, 'warn');
+      if (v.error) {
+        if (!adapter && declDetails) declDetails.open = true;
+        return toast(v.error, 'warn');
+      }
 
-      state.config = state.config || { providers: {}, agent_models: {}, search_providers: {}, search_selection: { search: [], fetch: '' } };
-      state.config.search_providers = state.config.search_providers || {};
-      if (state.config.search_providers[id]) return toast(`搜索提供商 ${id} 已存在`, 'warn');
+      const parsedKeys = parseMultiApiKeys(apiKeyRaw, keyAlias, [], 'vault');
+      if (parsedKeys.error) return toast(parsedKeys.error, 'warn');
 
       const entry = {
         id,
         name,
         enabled: true,
-        origin,
+        origin: 'vault',
         capabilities: caps,
         timeout_ms: v.timeoutMs,
-        api_keys: apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin }] : [],
+        api_keys: parsedKeys.keys,
       };
       if (baseUrl) entry.base_url = baseUrl;
       if (adapter) entry.adapter = adapter;
@@ -1665,7 +1735,7 @@
           ${brandIcon}
           <span>${eh(p.name || pId)}</span>
           <span class="pill">${eh(pId)}</span>
-          ${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
+          ${isHubMode() ? '' : (isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>')}
           ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
           ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
           ${busyCount > 0 ? `<span class="pill pill--accent">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
@@ -1704,135 +1774,22 @@
 
   function buildProviderEditor(pId, p) {
     const wrap = ce('div');
+    const q = (s) => wrap.querySelector(s);
     const keys = p.api_keys || [];
 
-    wrap.innerHTML = `
-      <div class="form-grid">
-        <div class="form-group">
-          <label class="form-label">供应商标识 / 名称</label>
-          <input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Base URL (OpenAI 协议)</label>
-          <div class="input-row">
-            <input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}">
-            <button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Anthropic Base URL (可选)</label>
-          <input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">预设规则绑定</label>
-          <input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">
-        </div>
-      </div>
+    wrap.innerHTML = `<div class="form-grid">${[
+      fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">`),
+      fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button></div>`),
+      fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
+      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额刷新、余额查询与自动纳管)</summary><div class="form-grid mt-2">${[
+      fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
+      fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
+      fg('自定义余额查询 URL (balance_url)', `<input class="input input--code" id="ed_p_bal_url_${pId}" value="${eh(p.balance_url || '')}" placeholder="https://api.../user/balance">`),
+      fg('余额提取 JSONPath (balance_path)', `<input class="input input--code" id="ed_p_bal_path_${pId}" value="${eh(p.balance_path || '')}" placeholder="$.balance">`),
+    ].join('')}</div><div class="section-bar mt-2 flex-end"><button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button></div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_check_balance_${pId}" type="button">查询余额</button><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
 
-      <!-- Advanced Settings Toggle -->
-      <details class="headers-details mt-3">
-        <summary class="form-label">高级配置 (配额刷新、余额查询与自动纳管)</summary>
-        <div class="form-grid mt-2">
-          <div class="form-group">
-            <label class="form-label">每日重置时间 (quota_reset_at)</label>
-            <input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">单 Key RPM 限制 (rpm_per_key)</label>
-            <input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">
-          </div>
-          <div class="form-group">
-            <label class="form-label">自定义余额查询 URL (balance_url)</label>
-            <input class="input input--code" id="ed_p_bal_url_${pId}" value="${eh(p.balance_url || '')}" placeholder="https://api.../user/balance">
-          </div>
-          <div class="form-group">
-            <label class="form-label">余额提取 JSONPath (balance_path)</label>
-            <input class="input input--code" id="ed_p_bal_path_${pId}" value="${eh(p.balance_path || '')}" placeholder="$.balance">
-          </div>
-        </div>
-        <div class="section-bar mt-2 flex-end">
-          <button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button>
-        </div>
-      </details>
-
-      <div class="section-bar mt-4">
-        <span class="form-label">API 密钥池 (${keys.length})</span>
-        <div class="fields">
-          <button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button>
-          <button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
-        </div>
-      </div>
-
-      <!-- OAuth inline prompt box -->
-      <div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden>
-        <div class="snippet-header">
-          <span class="form-label">MiniMax OAuth 设备授权码:</span>
-          <span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span>
-        </div>
-        <div class="text-sm mt-1">
-          请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a>
-          并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong>
-        </div>
-      </div>
-
-      <!-- Per-Key Table -->
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>启用</th>
-                <th>标签</th>
-                <th>Key 密文</th>
-                <th>归属</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="p_keys_tbody_${pId}"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="form-grid mt-3">
-        <div class="form-group">
-          <input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)">
-        </div>
-        <div class="form-group">
-          <input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key">
-        </div>
-        <div class="form-group flex-end">
-          <button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button>
-        </div>
-      </div>
-
-      <!-- Model Probing & Pills Area -->
-      <div class="section-bar mt-4">
-        <span class="form-label">模型探测与一键纳管</span>
-        <div class="fields">
-          <button class="btn btn--sm" id="btn_check_balance_${pId}" type="button">查询余额</button>
-          <button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button>
-        </div>
-      </div>
-      <div id="probe_pills_container_${pId}" class="hidden" hidden>
-        <div class="section-bar mt-1">
-          <input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型...">
-          <span class="text-muted text-xs" id="probe_pills_count_${pId}"></span>
-        </div>
-        <div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div>
-      </div>
-
-      <div class="form-actions form-actions--split">
-        <div class="form-actions-group">
-          <button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>
-        </div>
-        <div class="form-actions-group">
-          <button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button>
-        </div>
-      </div>
-    `;
-
-    const tbody = wrap.querySelector(`#p_keys_tbody_${pId}`);
+    const tbody = q(`#p_keys_tbody_${pId}`);
     keys.forEach((k, idx) => {
       const tr = ce('tr');
       const keyLabel = k.label || k.id || `key-${idx}`;
@@ -1850,7 +1807,7 @@
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
         <td><strong>${eh(keyLabel)}</strong></td>
         <td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td>
-        <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
+        ${isHubMode() ? '' : `<td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>`}
         <td>${statusHtml}</td>
         <td>
           <div class="fields">
@@ -1877,7 +1834,7 @@
       });
 
       clk(tr.querySelector('.btn_verify_k'), async () => {
-        const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+        const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
         const keyLabel = k.label || k.id || `key-${idx}`;
         toast(`正在校验 Key [${keyLabel}]...`, 'info');
         try {
@@ -1923,11 +1880,11 @@
     });
 
     // Check Balance (M2)
-    clk(wrap.querySelector(`#btn_check_balance_${pId}`), async () => {
-      const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+    clk(q(`#btn_check_balance_${pId}`), async () => {
+      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
-      const balUrl = wrap.querySelector(`#ed_p_bal_url_${pId}`)?.value.trim() || p.balance_url || '';
-      const balPath = wrap.querySelector(`#ed_p_bal_path_${pId}`)?.value.trim() || p.balance_path || '';
+      const balUrl = q(`#ed_p_bal_url_${pId}`)?.value.trim() || p.balance_url || '';
+      const balPath = q(`#ed_p_bal_path_${pId}`)?.value.trim() || p.balance_path || '';
 
       toast(`正在查询供应商 ${pId} 余额...`, 'info');
       try {
@@ -1952,10 +1909,10 @@
     });
 
     // Batch Test All Keys (U2)
-    clk(wrap.querySelector(`#btn_batch_test_keys_${pId}`), async () => {
+    clk(q(`#btn_batch_test_keys_${pId}`), async () => {
       toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
       let succ = 0;
-      const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       for (const k of keys) {
         try {
           const r = await window.HOST.verifyKey({
@@ -1971,18 +1928,18 @@
     });
 
     // OAuth Device Flow (U4)
-    clk(wrap.querySelector(`#btn_oauth_start_${pId}`), async () => {
+    clk(q(`#btn_oauth_start_${pId}`), async () => {
       toast('正在发起 OAuth 设备登录请求...', 'info');
       try {
         const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
         if (res && (res.ok || res.device_code)) {
-          const box = wrap.querySelector(`#oauth_box_${pId}`);
+          const box = q(`#oauth_box_${pId}`);
           box.hidden = false;
           box.classList.remove('hidden');
-          const link = wrap.querySelector(`#oauth_link_${pId}`);
+          const link = q(`#oauth_link_${pId}`);
           link.href = res.verification_uri || 'https://api.minimax.chat';
           link.textContent = res.verification_uri || '前往授权页面';
-          wrap.querySelector(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
+          q(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
 
           // Poll OAuth
           const intervalSec = (res.interval || 5) * 1000;
@@ -1994,7 +1951,7 @@
               });
               if (pollRes && (pollRes.ok || pollRes.access_token)) {
                 clearInterval(pollTimer);
-                wrap.querySelector(`#oauth_status_${pId}`).textContent = '授权成功！';
+                q(`#oauth_status_${pId}`).textContent = '授权成功！';
                 p.api_keys = p.api_keys || [];
                 p.api_keys.push({
                   id: `k_oauth_${Date.now().toString(36)}`,
@@ -2017,8 +1974,8 @@
     });
 
     // Probe Models and Clickable Pills (U2)
-    clk(wrap.querySelector(`#btn_probe_prov_${pId}`), async () => {
-      const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+    clk(q(`#btn_probe_prov_${pId}`), async () => {
+      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
       toast(`正在探测供应商 ${pId} 模型...`, 'info');
       try {
@@ -2031,12 +1988,12 @@
         const models = res?.models || [];
         if (models.length > 0) {
           toast(`探测成功: 发现 ${models.length} 个可用模型`, 'ok');
-          const cont = wrap.querySelector(`#probe_pills_container_${pId}`);
+          const cont = q(`#probe_pills_container_${pId}`);
           cont.hidden = false;
           cont.classList.remove('hidden');
-          const list = wrap.querySelector(`#probe_pills_list_${pId}`);
+          const list = q(`#probe_pills_list_${pId}`);
           list.innerHTML = '';
-          wrap.querySelector(`#probe_pills_count_${pId}`).textContent = `共 ${models.length} 个，点击一键纳管`;
+          q(`#probe_pills_count_${pId}`).textContent = `共 ${models.length} 个，点击一键纳管`;
 
           const renderPills = (filter = '') => {
             list.innerHTML = '';
@@ -2064,7 +2021,7 @@
           };
 
           renderPills();
-          wrap.querySelector(`#probe_pills_filter_${pId}`).addEventListener('input', (e) => {
+          q(`#probe_pills_filter_${pId}`).addEventListener('input', (e) => {
             renderPills(e.target.value);
           });
         } else {
@@ -2076,7 +2033,7 @@
     });
 
     // AutoList Sync
-    clk(wrap.querySelector(`#btn_autolist_sync_${pId}`), async () => {
+    clk(q(`#btn_autolist_sync_${pId}`), async () => {
       toast('正在同步模型列表并纳管...', 'info');
       try {
         const res = await window.HOST.syncAutoList({ provider: pId });
@@ -2091,36 +2048,36 @@
       }
     });
 
-    clk(wrap.querySelector(`#btn_add_key_${pId}`), () => {
-      const lbl = wrap.querySelector(`#new_key_lbl_${pId}`).value.trim();
-      const val = wrap.querySelector(`#new_key_val_${pId}`).value.trim();
-      if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
+    clk(q(`#btn_add_key_${pId}`), () => {
+      const lbl = q(`#new_key_lbl_${pId}`).value.trim();
+      const val = q(`#new_key_val_${pId}`).value.trim();
+      if (!val) return toast('请填写密钥内容', 'warn');
+      const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'vault');
+      if (parsed.error) return toast(parsed.error, 'warn');
       p.api_keys = p.api_keys || [];
-      p.api_keys.push({
-        id: `k_${Date.now().toString(36)}`,
-        label: lbl,
-        key: val,
-        enabled: true,
-        origin: 'vault',
-      });
+      p.api_keys.push(...parsed.keys);
       renderProvidersList();
     });
 
-    clk(wrap.querySelector(`#btn_save_prov_${pId}`), async () => {
-      p.name = wrap.querySelector(`#ed_p_name_${pId}`).value.trim();
-      p.base_url = wrap.querySelector(`#ed_p_base_${pId}`).value.trim();
-      p.anthropic_base_url = wrap.querySelector(`#ed_p_ant_${pId}`).value.trim();
-      p.preset_id = wrap.querySelector(`#ed_p_preset_${pId}`).value.trim();
-      p.quota_reset_at = wrap.querySelector(`#ed_p_reset_${pId}`).value.trim();
-      const rpm = Number(wrap.querySelector(`#ed_p_rpm_${pId}`).value);
+    clk(q(`#btn_save_prov_${pId}`), async () => {
+      p.name = q(`#ed_p_name_${pId}`).value.trim();
+      p.base_url = q(`#ed_p_base_${pId}`).value.trim();
+      p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
+      p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
+      p.quota_reset_at = q(`#ed_p_reset_${pId}`).value.trim();
+      const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
       if (rpm > 0) p.rpm_per_key = rpm;
-      p.balance_url = wrap.querySelector(`#ed_p_bal_url_${pId}`).value.trim();
-      p.balance_path = wrap.querySelector(`#ed_p_bal_path_${pId}`).value.trim();
+      p.balance_url = q(`#ed_p_bal_url_${pId}`).value.trim();
+      p.balance_path = q(`#ed_p_bal_path_${pId}`).value.trim();
+      if (isHubMode()) {
+        p.origin = 'vault';
+        (p.api_keys || []).forEach((k) => { if (k) k.origin = 'vault'; });
+      }
 
       await persistConfig('供应商保存成功');
     });
 
-    clk(wrap.querySelector(`#btn_del_prov_${pId}`), async () => {
+    clk(q(`#btn_del_prov_${pId}`), async () => {
       if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
       delete state.config.providers[pId];
       state.activeEditorKey = null;
@@ -2234,7 +2191,7 @@
 
     if (summaryEl) summaryEl.textContent = `已选 Search: ${selectedSearch.size} (共享可用 ${usableSel.length}) · Fetch: ${selectedFetch ? (spMap[selectedFetch]?.name || selectedFetch) : '无'}`;
 
-    const suffixOf = (sp) => (sp.enabled === false ? ' (停用)' : (sp.origin === 'local' ? ' (本地)' : (!(sp.api_keys || []).some((k) => k.enabled !== false) ? ' (无Key)' : '')));
+    const suffixOf = (sp) => (sp.enabled === false ? ' (停用)' : (!(sp.api_keys || []).some((k) => k.enabled !== false) ? ' (无Key)' : ''));
     searchGroup.innerHTML = '';
     if (!searchCap.length) searchGroup.innerHTML = '<span class="text-xs text-muted">暂无 search 提供商</span>';
     else for (const [spId, sp] of searchCap) {
@@ -2279,10 +2236,10 @@
     }
 
     for (const spId of ids) {
-      const sp = spMap[spId] || {}, health = computeSearchProviderHealth(sp), isLocal = sp.origin === 'local', isExpanded = state.activeEditorKey === `sp_${spId}`, caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
+      const sp = spMap[spId] || {}, health = computeSearchProviderHealth(sp), isExpanded = state.activeEditorKey === `sp_${spId}`, caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
-      row.innerHTML = `<span class="dot ${health.dotCls}"></span><div class="who"><div class="name"><span>${eh(sp.name || spId)}</span><span class="pill">${eh(spId)}</span><span class="${health.pillCls}">${eh(health.statusText)}</span><span class="pill ${isLocal ? 'pill--amber' : 'pill--green'}">${isLocal ? '本地私有，不下发节点' : '共享下发'}</span>${caps.map((c) => `<span class="pill pill--accent">${eh(c)}</span>`).join('')}${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}</div><div class="sub">${eh(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${eh(sp.base_url || '未设 Base URL')} · ${sp.timeout_ms || 15000}ms</div></div><div class="fields">${health.totalCount ? `<span class="pill tabular">启用 ${health.enabledCount} / 总 ${health.totalCount} 把 Key</span>` : '<span class="pill">未配置密钥（不会下发给节点）</span>'}${health.latestCheckedAt ? `<span class="pill tabular">探活 ${eh(formatTime(health.latestCheckedAt))}${health.latestLatencyMs !== null ? ` · ${health.latestLatencyMs}ms` : ''}</span>` : ''}<span class="caret">▾</span></div>`;
+      row.innerHTML = `<span class="dot ${health.dotCls}"></span><div class="who"><div class="name"><span>${eh(sp.name || spId)}</span><span class="pill">${eh(spId)}</span><span class="${health.pillCls}">${eh(health.statusText)}</span>${caps.map((c) => `<span class="pill pill--accent">${eh(c)}</span>`).join('')}${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}</div><div class="sub">${eh(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${eh(sp.base_url || '未设 Base URL')} · ${sp.timeout_ms || 15000}ms</div></div><div class="fields">${health.totalCount ? `<span class="pill tabular">启用 ${health.enabledCount} / 总 ${health.totalCount} 把 Key</span>` : '<span class="pill">未配置密钥（点击展开添加）</span>'}${health.latestCheckedAt ? `<span class="pill tabular">探活 ${eh(formatTime(health.latestCheckedAt))}${health.latestLatencyMs !== null ? ` · ${health.latestLatencyMs}ms` : ''}</span>` : ''}<span class="caret">▾</span></div>`;
       clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `sp_${spId}`;
@@ -2304,26 +2261,32 @@
     const keys = sp.api_keys || [];
     const caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
     const fmtJson = (obj) => (obj ? JSON.stringify(obj, null, 2) : '');
+    const q = (s) => wrap.querySelector(s);
+    const nextLbl = nextKeyLabel(keys);
 
-    wrap.innerHTML = `<div class="form-grid"><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="ed_sp_name_${spId}" value="${eh(sp.name || spId)}"></div><div class="form-group"><label class="form-label">作用域 (origin)</label><select class="select" id="ed_sp_origin_${spId}"><option value="vault" ${sp.origin !== 'local' ? 'selected' : ''}>vault (共享下发)</option><option value="local" ${sp.origin === 'local' ? 'selected' : ''}>local (仅本中枢留存)</option></select></div><div class="form-group"><label class="form-label">适配器 adapter (可选)</label><input class="input input--code" id="ed_sp_adapter_${spId}" value="${eh(sp.adapter || '')}"></div><div class="form-group"><label class="form-label">超时 ms (timeout_ms)</label><input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}"></div><div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="ed_sp_base_${spId}" value="${eh(sp.base_url || '')}"></div><div class="form-group"><label class="form-label">启用与能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label></div></div></div><details class="headers-details mt-3"><summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary><div class="form-grid form-grid--2 mt-2">${[['req', 'request', sp.request], ['resp', 'response', sp.response], ['fetch', 'fetch', sp.fetch], ['quirks', 'quirks', sp.quirks]].map(([kId, lbl, val]) => `<div class="form-group"><label class="form-label">${lbl} (JSON)</label><textarea class="textarea textarea--json" id="ed_sp_${kId}_${spId}">${eh(fmtJson(val))}</textarea></div>`).join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length} 把 Key)</span><div class="fields"><button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button><button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>密钥 (脱敏)</th><th>来源</th><th>状态</th><th>操作</th></tr></thead><tbody id="sp_keys_tbody_${spId}"></tbody></table></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_sp_key_lbl_${spId}" placeholder="Key 标签 (如 k1)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button></div></div>`;
+    wrap.innerHTML = `<div class="form-grid">${[
+      fg('显示名称', `<input class="input" id="ed_sp_name_${spId}" value="${eh(sp.name || spId)}">`),
+      fg('适配器 adapter (可选)', `<input class="input input--code" id="ed_sp_adapter_${spId}" value="${eh(sp.adapter || '')}">`),
+      fg('超时 ms (timeout_ms)', `<input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}">`),
+      fg('Base URL (可选)', `<input class="input input--code" id="ed_sp_base_${spId}" value="${eh(sp.base_url || '')}">`, '', 'form-group--span2'),
+      fg('启用与能力', `<div class="check-group"><label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label></div>`),
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary><div class="form-grid form-grid--2 mt-2">${[['req', 'request', sp.request], ['resp', 'response', sp.response], ['fetch', 'fetch', sp.fetch], ['quirks', 'quirks', sp.quirks]].map(([kId, lbl, val]) => fg(`${lbl} (JSON)`, `<textarea class="textarea textarea--json" id="ed_sp_${kId}_${spId}">${eh(fmtJson(val))}</textarea>`)).join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length} 把 Key)</span><div class="fields"><button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button><button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>密钥 (脱敏)</th><th>状态</th><th>操作</th></tr></thead><tbody id="sp_keys_tbody_${spId}"></tbody></table></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_sp_key_lbl_${spId}" placeholder="标签（留空自动 ${eh(nextLbl)}）"></div><div class="form-group form-group--span2"><textarea class="textarea input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴 API Key（可每行/逗号分隔一次添加多把）"></textarea></div><div class="form-group flex-end"><button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button></div></div>`;
 
     function buildSearchVerifyPayload(k, idx) {
-      const adapterVal = wrap.querySelector(`#ed_sp_adapter_${spId}`)?.value.trim() || sp.adapter || '';
-      const baseVal = wrap.querySelector(`#ed_sp_base_${spId}`)?.value.trim() || sp.base_url || '';
       const payload = {
         provider: spId,
         key_label: k.label || k.id || `key-${idx}`,
         api_key: k.key,
-        adapter: adapterVal,
-        base_url: baseVal,
+        adapter: q(`#ed_sp_adapter_${spId}`)?.value.trim() || sp.adapter || '',
+        base_url: q(`#ed_sp_base_${spId}`)?.value.trim() || sp.base_url || '',
       };
       try {
-        const reqDraft = parseOptionalJsonField(wrap.querySelector(`#ed_sp_req_${spId}`)?.value, 'request');
-      if (reqDraft) payload.request = reqDraft;
-      const fetchDraft = parseOptionalJsonField(wrap.querySelector(`#ed_sp_fetch_${spId}`)?.value, 'fetch');
-      if (fetchDraft) payload.fetch = fetchDraft;
-    } catch (_) {}
-    return payload;
+        const reqDraft = parseOptionalJsonField(q(`#ed_sp_req_${spId}`)?.value, 'request');
+        if (reqDraft) payload.request = reqDraft;
+        const fetchDraft = parseOptionalJsonField(q(`#ed_sp_fetch_${spId}`)?.value, 'fetch');
+        if (fetchDraft) payload.fetch = fetchDraft;
+      } catch (_) {}
+      return payload;
     }
 
     async function runSearchKeyVerify(k, idx) {
@@ -2343,86 +2306,28 @@
       }
     }
 
-    const tbody = wrap.querySelector(`#sp_keys_tbody_${spId}`);
-    if (keys.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
-    } else {
-      keys.forEach((k, idx) => {
-        const keyLabel = k.label || k.id || `key-${idx}`;
-        let stHtml = '<span class="pill">未校验</span>';
-        if (k.last_ok === true) {
-          stHtml = `<span class="pill pill--green">正常 ${k.last_latency_ms || 0}ms</span>`;
-        } else if (k.last_ok === false) {
-          const errSub = k.last_error ? `<div class="text-xs text-muted mt-1">${eh(scrubUiText(k.last_error, [k.key]))}</div>` : '';
-          stHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}${k.last_latency_ms ? ` · ${k.last_latency_ms}ms` : ''}</span>${errSub}`;
-        }
-        const tr = ce('tr');
-        tr.innerHTML = `<td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td><td><strong>${eh(keyLabel)}</strong></td><td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td><td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td><td>${stHtml}</td><td><div class="fields"><button class="btn btn--sm sp_btn_verify_k" type="button">${k.last_ok === false ? '重新校验' : '校验'}</button><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></div></td>`;
-        tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => { k.enabled = e.target.checked; });
-        clk(tr.querySelector('.sp_btn_verify_k'), async () => {
-          toast(`正在校验 [${keyLabel}]...`, 'info');
-          const ok = await runSearchKeyVerify(k, idx);
-          toast(ok ? `Key [${keyLabel}] 正常 (${k.last_latency_ms}ms)` : `Key [${keyLabel}] 失败: ${k.last_error}`, ok ? 'ok' : 'err');
-          renderSearchProvidersList();
-        });
-        clk(tr.querySelector('.sp_btn_del_k'), () => { sp.api_keys.splice(idx, 1); renderSearchProvidersList(); });
-        tbody.appendChild(tr);
-      });
-    }
-
-    clk(wrap.querySelector(`#btn_verify_all_sp_keys_${spId}`), async () => {
-      if (!keys.length) return toast('暂无密钥可校验', 'warn');
-      toast(`正在校验 ${keys.length} 把 Key...`, 'info');
-      let succ = 0;
-      for (let i = 0; i < keys.length; i++) if (await runSearchKeyVerify(keys[i], i)) succ++;
-      renderSearchProvidersList();
-      toast(`校验完成: ${succ}/${keys.length} 可用`, succ === keys.length ? 'ok' : 'warn');
-    });
-
-    clk(wrap.querySelector(`#btn_add_sp_key_${spId}`), () => {
-      const lbl = wrap.querySelector(`#new_sp_key_lbl_${spId}`).value.trim();
-      const val = wrap.querySelector(`#new_sp_key_val_${spId}`).value.trim();
-      if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
-      sp.api_keys = sp.api_keys || [];
-      sp.api_keys.push({
-        id: `k_${Date.now().toString(36)}`,
-        label: lbl,
-        key: val,
-        enabled: true,
-        origin: wrap.querySelector(`#ed_sp_origin_${spId}`)?.value || sp.origin || 'vault',
-      });
-      renderSearchProvidersList();
-    });
-
-    clk(wrap.querySelector(`#btn_clear_sp_keys_${spId}`), () => {
-      sp.api_keys = [];
-      renderSearchProvidersList();
-      toast('已清空密钥列表，点击「保存搜索提供商」生效', 'info');
-    });
-
-    clk(wrap.querySelector(`#btn_save_sp_${spId}`), async () => {
-      const nextName = wrap.querySelector(`#ed_sp_name_${spId}`).value.trim();
-      const nextBaseUrl = wrap.querySelector(`#ed_sp_base_${spId}`).value.trim();
+    function applyEditorToSp() {
+      const nextName = q(`#ed_sp_name_${spId}`).value.trim();
+      const nextBaseUrl = q(`#ed_sp_base_${spId}`).value.trim();
       const nextCaps = [];
-      if (wrap.querySelector(`#ed_sp_cap_search_${spId}`)?.checked) nextCaps.push('search');
-      if (wrap.querySelector(`#ed_sp_cap_fetch_${spId}`)?.checked) nextCaps.push('fetch');
-      const adapter = wrap.querySelector(`#ed_sp_adapter_${spId}`)?.value.trim() || '';
+      if (q(`#ed_sp_cap_search_${spId}`)?.checked) nextCaps.push('search');
+      if (q(`#ed_sp_cap_fetch_${spId}`)?.checked) nextCaps.push('fetch');
+      const adapter = q(`#ed_sp_adapter_${spId}`)?.value.trim() || inferSearchAdapter(spId, nextBaseUrl);
       const v = validateSearchSpec({
         name: nextName,
         baseUrl: nextBaseUrl,
-        timeoutRaw: wrap.querySelector(`#ed_sp_timeout_${spId}`).value,
+        timeoutRaw: q(`#ed_sp_timeout_${spId}`).value,
         caps: nextCaps,
         adapter,
-        reqRaw: wrap.querySelector(`#ed_sp_req_${spId}`)?.value,
-        respRaw: wrap.querySelector(`#ed_sp_resp_${spId}`)?.value,
-        fetchRaw: wrap.querySelector(`#ed_sp_fetch_${spId}`)?.value,
-        quirksRaw: wrap.querySelector(`#ed_sp_quirks_${spId}`)?.value,
+        reqRaw: q(`#ed_sp_req_${spId}`)?.value,
+        respRaw: q(`#ed_sp_resp_${spId}`)?.value,
+        fetchRaw: q(`#ed_sp_fetch_${spId}`)?.value,
+        quirksRaw: q(`#ed_sp_quirks_${spId}`)?.value,
       });
-      if (v.error) return toast(v.error, 'warn');
-
+      if (v.error) return v.error;
       sp.name = nextName;
-      sp.origin = wrap.querySelector(`#ed_sp_origin_${spId}`).value || 'vault';
-      sp.enabled = Boolean(wrap.querySelector(`#ed_sp_enabled_${spId}`)?.checked);
+      sp.origin = 'vault';
+      sp.enabled = Boolean(q(`#ed_sp_enabled_${spId}`)?.checked);
       sp.capabilities = nextCaps;
       sp.base_url = nextBaseUrl;
       sp.timeout_ms = v.timeoutMs;
@@ -2431,11 +2336,89 @@
       if (v.respObj) sp.response = v.respObj; else delete sp.response;
       if (v.fetchObj) sp.fetch = v.fetchObj; else delete sp.fetch;
       if (v.quirksObj) sp.quirks = v.quirksObj; else delete sp.quirks;
+      (sp.api_keys || []).forEach((k) => { if (k) k.origin = 'vault'; });
+      return '';
+    }
 
+    function appendPendingKeys() {
+      const rawVal = q(`#new_sp_key_val_${spId}`).value.trim();
+      if (!rawVal) return { count: 0 };
+      const lbl = q(`#new_sp_key_lbl_${spId}`).value.trim();
+      const parsed = parseMultiApiKeys(rawVal, lbl, sp.api_keys || [], 'vault');
+      if (parsed.error) return { error: parsed.error };
+      sp.api_keys = sp.api_keys || [];
+      sp.api_keys.push(...parsed.keys);
+      return { count: parsed.keys.length };
+    }
+
+    const tbody = q(`#sp_keys_tbody_${spId}`);
+    if (keys.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
+    } else {
+      keys.forEach((k, idx) => {
+        const keyLabel = k.label || k.id || `key-${idx}`;
+        let stHtml = '<span class="pill">未校验</span>';
+        if (k.last_ok === true) stHtml = `<span class="pill pill--green">正常 ${k.last_latency_ms || 0}ms</span>`;
+        else if (k.last_ok === false) {
+          const errSub = k.last_error ? `<div class="text-xs text-muted mt-1">${eh(scrubUiText(k.last_error, [k.key]))}</div>` : '';
+          stHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}${k.last_latency_ms ? ` · ${k.last_latency_ms}ms` : ''}</span>${errSub}`;
+        }
+        const tr = ce('tr');
+        tr.innerHTML = `<td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td><td><strong>${eh(keyLabel)}</strong></td><td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td><td>${stHtml}</td><td><div class="fields"><button class="btn btn--sm sp_btn_verify_k" type="button">${k.last_ok === false ? '重新校验' : '校验'}</button><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></div></td>`;
+        tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => { k.enabled = e.target.checked; });
+        clk(tr.querySelector('.sp_btn_verify_k'), async () => {
+          toast(`正在校验 [${keyLabel}]...`, 'info');
+          const ok = await runSearchKeyVerify(k, idx);
+          toast(ok ? `Key [${keyLabel}] 正常 (${k.last_latency_ms}ms)` : `Key [${keyLabel}] 失败: ${k.last_error}`, ok ? 'ok' : 'err');
+          renderSearchProvidersList();
+        });
+        clk(tr.querySelector('.sp_btn_del_k'), () => {
+          sp.api_keys.splice(idx, 1);
+          renderSearchProvidersList();
+          toast(`已移除 [${keyLabel}]，点击「保存搜索提供商」持久化`, 'info');
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    clk(q(`#btn_verify_all_sp_keys_${spId}`), async () => {
+      if (!keys.length) return toast('暂无密钥可校验', 'warn');
+      toast(`正在校验 ${keys.length} 把 Key...`, 'info');
+      let succ = 0;
+      for (let i = 0; i < keys.length; i++) if (await runSearchKeyVerify(keys[i], i)) succ++;
+      renderSearchProvidersList();
+      toast(`校验完成: ${succ}/${keys.length} 可用`, succ === keys.length ? 'ok' : 'warn');
+    });
+
+    clk(q(`#btn_add_sp_key_${spId}`), async () => {
+      if (!q(`#new_sp_key_val_${spId}`).value.trim()) return toast('请粘贴至少一把 API Key', 'warn');
+      const err = applyEditorToSp();
+      if (err) return toast(err, 'warn');
+      const prevLen = (sp.api_keys || []).length;
+      const added = appendPendingKeys();
+      if (added.error) return toast(added.error, 'warn');
+      try {
+        await persistConfig(`已添加并保存 ${added.count} 把密钥`);
+      } catch (e) {
+        sp.api_keys = (sp.api_keys || []).slice(0, prevLen);
+      }
+    });
+
+    clk(q(`#btn_clear_sp_keys_${spId}`), () => {
+      sp.api_keys = [];
+      renderSearchProvidersList();
+      toast('已清空密钥列表，点击「保存搜索提供商」生效', 'info');
+    });
+
+    clk(q(`#btn_save_sp_${spId}`), async () => {
+      const err = applyEditorToSp();
+      if (err) return toast(err, 'warn');
+      const added = appendPendingKeys();
+      if (added.error) return toast(added.error, 'warn');
       await persistConfig('搜索提供商配置已保存');
     });
 
-    clk(wrap.querySelector(`#btn_del_sp_${spId}`), async () => {
+    clk(q(`#btn_del_sp_${spId}`), async () => {
       if (!confirm(`确定删除搜索提供商 ${spId} 吗？`)) return;
       delete state.config.search_providers[spId];
       if (state.config.search_selection) {
@@ -2795,6 +2778,7 @@
 
   function buildModelEditor(mName, m) {
     const wrap = ce('div');
+    const q = (s) => wrap.querySelector(s);
     const candidates = m.candidates || [];
 
     wrap.innerHTML = `
@@ -2859,7 +2843,7 @@
       </div>
     `;
 
-    const tbody = wrap.querySelector(`#m_cands_tbody_${mName}`);
+    const tbody = q(`#m_cands_tbody_${mName}`);
     candidates.forEach((c, idx) => {
       const tr = ce('tr');
       const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
@@ -2879,10 +2863,10 @@
       tbody.appendChild(tr);
     });
 
-    clk(wrap.querySelector(`#btn_add_cand_${mName}`), () => {
-      const prov = wrap.querySelector(`#new_c_prov_${mName}`).value.trim();
-      const lbl = wrap.querySelector(`#new_c_lbl_${mName}`).value.trim();
-      const target = wrap.querySelector(`#new_c_target_${mName}`).value.trim();
+    clk(q(`#btn_add_cand_${mName}`), () => {
+      const prov = q(`#new_c_prov_${mName}`).value.trim();
+      const lbl = q(`#new_c_lbl_${mName}`).value.trim();
+      const target = q(`#new_c_target_${mName}`).value.trim();
       if (!prov || !lbl) return toast('请填写供应商和 Key 标签', 'warn');
       candidates.push({
         provider: prov,
@@ -2894,13 +2878,13 @@
       renderModelsList();
     });
 
-    clk(wrap.querySelector(`#btn_save_model_${mName}`), async () => {
-      m.routing_strategy = wrap.querySelector(`#ed_m_strat_${mName}`).value;
-      m.active_key = wrap.querySelector(`#ed_m_act_${mName}`).value.trim();
+    clk(q(`#btn_save_model_${mName}`), async () => {
+      m.routing_strategy = q(`#ed_m_strat_${mName}`).value;
+      m.active_key = q(`#ed_m_act_${mName}`).value.trim();
       await persistConfig('模型配置保存成功');
     });
 
-    clk(wrap.querySelector(`#btn_del_model_${mName}`), async () => {
+    clk(q(`#btn_del_model_${mName}`), async () => {
       if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
       delete state.config.agent_models[mName];
       state.activeEditorKey = null;
@@ -2971,6 +2955,7 @@
 
   function buildKBPipelineEditor(cat, pl, cands) {
     const wrap = ce('div');
+    const q = (s) => wrap.querySelector(s);
 
     wrap.innerHTML = `
       <div class="section-bar">
@@ -3018,7 +3003,7 @@
       </div>
     `;
 
-    const tbody = wrap.querySelector(`#kb_cands_tbody_${cat}`);
+    const tbody = q(`#kb_cands_tbody_${cat}`);
     cands.forEach((c, idx) => {
       const tr = ce('tr');
       const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
@@ -3066,11 +3051,11 @@
       tbody.appendChild(tr);
     });
 
-    clk(wrap.querySelector(`#btn_add_kb_cand_${cat}`), () => {
-      const prov = wrap.querySelector(`#new_kb_prov_${cat}`).value.trim();
-      const kLbl = wrap.querySelector(`#new_kb_key_${cat}`).value.trim();
-      const mdl = wrap.querySelector(`#new_kb_model_${cat}`).value.trim();
-      const conc = Number(wrap.querySelector(`#new_kb_conc_${cat}`).value) || 4;
+    clk(q(`#btn_add_kb_cand_${cat}`), () => {
+      const prov = q(`#new_kb_prov_${cat}`).value.trim();
+      const kLbl = q(`#new_kb_key_${cat}`).value.trim();
+      const mdl = q(`#new_kb_model_${cat}`).value.trim();
+      const conc = Number(q(`#new_kb_conc_${cat}`).value) || 4;
 
       if (!prov || !mdl) return toast('请填写供应商与模型 ID', 'warn');
       cands.push({
@@ -3084,7 +3069,7 @@
       renderModelsList();
     });
 
-    clk(wrap.querySelector(`#btn_save_kb_${cat}`), async () => {
+    clk(q(`#btn_save_kb_${cat}`), async () => {
       state.config.kb_models[cat] = cands;
       await persistConfig('知识库流水线配置保存成功');
     });
