@@ -7,6 +7,26 @@ import { scrubSecrets } from './models.js';
 
 export const NODES_KV_KEY = 'relay_nodes';
 
+function sanitizeMcpUrl(rawUrl) {
+  if (rawUrl === undefined || rawUrl === null) return '';
+  const trimmed = String(rawUrl).trim();
+  if (!trimmed) return '';
+  let u;
+  try {
+    u = new URL(trimmed);
+  } catch (_) {
+    const err = new Error('Invalid mcp_url: must be a valid http or https URL');
+    err.status = 400;
+    throw err;
+  }
+  if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password) {
+    const err = new Error('Invalid mcp_url: must use http/https without embedded credentials');
+    err.status = 400;
+    throw err;
+  }
+  return trimmed.replace(/\/+$/, '');
+}
+
 function sanitizeNode(n) {
   const copy = { ...n };
   delete copy.token_sha256;
@@ -130,6 +150,7 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') 
 
   const nodeId = `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   const nowIso = new Date().toISOString();
+  const mcpUrl = sanitizeMcpUrl(params.mcp_url);
 
   const node = {
     id: nodeId,
@@ -138,6 +159,7 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') 
     enabled: true,
     token_prefix: tokenPrefix,
     token_sha256: tokenSha,
+    mcp_url: mcpUrl,
     lease_ttl: Number(params.lease_ttl) || 86400,
     grace_ttl: Number(params.grace_ttl) || 3600,
     scope: {
@@ -183,6 +205,9 @@ export async function patchNode(nodeId, patch, kv) {
   }
   if (patch.lease_ttl !== undefined) node.lease_ttl = Number(patch.lease_ttl);
   if (patch.grace_ttl !== undefined) node.grace_ttl = Number(patch.grace_ttl);
+  if (patch.mcp_url !== undefined) {
+    node.mcp_url = sanitizeMcpUrl(patch.mcp_url);
+  }
   if (patch.scope !== undefined && typeof patch.scope === 'object') {
     const existingScope = node.scope && typeof node.scope === 'object' ? node.scope : {};
     node.scope = {

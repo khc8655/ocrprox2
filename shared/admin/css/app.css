@@ -1160,6 +1160,54 @@ input[type="checkbox"] {
   resize: vertical;
 }
 
+/* Status Notice Strip & Code Snippet (Extension Services / MCP Access) */
+.notice-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--khc-radius-md);
+  border: 1px solid var(--khc-border-1);
+  background-color: var(--khc-surface-muted);
+  color: var(--khc-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.notice-strip--ok {
+  background-color: var(--khc-success-bg);
+  border-color: transparent;
+  color: var(--khc-success-text);
+}
+
+.notice-strip--warn {
+  background-color: var(--khc-warning-bg);
+  border-color: transparent;
+  color: var(--khc-warning-text);
+}
+
+.code-snippet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.code-pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--khc-radius-md);
+  border: 1px solid var(--khc-border-1);
+  background-color: var(--khc-surface-muted);
+  color: var(--khc-text-1);
+  font-family: var(--khc-font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* Utilities */
 .flex-1 { flex: 1; min-width: 0; }
 .flex-end { display: flex; justify-content: flex-end; align-items: flex-end; }

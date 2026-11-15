@@ -102,6 +102,7 @@
         "role": "string (lite | full)",
         "lease_ttl": "integer",
         "grace_ttl": "integer",
+        "mcp_url": "string (optional http/https URL without credentials)",
         "scope": {
           "models": "array of strings",
           "providers": "array of strings",

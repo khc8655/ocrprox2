@@ -32,6 +32,7 @@ let body = {};
 try {
 body = await request.json();
 } catch (_) {}
+try {
 const res = await issueNode(body, kv, hubUrl);
 return new Response(
 JSON.stringify({
@@ -42,6 +43,15 @@ bootstrap_env: res.bootstrap_env,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );
+} catch (err) {
+if (err?.status === 400) {
+return new Response(
+JSON.stringify({ ok: false, error: err.message }),
+{ status: 400, headers: { 'content-type': 'application/json' } }
+);
+}
+throw err;
+}
 }
 if (method === 'POST' && targetId && isRotate) {
 const res = await rotateNodeToken(targetId, kv, hubUrl);

@@ -36,7 +36,8 @@
    - **租约时长（`lease_ttl`）**：搜索 MCP 节点建议设为 `300`~`900` 秒（仍只在真实请求触发时按需续租、无后台心跳，可兼顾 telemetry 快照时效与 `304` 低开销）。
    - **允许 LLM 供应商 / 允许 LLM 模型**：若该 MCP 不使用大模型 Key，填入 `[]`（表示不投影 `providers` 与 `agent_models`）。
    - **允许搜索提供商**（`scope.search_providers`）：填入 `*`（全量共享）或白名单 ID（如 `brave,tavily,jina`）。
-   - **无 `status_url`**：单向架构下无需填写或暴露节点回调 URL。
+   - **MCP 接入地址（`mcp_url`，可选）**：可填入 MCP 节点对外提供的 HTTP/HTTPS 地址（例如 `https://your-space.hf.space/mcp`，不含 URL 凭据）。填写后，控制台 **「扩展服务」** 页签会自动展示服务地址、暴露工具与 `mcpServers` 客户端配置示例。
+   - **无 `status_url`**：单向架构下无需填写或暴露节点回调 URL；Hub「概览」中的节点状态严格按 `last_seen` 与 `lease_ttl`/`grace_ttl` 计算快照状态（`已同步` / `宽限期内` / `过期 / 离线` / `从未同步` / `已吊销`）。
 3. 签发完成后妥善保存一次性明文 `NODE_TOKEN`（格式为 `stk_node_<48hex>`），注入 MCP 运行时环境变量（`HUB_URL` + `NODE_TOKEN`）。
 
 > **凭据隔离说明**：Hub KV 仅保存 `NODE_TOKEN` 的单向 SHA-256 摘要（`token_sha256`）及前缀，浏览器与服务端均不保存也不反向解密任何 `node_token_enc`。

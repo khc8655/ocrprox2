@@ -38,6 +38,7 @@
       "token_prefix": "stk_node_9f8e...",
       "lease_ttl": 86400,
       "grace_ttl": 3600,
+      "mcp_url": "https://khcsearch.hf.space/mcp",
       "scope": {
         "models": ["*"],
         "providers": ["minimax", "deepseek", "openrouter"],

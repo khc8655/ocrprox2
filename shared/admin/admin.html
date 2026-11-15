@@ -20,7 +20,7 @@
           <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
           <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
           <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
-          <button class="seg-btn" id="navSearch" data-tab="search" type="button" hidden>搜索服务</button>
+          <button class="seg-btn" id="navSearch" data-tab="search" type="button" hidden>扩展服务</button>
           <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
           <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
         </div>
@@ -50,7 +50,7 @@
             <p class="view-sub" id="hubOverviewSub">实时统计密钥池健康度、模型路由规模与中转节点同步状态</p>
           </div>
           <div class="view-actions">
-            <button class="btn" id="btnHubRefreshOverview" type="button">刷新状态</button>
+            <button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button>
             <button class="btn btn--primary" id="btnHubBatchVerifyAll" type="button">批量探活全部密钥</button>
           </div>
         </div>
@@ -96,10 +96,10 @@
                 <tr>
                   <th>节点名称</th>
                   <th>角色</th>
-                  <th>状态</th>
-                  <th>最近 IP</th>
+                  <th>同步快照状态</th>
+                  <th>最近 IP / Config</th>
                   <th>同步 / 304 命中</th>
-                  <th>最近活跃</th>
+                  <th>最后同步时间</th>
                 </tr>
               </thead>
               <tbody id="hubNodeStatsBody"></tbody>
@@ -110,20 +110,21 @@
         <div class="card">
           <div class="card-header">
             <div>
-              <h2 class="card-title">MCP 节点同步快照 (Telemetry)</h2>
-              <div class="card-sub">随 POST /api/node/config 按需捎带的运行遥测快照（零心跳，节点仅在拉取/续租时上报）</div>
+              <h2 class="card-title">MCP 节点最后同步快照</h2>
+              <div class="card-sub">仅展示节点最后一次 POST /api/node/config 捎带的同步快照（单向架构，非实时状态；零心跳）</div>
             </div>
+            <button class="btn btn--sm" id="btnGoSearchFromHub" type="button">管理扩展服务</button>
           </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>节点名称</th>
-                  <th>版本 / 运行时长</th>
-                  <th>Playwright</th>
+                  <th>快照状态 / 租约剩余</th>
+                  <th>版本 / Playwright</th>
                   <th>Search / Crawl</th>
                   <th>休眠 Key / 最近错误</th>
-                  <th>最近同步</th>
+                  <th>最后同步时间</th>
                 </tr>
               </thead>
               <tbody id="hubMcpTelemetryBody"></tbody>
@@ -394,6 +395,10 @@
             <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
             <input class="input input--code" id="issueNodeSearchProvs" value="*" placeholder="* 或 brave,tavily">
           </div>
+          <div class="form-group form-group--span2">
+            <label class="form-label">MCP 接入地址 mcp_url (可选)</label>
+            <input class="input input--code" id="issueNodeMcpUrl" placeholder="https://your-space.hf.space/mcp">
+          </div>
         </div>
         <div class="form-actions">
           <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
@@ -416,73 +421,53 @@
       <div class="card" id="nodesList"></div>
     </section>
 
-    <!-- 4b. 搜索服务 (Hub) -->
+    <!-- 4b. 扩展服务 (Hub) -->
     <section id="viewSearch" hidden>
       <div class="view-header">
         <div>
-          <h1 class="view-title">搜索服务与提供商</h1>
-          <p class="view-sub">集中管理 Search / Fetch 提供商密钥池、声明式协议配置与节点筛选下发策略</p>
+          <h1 class="view-title">扩展服务</h1>
+          <p class="view-sub">纳管外部 MCP 服务接入地址、同步快照与上游密钥池（严格单向控制面）</p>
         </div>
         <div class="view-actions">
           <button class="btn btn--primary" id="btnAddSearchProvider" type="button">添加搜索提供商</button>
         </div>
       </div>
 
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">已注册扩展服务</h2>
+            <div class="card-sub">集中下发上游提供商与筛选策略；MCP 节点单向拉取后在本地运行</div>
+          </div>
+          <div class="seg" id="extServiceProtoSeg">
+            <button class="seg-btn active" data-proto="all" type="button">全部</button>
+            <button class="seg-btn" data-proto="mcp" type="button">MCP</button>
+          </div>
+        </div>
+        <div id="extServicesList"></div>
+      </div>
+
+      <div class="card card-pad" id="mcpAccessCard"></div>
+
       <div class="card card-pad" id="addSearchProviderForm" hidden>
         <div class="section-bar">
           <h2 class="card-title">新增搜索提供商</h2>
         </div>
         <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">快速填充模板 (可选)</label>
-            <select class="select" id="newSearchPreset"></select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">提供商 ID (小写字母/数字/连字符)</label>
-            <input class="input input--code" id="newSearchId" placeholder="例如 brave">
-          </div>
-          <div class="form-group">
-            <label class="form-label">显示名称</label>
-            <input class="input" id="newSearchName" placeholder="例如 Brave Search">
-          </div>
-          <div class="form-group">
-            <label class="form-label">作用域 (origin)</label>
-            <select class="select" id="newSearchOrigin">
-              <option value="vault">vault (共享下发至节点)</option>
-              <option value="local">local (仅本中枢留存)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">内置适配器 adapter (可选)</label>
-            <input class="input input--code" id="newSearchAdapter" placeholder="如 brave, tavily, jina">
-          </div>
-          <div class="form-group">
-            <label class="form-label">超时毫秒 (timeout_ms)</label>
-            <input class="input tabular" id="newSearchTimeoutMs" type="number" value="15000" placeholder="15000">
-          </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">Base URL (可选)</label>
-            <input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.search.brave.com">
-          </div>
-          <div class="form-group">
-            <label class="form-label">能力 (capabilities)</label>
-            <div class="check-group">
-              <label class="check-chip"><input type="checkbox" id="newSearchCapSearch" checked> search</label>
-              <label class="check-chip"><input type="checkbox" id="newSearchCapFetch"> fetch</label>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">初始 Key 标签</label>
-            <input class="input" id="newSearchKeyAlias" placeholder="例如 k1">
-          </div>
-          <div class="form-group">
-            <label class="form-label">初始 API Key (可选，留空存为未配置)</label>
-            <input class="input input--code privacy-mask" id="newSearchApiKey" placeholder="粘贴 API Key (可选)">
-          </div>
+          <div class="form-group"><label class="form-label">快速模板</label><select class="select" id="newSearchPreset"></select></div>
+          <div class="form-group"><label class="form-label">提供商 ID</label><input class="input input--code" id="newSearchId" placeholder="brave"></div>
+          <div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newSearchName" placeholder="Brave Search"></div>
+          <div class="form-group"><label class="form-label">作用域 (origin)</label><select class="select" id="newSearchOrigin"><option value="vault">vault (共享下发)</option><option value="local">local (仅本中枢)</option></select></div>
+          <div class="form-group"><label class="form-label">adapter (可选)</label><input class="input input--code" id="newSearchAdapter" placeholder="brave/tavily/jina"></div>
+          <div class="form-group"><label class="form-label">timeout_ms</label><input class="input tabular" id="newSearchTimeoutMs" type="number" value="15000" placeholder="15000"></div>
+          <div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.search.brave.com"></div>
+          <div class="form-group"><label class="form-label">能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="newSearchCapSearch" checked> search</label><label class="check-chip"><input type="checkbox" id="newSearchCapFetch"> fetch</label></div></div>
+          <div class="form-group"><label class="form-label">初始 Key 标签</label><input class="input" id="newSearchKeyAlias" placeholder="k1"></div>
+          <div class="form-group"><label class="form-label">初始 API Key (可选)</label><input class="input input--code privacy-mask" id="newSearchApiKey" placeholder="API Key"></div>
         </div>
 
         <details class="headers-details mt-3">
-          <summary class="form-label">声明式协议配置 (未填 adapter 时必填 request 或 fetch JSON)</summary>
+          <summary class="form-label">声明式协议配置 (无 adapter 时必填 request 或 fetch JSON；支持 {{api_key}}/{{key}}/{{query}}/{{url}})</summary>
           <div class="form-grid mt-2">
             <div class="form-group">
               <label class="form-label">request (JSON)</label>
@@ -523,7 +508,8 @@
             <div class="check-group" id="searchSelectionFetchGroup"></div>
           </div>
         </div>
-        <p class="text-xs text-muted mt-2">控制平面可在下方提供商编辑器直接发起最小密钥校验探测；实际 Search / Playwright 抓取由下游 MCP 节点单向拉取配置后在本地执行。</p>
+        <div class="mt-3" id="searchSelectionAlerts"></div>
+        <p class="text-xs text-muted mt-2">控制台可直接探测 Key；Search 与 Playwright 抓页由 MCP 节点单向拉取后在本地执行。</p>
       </div>
 
       <div class="toolbar">

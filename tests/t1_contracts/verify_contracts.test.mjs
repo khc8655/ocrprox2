@@ -426,13 +426,17 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const leftBorderMatch = css.match(/border-left\s*:\s*[^;]*(#|rgb|hsl|var\(--)/i);
       assert.strictEqual(leftBorderMatch, null, 'app.css must have 0 colored left-border stripes');
 
-      // 4. Dist bundle <= 245,760 bytes (240 KB)
+      // 4. Dist bundle <= 245,760 bytes (240 KB) & includes Extension Services (MCP) UI elements
       assert.ok(statSync(distPath), 'shared/admin/dist/index.html must exist');
       const stat = statSync(distPath);
       assert.ok(
         stat.size <= 245760,
         `shared/admin/dist/index.html size (${stat.size} bytes) exceeds 245,760 bytes limit`
       );
+      const distHtml = readFileSync(distPath, 'utf8');
+      for (const marker of ['扩展服务', 'mcpAccessCard', 'extServicesList', 'MCP 节点最后同步快照']) {
+        assert.ok(distHtml.includes(marker), `Built UI bundle must include ${marker}`);
+      }
     });
   });
 

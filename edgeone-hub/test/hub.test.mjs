@@ -1163,17 +1163,29 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
         search_selection: { search: ['brave', 'jina'], fetch: 'jina' },
       }), TEST_ENV, mockKv);
 
+      // Reject invalid mcp_url schemes / embedded credentials with HTTP 400
+      for (const badUrl of ['ftp://invalid.example/mcp', 'https://user:pass@example.com/mcp', 'not-a-url']) {
+        const badIssue = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+          name: 'bad-mcp-url',
+          role: 'lite',
+          mcp_url: badUrl,
+        }), TEST_ENV, mockKv);
+        assert.strictEqual(badIssue.status, 400, `Expected 400 for invalid mcp_url: ${badUrl}`);
+      }
+
       // 2. Issue Search MCP lite node (Option A: strictly one-way, no status_url or node_token_enc)
       const issueRes = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
         name: 'khcsearch-mcp-01',
         role: 'lite',
         lease_ttl: 3600,
+        mcp_url: 'https://khcsearch.hf.space/mcp',
         scope: { providers: [], models: [], search_providers: ['brave', 'jina'] },
       }), TEST_ENV, mockKv);
       assert.strictEqual(issueRes.status, 200);
       const issued = await issueRes.json();
       const nodeId = issued.node.id;
       const token1 = issued.node_token;
+      assert.strictEqual(issued.node.mcp_url, 'https://khcsearch.hf.space/mcp');
 
       // Browser list must NEVER see token_sha256, node_token_enc, or status_url
       const listRes = await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, mockKv);
@@ -1181,6 +1193,18 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(listData.nodes[0].node_token_enc, undefined);
       assert.strictEqual(listData.nodes[0].token_sha256, undefined);
       assert.strictEqual(listData.nodes[0].status_url, undefined);
+      assert.strictEqual(listData.nodes[0].mcp_url, 'https://khcsearch.hf.space/mcp');
+
+      // PATCH mcp_url validation & update
+      const badPatch = await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, {
+        mcp_url: 'javascript:alert(1)',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(badPatch.status, 400);
+      const okPatch = await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, {
+        mcp_url: 'https://khcsearch-v2.hf.space/mcp',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(okPatch.status, 200);
+      assert.strictEqual((await okPatch.json()).node.mcp_url, 'https://khcsearch-v2.hf.space/mcp');
 
       // 3. Initial pull returns 200 with search_providers AND persists scrubbed on-demand telemetry
       const pull1 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, null, {

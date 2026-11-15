@@ -45,16 +45,26 @@ export async function handleNodesRequest(request, env, kv, params) {
       body = await request.json();
     } catch (_) {}
 
-    const res = await issueNode(body, kv, hubUrl);
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        node: res.node,
-        node_token: res.node_token,
-        bootstrap_env: res.bootstrap_env,
-      }),
-      { status: 200, headers: { 'content-type': 'application/json' } }
-    );
+    try {
+      const res = await issueNode(body, kv, hubUrl);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          node: res.node,
+          node_token: res.node_token,
+          bootstrap_env: res.bootstrap_env,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    } catch (err) {
+      if (err?.status === 400) {
+        return new Response(
+          JSON.stringify({ ok: false, error: err.message }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        );
+      }
+      throw err;
+    }
   }
 
   // 3. POST /api/admin/nodes/:id/rotate

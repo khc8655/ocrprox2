@@ -99,7 +99,8 @@ function cleanJs(src) {
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0)
-    .join('\n');
+    .join('\n')
+    .replace(/>\n+</g, '><');
 }
 const cleanIconsJs = cleanJs(iconsJs)
   .replace(/ xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, '')
