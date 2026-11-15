@@ -1,5 +1,8 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import { handleConfigRequest } from '../api/config.js';
 import { handleNodesRequest } from '../api/admin/nodes.js';
@@ -10,7 +13,6 @@ import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
-import * as edgeAdmin from '../../edge-functions/admin.js';
 import * as edgeIndex from '../../edge-functions/index.js';
 import * as edgeHealth from '../../edge-functions/health.js';
 import * as edgeHealthz from '../../edge-functions/healthz.js';
@@ -774,22 +776,13 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(env3.ADMIN_PASSWORD, 'higher_priority');
     });
 
-    test('edge-functions/admin.js renders Hub Admin Console with __HOST_KIND__="hub"', async () => {
-      const req = new Request('https://hub.example.com/admin', { method: 'GET' });
-      const context = { request: req, env: TEST_ENV };
-
-      const resp = await edgeAdmin.onRequestGet(context);
-      assert.strictEqual(resp.status, 200);
-      assert.strictEqual(resp.headers.get('content-type'), 'text/html; charset=utf-8');
-      assert.strictEqual(resp.headers.get('cache-control'), 'no-store');
-
-      const html = await resp.text();
+    test('static admin/index.html renders Hub Admin Console with __HOST_KIND__="hub" and edge-functions/admin.js is absent', async () => {
+      const rootDir = join(dirname(fileURLToPath(import.meta.url)), '../..');
+      assert.strictEqual(existsSync(join(rootDir, 'edge-functions/admin.js')), false, 'edge-functions/admin.js must not exist');
+      const html = readFileSync(join(rootDir, 'admin/index.html'), 'utf8');
       assert.ok(html.includes('window.__HOST_KIND__="hub"'), 'Must inject window.__HOST_KIND__="hub"');
+      assert.ok(html.includes('hubOverviewBox'), 'Must include hubOverviewBox');
       assert.ok(html.includes('<!DOCTYPE html>'));
-
-      // onRequest generic handler
-      const resp2 = await edgeAdmin.onRequest(context);
-      assert.strictEqual(resp2.status, 200);
     });
 
     test('edge-functions/index.js redirects GET / to /admin', async () => {
