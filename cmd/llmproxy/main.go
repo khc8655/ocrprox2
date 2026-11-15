@@ -34,9 +34,12 @@ import (
 )
 
 var (
-	version    = "v20261108-01"
+	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
+	// the literals below are the fallback for plain `go build` and must be kept
+	// in sync with version.json (guarded by npm run verify:release).
+	version    = "v20261114-03"
 	commit     = "dev"
-	AppVersion = "2.0.0"
+	AppVersion = "2.1.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -560,13 +563,12 @@ func main() {
 		bindAddr = fmt.Sprintf(":%d", *portFlag)
 	}
 
-	listener, err := listenDualStack(bindAddr)
+	// Listen on the requested socket. Only a wildcard/an IPv6 bind benefits from
+	// clearing IPV6_V6ONLY: an explicit IPv4 address cannot be a dual-stack
+	// socket, and trying would emit a misleading "dual-stack failed" warning.
+	listener, err := listenFor(bindAddr)
 	if err != nil {
-		log.Printf("warn: dual-stack listen on %s failed (%v), falling back to standard tcp", bindAddr, err)
-		listener, err = net.Listen("tcp", bindAddr)
-		if err != nil {
-			log.Fatalf("fatal: failed to listen on %s: %v", bindAddr, err)
-		}
+		log.Fatalf("fatal: failed to listen on %s: %v", bindAddr, err)
 	}
 	defer listener.Close()
 
@@ -606,6 +608,27 @@ func main() {
 
 	_ = server.Shutdown(shutdownCtx)
 	log.Println("llmproxy exited cleanly")
+}
+
+// listenFor binds addr, using a dual-stack (IPv4+IPv6) socket only when the bind
+// host is wildcard or IPv6. For an explicit IPv4 host the plain tcp listener is
+// used directly, so no spurious dual-stack failure is reported.
+func listenFor(addr string) (net.Listener, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil && host != "" && host != "::" {
+		if ip := net.ParseIP(host); ip == nil || ip.To4() != nil {
+			return net.Listen("tcp", addr)
+		}
+	}
+	l, dualErr := listenDualStack(addr)
+	if dualErr == nil {
+		return l, nil
+	}
+	l, err = net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 func listenDualStack(addr string) (net.Listener, error) {

@@ -169,7 +169,7 @@
             </div>
             <div class="form-group">
               <label class="form-label" for="newProvApiKey">初始 API Key</label>
-              <input class="input input--code" id="newProvApiKey" placeholder="sk-...">
+              <input class="input input--code" id="newProvApiKey" type="password" autocomplete="new-password" placeholder="sk-...">
             </div>
           </div>
           <div class="section-bar mt-3 flex-end gap-2">
@@ -1071,11 +1071,24 @@
       HOST.hideLogin();
       return { ok: true };
     }
+    if (res.status === 429) {
+      let retry = '';
+      try {
+      const body = await res.json();
+      if (body && body.retry_after_sec) retry = `（约 ${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）`;
+      } catch (_) {}
+      HOST.setToken('');
+      return { ok: false, error: `尝试过于频繁，已临时锁定${retry}` };
+    }
     } catch (_) {}
     try {
     const testRes = await fetch('/api/config', {
       headers: { 'authorization': `Bearer ${password}` },
     });
+    if (testRes.status === 429) {
+      HOST.setToken('');
+      return { ok: false, error: '尝试过于频繁，已临时锁定，请稍后重试' };
+    }
     if (testRes.status === 401) {
       HOST.setToken('');
       return { ok: false, error: '管理员凭据错误，请重试' };
@@ -1377,7 +1390,9 @@
   setupKeyboardShortcuts();
   setupNavigation();
   setupCreationForms();
-  await loadData();
+  if (window.HOST.getToken()) {
+    await loadData();
+  }
   startLanesPolling();
   }
   function setupLoginScreen() {
@@ -1541,6 +1556,31 @@
     const tab = btn.getAttribute('data-tab');
     if (tab) switchTab(tab);
     });
+  });
+  document.addEventListener('click', async (e) => {
+    const target = e.target instanceof Element ? e.target.closest('button[id^="btn_detect_ed_"]') : null;
+    if (!target) return;
+    const pId = target.id.slice('btn_detect_ed_'.length);
+    if (!pId || target.disabled) return;
+    target.disabled = true;
+    try {
+    const baseEl = document.getElementById(`ed_p_base_${pId}`);
+    const res = await window.HOST.detectProvider({
+      provider: pId,
+      base_url: baseEl ? baseEl.value.trim() : '',
+    });
+    if (res && res.ok) {
+      const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
+      toast(`协议探测成功${protocols ? `: ${protocols}` : ''}`, 'ok');
+      if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
+    } else {
+      toast(`协议探测失败: ${(res && res.error) || '未知错误'}`, 'err');
+    }
+    } catch (err) {
+    toast(`协议探测失败: ${err.message}`, 'err');
+    } finally {
+    target.disabled = false;
+    }
   });
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {

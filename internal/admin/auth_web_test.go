@@ -145,3 +145,48 @@ func TestAuthWeb_Login_Logout_And_CookieAuth(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthWeb_LockoutReturns429WithRetryAfter(t *testing.T) {
+	tmpDir := t.TempDir()
+	adminPass := "lockout-admin-pass-456"
+	authMgr := auth.NewAuthenticator("client-key-1", adminPass)
+	localSrc, err := config.NewLocalSource(tmpDir, adminPass)
+	if err != nil {
+		t.Fatalf("local source error: %v", err)
+	}
+	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
+	defer obsMgr.Close()
+	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
+
+	srv := NewServer(authMgr, localSrc, obsMgr, sched)
+	srv.SetAdminPassword(adminPass)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	const remote = "203.0.113.9:1234"
+	wrong, _ := json.Marshal(map[string]string{"password": "wrong-password"})
+
+	for i := 0; i < auth.MaxFailedAttempts; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", bytes.NewReader(wrong))
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401 before lockout, got %d", i+1, rec.Code)
+		}
+	}
+
+	// Locked out: even the correct password must get 429 + Retry-After.
+	good, _ := json.Marshal(map[string]string{"password": adminPass})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", bytes.NewReader(good))
+	req.RemoteAddr = remote
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 while locked out, got %d", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("expected Retry-After header on 429")
+	}
+}

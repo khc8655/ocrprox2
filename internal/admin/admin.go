@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -154,19 +155,53 @@ func (s *Server) RegisterRoutes(r any) {
 }
 
 func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request) bool {
+	// Sample the lockout state BEFORE authenticating: the request that trips the
+	// 5th failure still deserves a 401 ("bad credentials"); only requests made
+	// while already locked get 429.
+	blockedBefore := s.adminIPBlocked(r)
 	if !s.isAdminAuthorized(r) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok": false,
-			"error": map[string]any{
-				"message": "unauthorized admin credentials",
-				"type":    "auth_error",
-			},
-		})
+		s.writeAuthFailure(w, r, blockedBefore)
 		return false
 	}
 	return true
+}
+
+func (s *Server) adminIPBlocked(r *http.Request) bool {
+	return s.authMgr != nil && s.authMgr.BlockRemaining(auth.GetClientIP(r)) > 0
+}
+
+// writeAuthFailure emits 429 + Retry-After for callers already inside the
+// anti-bruteforce lockout, and 401 otherwise. Distinguishing the two lets the
+// console tell "wrong password" apart from "temporarily locked out".
+func (s *Server) writeAuthFailure(w http.ResponseWriter, r *http.Request, blocked bool) {
+	w.Header().Set("Content-Type", "application/json")
+	if blocked && s.authMgr != nil {
+		if remaining := s.authMgr.BlockRemaining(auth.GetClientIP(r)); remaining > 0 {
+			secs := int(remaining.Seconds())
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": false,
+				"error": map[string]any{
+					"message":         "too many failed admin attempts, retry later",
+					"type":            "rate_limit_error",
+					"retry_after_sec": secs,
+				},
+			})
+			return
+		}
+	}
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"message": "unauthorized admin credentials",
+			"type":    "auth_error",
+		},
+	})
 }
 
 func loadAdminHTML() []byte {

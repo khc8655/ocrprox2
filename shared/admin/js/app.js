@@ -51,7 +51,12 @@
     setupKeyboardShortcuts();
     setupNavigation();
     setupCreationForms();
-    await loadData();
+    // Only fetch data when a credential is already present. An unauthenticated
+    // page load must not issue /api/* requests: every one of those is a 401 and
+    // would otherwise burn the anti-bruteforce budget (5 hits = 10 min lockout).
+    if (window.HOST.getToken()) {
+      await loadData();
+    }
     startLanesPolling();
   }
 
@@ -239,6 +244,33 @@
         const tab = btn.getAttribute('data-tab');
         if (tab) switchTab(tab);
       });
+    });
+
+    // Provider detail panel "自动探测协议" button (rendered per-row inside .editor).
+    document.addEventListener('click', async (e) => {
+      const target = e.target instanceof Element ? e.target.closest('button[id^="btn_detect_ed_"]') : null;
+      if (!target) return;
+      const pId = target.id.slice('btn_detect_ed_'.length);
+      if (!pId || target.disabled) return;
+      target.disabled = true;
+      try {
+        const baseEl = document.getElementById(`ed_p_base_${pId}`);
+        const res = await window.HOST.detectProvider({
+          provider: pId,
+          base_url: baseEl ? baseEl.value.trim() : '',
+        });
+        if (res && res.ok) {
+          const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
+          toast(`协议探测成功${protocols ? `: ${protocols}` : ''}`, 'ok');
+          if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
+        } else {
+          toast(`协议探测失败: ${(res && res.error) || '未知错误'}`, 'err');
+        }
+      } catch (err) {
+        toast(`协议探测失败: ${err.message}`, 'err');
+      } finally {
+        target.disabled = false;
+      }
     });
 
     const logoutBtn = document.getElementById('logoutBtn');

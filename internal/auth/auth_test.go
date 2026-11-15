@@ -74,6 +74,51 @@ func TestVerifyAdminAuth_AntiBruteforce(t *testing.T) {
 	}
 }
 
+func TestVerifyAdminAuth_CredentiallessRequestsDoNotLock(t *testing.T) {
+	a := NewAuthenticator("my-client-key", "admin-pass")
+
+	ip := "192.168.1.51"
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		req.RemoteAddr = ip + ":54321"
+		if a.VerifyAdminAuth(req) {
+			t.Fatalf("credential-less request must not authenticate")
+		}
+	}
+
+	if a.IsIPBlocked(ip) {
+		t.Fatalf("credential-less requests must not consume the brute-force budget")
+	}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	req.RemoteAddr = ip + ":54321"
+	req.Header.Set("Authorization", "Bearer admin-pass")
+	if !a.VerifyAdminAuth(req) {
+		t.Fatalf("correct password must still work after credential-less requests")
+	}
+}
+
+func TestVerifyAdminAuth_BlockRemaining(t *testing.T) {
+	a := NewAuthenticator("", "admin-pass")
+	ip := "192.168.1.52"
+
+	if got := a.BlockRemaining(ip); got != 0 {
+		t.Fatalf("expected no block duration, got %v", got)
+	}
+
+	for i := 0; i < MaxFailedAttempts; i++ {
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		req.RemoteAddr = ip + ":54321"
+		req.Header.Set("Authorization", "Bearer wrong")
+		a.VerifyAdminAuth(req)
+	}
+
+	remaining := a.BlockRemaining(ip)
+	if remaining <= 0 || remaining > BlockDuration {
+		t.Fatalf("expected remaining block within (0, %v], got %v", BlockDuration, remaining)
+	}
+}
+
 func TestUpdateClientKeys_MultiKeyAndHotReload(t *testing.T) {
 	a := NewAuthenticator("initial-key", "admin-pass")
 

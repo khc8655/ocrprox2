@@ -91,6 +91,15 @@
           HOST.hideLogin();
           return { ok: true };
         }
+        if (res.status === 429) {
+          let retry = '';
+          try {
+            const body = await res.json();
+            if (body && body.retry_after_sec) retry = `（约 ${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）`;
+          } catch (_) {}
+          HOST.setToken('');
+          return { ok: false, error: `尝试过于频繁，已临时锁定${retry}` };
+        }
       } catch (_) {}
 
       // 2. Validate token against /api/config
@@ -98,6 +107,10 @@
         const testRes = await fetch('/api/config', {
           headers: { 'authorization': `Bearer ${password}` },
         });
+        if (testRes.status === 429) {
+          HOST.setToken('');
+          return { ok: false, error: '尝试过于频繁，已临时锁定，请稍后重试' };
+        }
         if (testRes.status === 401) {
           HOST.setToken('');
           return { ok: false, error: '管理员凭据错误，请重试' };

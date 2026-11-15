@@ -190,7 +190,10 @@ func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 
 	token := ExtractToken(r)
 	if token == "" {
-		a.recordAdminFailure(ip, now)
+		// Credential-less requests (page loads, health probes, unauthenticated
+		// scripts) must NOT consume the brute-force budget: the admin console
+		// itself issues a GET /api/config before login. Only an actually wrong
+		// credential counts as a brute-force attempt.
 		return false
 	}
 
@@ -222,8 +225,19 @@ func (a *Authenticator) recordAdminFailure(ip string, now time.Time) {
 
 // IsIPBlocked returns whether the given IP is currently blocked by anti-bruteforce rules.
 func (a *Authenticator) IsIPBlocked(ip string) bool {
+	return a.BlockRemaining(ip) > 0
+}
+
+// BlockRemaining returns how long the given IP stays blocked (0 when not blocked).
+func (a *Authenticator) BlockRemaining(ip string) time.Duration {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	until, ok := a.blockedIPs[ip]
-	return ok && time.Now().Before(until)
+	if !ok {
+		return 0
+	}
+	if d := until.Sub(time.Now()); d > 0 {
+		return d
+	}
+	return 0
 }

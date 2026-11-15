@@ -379,7 +379,19 @@
 ### 7.3 `isAdminAuthorized(r)` 双轨校验逻辑
 1. 优先检查请求头 `Authorization: Bearer <password>`（保持 100% 脚本兼容）。
 2. 若无请求头或校验未通过，检查是否携带合法 `llmproxy_admin_session` Cookie（HMAC 密钥绑定当前管理员密码，密码修改自动全端失效）。
-3. 无凭据或两者均非法时，记录失败 IP 并严格执行防暴力破解冷却阶梯（10 分钟内连续 5 次失败封禁 10 分钟）。
+3. **防暴力破解只统计"携带了错误凭据"的尝试**：完全无凭据的请求（浏览器首屏加载、健康探针、未登录脚本）不消耗失败额度，避免正常用户刷新页面即自锁。
+4. 失败阶梯：10 分钟内连续 5 次错误凭据 → 封禁该 IP 10 分钟。
+5. **状态码契约**：被封禁期间，任何管理端点（含 `POST /api/admin/auth/login`）返回 `429 Too Many Requests` 并携带 `Retry-After: <秒>`；未被封禁时的失败返回 `401 Unauthorized`。前端据此区分"密码错误"与"临时锁定"。
+```json
+{
+  "ok": false,
+  "error": { "message": "too many failed admin attempts, retry later", "type": "rate_limit_error", "retry_after_sec": 600 }
+}
+```
+
+### 7.4 管理端可见的凭据范围
+- `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
+- `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。
 
 ---
 

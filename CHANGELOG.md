@@ -4,6 +4,19 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **管理端自锁（P1）**：完全无凭据的请求不再计入防爆破失败阶梯（此前未登录刷新控制台 5 次即把该 IP 锁 10 分钟，期间正确密码也被拒）；锁定期返回 `429 Too Many Requests` + `Retry-After`，控制台据此提示"临时锁定"而非"密码错误"；未登录首屏不再预取 `/api/config`。
+- **供应商详情面板"自动探测协议"失效（P2）**：补齐 `btn_detect_ed_<id>` 的行内事件绑定，调用 `/api/admin/detect-provider` 并回填归一化 Base URL。
+- **新建供应商 API Key 明文回显（P3）**：`#newProvApiKey` 改为 `type="password"`。
+- **显式 IPv4 绑定的误导性 dual-stack 告警（P3）**：仅在通配/IPv6 绑定时尝试双栈 socket，IPv4 直连不再打印 `dual-stack listen failed`。
+- **密钥健康度统计失真（P3）**：`usage.jsonl` 记录新增 `try_failed`，故障转移中失败的上游尝试计入对应 Key 的 `failed`，不再只统计最终胜出 Key。
+- **版本常量漂移（P3）**：`cmd/llmproxy/main.go` 默认版本同步至 `v20261114-03 / 2.1.0`，`go build` 直接产出的 `--version` 不再错误。
+- **文档漂移（P3）**：`docs/TESTING_SPEC.md` 中 T2 中枢测试落点修正为 `edgeone-hub/test/hub.test.mjs`；`docs/ADMIN_UI_BACKEND_CONTRACT.md` 补充 429 契约与 `settings.client_key` 明文可见的设计说明。
+
+---
+
 ## [v20261114-03] - 2026-11-14
 
 ### Added

@@ -137,7 +137,7 @@ go test -race ./...        # 执行 Go 全量模块并发数据竞争检测
 | 1 代测试文件 (`ocrprox/tests/`) | 2 代对应落点 (`llmproxy2`) | 演进方式 |
 |---|---|---|
 | `test_admin_contract.py` / `test_runtime_profiles.py` / `test_settings_schema.py` / `verify_presets_integrity.py` / `verify_ui_layout.py` | `tests/t1_contracts/` | 保留并扩展支持 `hub/lite/full` 三角色 + Magpie 极简 UI 零内联样式门禁 |
-| `test_edgeone_export_guard.py` / `test_vault_sync.py` / `test_vault_key_isolation.py` | `tests/t2_hub/` | 升级为校验 `/api/node/config` Scope 隔离、`origin=local` 阻断与 304 续租 |
+| `test_edgeone_export_guard.py` / `test_vault_sync.py` / `test_vault_key_isolation.py` | `edgeone-hub/test/hub.test.mjs`（`npm run test:hub`） | 升级为校验 `/api/node/config` Scope 隔离、`origin=local` 阻断与 304 续租 |
 | `test_scheduler_p1_fixes.py` / `test_stream_turn_integrity.py` | `internal/scheduler/*_test.go` | 转化为 Go `-race` 单测 + 新增 `forbiddenAlike` 自愈单测 |
 | `test_gemini_compat.py` / `test_agent_dual_engine.py` | `internal/adapters/*_test.go` | 转化为 Go 声明式规则 + Gemini 兼容层 Fixtures 单测 |
 | `test_oauth_credentials.py` / `verify_security_redlines.py` | `internal/oauth/*_test.go` & `internal/auth/*_test.go` | 转化为 Go 单测 |

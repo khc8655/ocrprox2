@@ -284,7 +284,8 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 	}
 	var healthResp map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &healthResp)
-	if healthResp["app_version"] != version || healthResp["semver"] != "2.0.0" {
+	_, wantSemver := releaseMeta(t)
+	if healthResp["app_version"] != version || healthResp["semver"] != wantSemver {
 		t.Errorf("unexpected healthz response: %+v", healthResp)
 	}
 
@@ -421,12 +422,32 @@ func TestLiteMode_RouteValidationAndReadOnlyGuard(t *testing.T) {
 	}
 }
 
-func TestVersionVariables(t *testing.T) {
-	if version != "v20261108-01" {
-		t.Errorf("unexpected version: %s", version)
+// releaseMeta reads version.json so the built-in defaults are guarded against
+// drifting from the release metadata (build-release.mjs injects the same values
+// through -ldflags; plain `go build` must not lag behind).
+func releaseMeta(t *testing.T) (string, string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "version.json"))
+	if err != nil {
+		t.Fatalf("read version.json: %v", err)
 	}
-	if AppVersion != "2.0.0" {
-		t.Errorf("unexpected AppVersion: %s", AppVersion)
+	var meta struct {
+		Version string `json:"version"`
+		Semver  string `json:"semver"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		t.Fatalf("parse version.json: %v", err)
+	}
+	return meta.Version, meta.Semver
+}
+
+func TestVersionVariables(t *testing.T) {
+	wantVersion, wantSemver := releaseMeta(t)
+	if version != wantVersion {
+		t.Errorf("version %s drifts from version.json (%s)", version, wantVersion)
+	}
+	if AppVersion != wantSemver {
+		t.Errorf("AppVersion %s drifts from version.json (%s)", AppVersion, wantSemver)
 	}
 }
 

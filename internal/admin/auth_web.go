@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/khc8655/llmproxy2/internal/auth"
@@ -73,10 +74,29 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check anti-bruteforce and verify password via authMgr
+	// Lockout state is sampled first: the attempt that trips the 5th failure
+	// still answers 401 ("bad credentials"), later attempts answer 429.
+	blockedBefore := s.adminIPBlocked(r)
 	fakeReq := httptest.NewRequest(http.MethodGet, "/test", nil)
 	fakeReq.Header.Set("Authorization", "Bearer "+req.Password)
 	fakeReq.RemoteAddr = r.RemoteAddr
 	if !s.authMgr.VerifyAdminAuth(fakeReq) {
+		if blockedBefore {
+			if remaining := s.authMgr.BlockRemaining(auth.GetClientIP(r)); remaining > 0 {
+				secs := int(remaining.Seconds())
+				if secs < 1 {
+					secs = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":              false,
+					"error":           "too many failed attempts, retry later",
+					"retry_after_sec": secs,
+				})
+				return
+			}
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":    false,

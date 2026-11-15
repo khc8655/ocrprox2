@@ -18,31 +18,40 @@ import (
 
 // UsageRecord represents one line in usage.jsonl (enhanced with Magpie fields).
 type UsageRecord struct {
-	Timestamp          int64  `json:"t"`
-	Mode               string `json:"mode"`
-	Endpoint           string `json:"ep"`
-	ReqModel           string `json:"req"`
-	ServedModel        string `json:"served"`
-	Provider           string `json:"provider"`
-	KeyID              string `json:"key_id"`
-	InTokens           int    `json:"in"`
-	OutTokens          int    `json:"out"`
-	CacheReadTokens    int    `json:"cache_read,omitempty"`
-	CacheWriteTokens   int    `json:"cache_write,omitempty"`
-	CacheWrite1hTokens int    `json:"cache_write_1h,omitempty"`
-	ReasoningTokens    int    `json:"reasoning,omitempty"`
-	Millis             int64  `json:"ms"`
-	TTFTMillis         int64  `json:"ttft_ms,omitempty"`
-	FlowMillis         int64  `json:"flow_ms,omitempty"`
-	OwnMillis          int64  `json:"own_ms,omitempty"`
-	QueuedMillis       int64  `json:"queued_ms,omitempty"`
-	SentMillis         int64  `json:"sent_ms,omitempty"`
-	RetriedMillis      int64  `json:"retried_ms,omitempty"`
-	UpBytes            int    `json:"up_bytes,omitempty"`
-	DownBytes          int    `json:"down_bytes,omitempty"`
-	StopReason         string `json:"stop,omitempty"`
-	Status             int    `json:"status"`
-	Tries              int    `json:"tries"`
+	Timestamp          int64        `json:"t"`
+	Mode               string       `json:"mode"`
+	Endpoint           string       `json:"ep"`
+	ReqModel           string       `json:"req"`
+	ServedModel        string       `json:"served"`
+	Provider           string       `json:"provider"`
+	KeyID              string       `json:"key_id"`
+	InTokens           int          `json:"in"`
+	OutTokens          int          `json:"out"`
+	CacheReadTokens    int          `json:"cache_read,omitempty"`
+	CacheWriteTokens   int          `json:"cache_write,omitempty"`
+	CacheWrite1hTokens int          `json:"cache_write_1h,omitempty"`
+	ReasoningTokens    int          `json:"reasoning,omitempty"`
+	Millis             int64        `json:"ms"`
+	TTFTMillis         int64        `json:"ttft_ms,omitempty"`
+	FlowMillis         int64        `json:"flow_ms,omitempty"`
+	OwnMillis          int64        `json:"own_ms,omitempty"`
+	QueuedMillis       int64        `json:"queued_ms,omitempty"`
+	SentMillis         int64        `json:"sent_ms,omitempty"`
+	RetriedMillis      int64        `json:"retried_ms,omitempty"`
+	UpBytes            int          `json:"up_bytes,omitempty"`
+	DownBytes          int          `json:"down_bytes,omitempty"`
+	StopReason         string       `json:"stop,omitempty"`
+	Status             int          `json:"status"`
+	Tries              int          `json:"tries"`
+	FailedTries        []TryFailure `json:"try_failed,omitempty"`
+}
+
+// TryFailure attributes one failed upstream attempt to the key that produced it,
+// so failover failures are visible in per-key health statistics.
+type TryFailure struct {
+	Provider string `json:"provider"`
+	KeyID    string `json:"key_id"`
+	Status   int    `json:"status"`
 }
 
 // SeriesPoint is a single bucket point in the interactive timeline series.
@@ -228,6 +237,20 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 		StopReason:         trace.StopReason,
 		Status:             trace.Status,
 		Tries:              len(trace.Tries),
+	}
+
+	for _, tr := range trace.Tries {
+		if tr.Status >= 200 && tr.Status < 300 {
+			continue
+		}
+		if tr.Provider == "" || tr.KeyID == "" {
+			continue
+		}
+		rec.FailedTries = append(rec.FailedTries, TryFailure{
+			Provider: tr.Provider,
+			KeyID:    tr.KeyID,
+			Status:   tr.Status,
+		})
 	}
 
 	m.mu.Lock()
@@ -514,6 +537,23 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 				ks.flowSum += effFlow
 				ks.flowOutSum += r.OutTokens
 			}
+		}
+
+		// Failed failover attempts are attributed to the key that actually failed,
+		// so key health/failure rate reflects every attempt instead of only the
+		// winning key's final status.
+		for _, ft := range r.FailedTries {
+			if ft.Provider == "" || ft.KeyID == "" {
+				continue
+			}
+			fKey := ft.Provider + ":" + ft.KeyID
+			fks, ok := keyMap[fKey]
+			if !ok {
+				fks = &KeyStats{Provider: ft.Provider, KeyID: ft.KeyID}
+				keyMap[fKey] = fks
+			}
+			fks.Requests++
+			fks.Failed++
 		}
 	}
 

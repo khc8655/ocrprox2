@@ -38,7 +38,10 @@
       "method": "GET",
       "path": "/api/config",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub", "full"],
+      "roles": [
+        "hub",
+        "full"
+      ],
       "response": {
         "ok": "boolean",
         "_version": "integer",
@@ -51,7 +54,10 @@
       "method": "POST",
       "path": "/api/config",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub", "full"],
+      "roles": [
+        "hub",
+        "full"
+      ],
       "request": {
         "_version": "integer",
         "providers": "object",
@@ -72,7 +78,9 @@
       "method": "GET",
       "path": "/api/admin/nodes",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "response": {
         "ok": true,
         "nodes": "array of node objects"
@@ -82,7 +90,9 @@
       "method": "POST",
       "path": "/api/admin/nodes",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "request": {
         "name": "string",
         "role": "string (lite | full)",
@@ -104,13 +114,17 @@
       "method": "PATCH",
       "path": "/api/admin/nodes/:id",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"]
+      "roles": [
+        "hub"
+      ]
     },
     "nodes_rotate": {
       "method": "POST",
       "path": "/api/admin/nodes/:id/rotate",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "response": {
         "ok": true,
         "node_token": "string (stk_node_<48hex>)",
@@ -121,13 +135,17 @@
       "method": "DELETE",
       "path": "/api/admin/nodes/:id",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"]
+      "roles": [
+        "hub"
+      ]
     },
     "node_config": {
       "method": "POST",
       "path": "/api/node/config",
       "auth": "NODE_TOKEN",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "headers": {
         "Authorization": "Bearer stk_node_<48hex>",
         "If-None-Match": "optional etag"
@@ -137,7 +155,9 @@
       "method": "GET",
       "path": "/api/admin/usage",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "params": {
         "period": "today | 7d | 30d | all",
         "tz": "string (e.g. Asia/Shanghai)"
@@ -147,7 +167,9 @@
       "method": "GET",
       "path": "/api/admin/traces",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "response": {
         "ok": true,
         "traces": "array of RequestTrace objects"
@@ -157,7 +179,9 @@
       "method": "POST",
       "path": "/api/admin/mode",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "mode": "string (agent | kb)"
       },
@@ -170,7 +194,10 @@
       "method": "POST",
       "path": "/api/admin/probe-models",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub", "full"],
+      "roles": [
+        "hub",
+        "full"
+      ],
       "request": {
         "provider": "string",
         "base_url": "string (optional)",
@@ -185,7 +212,10 @@
       "method": "POST",
       "path": "/api/admin/verify-key",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub", "full"],
+      "roles": [
+        "hub",
+        "full"
+      ],
       "request": {
         "provider": "string",
         "base_url": "string (optional)",
@@ -204,7 +234,9 @@
       "method": "GET",
       "path": "/api/vault/manifest",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "response": {
         "ok": true,
         "_version": "integer",
@@ -215,7 +247,9 @@
       "method": "POST",
       "path": "/api/vault/fetch",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["hub"],
+      "roles": [
+        "hub"
+      ],
       "request": {
         "provider": "string",
         "key_label": "string (optional)",
@@ -231,7 +265,9 @@
       "method": "POST",
       "path": "/api/admin/detect-provider",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "base_url": "string (optional)",
         "api_key": "string (optional)",
@@ -249,7 +285,9 @@
       "method": "POST",
       "path": "/api/admin/balance",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "provider": "string (optional)",
         "key_label": "string (optional)",
@@ -268,7 +306,9 @@
       "method": "POST",
       "path": "/api/admin/test-provider",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "provider": "string",
         "key_label": "string (optional)",
@@ -285,7 +325,9 @@
       "method": "POST",
       "path": "/api/admin/autolist-sync",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "provider": "string",
         "auto_include": "string (optional)",
@@ -302,7 +344,9 @@
       "method": "GET",
       "path": "/api/admin/presets-extra",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "response": {
         "ok": true,
         "presets": "array of objects"
@@ -312,7 +356,9 @@
       "method": "GET",
       "path": "/api/admin/access-info",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "response": {
         "ok": true,
         "mode": "string",
@@ -327,7 +373,9 @@
       "method": "POST",
       "path": "/api/admin/access-key",
       "auth": "ADMIN_PASSWORD",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "client_key": "string (optional)",
         "generate": "boolean (optional)"
@@ -342,7 +390,9 @@
       "method": "POST",
       "path": "/api/admin/auth/login",
       "auth": "NONE",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "request": {
         "password": "string"
       },
@@ -354,10 +404,40 @@
       "method": "POST",
       "path": "/api/admin/auth/logout",
       "auth": "NONE",
-      "roles": ["full"],
+      "roles": [
+        "full"
+      ],
       "response": {
         "ok": true
       }
+    }
+  },
+  "auth_semantics": {
+    "login": {
+      "method": "POST",
+      "path": "/api/admin/auth/login",
+      "auth": "none"
+    },
+    "failure_unauthorized": {
+      "status": 401,
+      "when": "invalid credential, IP not locked"
+    },
+    "failure_locked": {
+      "status": 429,
+      "headers": {
+        "Retry-After": "seconds"
+      },
+      "when": "IP locked after 5 wrong credentials within 10 minutes"
+    },
+    "credential_less_requests": {
+      "counted_as_failure": false,
+      "reason": "page loads and probes must not consume the anti-bruteforce budget"
+    },
+    "client_key_visibility": {
+      "path": "/api/config",
+      "field": "settings.client_key",
+      "masked": false,
+      "reason": "admin needs the value to configure gateway clients"
     }
   }
 }
