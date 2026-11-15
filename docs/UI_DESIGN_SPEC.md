@@ -1,246 +1,80 @@
-# Web 管理端 UI 设计与前端工程规范 (Magpie-Style Minimalist UI Specification)
+# Web 管理端 UI 设计与前端工程规范 (KHC Admin Design System + Magpie 轻量架构)
 
-> **核心定位**：彻底抛弃 1 代 (`ocrprox`) 臃肿的“重型后台仪表盘 + 抽屉弹窗套娃 + 294 处 JS 内联样式”历史包袱，全面采用 **`yetone/magpie` 的极简实用设计语言** —— **"One quiet surface, real logos, inline row editors, zero clutter"**（一个安静的底面、清晰的图标、列表行内原地展开编辑、零视觉噪音）。
-> **适用端**：EdgeOne Makers 轻中枢 (`hub`) 管理端与 Go 标准 VM 完整节点 (`full`) 管理端（`lite` 极简节点无 UI）。
-
----
-
-## 一、 1 代 UI 痛点复盘 vs 2 代 Magpie 极简风格对照
-
-| 维度 | 1 代 (`ocrprox`) UI 为什么让人头疼？ | 2 代 (`llmproxy2`) Magpie 风格标准 |
-|---|---|---|
-| **信息架构与导航** | 6~7 个复杂 Tab + 大号 KPI 统计卡片 + 占满首屏的说明横幅，找一个核心功能要滚屏或跨页跳转 | **顶栏 46px 分段导航（`.seg`）**：`hub` 端仅 **3 个视图**（供应商、节点、设置），`full` 端仅 **4 个视图**（路由、供应商、日志、设置），打开即核心列表 |
-| **编辑交互模式** | **右侧大抽屉（Drawer）+ 多层弹窗（Modal）套娃**：看列表在左边，点编辑弹出半屏抽屉，再点加 Key 又弹窗，极易迷失且 DOM 脆弱 | **列表行内原地展开（Inline `.editor`）**：点哪一行供应商或模型，就在该行正下方平滑展开微灰底色（`--card-2`）编辑区，增删 Key、测速、绑模型当场完成，**彻底消灭 Drawer 抽屉！** |
-| **视觉噪音** | 大量彩色左边框条（Left-border stripes）、五颜六色的渐变徽章、冗余边框套边框 | **安静表面（One Quiet Surface）**：严禁彩色左边框条；整页只有一个圆角白底 `.list` 容器，行间仅 `1px` 极细分割线，状态仅用 `7px` 语义圆点（绿/黄/红叉/灰）表达 |
-| **页面宽度与视线** | 宽屏下左右无限拉伸，名称在最左、开关在最右，视线跨度极大 | **居中阅读走廊（Max-Width 920px）**：无论屏幕多大，内容区居中限宽，右侧控件列固定网格宽度（`.fields`），所有下拉箭头垂直对齐在同一直线上 |
-| **代码与样式维护** | 10 个 JS 文件散落 **294 处内联样式**（`style="..."` 223 处 + `.style.xxx` 71 处），两套新旧类名混用，改一处崩三处 | **30 个核心语义类走天下 + 零内联样式铁律**：显隐统一用原生 `[hidden]`，JS 模板严禁出现 `style=`，单文件打包体积从 350KB 压降至 **≤ 240 KB（245,760 bytes，Gzip < 50KB）** |
+> **核心定位**：保留 `yetone/magpie` 的 **“零依赖、单文件瞬开、行内原地展开编辑、零内联样式”** 轻量工程内核，同时全面采用 **KHC Admin Design System** 的视觉令牌、栅格规范与移动优先响应式体系，彻底消除 1 代遗留的杂乱样式、硬编码元素与双模式别扭兼容。
+> **适用端**：EdgeOne Makers 轻中枢 (`hub`) 管理端与 Go 标准 VM 完整节点 (`full`) 管理端（`lite` 极简节点无 UI，VM 端通过 `//go:embed assets/index.html` 静态内嵌，零运行时内存膨胀）。
 
 ---
 
-## 二、 核心视觉令牌（Design Tokens —— 源自 `magpie/app.css` 精炼版）
+## 一、 工程轻量化与硬性门禁（Hard Gates）
 
-全站 CSS 变量严格控制在 **20 个以内**，原生支持浅色（Light）与深色（Dark）双主题自动/手动切换，所有文本对比度均满足 WCAG AA（≥ 4.5:1）：
+所有 UI 变更必须通过 `npm run build:admin` 与 `npm run verify:release` 的 5 项自动化门禁校验：
 
-```css
-:root {
-  /* 1. 表面层级 (Surfaces) —— 只有三层：页面底 -> 列表白卡 -> 展开编辑微灰底 */
-  --bg: #f4f4f6;            /* 页面全局安静浅灰背景 */
-  --card: #ffffff;          /* 列表主容器 (.list) 纯白表面 */
-  --card-2: #f9f9fb;        /* 行内展开编辑器 (.editor) 微灰表面 */
-  --pill: #f1f1f4;          /* 行内胶囊按钮/选择器 (.field / .pill) 默认底色 */
-  --pill-hover: #e9e9ee;    /* 胶囊悬停底色 */
-  --seg-track: #e6e6eb;     /* 顶栏分段切换器轨道底色 */
-
-  /* 2. 线条与阴影 (Lines & Elevation) */
-  --line: #e3e3e8;          /* 卡片外框与主分割线 */
-  --line-2: #ececf0;        /* 列表行 (.row) 之间的极细分割线 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 .5px rgba(0, 0, 0, .06);
-  --shadow-pop: 0 12px 32px rgba(20, 22, 30, .14), 0 2px 6px rgba(20, 22, 30, .06);
-
-  /* 3. 文字层级 (Typography) */
-  --fg: #1c1c21;            /* 主标题与核心正文 */
-  --fg-2: #4b4b53;          /* 次级正文与控件文字 */
-  --muted: #85858d;         /* 辅助说明、副标题 (.sub)、时间戳 */
-  --faint: #b9b9c2;         /* 禁用态、占位符 */
-
-  /* 4. 语义状态色 (Semantic States —— 仅用于状态圆点与小胶囊，严禁大面积铺色) */
-  --accent: #4f46e5;        /* 唯一主交互强调色 (Indigo) */
-  --accent-soft: #eeedfd;
-  --green: #189a58;         /* 健康 / 在线 / 租约有效 */
-  --green-soft: #e4f6ec;
-  --amber: #b45309;         /* 冷却中 / 速率限制 / 宽限期 */
-  --amber-soft: #fbf0df;
-  --red: #d64545;           /* 故障 / 已吊销 / 鉴权失败 (配合 × 形状兼顾色盲识别) */
-  --red-soft: #fbe9e9;
-
-  /* 5. 字体栈 (Font Stacks) */
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
-  --code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #1a1a1e;
-    --card: #232327;
-    --card-2: #1f1f23;
-    --pill: #2d2d33;
-    --pill-hover: #36363d;
-    --seg-track: rgba(255, 255, 255, .06);
-    --line: #333339;
-    --line-2: #2c2c32;
-    --fg: #ededf1;
-    --fg-2: #b9b9c1;
-    --muted: #8b8b94;
-    --faint: #56565f;
-    --accent: #a5b4fc;
-    --accent-soft: #2b2c47;
-    --green: #6fd99b;
-    --green-soft: #1e3a2b;
-    --amber: #f2b544;
-    --amber-soft: #3f3220;
-    --red: #f28b82;
-    --red-soft: #45272a;
-  }
-}
-```
+1. **零外部依赖**：`package.json` 的 `dependencies` 与 `devDependencies` 保持 `{}`，严禁引入 React / Vue / Tailwind / ECharts / 图标字体包，全部采用原生 HTML5 + CSS3 + ES6 + 内联 SVG。
+2. **零内联样式（Zero Inline Style）**：HTML 与 JS 字符串中严禁出现 `style="..."`，JS 代码中严禁出现 `.style.xxx`（显隐统一使用 `[hidden]` 与 `.hidden`，SVG 尺寸/进度条使用 SVG 属性如 `width` / `height` / `rx`）。
+3. **零抽屉弹窗（Zero `.drawer`）**：列表项配置统一使用行内原地展开（`.row` + `.editor`），严禁右侧大抽屉套娃。
+4. **零左边框色条**：严禁使用 `border-left: ... (#|rgb|hsl|var(--)` 彩色竖条，状态统一采用 `7px` 语义圆点（`.dot`）与轻量胶囊（`.pill`）。
+5. **单文件瞬开体积上限**：`shared/admin/dist/index.html` 与 `internal/admin/assets/index.html` 体积必须 **≤ 245,760 bytes（240 KB）**，当前为 ~215 KB。
 
 ---
 
-## 三、 页面骨架与核心组件范式（只用 5 种基础构件拼装全站）
+## 二、 KHC Admin Design System 视觉令牌
 
-### 3.1 构件一：46px 极简顶栏与分段切换器（`header.top` + `nav.seg`）
+定义于 [`shared/admin/css/app.css`](file:///Users/xk/Documents/llmproxy2/shared/admin/css/app.css)，原生支持 Light 与 Dark（`data-theme="dark"` 或系统偏好）双主题：
 
-不再使用厚重的侧边栏或大页头，全站顶部固定一条 `46px` 高的紧凑导航栏：
+| 类别 | Token | Light 值 | Dark 值 | 用途 |
+|---|---|---|---|---|
+| **主强调色** | `--khc-primary-500` | `#1664FF` | `#3B82F6` | 主按钮、激活态、图表主柱、进度条 |
+| | `--khc-primary-600` | `#0F54E0` | `#2563EB` | 主按钮悬停态 |
+| | `--khc-primary-50` | `#E6EEFF` | `rgba(59,130,246,0.15)` | 角色徽章底色、强调胶囊底色 |
+| **中性表面** | `--khc-surface-page` | `#F8FAFC` | `#0F172A` | 全局页面底色 |
+| | `--khc-surface-card` | `#FFFFFF` | `#1E293B` | 卡片、吸顶顶栏、表格表面 |
+| | `--khc-surface-hover` | `#F1F5F9` | `#334155` | 列表行悬停与展开高亮 |
+| | `--khc-surface-muted` | `#F1F5F9` | `#162032` | 分段轨道、行内编辑器背景、表头 |
+| **边框线条** | `--khc-border-1` | `#E2E8F0` | `#334155` | 卡片外框、表格/行分割线 |
+| | `--khc-border-2` | `#CBD5E1` | `#475569` | 按钮悬停边框 |
+| **文字层级** | `--khc-text-1` | `#0F172A` | `#F8FAFC` | 主标题、核心数值、正文 |
+| | `--khc-text-2` | `#475569` | `#94A3B8` | 副标题、标签、次级说明 |
+| | `--khc-text-3` | `#94A3B8` | `#64748B` | 占位符、图标、辅助次要文本 |
+| **语义状态** | `--khc-success-500` | `#10B981` | `#10B981` | 在线、探活通过、健康进度 |
+| | `--khc-warning-500` | `#F59E0B` | `#F59E0B` | 冷却中、重试、未探活 |
+| | `--khc-danger-500` | `#EF4444` | `#EF4444` | 异常、吊销、鉴权失败 |
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ [🐦 llmproxy]   ( 供应商与密钥 | 中转节点 | 设置 )    [● Hub 在线] [🌓] [退出] │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-- **左侧（`.brand`）**：18px 简洁 SVG 图标 + 站点名称 + 角色胶囊（`Hub` 或 `Full`）。
-- **中间（`nav.seg`）**：苹果风格分段控制器，选中项带白色浮动滑块（`background: var(--card); box-shadow: var(--shadow-sm)`）。
-- **右侧（`.actions`）**：
-  - 在 `full` 节点上：直接放置 **`[ Agent | KB ]` 模式分段开关**（一键切换运行模式，无需进设置页翻找！）+ **「从中枢拉取」** 快捷图标按钮；
-  - 在 `hub` 节点上：显示当前 `config_version` 与一键 **「＋ 新建节点」** 按钮。
-
-### 3.2 构件二：圆角列表容器与标准行（`.list` + `.row`）
-
-所有业务对象（供应商、模型、中转节点、设置项）统一渲染为 `.list` 内的 `.row`，**绝不发明第二种卡片样式**：
-
-```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ ●  MiniMax 稀宇科技            https://api.minimaxi.com/v1    [3 把 Key] [共享] ▾ │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ ●  Google Vertex AI           us-central1 · gemini-2.5/3.x   [2 把 Key] [本地] ▾ │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ ●  DeepSeek 深度求索          https://api.deepseek.com/v1    [1 把 Key] [共享] ▾ │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-- **标准 `.row` 结构（固定高度 `48px`，左右内边距 `14px`）**：
-  1. **状态圆点 / 图标（`.ic` / `.dot`）**：`7px` 语义圆点（如全绿代表所有 Key 正常，琥珀色代表部分 Key 冷却中，红叉代表全部失效）或 `20px` 厂商图标；
-  2. **主信息区（`.who`，`flex: 1; min-width: 0`）**：左侧主名称 `.name`（`font-weight: 500; 13.5px`）+ 一行简短副信息 `.sub`（`11.5px; color: var(--muted)`，使用等宽字体显示 Base URL 或绑定模型摘要）；
-  3. **右侧胶囊控件列（`.fields`，固定 Grid 列宽）**：放置密钥数量胶囊、归属标签（`共享` vs `本地私有`）、快速开关与展开箭头 `▾`。
-
-### 3.3 构件三：行内原地展开编辑器（Inline `.editor` —— 彻底取代 Drawer 抽屉）
-
-点击任意一行 `.row`，无需弹窗或滑出抽屉，直接在该行下方展开 `.editor`（`background: var(--card-2); border-top: 1px solid var(--line-2); padding: 12px 16px`）：
-
-```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ ●  MiniMax 稀宇科技            https://api.minimaxi.com/v1    [3 把 Key] [共享] ▴ │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│  预设规则: [minimax ▾]   Base URL: [https://api.minimaxi.com/v1      ] [同步规则] │
-│  ──────────────────────────────────────────────────────────────────────────────  │
-│  ● hk-pool-01     sk-api-8f9e...3a1b    [共享]   128ms (2分钟前)   [测速] [删除]  │
-│  ● hk-pool-02     eyJhbGciOiJ...9x2z    [OAuth]  有效 (剩余 18h)   [刷新] [删除]  │
-│  × backup-key     sk-api-1c2d...7f8e    [本地]   冷却中 (429 限流) [解封] [删除]  │
-│  ＋ [输入标签 (如 prod-03)] [粘贴 API Key 或点击右侧扫码] [设为本地私有 □] [添加] │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**为什么这种设计比 1 代好十倍？**
-1. **上下文不丢失**：展开 MiniMax 的同时，上下其它供应商依然在视线内，可以随时对比；
-2. **操作路径最短**：看 Key 状态、测速、解封冷却、新增 Key、切换 `共享/本地私有` 全部在一个平面内一键完成；
-3. **代码量骤减 70%**：没有 Drawer 遮罩层、没有滚动锁定冲突、没有弹窗状态同步 Bug。
+### 布局与控件尺寸规范
+- **4px 基准栅格**：所有间距严格采用 `4px` 倍数（`4 / 8 / 12 / 16 / 20px`）。
+- **居中容器**：`.main-wrap` 与 `.header-inner` 最大宽度 `1120px`，左右留白 `20px`（移动端 `12px`）。
+- **吸顶顶栏**：桌面端高度 `48px`（`--khc-header-h`），仅含品牌标识+角色徽章、分段主导航（`.seg`）、版本号/模式切换/隐私遮罩/主题切换/登出按钮。
+- **统一控件高度**：所有 `.btn`、`.input`、`.select` 统一高度 `32px`（`--khc-ctrl-h`），圆角 `6px`（`--khc-radius-md`）；行内小按钮 `.btn--sm` 高度 `26px`。
+- **数字排版**：所有计数、延迟、版本号、密钥预览、IP 地址均使用 `.tabular`（`font-variant-numeric: tabular-nums` + 等宽字体栈）。
+- **零 Emoji 规范**：全站界面（含按钮、折叠标题、状态提示）严禁使用 emoji，统一使用 [`shared/admin/js/icons.js`](file:///Users/xk/Documents/llmproxy2/shared/admin/js/icons.js) 提供的线性 SVG 图标（`uiIcon()`）与供应商官方品牌 SVG（`renderBrandIcon()`）。
 
 ---
 
-## 四、 两端（`hub` vs `full`）具体页面标准设计
+## 三、 零硬编码原则（Zero Hardcoded DOM Elements）
 
-### 4.1 EdgeOne Makers 轻中枢（`hub` 角色 —— 共 3 个极简视图）
-
-#### 视图 1：`供应商与密钥 (Providers)`（默认首页）
-- 顶部搜索框 `Find a provider` + 右侧 `＋ 添加供应商` 按钮；
-- 主体为一个 `.list`，列出所有供应商；点击展开 `.editor` 管理其下的 API Keys（支持勾选 `仅中枢本地保留 (origin=local)`，未勾选的默认作为 `vault` 共享池供节点按 Scope 拉取）。
-
-#### 视图 2：`中转节点 (Nodes)`（2 代核心新增页）
-- 主体为一个 `.list`，每一行代表一台签发的 VM 节点（NAT `lite` 或标准 `full`）：
-  ```text
-  ┌────────────────────────────────────────────────────────────────────────────────┐
-  │ ●  香港 NAT 小鸡 01 (lite)   Scope: 全部模型 · 3家供应商   最后活跃: 12分钟前  ▾ │
-  ├────────────────────────────────────────────────────────────────────────────────┤
-  │  节点 ID: node_hk_01        Token 摘要: stk_node_9f8e...   版本: v20261108-01  │
-  │  租约时长: [24 小时 ▾]      允许供应商: [✓ MiniMax] [✓ DeepSeek] [✓ OpenRouter]│
-  │  允许模型: [全部模型 (*)                                                     ] │
-  │  一键部署: [复制 NAT 极简节点启动命令]          [轮换 Token]  [注销/停用该节点] │
-  └────────────────────────────────────────────────────────────────────────────────┘
-  ```
-- 点击右上角 `＋ 签发新节点`：在列表顶部直接展开新建行，填完名称、选好 `lite/full` 和 Scope 后点击「生成 Token」，当场展示一次性 `NODE_TOKEN` 与一键复制的 `systemd` / 命令脚本。
-
-#### 视图 3：`设置 (Settings)`
-- 极简两段式 `.list prefs`（与 `magpie` 设置页完全同构：左名称+说明 `.who`，右胶囊选择器）：
-  - **界面与外观**：浅色 / 深色 / 跟随系统；
-  - **默认调度参数**：`agent_routing_strategy`（粘性故障转移 / 手动固定）、`agent_first_byte_timeout_sec`、冷却时长配置；
-  - **备份与导入导出**：一键导出加密/脱敏配置 JSON、导入合并。
+[`shared/admin/admin.html`](file:///Users/xk/Documents/llmproxy2/shared/admin/admin.html) 仅保留语义化骨架，禁止写死业务或演示数据：
+1. **供应商预设模板**：`#newProvPreset` 不在 HTML 中硬编码 `<option>`，由 `app.js` 的 `populatePresetDropdown()` 运行时从 `PRESETS_META` 动态渲染。
+2. **接入地址与配置默认值**：`#gwBaseUrl` 由 `location.origin` 动态生成；超时与冷却秒数不在 HTML 中写死 `value="120"` 等静态值，统一使用 `placeholder` 并由后端/KV 下发的 `state.config.settings` 填充。
+3. **角色与版本标识**：`#brandRole`、`#loginHostBadge`、`#configVersionDisplay` 全部由运行时 `window.HOST.kind` 与 `_version` 动态写入。
 
 ---
 
-### 4.2 标准 VM 完整节点（`full` 角色 —— 共 4 个极简视图）
+## 四、 信息架构与端能力对齐（Hub vs Full）
 
-#### 视图 1：`模型与路由 (Models)`（默认首页）
-- 顶栏右侧直接切换 **`[ Agent 模式 | KB 知识库模式 ]`**：
-  - 当处于 **Agent 模式** 时：列表展示所有已配置的 `agent_models`（如 `claude-sonnet-4-20250514`、`MiniMax-M2.5`、`gemini-2.5-pro`）；点击任意模型行原地展开候选 Key 排序列表（支持拖拽排序、切换当前粘性主 Key `active_key`、一键并发探测所有绑定 Key 延迟）。
-  - 当处于 **KB 模式** 时：列表 고정展示 4 行虚拟模型（`chat`、`embedding`、`reranker`、`ocr`）；点击任意一行原地展开该分类的候选供应商/模型列表与并发槽位状态。
-
-#### 视图 2：`供应商 (Providers)`
-- 与 `hub` 端共用同一个组件！额外在列表上方提供一条安静的同步栏：
-  `[☁️ EdgeOne 中枢: https://hub.example.com]  [拉取新供应商]  [增量同步 Key 与规则]`
-- 已从中枢拉取的供应商行带有 `[中枢同步]` 胶囊标识，其中枢 Key 锁定只读，但允许在行内展开区继续添加 `[本地私有]` Key 或发起 MiniMax OAuth 扫码登录。
-
-#### 视图 3：`统计与轨迹 (Activity)`（100% 借鉴 Magpie `Usage` + `Trace` 极简设计）
-- **为什么彻底抛弃 1 代统计页？** 1 代为了同时迁就 EdgeOne KV 与 VM 本地文件，把统计拆得七零八落，且只记最终结果、看不到重试过程。2 代直接采用 `magpie` 的 **「时间段胶囊切换 + 汇总条 + 实时请求轨迹行内展开」** 经典三段式：
-  1. **顶栏周期分段切换（`.seg`）**：`[ 今日 (Today) | 近 7 天 (7d) | 近 30 天 (30d) | 全部 ]`（自动按浏览器本地时区对齐零点）。
-  2. **第一部分：简洁汇总列表（`Models` & `Providers / Keys` 聚合表）**：
-     ```text
-     ┌────────────────────────────────────────────────────────────────────────────────┐
-     │ 总请求: 1,428 (成功率 99.4%)   总 Token: 18.4M (缓存命中 62%)   平均 TTFT: 380ms│
-     ├────────────────────────────────────────────────────────────────────────────────┤
-     │ ● claude-sonnet-4-20250514   860 次 · 12.1M tok (缓存 68%)   TTFT 410ms · 99.8%│
-     │ ● MiniMax-M2.5               412 次 ·  5.2M tok (缓存 51%)   TTFT 290ms · 100% │
-     │ ● deepseek-chat              156 次 ·  1.1M tok (缓存 44%)   TTFT 520ms · 97.4%│
-     └────────────────────────────────────────────────────────────────────────────────┘
-     ```
-  3. **第二部分：最近 60 次请求轨迹与故障转移回放（`Recent Traces`，源自 `magpie/trace.go`）**：
-     - 列表展示最近 60 条请求（支持一键过滤「仅看含重试/错误」）；
-     - **点击任意一条请求行，原地展开（`.editor`）完整的多跳尝试故事（`Tries []Try`）**：
-     ```text
-     ┌────────────────────────────────────────────────────────────────────────────────┐
-     │ ● 09:41:05  claude-sonnet-4  → MiniMax (hk-02)   [2次尝试]  1.84s (TTFT 420ms) ▴│
-     ├────────────────────────────────────────────────────────────────────────────────┤
-     │  端点: POST /v1/chat/completions (stream)   Token: 入 1,420 / 出 380 / 缓存 1024│
-     │  ────────────────────────────────────────────────────────────────────────────  │
-     │  × Try #1  minimax / hk-pool-01   HTTP 429 (310ms)  → 已触发模型级冷却 15s      │
-     │            Upstream rate limit exceeded: RPM quota reached (scrubbed)          │
-     │  ● Try #2  minimax / hk-pool-02   HTTP 200 (1530ms, TTFT 420ms)  → 成功响应    │
-     └────────────────────────────────────────────────────────────────────────────────┘
-     ```
-     - **排障体验质的飞跃**：再也不用去翻黑底白字的原始大日志猜“刚才为什么慢了 300ms”或“哪把 Key 报了 429”，点开请求行直接看到 `Try #1 -> Try #2` 的完整切换证据！
-
-#### 视图 4：`设置 (Settings)`
-- 与 `hub` 端共用同一个 Schema 驱动的 `.list prefs` 渲染器，按 `HOST.capabilities` 自动多出：
-  - **时段自动切换（Mode Scheduler）**：开关 + `Agent 时段` / `KB 时段` 时间选择器；
-  - **OCR 与并发控制**：`ocr_max_inflight`、`kb_global_max_concurrency`；
-  - **EdgeOne 中枢连接配置**：中枢 URL 与 `NODE_TOKEN` 设置。
+| 视图 Tab | EdgeOne Hub (`hub`) | VM 完整节点 (`full`) | 核心内容 |
+|---|---|---|---|
+| **概览 (`viewActivity`)** | 显示 `#hubOverviewBox` | 显示 `#fullOverviewBox` | **Hub**：8 项对称 KPI、供应商密钥池健康分布表 + 一键批量探活、中转节点同步/304 遥测表<br>**Full**：8 项对称 KPI、纯 SVG 双色堆叠柱状图（含 X 轴标签防重叠守卫）、53 周热力图、3 维用量排行、60 条请求瀑布流轨迹 |
+| **供应商 (`viewProviders`)** | 完整管理 + 密钥探活持久化 | 完整管理 + Vault 同步 + 探活/余额/OAuth | 搜索框 + 状态分段筛选（全部/已启用/探活通过/异常或未测）、cURL 自动解析、行内密钥池表格与模型探测一键纳管 |
+| **模型路由 (`viewModels`)** | Agent 路由 + KB 4 流水线配置 | Agent 路由 + KB 4 流水线配置 + 在线路由测试 | 顶部 `Agent 路由 / KB 流水线` 切换器、模型搜索框、候选权重与粘性 Key 行内编辑器 |
+| **中转节点 (`viewNodes`)** | 完整支持 | 隐藏 | 节点签发（`NODE_TOKEN`）、租约与模型/供应商白名单（`scope`）、轮换 Token、吊销/恢复 |
+| **系统设置 (`viewSettings`)** | 卡片 `2`（全局策略）+ 卡片 `5`（备份与迁移） | 卡片 `1~5` 全部开放 | 编号步骤卡片：1 网关接入与密钥、2 路由与冷却策略、3 时段调度与并发、4 Vault 连接、5 JSON 导出与 v1/v2 导入 |
 
 ---
 
-## 五、 前端工程硬门禁（彻底杜绝 1 代 UI 乱象复发）
+## 五、 手机端响应式适配规范（`<= 768px`）
 
-为保证 2 代 UI 永远保持像 `magpie` 一样干净、好改、不破版，制定以下 **6 条可执行门禁（纳入 `T1.ui_layout` 自动检查）**：
-
-1. **零内联样式铁律（Zero Inline Style Gate）**：
-   - `shared/admin/admin.html` 与 `shared/admin/js/*.js` 中 **严禁出现任何 `style="` 字符串或 `.style.display =` 赋值**（唯一例外：CSS 变量动态传值如 `style="--p: 75%"`）。
-   - 元素显隐 **100% 强制使用原生 `el.hidden = true / false`**。
-   - 门禁测试直接用正则扫描全部 `.html` 和 `.js` 源码，发现 1 处内联样式即判定构建失败！
-2. **禁止右侧抽屉与多层弹窗（No Drawer Gate）**：
-   - 废除一切 `.drawer`、`.slide-over` 组件；所有详情查看与表单编辑一律使用列表行内原地展开（`.editor`）。
-   - 仅保留一个轻量级确认框（如删除/吊销二次确认）或行内二级按钮确认（点击「注销」变为红色「确认注销？」3 秒内再点生效，连弹窗都省掉！）。
-3. **禁止彩色左边框与花哨装饰（No Left-Border Stripes）**：
-   - 遵循 `magpie` 规范，禁止使用 `border-left: 4px solid ...`；所有状态统一使用 `7px` 圆点（`.dot--ok`, `.dot--warn`, `.dot--err`, `.dot--off`）。
-4. **原生零框架、超轻量单文件预算（Bundle Size Gate ≤ 240 KB / 245,760 bytes）**：
-   - 1 代打包后高达 `349 KB`；2 代重构引入完整 Magpie 极简单页与 SVG 图标集、53 周热力图后，HTML + CSS + JS 合计原始体积硬上限严格锁定为 **≤ 240 KB（245,760 bytes，Gzip ≤ 50 KB）**，打开速度依然超快，且任何 AI 或开发者都能在几分钟内通读全部前端代码。
-5. **移动端与窄窗自适应（360px Zero Horizontal Scroll）**：
-   - 借鉴 `magpie` 的 `@media (max-width: 760px)` 规则：在手机浏览器上打开时，顶栏分段导航 `.seg` 自动下移为第二行横向滑动条，行内 `.fields` 自动折行，确保从 360px 手机屏幕到 4K 桌面屏零横向滚动条、零文字挤压。
-6. **字体与等宽数字对齐（Tabular Nums）**：
-   - 所有延迟（`128ms`）、版本号（`v137`）、时间戳、配额数字强制应用 `font-variant-numeric: tabular-nums`，数字跳动时列表列宽绝不抖动。
+针对 `375px ~ 768px` 移动端视口强制保证 **零横向溢出（`scrollWidth <= innerWidth`）**：
+1. **顶栏两行折叠与横向滑轨**：`.header-inner` 自动换行，第一行保留品牌与操作图标按钮，第二行 `.nav-wrap` 占满 `100%` 宽度并支持横向平滑滑动（隐藏滚动条）。
+2. **KPI 卡片网格**：桌面端 4 列（`repeat(4, minmax(0, 1fr))`）自动切换为移动端 **2 列（`repeat(2, minmax(0, 1fr))`）**，8 项 KPI 始终保持 `2×4` 对称。
+3. **表单栅格**：桌面端 3 列（`.form-grid`）与 2 列（`.form-grid--2`）在移动端统一收敛为 **单列**。
+4. **宽表局部滚动**：所有密钥池表格、供应商健康分布表、中转节点遥测表均包裹在 `.table-wrap`（`overflow-x: auto`）内，避免撑破页面整体宽度。
+5. **列表行与工具栏**：`.row` 右侧 `.fields` 在移动端自动折行右对齐；搜索框自动占满 `100%` 宽度。
