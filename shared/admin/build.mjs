@@ -96,12 +96,7 @@ function cleanJs(src) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .split('\n')
-    .map(line => {
-      const m = line.match(/^(\s*)(.*)$/);
-      if (!m) return line.trimEnd();
-      const indent = m[1].replace(/ {4}/g, '  ').replace(/\t/g, '  ');
-      return (indent + m[2]).trimEnd();
-    })
+    .map(line => line.trim())
     .filter(line => line.length > 0)
     .join('\n');
 }
@@ -109,7 +104,12 @@ const cleanIconsJs = cleanJs(iconsJs);
 const cleanUsageJs = cleanJs(usageJs);
 const cleanHostJs = cleanJs(hostJs);
 const cleanAppJs = cleanJs(appJs);
-let bundledHtml = html.replace(/<!--[\s\S]*?-->/g, '');
+let bundledHtml = html
+  .replace(/<!--[\s\S]*?-->/g, '')
+  .split('\n')
+  .map(line => line.trim())
+  .filter(Boolean)
+  .join('\n');
 bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', `<style>\n${minCss}\n</style>`);
 bundledHtml = bundledHtml.replace('<script src="js/icons.js"></script>', `<script>\n${cleanIconsJs}\n</script>`);
 bundledHtml = bundledHtml.replace('<script src="js/usage.js"></script>', `<script>\n${cleanUsageJs}\n</script>`);
@@ -142,7 +142,9 @@ console.log('\n7. Generating edge-functions/admin.js (EdgeOne Hub Console)...');
 const edgeFuncDir = join(projectRoot, 'edge-functions');
 mkdirSync(edgeFuncDir, { recursive: true });
 
-let hubHtml = bundledHtml.replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>');
+let hubHtml = bundledHtml
+  .replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>')
+  .replace(`<script>\n${cleanUsageJs}\n</script>`, '');
 
 const safeHtml = hubHtml.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 

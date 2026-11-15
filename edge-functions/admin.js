@@ -8,3946 +8,3432 @@ function pageHtml() {
 <html lang="zh-CN">
 <head>
   <script>window.__HOST_KIND__="hub";</script>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>LLMProxy2 控制台</title>
-  <style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LLMProxy2 控制台</title>
+<style>
 :root{--khc-primary-500:#1664FF;--khc-primary-600:#0F54E0;--khc-primary-50:#E6EEFF;--khc-primary-100:#D1E0FF;--khc-surface-page:#F8FAFC;--khc-surface-card:#FFFFFF;--khc-surface-hover:#F1F5F9;--khc-surface-muted:#F1F5F9;--khc-border-1:#E2E8F0;--khc-border-2:#CBD5E1;--khc-text-1:#0F172A;--khc-text-2:#475569;--khc-text-3:#94A3B8;--khc-success-500:#10B981;--khc-success-bg:#ECFDF5;--khc-success-text:#047857;--khc-warning-500:#F59E0B;--khc-warning-bg:#FFFBEB;--khc-warning-text:#B45309;--khc-danger-500:#EF4444;--khc-danger-bg:#FEF2F2;--khc-danger-text:#B91C1C;--khc-radius-sm:4px;--khc-radius-md:6px;--khc-radius-lg:8px;--khc-radius-xl:12px;--khc-shadow-sm:0 1px 2px rgba(15,23,42,0.04);--khc-shadow-md:0 4px 12px rgba(15,23,42,0.08);--khc-shadow-lg:0 12px 32px rgba(15,23,42,0.14);--khc-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--khc-font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--khc-header-h:48px;--khc-ctrl-h:32px}:root[data-theme="dark"]{--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;background-color:var(--khc-surface-page);color:var(--khc-text-1);font-family:var(--khc-font-sans);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}[hidden],.hidden{display:none !important}.tabular{font-variant-numeric:tabular-nums;font-family:var(--khc-font-mono)}.mono{font-family:var(--khc-font-mono)}.app-header{position:sticky;top:0;z-index:40;background-color:var(--khc-surface-card);border-bottom:1px solid var(--khc-border-1)}.header-inner{max-width:1120px;margin:0 auto;height:var(--khc-header-h);padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}.brand-mark{width:24px;height:24px;border-radius:var(--khc-radius-md);background:var(--khc-primary-500);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}.brand-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--khc-text-1)}.badge-role{font-size:11px;font-weight:600;padding:2px 6px;border-radius:var(--khc-radius-sm);background-color:var(--khc-primary-50);color:var(--khc-primary-500)}.nav-wrap{display:flex;align-items:center;min-width:0;flex:1;justify-content:center}.seg{display:inline-flex;align-items:center;gap:2px;background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:2px}.seg-btn{appearance:none;border:none;background:transparent;color:var(--khc-text-2);font-family:inherit;font-size:12px;font-weight:500;height:26px;padding:0 12px;border-radius:var(--khc-radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;transition:color 0.15s ease,background-color 0.15s ease}.seg-btn:hover{color:var(--khc-text-1)}.seg-btn.active{background-color:var(--khc-surface-card);color:var(--khc-text-1);font-weight:600;box-shadow:var(--khc-shadow-sm)}.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.version-pill{font-size:11px;font-weight:600;padding:0 8px;height:26px;display:inline-flex;align-items:center;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);color:var(--khc-text-2)}.main-wrap{max-width:1120px;margin:0 auto;padding:20px}.view-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}.view-title{margin:0;font-size:18px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.01em}.view-sub{margin:2px 0 0 0;font-size:12px;color:var(--khc-text-2)}.view-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}.search-box{position:relative;flex:1;min-width:200px;max-width:320px}.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--khc-text-3);pointer-events:none;display:inline-flex}.search-input{padding-left:30px !important}.btn{appearance:none;border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;font-weight:500;height:var(--khc-ctrl-h);padding:0 12px;border-radius:var(--khc-radius-md);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;transition:background-color 0.15s ease,border-color 0.15s ease}.btn:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:var(--khc-border-2)}.btn:disabled{opacity:0.5;cursor:not-allowed}.btn--primary{background-color:var(--khc-primary-500);border-color:var(--khc-primary-500);color:#FFFFFF}.btn--primary:hover:not(:disabled){background-color:var(--khc-primary-600);border-color:var(--khc-primary-600)}.btn--danger{color:var(--khc-danger-text);border-color:var(--khc-border-1)}.btn--danger:hover:not(:disabled){background-color:var(--khc-danger-bg);border-color:var(--khc-danger-500)}.btn--sm{height:26px;padding:0 9px;font-size:11px}.btn--icon{width:var(--khc-ctrl-h);padding:0}.btn--ghost{background-color:transparent;border-color:transparent;color:var(--khc-text-2)}.btn--ghost:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:transparent;color:var(--khc-text-1)}.btn.active{background-color:var(--khc-primary-50);border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.input,.select,.textarea{width:100%;height:var(--khc-ctrl-h);padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;outline:none;transition:border-color 0.15s ease}.input:focus,.select:focus,.textarea:focus{border-color:var(--khc-primary-500)}.input--code{font-family:var(--khc-font-mono);font-size:12px}.textarea{height:auto;min-height:76px;padding:8px 10px;resize:vertical;line-height:1.45}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}.form-group{display:flex;flex-direction:column;gap:5px;min-width:0}.form-group--span2{grid-column:span 2}.form-group--full{grid-column:1 / -1}.form-label{font-size:11px;font-weight:500;color:var(--khc-text-2);display:flex;align-items:center;justify-content:space-between;gap:8px}.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--khc-border-1)}.card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);box-shadow:var(--khc-shadow-sm);overflow:hidden;margin-bottom:16px}.card-pad{padding:16px 20px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);flex-wrap:wrap}.card-title{margin:0;font-size:13px;font-weight:600;color:var(--khc-text-1);display:flex;align-items:center;gap:8px}.card-sub{font-size:12px;color:var(--khc-text-2)}.row{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--khc-border-1);cursor:pointer;transition:background-color 0.12s ease}.row:last-child{border-bottom:none}.row:hover{background-color:var(--khc-surface-hover)}.row.expanded{background-color:var(--khc-surface-hover)}.row--static{cursor:default}.row--static:hover{background-color:transparent}.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:var(--khc-text-3)}.dot--ok{background-color:var(--khc-success-500)}.dot--warn{background-color:var(--khc-warning-500)}.dot--err{background-color:var(--khc-danger-500)}.ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--khc-text-2)}.ico svg{width:16px;height:16px}.who{flex:1;min-width:0}.name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:600;color:var(--khc-text-1)}.sub{font-size:11px;color:var(--khc-text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fields{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}.caret{font-size:11px;color:var(--khc-text-3);transition:transform 0.15s ease}.row.expanded .caret{transform:rotate(180deg)}.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--khc-radius-sm);font-size:11px;font-weight:500;background-color:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);white-space:nowrap}.pill--accent{background-color:var(--khc-primary-50);border-color:var(--khc-primary-100);color:var(--khc-primary-500)}.pill--green{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.pill--amber{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.pill--red{background-color:var(--khc-danger-bg);border-color:transparent;color:var(--khc-danger-text)}.editor{padding:16px 20px;background-color:var(--khc-surface-muted);border-bottom:1px solid var(--khc-border-1)}.editor-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--khc-border-1)}.section-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th{text-align:left;font-size:11px;font-weight:600;color:var(--khc-text-2);padding:9px 12px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);white-space:nowrap}.data-table td{padding:9px 12px;border-bottom:1px solid var(--khc-border-1);color:var(--khc-text-1);vertical-align:middle}.data-table tr:last-child td{border-bottom:none}.data-table tr:hover td{background-color:var(--khc-surface-hover)}.health-bar{display:flex;align-items:center;gap:8px}.health-track{width:72px;height:6px;border-radius:3px;background-color:var(--khc-border-1);overflow:hidden;flex-shrink:0}.health-fill{height:100%;fill:var(--khc-primary-500);background-color:var(--khc-primary-500);border-radius:3px}.health-fill--ok{fill:var(--khc-success-500);background-color:var(--khc-success-500)}.health-fill--warn{fill:var(--khc-warning-500);background-color:var(--khc-warning-500)}.health-fill--err{fill:var(--khc-danger-500);background-color:var(--khc-danger-500)}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);padding:14px 16px;box-shadow:var(--khc-shadow-sm);display:flex;flex-direction:column;gap:4px}.kpi-label{font-size:11px;font-weight:500;color:var(--khc-text-2)}.kpi-value{font-size:20px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.kpi-sub{font-size:11px;color:var(--khc-text-3)}.chart-svg{width:100%;height:auto;display:block}.chart-axis{stroke:var(--khc-border-1);stroke-width:1}.chart-rect--in{fill:var(--khc-primary-500)}.chart-rect--out{fill:var(--khc-primary-100)}.chart-label{font-size:10px;fill:var(--khc-text-3);font-family:var(--khc-font-mono)}.heatmap-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.heatmap-svg{width:100%;min-width:560px;height:auto;display:block}.heat-cell{fill:var(--khc-surface-muted)}.heat-l1{fill:#DBEAFE}.heat-l2{fill:#93C5FD}.heat-l3{fill:#3B82F6}.heat-l4{fill:#1664FF}:root[data-theme="dark"] .heat-l1{fill:#1E3A8A}:root[data-theme="dark"] .heat-l2{fill:#1D4ED8}:root[data-theme="dark"] .heat-l3{fill:#3B82F6}:root[data-theme="dark"] .heat-l4{fill:#60A5FA}.probe-pills-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.probe-pill{font-family:var(--khc-font-mono);font-size:11px;padding:4px 8px;border-radius:var(--khc-radius-sm);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);cursor:pointer}.probe-pill:hover{border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.headers-details{border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);padding:8px 12px}.headers-details summary{cursor:pointer;user-select:none;font-weight:500}.headers-pre{margin:8px 0 0 0;padding:10px;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);overflow-x:auto;font-size:11px}.snippet-box{background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:10px 12px}.snippet-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.snippet-code{display:block;font-family:var(--khc-font-mono);font-size:11px;color:var(--khc-text-1);overflow-x:auto;white-space:nowrap}.waterfall-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px 12px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md)}.wf-item{font-size:12px;display:flex;align-items:center;gap:4px}.wf-label{color:var(--khc-text-2)}.try-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);margin-top:6px}.step-num{width:20px;height:20px;border-radius:50%;background-color:var(--khc-primary-50);color:var(--khc-primary-500);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.privacy-masked .privacy-mask{filter:blur(5px);user-select:none}.login-overlay{position:fixed;inset:0;z-index:100;background-color:rgba(15,23,42,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px}.login-card{width:100%;max-width:380px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-xl);box-shadow:var(--khc-shadow-lg);padding:24px}.login-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.login-error{margin-top:10px;padding:8px 10px;border-radius:var(--khc-radius-md);background-color:var(--khc-danger-bg);color:var(--khc-danger-text);font-size:12px}.toast-box{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:340px}.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);box-shadow:var(--khc-shadow-md);font-size:12px;color:var(--khc-text-1)}.flex-1{flex:1;min-width:0}.flex-end{display:flex;justify-content:flex-end;align-items:flex-end}.gap-2{gap:8px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mr-2{margin-right:8px}.text-sm{font-size:12px}.text-xs{font-size:11px}.text-muted{color:var(--khc-text-2)}.text-danger{color:var(--khc-danger-text)}.text-ok{color:var(--khc-success-text)}@media (max-width:768px){.header-inner{height:auto;min-height:var(--khc-header-h);padding:8px 12px;flex-wrap:wrap;row-gap:8px}.brand{order:1}.header-actions{order:2}.nav-wrap{order:3;flex-basis:100%;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-wrap::-webkit-scrollbar{display:none}.main-wrap{padding:14px 12px}.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:12px}.kpi-value{font-size:17px}.form-grid,.form-grid--2{grid-template-columns:minmax(0,1fr);gap:10px}.form-group--span2{grid-column:span 1}.search-box{max-width:none;flex-basis:100%}.row{padding:10px 12px;flex-wrap:wrap}.fields{width:100%;justify-content:flex-end;margin-top:4px}.editor{padding:12px}.card-pad{padding:12px 14px}.toast-box{left:12px;right:12px;bottom:12px;max-width:none}}
 </style>
 </head>
 <body>
-  <header class="app-header">
-    <div class="header-inner">
-      <div class="brand">
-        <span class="brand-mark" id="brandMark"></span>
-        <span class="brand-name">LLMProxy2</span>
-        <span class="badge-role" id="brandRole"></span>
-      </div>
-
-      <nav class="nav-wrap" aria-label="主导航">
-        <div class="seg" id="navSeg">
-          <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
-          <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
-          <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
-          <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
-          <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
-        </div>
-      </nav>
-
-      <div class="header-actions">
-        <div class="seg" id="modeSwitchBox" hidden>
-          <button class="seg-btn" id="modeBtnAgent" type="button">Agent</button>
-          <button class="seg-btn" id="modeBtnKB" type="button">KB</button>
-        </div>
-        <span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span>
-        <button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button>
-        <button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button>
-        <button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button>
-      </div>
-    </div>
-  </header>
-
-  <main class="main-wrap">
-    
-    <section id="viewActivity">
-      
-      <div id="hubOverviewBox" hidden>
-        <div class="view-header">
-          <div>
-            <h1 class="view-title">中枢控制面概览</h1>
-            <p class="view-sub" id="hubOverviewSub">实时统计密钥池健康度、模型路由规模与中转节点同步状态</p>
-          </div>
-          <div class="view-actions">
-            <button class="btn" id="btnHubRefreshOverview" type="button">刷新状态</button>
-            <button class="btn btn--primary" id="btnHubBatchVerifyAll" type="button">批量探活全部密钥</button>
-          </div>
-        </div>
-
-        <div class="kpi-grid" id="hubKpiGrid"></div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">供应商密钥池与探活健康分布</h2>
-              <div class="card-sub" id="hubHealthSummarySub"></div>
-            </div>
-            <button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>供应商</th>
-                  <th>协议</th>
-                  <th>启用 / 总密钥</th>
-                  <th>健康分布</th>
-                  <th>最近探活延迟</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="hubProviderStatsBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">中转节点同步遥测</h2>
-              <div class="card-sub">节点配置拉取、304 缓存命中及活跃租约</div>
-            </div>
-            <button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>节点名称</th>
-                  <th>角色</th>
-                  <th>状态</th>
-                  <th>最近 IP</th>
-                  <th>同步 / 304 命中</th>
-                  <th>最近活跃</th>
-                </tr>
-              </thead>
-              <tbody id="hubNodeStatsBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      
-      <div id="fullOverviewBox" hidden>
-        <div class="view-header">
-          <div>
-            <h1 class="view-title">网关运行概览</h1>
-            <p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p>
-          </div>
-          <div class="view-actions">
-            <div class="seg" id="activityPeriodSeg">
-              <button class="seg-btn active" data-period="today" type="button">今日</button>
-              <button class="seg-btn" data-period="7d" type="button">近 7 天</button>
-              <button class="seg-btn" data-period="30d" type="button">近 30 天</button>
-              <button class="seg-btn" data-period="all" type="button">全部</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <span class="kpi-label">请求总数</span>
-            <span class="kpi-value" id="statRequests">0</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">请求成功率</span>
-            <span class="kpi-value" id="statSuccess">-</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">Token 总消耗</span>
-            <span class="kpi-value" id="statTokens">0</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">缓存命中率</span>
-            <span class="kpi-value" id="statCacheHit">0%</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">平均首字 (TTFT)</span>
-            <span class="kpi-value" id="statTTFT">-</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">平均生成速率</span>
-            <span class="kpi-value" id="statTPS">-</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">上下行流量</span>
-            <span class="kpi-value" id="statBandwidth">0 B</span>
-          </div>
-          <div class="kpi-card">
-            <span class="kpi-label">活跃路由 / 供应商</span>
-            <span class="kpi-value" id="statActiveScope">-</span>
-          </div>
-        </div>
-
-        <div class="card card-pad" id="usageChartBox" hidden></div>
-
-        <div class="card card-pad" id="usageHeatmapWrapper" hidden>
-          <div class="section-bar">
-            <span class="form-label">年度调用热力图</span>
-          </div>
-          <div class="heatmap-scroll" id="usageHeatmapBox"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">多维用量统计</h2>
-            <div class="seg" id="usageDimensionSeg">
-              <button class="seg-btn active" data-dim="models" type="button">按模型</button>
-              <button class="seg-btn" data-dim="providers" type="button">按供应商</button>
-              <button class="seg-btn" data-dim="keys" type="button">按密钥</button>
-            </div>
-          </div>
-          <div id="usageBreakdownList"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <h2 class="card-title">最近请求轨迹</h2>
-            <div class="fields">
-              <button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button>
-              <button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button>
-            </div>
-          </div>
-          <div id="tracesList"></div>
-        </div>
-      </div>
-    </section>
-
-    
-    <section id="viewProviders" hidden>
-      <div class="view-header">
-        <div>
-          <h1 class="view-title">供应商与密钥池</h1>
-          <p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p>
-        </div>
-        <div class="view-actions">
-          <div class="fields" id="vaultSyncBar" hidden>
-            <button class="btn" id="btnSyncManifest" type="button">拉取中枢清单</button>
-            <button class="btn" id="btnSyncKeys" type="button">从 Vault 同步密钥</button>
-          </div>
-          <button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button>
-        </div>
-      </div>
-
-      <div class="card card-pad" id="addProviderForm" hidden>
-        <div class="section-bar">
-          <h2 class="card-title">新增供应商</h2>
-          <button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button>
-        </div>
-
-        <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
-          <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">快速预设</label>
-            <select class="select" id="newProvPreset"></select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">供应商 ID</label>
-            <input class="input input--code" id="newProvId" placeholder="例如 deepseek">
-          </div>
-          <div class="form-group">
-            <label class="form-label">显示名称</label>
-            <input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">
-          </div>
-          <div class="form-group form-group--span2">
-            <div class="form-label">
-              <span>Base URL</span>
-              <button class="btn btn--sm" id="btnDetectProvider" type="button">探测协议</button>
-            </div>
-            <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
-          </div>
-          <div class="form-group">
-            <label class="form-label">上游协议类型</label>
-            <select class="select" id="newProvApiType">
-              <option value="openai-completions">OpenAI Chat Completions</option>
-              <option value="anthropic-messages">Anthropic Messages</option>
-              <option value="gemini">Google Gemini</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">初始 Key 标签</label>
-            <input class="input" id="newProvKeyAlias" placeholder="例如 pool-01">
-          </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">初始 API Key</label>
-            <input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)">
-          </div>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn" id="btnCancelAddProvider" type="button">取消</button>
-          <button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button>
-        </div>
-      </div>
-
-      <div class="toolbar">
-        <div class="search-box">
-          <span class="search-ico" id="providerSearchIcon"></span>
-          <input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
-        </div>
-        <div class="seg" id="providerFilterSeg">
-          <button class="seg-btn active" data-filter="all" type="button">全部</button>
-          <button class="seg-btn" data-filter="enabled" type="button">已启用</button>
-          <button class="seg-btn" data-filter="healthy" type="button">探活通过</button>
-          <button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button>
-        </div>
-      </div>
-
-      <div class="card" id="providersList"></div>
-    </section>
-
-    
-    <section id="viewModels" hidden>
-      <div class="view-header">
-        <div>
-          <h1 class="view-title">模型路由与流水线</h1>
-          <p class="view-sub" id="modelsSubtitle">配置 Agent 逻辑模型映射及知识库 (KB) 高并发候选流水线</p>
-        </div>
-        <div class="view-actions">
-          <div class="seg" id="modelPipelineSeg">
-            <button class="seg-btn active" data-submode="agent" type="button">Agent 路由</button>
-            <button class="seg-btn" data-submode="kb" type="button">KB 流水线</button>
-          </div>
-          <button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button>
-        </div>
-      </div>
-
-      <div class="card card-pad" id="addModelForm" hidden>
-        <h2 class="card-title mb-3">新增 Agent 逻辑模型</h2>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">对外模型名</label>
-            <input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5">
-          </div>
-          <div class="form-group">
-            <label class="form-label">首选供应商</label>
-            <select class="select" id="newModelProvider"></select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">上游目标模型 ID</label>
-            <input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致">
-          </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn" id="btnCancelAddModel" type="button">取消</button>
-          <button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button>
-        </div>
-      </div>
-
-      <div class="toolbar">
-        <div class="search-box">
-          <span class="search-ico" id="modelSearchIcon"></span>
-          <input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商">
-        </div>
-      </div>
-
-      <div class="card" id="modelsList"></div>
-    </section>
-
-    
-    <section id="viewNodes" hidden>
-      <div class="view-header">
-        <div>
-          <h1 class="view-title">中转节点管理</h1>
-          <p class="view-sub">签发、轮换及吊销下游网关节点的 Vault 同步凭证与权限范围</p>
-        </div>
-        <div class="view-actions">
-          <button class="btn btn--primary" id="btnIssueNode" type="button">签发新节点</button>
-        </div>
-      </div>
-
-      <div class="card card-pad" id="issueNodeForm" hidden>
-        <h2 class="card-title mb-3">签发新中转节点凭证</h2>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">节点名称</label>
-            <input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
-          </div>
-          <div class="form-group">
-            <label class="form-label">节点角色</label>
-            <select class="select" id="issueNodeRole">
-              <option value="full">Full (全功能代理网关)</option>
-              <option value="lite">Lite (轻量本地代理)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">租约时长 (秒)</label>
-            <input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
-          </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
-        </div>
-
-        <div class="editor-section" id="issuedTokenDisplay" hidden>
-          <div class="form-grid form-grid--2">
-            <div class="form-group">
-              <label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
-              <input class="input input--code" id="issuedTokenVal" readonly>
-            </div>
-            <div class="form-group">
-              <label class="form-label">节点启动环境变量</label>
-              <input class="input input--code" id="issuedEnvVal" readonly>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card" id="nodesList"></div>
-    </section>
-
-    
-    <section id="viewSettings" hidden>
-      <div class="view-header">
-        <div>
-          <h1 class="view-title">系统设置与备份</h1>
-          <p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p>
-        </div>
-        <div class="view-actions">
-          <button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button>
-        </div>
-      </div>
-
-      
-      <div class="card card-pad" id="gatewayAccessCenter" hidden>
-        <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2>
-        </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group">
-            <label class="form-label">网关入口地址 (Base URL)</label>
-            <input class="input input--code" id="gwBaseUrl" readonly>
-          </div>
-          <div class="form-group">
-            <div class="form-label">
-              <span>客户端鉴权密钥</span>
-              <div class="fields">
-                <button class="btn btn--sm" id="btnGenClientKey" type="button">随机生成</button>
-                <button class="btn btn--sm btn--primary" id="btnSaveClientKey" type="button">保存密钥</button>
-              </div>
-            </div>
-            <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
-          </div>
-        </div>
-        <div class="form-grid form-grid--2 mt-3">
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">Claude Code 环境变量</span>
-              <button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button>
-            </div>
-            <code class="snippet-code" id="snippetClaude"></code>
-          </div>
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">OpenAI / Cursor 配置</span>
-              <button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button>
-            </div>
-            <code class="snippet-code" id="snippetCursor"></code>
-          </div>
-        </div>
-      </div>
-
-      
-      <div class="card card-pad">
-        <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">2</span>全局路由与异常冷却策略</h2>
-          <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
-        </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">默认路由策略</label>
-            <select class="select" id="cfgRoutingStrategy">
-              <option value="sticky_failover">粘性故障转移</option>
-              <option value="round_robin">标准轮询</option>
-              <option value="manual">手动直通</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">首字超时 (秒)</label>
-            <input class="input tabular" id="cfgFirstByteTimeout" type="number" placeholder="120">
-          </div>
-          <div class="form-group">
-            <label class="form-label">429 限流冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown429" type="number" placeholder="15">
-          </div>
-          <div class="form-group">
-            <label class="form-label">5xx 服务端异常冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown5xx" type="number" placeholder="30">
-          </div>
-          <div class="form-group">
-            <label class="form-label">网络超时冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldownNet" type="number" placeholder="15">
-          </div>
-          <div class="form-group">
-            <label class="form-label">401/403 鉴权失败冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldownAuth" type="number" placeholder="86400">
-          </div>
-        </div>
-      </div>
-
-      
-      <div class="card card-pad" id="modeScheduleBox" hidden>
-        <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">3</span>运行模式定时调度与并发保护</h2>
-          <label class="form-label">
-            <input type="checkbox" id="cfgModeSchedEnabled">
-            <span>启用自动时段切换</span>
-          </label>
-        </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Agent 模式时段</label>
-            <input class="input input--code" id="cfgModeSchedWindow" placeholder="08:30-22:30">
-          </div>
-          <div class="form-group">
-            <label class="form-label">时区</label>
-            <input class="input input--code" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
-          </div>
-          <div class="form-group">
-            <label class="form-label">状态变更 Webhook</label>
-            <input class="input input--code" id="cfgModeSchedWebhook" placeholder="https://...">
-          </div>
-          <div class="form-group">
-            <label class="form-label">OCR 最大并发数</label>
-            <input class="input tabular" id="cfgOcrInflight" type="number" placeholder="4">
-          </div>
-          <div class="form-group">
-            <label class="form-label">KB 全局并发上限</label>
-            <input class="input tabular" id="cfgKbConcurrency" type="number" placeholder="16">
-          </div>
-        </div>
-      </div>
-
-      
-      <div class="card card-pad" id="cfgVaultLinkBox" hidden>
-        <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
-        </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group" id="cfgVaultUrlGroup">
-            <label class="form-label">Vault 中枢地址</label>
-            <input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">
-          </div>
-          <div class="form-group" id="cfgVaultTokenGroup">
-            <label class="form-label">节点同步 Token</label>
-            <input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">
-          </div>
-        </div>
-      </div>
-
-      
-      <div class="card card-pad" id="configBackupBox">
-        <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2>
-        </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group">
-            <label class="form-label">导出当前完整配置 (JSON)</label>
-            <div>
-              <button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">导入 v1 / v2 配置文件</label>
-            <div class="fields">
-              <select class="select" id="importConfigMode">
-                <option value="merge">增量合并 (保留现有)</option>
-                <option value="overwrite">全量覆盖</option>
-              </select>
-              <input type="file" id="importConfigFile" accept=".json,application/json" hidden>
-              <button class="btn btn--primary" id="btnTriggerImport" type="button">选择文件导入</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  
-  <div class="login-overlay hidden" id="loginScreen" hidden>
-    <div class="login-card">
-      <div class="login-head">
-        <div class="brand">
-          <span class="brand-mark" id="loginBrandMark"></span>
-          <span class="brand-name">LLMProxy2</span>
-        </div>
-        <span class="badge-role" id="loginHostBadge"></span>
-      </div>
-      <form id="loginForm">
-        <div class="form-group">
-          <label class="form-label" for="loginPassword">管理员密码</label>
-          <input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码">
-        </div>
-        <div class="login-error hidden" id="loginError" hidden></div>
-        <div class="form-actions">
-          <button class="btn btn--primary" type="submit">验证并登录</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div class="toast-box" id="toastBox"></div>
-
-  <script>
+<header class="app-header">
+<div class="header-inner">
+<div class="brand">
+<span class="brand-mark" id="brandMark"></span>
+<span class="brand-name">LLMProxy2</span>
+<span class="badge-role" id="brandRole"></span>
+</div>
+<nav class="nav-wrap" aria-label="主导航">
+<div class="seg" id="navSeg">
+<button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
+<button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
+<button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
+<button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
+<button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
+</div>
+</nav>
+<div class="header-actions">
+<div class="seg" id="modeSwitchBox" hidden>
+<button class="seg-btn" id="modeBtnAgent" type="button">Agent</button>
+<button class="seg-btn" id="modeBtnKB" type="button">KB</button>
+</div>
+<span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span>
+<button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button>
+<button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button>
+<button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button>
+</div>
+</div>
+</header>
+<main class="main-wrap">
+<section id="viewActivity">
+<div id="hubOverviewBox" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">中枢控制面概览</h1>
+<p class="view-sub" id="hubOverviewSub">实时统计密钥池健康度、模型路由规模与中转节点同步状态</p>
+</div>
+<div class="view-actions">
+<button class="btn" id="btnHubRefreshOverview" type="button">刷新状态</button>
+<button class="btn btn--primary" id="btnHubBatchVerifyAll" type="button">批量探活全部密钥</button>
+</div>
+</div>
+<div class="kpi-grid" id="hubKpiGrid"></div>
+<div class="card">
+<div class="card-header">
+<div>
+<h2 class="card-title">供应商密钥池与探活健康分布</h2>
+<div class="card-sub" id="hubHealthSummarySub"></div>
+</div>
+<button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button>
+</div>
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>供应商</th>
+<th>协议</th>
+<th>启用 / 总密钥</th>
+<th>健康分布</th>
+<th>最近探活延迟</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody id="hubProviderStatsBody"></tbody>
+</table>
+</div>
+</div>
+<div class="card">
+<div class="card-header">
+<div>
+<h2 class="card-title">中转节点同步遥测</h2>
+<div class="card-sub">节点配置拉取、304 缓存命中及活跃租约</div>
+</div>
+<button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button>
+</div>
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>节点名称</th>
+<th>角色</th>
+<th>状态</th>
+<th>最近 IP</th>
+<th>同步 / 304 命中</th>
+<th>最近活跃</th>
+</tr>
+</thead>
+<tbody id="hubNodeStatsBody"></tbody>
+</table>
+</div>
+</div>
+</div>
+<div id="fullOverviewBox" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">网关运行概览</h1>
+<p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p>
+</div>
+<div class="view-actions">
+<div class="seg" id="activityPeriodSeg">
+<button class="seg-btn active" data-period="today" type="button">今日</button>
+<button class="seg-btn" data-period="7d" type="button">近 7 天</button>
+<button class="seg-btn" data-period="30d" type="button">近 30 天</button>
+<button class="seg-btn" data-period="all" type="button">全部</button>
+</div>
+</div>
+</div>
+<div class="kpi-grid">
+<div class="kpi-card">
+<span class="kpi-label">请求总数</span>
+<span class="kpi-value" id="statRequests">0</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">请求成功率</span>
+<span class="kpi-value" id="statSuccess">-</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">Token 总消耗</span>
+<span class="kpi-value" id="statTokens">0</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">缓存命中率</span>
+<span class="kpi-value" id="statCacheHit">0%</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">平均首字 (TTFT)</span>
+<span class="kpi-value" id="statTTFT">-</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">平均生成速率</span>
+<span class="kpi-value" id="statTPS">-</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">上下行流量</span>
+<span class="kpi-value" id="statBandwidth">0 B</span>
+</div>
+<div class="kpi-card">
+<span class="kpi-label">活跃路由 / 供应商</span>
+<span class="kpi-value" id="statActiveScope">-</span>
+</div>
+</div>
+<div class="card card-pad" id="usageChartBox" hidden></div>
+<div class="card card-pad" id="usageHeatmapWrapper" hidden>
+<div class="section-bar">
+<span class="form-label">年度调用热力图</span>
+</div>
+<div class="heatmap-scroll" id="usageHeatmapBox"></div>
+</div>
+<div class="card">
+<div class="card-header">
+<h2 class="card-title">多维用量统计</h2>
+<div class="seg" id="usageDimensionSeg">
+<button class="seg-btn active" data-dim="models" type="button">按模型</button>
+<button class="seg-btn" data-dim="providers" type="button">按供应商</button>
+<button class="seg-btn" data-dim="keys" type="button">按密钥</button>
+</div>
+</div>
+<div id="usageBreakdownList"></div>
+</div>
+<div class="card">
+<div class="card-header">
+<h2 class="card-title">最近请求轨迹</h2>
+<div class="fields">
+<button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button>
+<button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button>
+</div>
+</div>
+<div id="tracesList"></div>
+</div>
+</div>
+</section>
+<section id="viewProviders" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">供应商与密钥池</h1>
+<p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p>
+</div>
+<div class="view-actions">
+<div class="fields" id="vaultSyncBar" hidden>
+<button class="btn" id="btnSyncManifest" type="button">拉取中枢清单</button>
+<button class="btn" id="btnSyncKeys" type="button">从 Vault 同步密钥</button>
+</div>
+<button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button>
+</div>
+</div>
+<div class="card card-pad" id="addProviderForm" hidden>
+<div class="section-bar">
+<h2 class="card-title">新增供应商</h2>
+<button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button>
+</div>
+<div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
+<textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">快速预设</label>
+<select class="select" id="newProvPreset"></select>
+</div>
+<div class="form-group">
+<label class="form-label">供应商 ID</label>
+<input class="input input--code" id="newProvId" placeholder="例如 deepseek">
+</div>
+<div class="form-group">
+<label class="form-label">显示名称</label>
+<input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">
+</div>
+<div class="form-group form-group--span2">
+<div class="form-label">
+<span>Base URL</span>
+<button class="btn btn--sm" id="btnDetectProvider" type="button">探测协议</button>
+</div>
+<input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
+</div>
+<div class="form-group">
+<label class="form-label">上游协议类型</label>
+<select class="select" id="newProvApiType">
+<option value="openai-completions">OpenAI Chat Completions</option>
+<option value="anthropic-messages">Anthropic Messages</option>
+<option value="gemini">Google Gemini</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">初始 Key 标签</label>
+<input class="input" id="newProvKeyAlias" placeholder="例如 pool-01">
+</div>
+<div class="form-group form-group--span2">
+<label class="form-label">初始 API Key</label>
+<input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn" id="btnCancelAddProvider" type="button">取消</button>
+<button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button>
+</div>
+</div>
+<div class="toolbar">
+<div class="search-box">
+<span class="search-ico" id="providerSearchIcon"></span>
+<input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
+</div>
+<div class="seg" id="providerFilterSeg">
+<button class="seg-btn active" data-filter="all" type="button">全部</button>
+<button class="seg-btn" data-filter="enabled" type="button">已启用</button>
+<button class="seg-btn" data-filter="healthy" type="button">探活通过</button>
+<button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button>
+</div>
+</div>
+<div class="card" id="providersList"></div>
+</section>
+<section id="viewModels" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">模型路由与流水线</h1>
+<p class="view-sub" id="modelsSubtitle">配置 Agent 逻辑模型映射及知识库 (KB) 高并发候选流水线</p>
+</div>
+<div class="view-actions">
+<div class="seg" id="modelPipelineSeg">
+<button class="seg-btn active" data-submode="agent" type="button">Agent 路由</button>
+<button class="seg-btn" data-submode="kb" type="button">KB 流水线</button>
+</div>
+<button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button>
+</div>
+</div>
+<div class="card card-pad" id="addModelForm" hidden>
+<h2 class="card-title mb-3">新增 Agent 逻辑模型</h2>
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">对外模型名</label>
+<input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5">
+</div>
+<div class="form-group">
+<label class="form-label">首选供应商</label>
+<select class="select" id="newModelProvider"></select>
+</div>
+<div class="form-group">
+<label class="form-label">上游目标模型 ID</label>
+<input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn" id="btnCancelAddModel" type="button">取消</button>
+<button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button>
+</div>
+</div>
+<div class="toolbar">
+<div class="search-box">
+<span class="search-ico" id="modelSearchIcon"></span>
+<input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商">
+</div>
+</div>
+<div class="card" id="modelsList"></div>
+</section>
+<section id="viewNodes" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">中转节点管理</h1>
+<p class="view-sub">签发、轮换及吊销下游网关节点的 Vault 同步凭证与权限范围</p>
+</div>
+<div class="view-actions">
+<button class="btn btn--primary" id="btnIssueNode" type="button">签发新节点</button>
+</div>
+</div>
+<div class="card card-pad" id="issueNodeForm" hidden>
+<h2 class="card-title mb-3">签发新中转节点凭证</h2>
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">节点名称</label>
+<input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
+</div>
+<div class="form-group">
+<label class="form-label">节点角色</label>
+<select class="select" id="issueNodeRole">
+<option value="full">Full (全功能代理网关)</option>
+<option value="lite">Lite (轻量本地代理)</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">租约时长 (秒)</label>
+<input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
+</div>
+<div class="editor-section" id="issuedTokenDisplay" hidden>
+<div class="form-grid form-grid--2">
+<div class="form-group">
+<label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
+<input class="input input--code" id="issuedTokenVal" readonly>
+</div>
+<div class="form-group">
+<label class="form-label">节点启动环境变量</label>
+<input class="input input--code" id="issuedEnvVal" readonly>
+</div>
+</div>
+</div>
+</div>
+<div class="card" id="nodesList"></div>
+</section>
+<section id="viewSettings" hidden>
+<div class="view-header">
+<div>
+<h1 class="view-title">系统设置与备份</h1>
+<p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p>
+</div>
+<div class="view-actions">
+<button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button>
+</div>
+</div>
+<div class="card card-pad" id="gatewayAccessCenter" hidden>
+<div class="section-bar">
+<h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2>
+</div>
+<div class="form-grid form-grid--2">
+<div class="form-group">
+<label class="form-label">网关入口地址 (Base URL)</label>
+<input class="input input--code" id="gwBaseUrl" readonly>
+</div>
+<div class="form-group">
+<div class="form-label">
+<span>客户端鉴权密钥</span>
+<div class="fields">
+<button class="btn btn--sm" id="btnGenClientKey" type="button">随机生成</button>
+<button class="btn btn--sm btn--primary" id="btnSaveClientKey" type="button">保存密钥</button>
+</div>
+</div>
+<input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
+</div>
+</div>
+<div class="form-grid form-grid--2 mt-3">
+<div class="snippet-box">
+<div class="snippet-header">
+<span class="form-label">Claude Code 环境变量</span>
+<button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button>
+</div>
+<code class="snippet-code" id="snippetClaude"></code>
+</div>
+<div class="snippet-box">
+<div class="snippet-header">
+<span class="form-label">OpenAI / Cursor 配置</span>
+<button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button>
+</div>
+<code class="snippet-code" id="snippetCursor"></code>
+</div>
+</div>
+</div>
+<div class="card card-pad">
+<div class="section-bar">
+<h2 class="card-title"><span class="step-num">2</span>全局路由与异常冷却策略</h2>
+<button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">默认路由策略</label>
+<select class="select" id="cfgRoutingStrategy">
+<option value="sticky_failover">粘性故障转移</option>
+<option value="round_robin">标准轮询</option>
+<option value="manual">手动直通</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">首字超时 (秒)</label>
+<input class="input tabular" id="cfgFirstByteTimeout" type="number" placeholder="120">
+</div>
+<div class="form-group">
+<label class="form-label">429 限流冷却 (秒)</label>
+<input class="input tabular" id="cfgCooldown429" type="number" placeholder="15">
+</div>
+<div class="form-group">
+<label class="form-label">5xx 服务端异常冷却 (秒)</label>
+<input class="input tabular" id="cfgCooldown5xx" type="number" placeholder="30">
+</div>
+<div class="form-group">
+<label class="form-label">网络超时冷却 (秒)</label>
+<input class="input tabular" id="cfgCooldownNet" type="number" placeholder="15">
+</div>
+<div class="form-group">
+<label class="form-label">401/403 鉴权失败冷却 (秒)</label>
+<input class="input tabular" id="cfgCooldownAuth" type="number" placeholder="86400">
+</div>
+</div>
+</div>
+<div class="card card-pad" id="modeScheduleBox" hidden>
+<div class="section-bar">
+<h2 class="card-title"><span class="step-num">3</span>运行模式定时调度与并发保护</h2>
+<label class="form-label">
+<input type="checkbox" id="cfgModeSchedEnabled">
+<span>启用自动时段切换</span>
+</label>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">Agent 模式时段</label>
+<input class="input input--code" id="cfgModeSchedWindow" placeholder="08:30-22:30">
+</div>
+<div class="form-group">
+<label class="form-label">时区</label>
+<input class="input input--code" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
+</div>
+<div class="form-group">
+<label class="form-label">状态变更 Webhook</label>
+<input class="input input--code" id="cfgModeSchedWebhook" placeholder="https://...">
+</div>
+<div class="form-group">
+<label class="form-label">OCR 最大并发数</label>
+<input class="input tabular" id="cfgOcrInflight" type="number" placeholder="4">
+</div>
+<div class="form-group">
+<label class="form-label">KB 全局并发上限</label>
+<input class="input tabular" id="cfgKbConcurrency" type="number" placeholder="16">
+</div>
+</div>
+</div>
+<div class="card card-pad" id="cfgVaultLinkBox" hidden>
+<div class="section-bar">
+<h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
+</div>
+<div class="form-grid form-grid--2">
+<div class="form-group" id="cfgVaultUrlGroup">
+<label class="form-label">Vault 中枢地址</label>
+<input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">
+</div>
+<div class="form-group" id="cfgVaultTokenGroup">
+<label class="form-label">节点同步 Token</label>
+<input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">
+</div>
+</div>
+</div>
+<div class="card card-pad" id="configBackupBox">
+<div class="section-bar">
+<h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2>
+</div>
+<div class="form-grid form-grid--2">
+<div class="form-group">
+<label class="form-label">导出当前完整配置 (JSON)</label>
+<div>
+<button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button>
+</div>
+</div>
+<div class="form-group">
+<label class="form-label">导入 v1 / v2 配置文件</label>
+<div class="fields">
+<select class="select" id="importConfigMode">
+<option value="merge">增量合并 (保留现有)</option>
+<option value="overwrite">全量覆盖</option>
+</select>
+<input type="file" id="importConfigFile" accept=".json,application/json" hidden>
+<button class="btn btn--primary" id="btnTriggerImport" type="button">选择文件导入</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<div class="login-overlay hidden" id="loginScreen" hidden>
+<div class="login-card">
+<div class="login-head">
+<div class="brand">
+<span class="brand-mark" id="loginBrandMark"></span>
+<span class="brand-name">LLMProxy2</span>
+</div>
+<span class="badge-role" id="loginHostBadge"></span>
+</div>
+<form id="loginForm">
+<div class="form-group">
+<label class="form-label" for="loginPassword">管理员密码</label>
+<input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码">
+</div>
+<div class="login-error hidden" id="loginError" hidden></div>
+<div class="form-actions">
+<button class="btn btn--primary" type="submit">验证并登录</button>
+</div>
+</form>
+</div>
+</div>
+<div class="toast-box" id="toastBox"></div>
+<script>
 (function () {
-  const ICONS = {
-  "openai": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>OpenAI</title><path d=\\"M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z\\"></path></svg>",
-  "anthropic": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Anthropic</title><path d=\\"M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z\\"></path></svg>",
-  "claude": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Claude</title><path d=\\"M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z\\" fill=\\"#D97757\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "google": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Google</title><path d=\\"M23 12.245c0-.905-.075-1.565-.236-2.25h-10.54v4.083h6.186c-.124 1.014-.797 2.542-2.294 3.569l-.021.136 3.332 2.53.23.022C21.779 18.417 23 15.593 23 12.245z\\" fill=\\"#4285F4\\"></path><path d=\\"M12.225 23c3.03 0 5.574-.978 7.433-2.665l-3.542-2.688c-.948.648-2.22 1.1-3.891 1.1a6.745 6.745 0 01-6.386-4.572l-.132.011-3.465 2.628-.045.124C4.043 20.531 7.835 23 12.225 23z\\" fill=\\"#34A853\\"></path><path d=\\"M5.84 14.175A6.65 6.65 0 015.463 12c0-.758.138-1.491.361-2.175l-.006-.147-3.508-2.67-.115.054A10.831 10.831 0 001 12c0 1.772.436 3.447 1.197 4.938l3.642-2.763z\\" fill=\\"#FBBC05\\"></path><path d=\\"M12.225 5.253c2.108 0 3.529.892 4.34 1.638l3.167-3.031C17.787 2.088 15.255 1 12.225 1 7.834 1 4.043 3.469 2.197 7.062l3.63 2.763a6.77 6.77 0 016.398-4.572z\\" fill=\\"#EB4335\\"></path></svg>",
-  "gemini": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Gemini</title><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"#3186FF\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-0-_R_0_)\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-1-_R_0_)\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-2-_R_0_)\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-0-_R_0_\\" x1=\\"7\\" x2=\\"11\\" y1=\\"15.5\\" y2=\\"12\\"><stop stop-color=\\"#08B962\\"></stop><stop offset=\\"1\\" stop-color=\\"#08B962\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-1-_R_0_\\" x1=\\"8\\" x2=\\"11.5\\" y1=\\"5.5\\" y2=\\"11\\"><stop stop-color=\\"#F94543\\"></stop><stop offset=\\"1\\" stop-color=\\"#F94543\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-2-_R_0_\\" x1=\\"3.5\\" x2=\\"17.5\\" y1=\\"13.5\\" y2=\\"12\\"><stop stop-color=\\"#FABC12\\"></stop><stop offset=\\".46\\" stop-color=\\"#FABC12\\" stop-opacity=\\"0\\"></stop></linearGradient></defs></svg>",
-  "vertex": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>VertexAI</title><path d=\\"M11.995 20.216a1.892 1.892 0 100 3.785 1.892 1.892 0 000-3.785zm0 2.806a.927.927 0 11.927-.914.914.914 0 01-.927.914z\\" fill=\\"#4285F4\\"></path><path clip-rule=\\"evenodd\\" d=\\"M21.687 14.144c.237.038.452.16.605.344a.978.978 0 01-.18 1.3l-8.24 6.082a1.892 1.892 0 00-1.147-1.508l8.28-6.08a.991.991 0 01.682-.138z\\" fill=\\"#669DF6\\" fill-rule=\\"evenodd\\"></path><path clip-rule=\\"evenodd\\" d=\\"M10.122 21.842l-8.217-6.066a.952.952 0 01-.206-1.287.978.978 0 011.287-.206l8.28 6.08a1.893 1.893 0 00-1.144 1.479z\\" fill=\\"#AECBFA\\" fill-rule=\\"evenodd\\"></path><path d=\\"M4.273 4.475a.978.978 0 01-.965-.965V1.09a.978.978 0 111.943 0v2.42a.978.978 0 01-.978.965zM4.247 13.034a.978.978 0 100-1.956.978.978 0 000 1.956zM4.247 10.19a.978.978 0 100-1.956.978.978 0 000 1.956zM4.247 7.332a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#AECBFA\\"></path><path d=\\"M19.718 7.307a.978.978 0 01-.965-.979v-2.42a.965.965 0 011.93 0v2.42a.964.964 0 01-.965.979zM19.743 13.047a.978.978 0 100-1.956.978.978 0 000 1.956zM19.743 10.151a.978.978 0 100-1.956.978.978 0 000 1.956zM19.743 2.068a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#4285F4\\"></path><path d=\\"M11.995 15.917a.978.978 0 01-.965-.965v-2.459a.978.978 0 011.943 0v2.433a.976.976 0 01-.978.991zM11.995 18.762a.978.978 0 100-1.956.978.978 0 000 1.956zM11.995 10.64a.978.978 0 100-1.956.978.978 0 000 1.956zM11.995 7.783a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#669DF6\\"></path><path d=\\"M15.856 10.177a.978.978 0 01-.965-.965v-2.42a.977.977 0 011.702-.763.979.979 0 01.241.763v2.42a.978.978 0 01-.978.965zM15.869 4.913a.978.978 0 100-1.956.978.978 0 000 1.956zM15.869 15.853a.978.978 0 100-1.956.978.978 0 000 1.956zM15.869 12.996a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#4285F4\\"></path><path d=\\"M8.121 15.853a.978.978 0 100-1.956.978.978 0 000 1.956zM8.121 7.783a.978.978 0 100-1.956.978.978 0 000 1.956zM8.121 4.913a.978.978 0 100-1.957.978.978 0 000 1.957zM8.134 12.996a.978.978 0 01-.978-.94V9.611a.965.965 0 011.93 0v2.445a.966.966 0 01-.952.94z\\" fill=\\"#AECBFA\\"></path></svg>",
-  "deepseek": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>DeepSeek</title><path d=\\"M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z\\" fill=\\"#4D6BFE\\"></path></svg>",
-  "minimax": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Minimax</title><defs><linearGradient id=\\"lobe-icons-minimax-_R_0_\\" x1=\\"0%\\" x2=\\"100.182%\\" y1=\\"50.057%\\" y2=\\"50.057%\\"><stop offset=\\"0%\\" stop-color=\\"#E2167E\\"></stop><stop offset=\\"100%\\" stop-color=\\"#FE603C\\"></stop></linearGradient></defs><path d=\\"M16.278 2c1.156 0 2.093.927 2.093 2.07v12.501a.74.74 0 00.744.709.74.74 0 00.743-.709V9.099a2.06 2.06 0 012.071-2.049A2.06 2.06 0 0124 9.1v6.561a.649.649 0 01-.652.645.649.649 0 01-.653-.645V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v7.472a2.037 2.037 0 01-2.048 2.026 2.037 2.037 0 01-2.048-2.026v-12.5a.785.785 0 00-.788-.753.785.785 0 00-.789.752l-.001 15.904A2.037 2.037 0 0113.441 22a2.037 2.037 0 01-2.048-2.026V18.04c0-.356.292-.645.652-.645.36 0 .652.289.652.645v1.934c0 .263.142.506.372.638.23.131.514.131.744 0a.734.734 0 00.372-.638V4.07c0-1.143.937-2.07 2.093-2.07zm-5.674 0c1.156 0 2.093.927 2.093 2.07v11.523a.648.648 0 01-.652.645.648.648 0 01-.652-.645V4.07a.785.785 0 00-.789-.78.785.785 0 00-.789.78v14.013a2.06 2.06 0 01-2.07 2.048 2.06 2.06 0 01-2.071-2.048V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v3.8a2.06 2.06 0 01-2.071 2.049A2.06 2.06 0 010 12.9v-1.378c0-.357.292-.646.652-.646.36 0 .653.29.653.646V12.9c0 .418.343.757.766.757s.766-.339.766-.757V9.099a2.06 2.06 0 012.07-2.048 2.06 2.06 0 012.071 2.048v8.984c0 .419.343.758.767.758.423 0 .766-.339.766-.758V4.07c0-1.143.937-2.07 2.093-2.07z\\" fill=\\"url(#lobe-icons-minimax-_R_0_)\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "kimi": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Kimi</title><path d=\\"M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z\\"></path><path d=\\"M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z\\"></path></svg>",
-  "moonshot": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>MoonshotAI</title><path d=\\"M1.052 16.916l9.539 2.552a21.007 21.007 0 00.06 2.033l5.956 1.593a11.997 11.997 0 01-5.586.865l-.18-.016-.044-.004-.084-.009-.094-.01a11.605 11.605 0 01-.157-.02l-.107-.014-.11-.016a11.962 11.962 0 01-.32-.051l-.042-.008-.075-.013-.107-.02-.07-.015-.093-.019-.075-.016-.095-.02-.097-.023-.094-.022-.068-.017-.088-.022-.09-.024-.095-.025-.082-.023-.109-.03-.062-.02-.084-.025-.093-.028-.105-.034-.058-.019-.08-.026-.09-.031-.066-.024a6.293 6.293 0 01-.044-.015l-.068-.025-.101-.037-.057-.022-.08-.03-.087-.035-.088-.035-.079-.032-.095-.04-.063-.028-.063-.027a5.655 5.655 0 01-.041-.018l-.066-.03-.103-.047-.052-.024-.096-.046-.062-.03-.084-.04-.086-.044-.093-.047-.052-.027-.103-.055-.057-.03-.058-.032a6.49 6.49 0 01-.046-.026l-.094-.053-.06-.034-.051-.03-.072-.041-.082-.05-.093-.056-.052-.032-.084-.053-.061-.039-.079-.05-.07-.047-.053-.035a7.785 7.785 0 01-.054-.036l-.044-.03-.044-.03a6.066 6.066 0 01-.04-.028l-.057-.04-.076-.054-.069-.05-.074-.054-.056-.042-.076-.057-.076-.059-.086-.067-.045-.035-.064-.052-.074-.06-.089-.073-.046-.039-.046-.039a7.516 7.516 0 01-.043-.037l-.045-.04-.061-.053-.07-.062-.068-.06-.062-.058-.067-.062-.053-.05-.088-.084a13.28 13.28 0 01-.099-.097l-.029-.028-.041-.042-.069-.07-.05-.051-.05-.053a6.457 6.457 0 01-.168-.179l-.08-.088-.062-.07-.071-.08-.042-.049-.053-.062-.058-.068-.046-.056a7.175 7.175 0 01-.027-.033l-.045-.055-.066-.082-.041-.052-.05-.064-.02-.025a11.99 11.99 0 01-1.44-2.402zm-1.02-5.794l11.353 3.037a20.468 20.468 0 00-.469 2.011l10.817 2.894a12.076 12.076 0 01-1.845 2.005L.657 15.923l-.016-.046-.035-.104a11.965 11.965 0 01-.05-.153l-.007-.023a11.896 11.896 0 01-.207-.741l-.03-.126-.018-.08-.021-.097-.018-.081-.018-.09-.017-.084-.018-.094c-.026-.141-.05-.283-.071-.426l-.017-.118-.011-.083-.013-.102a12.01 12.01 0 01-.019-.161l-.005-.047a12.12 12.12 0 01-.034-2.145zm1.593-5.15l11.948 3.196c-.368.605-.705 1.231-1.01 1.875l11.295 3.022c-.142.82-.368 1.612-.668 2.365l-11.55-3.09L.124 10.26l.015-.1.008-.049.01-.067.015-.087.018-.098c.026-.148.056-.295.088-.442l.028-.124.02-.085.024-.097c.022-.09.045-.18.07-.268l.028-.102.023-.083.03-.1.025-.082.03-.096.026-.082.031-.095a11.896 11.896 0 011.01-2.232zm4.442-4.4L17.352 4.59a20.77 20.77 0 00-1.688 1.721l7.823 2.093c.267.852.442 1.744.513 2.665L2.106 5.213l.045-.065.027-.04.04-.055.046-.065.055-.076.054-.072.064-.086.05-.065.057-.073.055-.07.06-.074.055-.069.065-.077.054-.066.066-.077.053-.06.072-.082.053-.06.067-.074.054-.058.073-.078.058-.06.063-.067.168-.17.1-.098.059-.056.076-.071a12.084 12.084 0 012.272-1.677zM12.017 0h.097l.082.001.069.001.054.002.068.002.046.001.076.003.047.002.06.003.054.002.087.005.105.007.144.011.088.007.044.004.077.008.082.008.047.005.102.012.05.006.108.014.081.01.042.006.065.01.207.032.07.012.065.011.14.026.092.018.11.022.046.01.075.016.041.01L14.7.3l.042.01.065.015.049.012.071.017.096.024.112.03.113.03.113.032.05.015.07.02.078.024.073.023.05.016.05.016.076.025.099.033.102.036.048.017.064.023.093.034.11.041.116.045.1.04.047.02.06.024.041.018.063.026.04.018.057.025.11.048.1.046.074.035.075.036.06.028.092.046.091.045.102.052.053.028.049.026.046.024.06.033.041.022.052.029.088.05.106.06.087.051.057.034.053.032.096.059.088.055.098.062.036.024.064.041.084.056.04.027.062.042.062.043.023.017c.054.037.108.075.161.114l.083.06.065.048.056.043.086.065.082.064.04.03.05.041.086.069.079.065.085.071c.712.6 1.353 1.283 1.909 2.031L7.222.994l.062-.027.065-.028.081-.034.086-.035c.113-.045.227-.09.341-.131l.096-.035.093-.033.084-.03.096-.031c.087-.03.176-.058.264-.085l.091-.027.086-.025.102-.03.085-.023.1-.026L9.04.37l.09-.023.091-.022.095-.022.09-.02.098-.021.091-.02.095-.018.092-.018.1-.018.091-.016.098-.017.092-.014.097-.015.092-.013.102-.013.091-.012.105-.012.09-.01.105-.01c.093-.01.186-.018.28-.024l.106-.008.09-.005.11-.006.093-.004.1-.004.097-.002.099-.002.197-.002z\\"></path></svg>",
-  "zhipu": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Zhipu</title><path d=\\"M11.991 23.503a.24.24 0 00-.244.248.24.24 0 00.244.249.24.24 0 00.245-.249.24.24 0 00-.22-.247l-.025-.001zM9.671 5.365a1.697 1.697 0 011.099 2.132l-.071.172-.016.04-.018.054c-.07.16-.104.32-.104.498-.035.71.47 1.279 1.186 1.314h.366c1.309.053 2.338 1.173 2.286 2.523-.052 1.332-1.152 2.38-2.478 2.327h-.174c-.715.018-1.274.64-1.239 1.368 0 .124.018.23.053.337.209.373.54.658.96.8.75.23 1.517-.125 1.9-.782l.018-.035c.402-.64 1.17-.96 1.92-.711.854.284 1.378 1.226 1.099 2.167a1.661 1.661 0 01-2.077 1.102 1.711 1.711 0 01-.907-.711l-.017-.035c-.2-.323-.463-.58-.851-.711l-.056-.018a1.646 1.646 0 00-1.954.746 1.66 1.66 0 01-1.065.764 1.677 1.677 0 01-1.989-1.279c-.209-.906.332-1.83 1.257-2.043a1.51 1.51 0 01.296-.035h.018c.68-.071 1.151-.622 1.116-1.333a1.307 1.307 0 00-.227-.693 2.515 2.515 0 01-.366-1.403 2.39 2.39 0 01.366-1.208c.14-.195.21-.444.227-.693.018-.71-.506-1.261-1.186-1.332l-.07-.018a1.43 1.43 0 01-.299-.07l-.05-.019a1.7 1.7 0 01-1.047-2.114 1.68 1.68 0 012.094-1.101zm-5.575 10.11c.26-.264.639-.367.994-.27.355.096.633.379.728.74.095.362-.007.748-.267 1.013-.402.41-1.053.41-1.455 0a1.062 1.062 0 010-1.482zm14.845-.294c.359-.09.738.024.992.297.254.274.344.665.237 1.025-.107.36-.396.634-.756.718-.551.128-1.1-.22-1.23-.781a1.05 1.05 0 01.757-1.26zm-.064-4.39c.314.32.49.753.49 1.206 0 .452-.176.886-.49 1.206-.315.32-.74.5-1.185.5-.444 0-.87-.18-1.184-.5a1.727 1.727 0 010-2.412 1.654 1.654 0 012.369 0zm-11.243.163c.364.484.447 1.128.218 1.691a1.665 1.665 0 01-2.188.923c-.855-.36-1.26-1.358-.907-2.228a1.68 1.68 0 011.33-1.038c.593-.08 1.183.169 1.547.652zm11.545-4.221c.368 0 .708.2.892.524.184.324.184.724 0 1.048a1.026 1.026 0 01-.892.524c-.568 0-1.03-.47-1.03-1.048 0-.579.462-1.048 1.03-1.048zm-14.358 0c.368 0 .707.2.891.524.184.324.184.724 0 1.048a1.026 1.026 0 01-.891.524c-.569 0-1.03-.47-1.03-1.048 0-.579.461-1.048 1.03-1.048zm10.031-1.475c.925 0 1.675.764 1.675 1.706s-.75 1.705-1.675 1.705-1.674-.763-1.674-1.705c0-.942.75-1.706 1.674-1.706zm-2.626-.684c.362-.082.653-.356.761-.718a1.062 1.062 0 00-.238-1.028 1.017 1.017 0 00-.996-.294c-.547.14-.881.7-.752 1.257.13.558.675.907 1.225.783zm0 16.876c.359-.087.644-.36.75-.72a1.062 1.062 0 00-.237-1.019 1.018 1.018 0 00-.985-.301 1.037 1.037 0 00-.762.717c-.108.361-.017.754.239 1.028.245.263.606.377.953.305l.043-.01zM17.19 3.5a.631.631 0 00.628-.64c0-.355-.279-.64-.628-.64a.631.631 0 00-.628.64c0 .355.28.64.628.64zm-10.38 0a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64a.631.631 0 00-.628.64c0 .355.279.64.628.64zm-5.182 7.852a.631.631 0 00-.628.64c0 .354.28.639.628.639a.63.63 0 00.627-.606l.001-.034a.62.62 0 00-.628-.64zm5.182 9.13a.631.631 0 00-.628.64c0 .355.279.64.628.64a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64zm10.38.018a.631.631 0 00-.628.64c0 .355.28.64.628.64a.631.631 0 00.628-.64c0-.355-.279-.64-.628-.64zm5.182-9.148a.631.631 0 00-.628.64c0 .354.279.639.628.639a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64zm-.384-4.992a.24.24 0 00.244-.249.24.24 0 00-.244-.249.24.24 0 00-.244.249c0 .142.122.249.244.249zM11.991.497a.24.24 0 00.245-.248A.24.24 0 0011.99 0a.24.24 0 00-.244.249c0 .133.108.236.223.247l.021.001zM2.011 6.36a.24.24 0 00.245-.249.24.24 0 00-.244-.249.24.24 0 00-.244.249.24.24 0 00.244.249zm0 11.263a.24.24 0 00-.243.248.24.24 0 00.244.249.24.24 0 00.244-.249.252.252 0 00-.244-.248zm19.995-.018a.24.24 0 00-.245.248.24.24 0 00.245.25.24.24 0 00.244-.25.252.252 0 00-.244-.248z\\" fill=\\"#3859FF\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "stepfun": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Stepfun</title><path d=\\"M22.012 0h1.032v.927H24v.968h-.956V3.78h-1.032V1.896h-1.878v-.97h1.878V0zM2.6 12.371V1.87h.969v10.502h-.97zm10.423.66h10.95v.918h-6.208v9.579h-4.742V13.03zM5.629 3.333v12.356H0v4.51h10.386V8L20.859 8l-.003-4.668-15.227.001z\\" fill=\\"url(#lobe-icons-stepfun-_R_0_)\\" fill-rule=\\"evenodd\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-stepfun-_R_0_\\" x1=\\"1.646\\" x2=\\"18.342\\" y1=\\"1.916\\" y2=\\"22.091\\"><stop stop-color=\\"#01A9FF\\"></stop><stop offset=\\"1\\" stop-color=\\"#0160FF\\"></stop></linearGradient></defs></svg>",
-  "siliconflow": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>SiliconCloud</title><path clip-rule=\\"evenodd\\" d=\\"M22.956 6.521H12.522c-.577 0-1.044.468-1.044 1.044v3.13c0 .577-.466 1.044-1.043 1.044H1.044c-.577 0-1.044.467-1.044 1.044v4.174C0 17.533.467 18 1.044 18h10.434c.577 0 1.044-.467 1.044-1.043v-3.13c0-.578.466-1.044 1.043-1.044h9.391c.577 0 1.044-.467 1.044-1.044V7.565c0-.576-.467-1.044-1.044-1.044z\\" fill=\\"#6E29F6\\" fill-rule=\\"evenodd\\"></path></svg>",
-  "openrouter": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>OpenRouter</title><path d=\\"M18.654 3.87a5.087 5.087 0 110 10.174L23.7 19.09c.64.641.187 1.737-.72 1.737H8.48a8.479 8.479 0 010-16.958h10.175zM8.479 7.26a5.087 5.087 0 100 10.176 5.087 5.087 0 000-10.175z\\"></path></svg>",
-  "nvidia": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Nvidia</title><path d=\\"M10.212 8.976V7.62c.127-.01.256-.017.388-.021 3.596-.117 5.957 3.184 5.957 3.184s-2.548 3.647-5.282 3.647a3.227 3.227 0 01-1.063-.175v-4.109c1.4.174 1.681.812 2.523 2.258l1.873-1.627a4.905 4.905 0 00-3.67-1.846 6.594 6.594 0 00-.729.044m0-4.476v2.025c.13-.01.259-.019.388-.024 5.002-.174 8.261 4.226 8.261 4.226s-3.743 4.69-7.643 4.69c-.338 0-.675-.031-1.007-.092v1.25c.278.038.558.057.838.057 3.629 0 6.253-1.91 8.794-4.169.421.347 2.146 1.193 2.501 1.564-2.416 2.083-8.048 3.763-11.24 3.763-.308 0-.603-.02-.894-.048V19.5H24v-15H10.21zm0 9.756v1.068c-3.356-.616-4.287-4.21-4.287-4.21a7.173 7.173 0 014.287-2.138v1.172h-.005a3.182 3.182 0 00-2.502 1.178s.615 2.276 2.507 2.931m-5.961-3.3c1.436-1.935 3.604-3.148 5.961-3.336V6.523C5.81 6.887 2 10.723 2 10.723s2.158 6.427 8.21 7.015v-1.166C5.77 16 4.25 10.958 4.25 10.958h-.002z\\" fill=\\"#74B71B\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "groq": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Groq</title><path d=\\"M12.036 2c-3.853-.035-7 3-7.036 6.781-.035 3.782 3.055 6.872 6.908 6.907h2.42v-2.566h-2.292c-2.407.028-4.38-1.866-4.408-4.23-.029-2.362 1.901-4.298 4.308-4.326h.1c2.407 0 4.358 1.915 4.365 4.278v6.305c0 2.342-1.944 4.25-4.323 4.279a4.375 4.375 0 01-3.033-1.252l-1.851 1.818A7 7 0 0012.029 22h.092c3.803-.056 6.858-3.083 6.879-6.816v-6.5C18.907 4.963 15.817 2 12.036 2z\\"></path></svg>",
-  "volcengine": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Volcengine</title><path d=\\"M19.44 10.153l-2.936 11.586a.215.215 0 00.214.261h5.87a.215.215 0 00.214-.261l-2.95-11.586a.214.214 0 00-.412 0zM3.28 12.778l-2.275 8.96A.214.214 0 001.22 22h4.532a.212.212 0 00.214-.165.214.214 0 000-.097l-2.276-8.96a.214.214 0 00-.41 0z\\" fill=\\"#00E5E5\\"></path><path d=\\"M7.29 5.359L3.148 21.738a.215.215 0 00.203.261h8.29a.214.214 0 00.215-.261L7.7 5.358a.214.214 0 00-.41 0z\\" fill=\\"#006EFF\\"></path><path d=\\"M14.44.15a.214.214 0 00-.41 0L8.366 21.739a.214.214 0 00.214.261H19.9a.216.216 0 00.171-.078.214.214 0 00.044-.183L14.439.15z\\" fill=\\"#006EFF\\"></path><path d=\\"M10.278 7.741L6.685 21.736a.214.214 0 00.214.264h7.17a.215.215 0 00.214-.264L10.688 7.741a.214.214 0 00-.41 0z\\" fill=\\"#00E5E5\\"></path></svg>",
-  "alibaba": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Alibaba</title><path d=\\"M24 14.014c-2.8 1.512-5.62 2.896-8.759 3.524-.7.139-1.476.139-2.187.043-.678-.085-1.017-.682-.776-1.31.23-.585.536-1.181.93-1.671.852-1.065 1.814-2.034 2.678-3.088a15.75 15.75 0 001.422-2.054c.306-.511.164-1.129-.372-1.384-.897-.437-1.859-.745-2.81-1.075-.11-.043-.274.074-.492.149.273.244.47.425.743.67-2.821.48-5.49 1.16-8.08 2.098-.012.053-.033.095-.023.117.383.585.208 1.032-.35 1.394a2.365 2.365 0 00-.568.522c1.706.5 3.226.213 4.68-.735-.087-.127-.175-.244-.262-.372.546.096.874.394.918.862.011.107-.054.213-.087.32-.077-.086-.175-.17-.24-.267-.045-.064-.056-.138-.088-.245-1.728 1.15-3.587 1.438-5.632.842 0 .404-.022.745.011 1.075.022.287-.098.415-.36.564-.591.362-1.204.735-1.696 1.214-.59.585-.371 1.299.427 1.597.907.34 1.859.35 2.81.234 1.126-.139 2.23-.32 3.456-.49-1.433.67-2.844 1.14-4.33 1.33-1.04.14-2.078.214-3.106-.084-1.476-.415-2.133-1.501-1.75-2.96.361-1.363 1.236-2.449 2.176-3.45 3.139-3.332 7.108-5.024 11.7-5.365 1.072-.074 2.155.064 3.16.511 1.411.639 2.002 1.99 1.313 3.354-.448.905-1.072 1.735-1.695 2.555-.612.809-1.301 1.554-1.946 2.331-.186.234-.361.48-.503.745-.274.5-.088.83.492.778 1.213-.118 2.45-.213 3.62-.511 1.716-.437 3.389-1.054 5.084-1.597.175-.043.339-.107.492-.17z\\" fill=\\"#FF6003\\" fill-rule=\\"evenodd\\"></path></svg>",
-  "qwen": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Qwen</title><path d=\\"M12.604 1.34c.393.69.784 1.382 1.174 2.075a.18.18 0 00.157.091h5.552c.174 0 .322.11.446.327l1.454 2.57c.19.337.24.478.024.837-.26.43-.513.864-.76 1.3l-.367.658c-.106.196-.223.28-.04.512l2.652 4.637c.172.301.111.494-.043.77-.437.785-.882 1.564-1.335 2.34-.159.272-.352.375-.68.37-.777-.016-1.552-.01-2.327.016a.099.099 0 00-.081.05 575.097 575.097 0 01-2.705 4.74c-.169.293-.38.363-.725.364-.997.003-2.002.004-3.017.002a.537.537 0 01-.465-.271l-1.335-2.323a.09.09 0 00-.083-.049H4.982c-.285.03-.553-.001-.805-.092l-1.603-2.77a.543.543 0 01-.002-.54l1.207-2.12a.198.198 0 000-.197 550.951 550.951 0 01-1.875-3.272l-.79-1.395c-.16-.31-.173-.496.095-.965.465-.813.927-1.625 1.387-2.436.132-.234.304-.334.584-.335a338.3 338.3 0 012.589-.001.124.124 0 00.107-.063l2.806-4.895a.488.488 0 01.422-.246c.524-.001 1.053 0 1.583-.006L11.704 1c.341-.003.724.032.9.34zm-3.432.403a.06.06 0 00-.052.03L6.254 6.788a.157.157 0 01-.135.078H3.253c-.056 0-.07.025-.041.074l5.81 10.156c.025.042.013.062-.034.063l-2.795.015a.218.218 0 00-.2.116l-1.32 2.31c-.044.078-.021.118.068.118l5.716.008c.046 0 .08.02.104.061l1.403 2.454c.046.081.092.082.139 0l5.006-8.76.783-1.382a.055.055 0 01.096 0l1.424 2.53a.122.122 0 00.107.062l2.763-.02a.04.04 0 00.035-.02.041.041 0 000-.04l-2.9-5.086a.108.108 0 010-.113l.293-.507 1.12-1.977c.024-.041.012-.062-.035-.062H9.2c-.059 0-.073-.026-.043-.077l1.434-2.505a.107.107 0 000-.114L9.225 1.774a.06.06 0 00-.053-.031zm6.29 8.02c.046 0 .058.02.034.06l-.832 1.465-2.613 4.585a.056.056 0 01-.05.029.058.058 0 01-.05-.029L8.498 9.841c-.02-.034-.01-.052.028-.054l.216-.012 6.722-.012z\\" fill=\\"url(#lobe-icons-qwen-_R_0_)\\" fill-rule=\\"nonzero\\"></path><defs><linearGradient id=\\"lobe-icons-qwen-_R_0_\\" x1=\\"0%\\" x2=\\"100%\\" y1=\\"0%\\" y2=\\"0%\\"><stop offset=\\"0%\\" stop-color=\\"#6336E7\\" stop-opacity=\\".84\\"></stop><stop offset=\\"100%\\" stop-color=\\"#6F69F7\\" stop-opacity=\\".84\\"></stop></linearGradient></defs></svg>",
-  "bailian": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>BaiLian</title><path d=\\"M6.336 8.919v6.162l5.335-3.083L6.337 8.92z\\" fill=\\"#1C54E3\\"></path><path d=\\"M21.394 5.288s-.006-.006-.01-.006L17.01 2.754 6.336 8.92l5.335 3.082 9.701-5.6.016-.01a.635.635 0 00.006-1.1v-.003z\\" fill=\\"#AA9AFF\\"></path><path d=\\"M21.71 12.465a.62.62 0 00-.316.085s-.006 0-.009.003l-4.375 2.528 5.05 2.915h.006a2.06 2.06 0 00.28-1.04v-3.855a.637.637 0 00-.636-.636z\\" fill=\\"#00EAD1\\"></path><path d=\\"M22.06 17.996l-5.05-2.915L6.34 21.242l4.27 2.465s.016.006.022.012a2.102 2.102 0 002.093 0c.006-.003.016-.006.022-.012l8.538-4.93c.003 0 .006-.003.01-.006.321-.183.589-.45.775-.772h-.006l-.004-.003z\\" fill=\\"#00CEC9\\"></path><path d=\\"M11.672 11.998l-5.336 3.083-1.444.832-3.605 2.083H1.28c.173.303.416.555.709.738l.078.044.016.01.02.012 4.232 2.442 10.671-6.161-5.335-3.082z\\" fill=\\"#00EAD1\\"></path><path d=\\"M12.74.29c-.1-.06-.208-.107-.315-.148-.02-.006-.038-.016-.057-.022a2.121 2.121 0 00-.7-.12c-.233 0-.457.038-.668.11l-.031.01a2.196 2.196 0 00-.372.17L2.068 5.222s-.003 0-.006.003c-.324.183-.592.451-.781.773h.006l5.049 2.918L17.01 2.758 12.74.29z\\" fill=\\"#7347FF\\"></path><path d=\\"M1.287 6.001H1.28A2.06 2.06 0 001 7.041v9.915c0 .378.1.735.28 1.043h.007l5.049-2.918V8.919l-5.05-2.918z\\" fill=\\"#0423DA\\"></path></svg>",
-  "baidu": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Baidu</title><path d=\\"M8.859 11.735c1.017-1.71 4.059-3.083 6.202.286 1.579 2.284 4.284 4.397 4.284 4.397s2.027 1.601.73 4.684c-1.24 2.956-5.64 1.607-6.005 1.49l-.024-.009s-1.746-.568-3.776-.112c-2.026.458-3.773.286-3.773.286l-.045-.001c-.328-.01-2.38-.187-3.001-2.968-.675-3.028 2.365-4.687 2.592-4.968.226-.288 1.802-1.37 2.816-3.085zm.986 1.738v2.032h-1.64s-1.64.138-2.213 2.014c-.2 1.252.177 1.99.242 2.148.067.157.596 1.073 1.927 1.342h3.078v-7.514l-1.394-.022zm3.588 2.191l-1.44.024v3.956s.064.985 1.44 1.344h3.541v-5.3h-1.528v3.979h-1.46s-.466-.068-.553-.447v-3.556zM9.82 16.715v3.06H8.58s-.863-.045-1.126-1.049c-.136-.445.02-.959.088-1.16.063-.203.353-.671.951-.85H9.82zm9.525-9.036c2.086 0 2.646 2.06 2.646 2.742 0 .688.284 3.597-2.309 3.655-2.595.057-2.704-1.77-2.704-3.08 0-1.374.277-3.317 2.367-3.317zM4.24 6.08c1.523-.135 2.645 1.55 2.762 2.513.07.625.393 3.486-1.975 4-2.364.515-3.244-2.249-2.984-3.544 0 0 .28-2.797 2.197-2.969zm8.847-1.483c.14-1.31 1.69-3.316 2.931-3.028 1.236.285 2.367 1.944 2.137 3.37-.224 1.428-1.345 3.313-3.095 3.082-1.748-.226-2.143-1.823-1.973-3.424zM9.425 1c1.307 0 2.364 1.519 2.364 3.398 0 1.879-1.057 3.4-2.364 3.4s-2.367-1.521-2.367-3.4C7.058 2.518 8.118 1 9.425 1z\\" fill=\\"#2932E1\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "tencent": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Tencent</title><path d=\\"M9.976 1L24 9.8l-10.587.015L10.723 23H5.489L8.18 9.8H3.244L1 5.4h8.077L9.976 1z\\" fill=\\"#0052D9\\" fill-rule=\\"evenodd\\"></path></svg>",
-  "bedrock": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Bedrock</title><defs><linearGradient id=\\"lobe-icons-bedrock-_R_0_\\" x1=\\"80%\\" x2=\\"20%\\" y1=\\"20%\\" y2=\\"80%\\"><stop offset=\\"0%\\" stop-color=\\"#6350FB\\"></stop><stop offset=\\"50%\\" stop-color=\\"#3D8FFF\\"></stop><stop offset=\\"100%\\" stop-color=\\"#9AD8F8\\"></stop></linearGradient></defs><path d=\\"M13.05 15.513h3.08c.214 0 .389.177.389.394v1.82a1.704 1.704 0 011.296 1.661c0 .943-.755 1.708-1.685 1.708-.931 0-1.686-.765-1.686-1.708 0-.807.554-1.484 1.297-1.662v-1.425h-2.69v4.663a.395.395 0 01-.188.338l-2.69 1.641a.385.385 0 01-.405-.002l-4.926-3.086a.395.395 0 01-.185-.336V16.3L2.196 14.87A.395.395 0 012 14.555L2 14.528V9.406c0-.14.073-.27.192-.34l2.465-1.462V4.448c0-.129.062-.249.165-.322l.021-.014L9.77 1.058a.385.385 0 01.407 0l2.69 1.675a.395.395 0 01.185.336V7.6h3.856V5.683a1.704 1.704 0 01-1.296-1.662c0-.943.755-1.708 1.685-1.708.931 0 1.685.765 1.685 1.708 0 .807-.553 1.484-1.296 1.662v2.311a.391.391 0 01-.389.394h-4.245v1.806h6.624a1.69 1.69 0 011.64-1.313c.93 0 1.685.764 1.685 1.707 0 .943-.754 1.708-1.685 1.708a1.69 1.69 0 01-1.64-1.314H13.05v1.937h4.953l.915 1.18a1.66 1.66 0 01.84-.227c.931 0 1.685.764 1.685 1.707 0 .943-.754 1.708-1.685 1.708-.93 0-1.685-.765-1.685-1.708 0-.346.102-.668.276-.937l-.724-.935H13.05v1.806zM9.973 1.856L7.93 3.122V6.09h-.778V3.604L5.435 4.669v2.945l2.11 1.36L9.712 7.61V5.334h.778V7.83c0 .136-.07.263-.184.335L7.963 9.638v2.081l1.422 1.009-.446.646-1.406-.998-1.53 1.005-.423-.66 1.605-1.055v-1.99L5.038 8.29l-2.26 1.34v1.676l1.972-1.189.398.677-2.37 1.429V14.3l2.166 1.258 2.27-1.368.397.677-2.176 1.311V19.3l1.876 1.175 2.365-1.426.398.678-2.017 1.216 1.918 1.201 2.298-1.403v-5.78l-4.758 2.893-.4-.675 5.158-3.136V3.289L9.972 1.856zM16.13 18.47a.913.913 0 00-.908.92c0 .507.406.918.908.918a.913.913 0 00.907-.919.913.913 0 00-.907-.92zm3.63-3.81a.913.913 0 00-.908.92c0 .508.406.92.907.92a.913.913 0 00.908-.92.913.913 0 00-.908-.92zm1.555-4.99a.913.913 0 00-.908.92c0 .507.407.918.908.918a.913.913 0 00.907-.919.913.913 0 00-.907-.92zM17.296 3.1a.913.913 0 00-.907.92c0 .508.406.92.907.92a.913.913 0 00.908-.92.913.913 0 00-.908-.92z\\" fill=\\"url(#lobe-icons-bedrock-_R_0_)\\" fill-rule=\\"nonzero\\"></path></svg>",
-  "azure": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Azure</title><path d=\\"M7.242 1.613A1.11 1.11 0 018.295.857h6.977L8.03 22.316a1.11 1.11 0 01-1.052.755h-5.43a1.11 1.11 0 01-1.053-1.466L7.242 1.613z\\" fill=\\"url(#lobe-icons-azure-0-_R_0_)\\"></path><path d=\\"M18.397 15.296H7.4a.51.51 0 00-.347.882l7.066 6.595c.206.192.477.298.758.298h6.226l-2.706-7.775z\\" fill=\\"#0078D4\\"></path><path d=\\"M15.272.857H7.497L0 23.071h7.775l1.596-4.73 5.068 4.73h6.665l-2.707-7.775h-7.998L15.272.857z\\" fill=\\"url(#lobe-icons-azure-1-_R_0_)\\"></path><path d=\\"M17.193 1.613a1.11 1.11 0 00-1.052-.756h-7.81.035c.477 0 .9.304 1.052.756l6.748 19.992a1.11 1.11 0 01-1.052 1.466h-.12 7.895a1.11 1.11 0 001.052-1.466L17.193 1.613z\\" fill=\\"url(#lobe-icons-azure-2-_R_0_)\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-0-_R_0_\\" x1=\\"8.247\\" x2=\\"1.002\\" y1=\\"1.626\\" y2=\\"23.03\\"><stop stop-color=\\"#114A8B\\"></stop><stop offset=\\"1\\" stop-color=\\"#0669BC\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-1-_R_0_\\" x1=\\"14.042\\" x2=\\"12.324\\" y1=\\"15.302\\" y2=\\"15.888\\"><stop stop-opacity=\\".3\\"></stop><stop offset=\\".071\\" stop-opacity=\\".2\\"></stop><stop offset=\\".321\\" stop-opacity=\\".1\\"></stop><stop offset=\\".623\\" stop-opacity=\\".05\\"></stop><stop offset=\\"1\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-2-_R_0_\\" x1=\\"12.841\\" x2=\\"20.793\\" y1=\\"1.626\\" y2=\\"22.814\\"><stop stop-color=\\"#3CCBF4\\"></stop><stop offset=\\"1\\" stop-color=\\"#2892DF\\"></stop></linearGradient></defs></svg>",
-  "ollama": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Ollama</title><path d=\\"M7.905 1.09c.216.085.411.225.588.41.295.306.544.744.734 1.263.191.522.315 1.1.362 1.68a5.054 5.054 0 012.049-.636l.051-.004c.87-.07 1.73.087 2.48.474.101.053.2.11.297.17.05-.569.172-1.134.36-1.644.19-.52.439-.957.733-1.264a1.67 1.67 0 01.589-.41c.257-.1.53-.118.796-.042.401.114.745.368 1.016.737.248.337.434.769.561 1.287.23.934.27 2.163.115 3.645l.053.04.026.019c.757.576 1.284 1.397 1.563 2.35.435 1.487.216 3.155-.534 4.088l-.018.021.002.003c.417.762.67 1.567.724 2.4l.002.03c.064 1.065-.2 2.137-.814 3.19l-.007.01.01.024c.472 1.157.62 2.322.438 3.486l-.006.039a.651.651 0 01-.747.536.648.648 0 01-.54-.742c.167-1.033.01-2.069-.48-3.123a.643.643 0 01.04-.617l.004-.006c.604-.924.854-1.83.8-2.72-.046-.779-.325-1.544-.8-2.273a.644.644 0 01.18-.886l.009-.006c.243-.159.467-.565.58-1.12a4.229 4.229 0 00-.095-1.974c-.205-.7-.58-1.284-1.105-1.683-.595-.454-1.383-.673-2.38-.61a.653.653 0 01-.632-.371c-.314-.665-.772-1.141-1.343-1.436a3.288 3.288 0 00-1.772-.332c-1.245.099-2.343.801-2.67 1.686a.652.652 0 01-.61.425c-1.067.002-1.893.252-2.497.703-.522.39-.878.935-1.066 1.588a4.07 4.07 0 00-.068 1.886c.112.558.331 1.02.582 1.269l.008.007c.212.207.257.53.109.785-.36.622-.629 1.549-.673 2.44-.05 1.018.186 1.902.719 2.536l.016.019a.643.643 0 01.095.69c-.576 1.236-.753 2.252-.562 3.052a.652.652 0 01-1.269.298c-.243-1.018-.078-2.184.473-3.498l.014-.035-.008-.012a4.339 4.339 0 01-.598-1.309l-.005-.019a5.764 5.764 0 01-.177-1.785c.044-.91.278-1.842.622-2.59l.012-.026-.002-.002c-.293-.418-.51-.953-.63-1.545l-.005-.024a5.352 5.352 0 01.093-2.49c.262-.915.777-1.701 1.536-2.269.06-.045.123-.09.186-.132-.159-1.493-.119-2.73.112-3.67.127-.518.314-.95.562-1.287.27-.368.614-.622 1.015-.737.266-.076.54-.059.797.042zm4.116 9.09c.936 0 1.8.313 2.446.855.63.527 1.005 1.235 1.005 1.94 0 .888-.406 1.58-1.133 2.022-.62.375-1.451.557-2.403.557-1.009 0-1.871-.259-2.493-.734-.617-.47-.963-1.13-.963-1.845 0-.707.398-1.417 1.056-1.946.668-.537 1.55-.849 2.485-.849zm0 .896a3.07 3.07 0 00-1.916.65c-.461.37-.722.835-.722 1.25 0 .428.21.829.61 1.134.455.347 1.124.548 1.943.548.799 0 1.473-.147 1.932-.426.463-.28.7-.686.7-1.257 0-.423-.246-.89-.683-1.256-.484-.405-1.14-.643-1.864-.643zm.662 1.21l.004.004c.12.151.095.37-.056.49l-.292.23v.446a.375.375 0 01-.376.373.375.375 0 01-.376-.373v-.46l-.271-.218a.347.347 0 01-.052-.49.353.353 0 01.494-.051l.215.172.22-.174a.353.353 0 01.49.051zm-5.04-1.919c.478 0 .867.39.867.871a.87.87 0 01-.868.871.87.87 0 01-.867-.87.87.87 0 01.867-.872zm8.706 0c.48 0 .868.39.868.871a.87.87 0 01-.868.871.87.87 0 01-.867-.87.87.87 0 01.867-.872zM7.44 2.3l-.003.002a.659.659 0 00-.285.238l-.005.006c-.138.189-.258.467-.348.832-.17.692-.216 1.631-.124 2.782.43-.128.899-.208 1.404-.237l.01-.001.019-.034c.046-.082.095-.161.148-.239.123-.771.022-1.692-.253-2.444-.134-.364-.297-.65-.453-.813a.628.628 0 00-.107-.09L7.44 2.3zm9.174.04l-.002.001a.628.628 0 00-.107.09c-.156.163-.32.45-.453.814-.29.794-.387 1.776-.23 2.572l.058.097.008.014h.03a5.184 5.184 0 011.466.212c.086-1.124.038-2.043-.128-2.722-.09-.365-.21-.643-.349-.832l-.004-.006a.659.659 0 00-.285-.239h-.004z\\"></path></svg>",
-  "cline": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Cline</title><path d=\\"M17.035 3.991c2.75 0 4.98 2.24 4.98 5.003v1.667l1.45 2.896a1.01 1.01 0 01-.002.909l-1.448 2.864v1.668c0 2.762-2.23 5.002-4.98 5.002H7.074c-2.751 0-4.98-2.24-4.98-5.002V17.33l-1.48-2.855a1.01 1.01 0 01-.003-.927l1.482-2.887V8.994c0-2.763 2.23-5.003 4.98-5.003h9.962zM8.265 9.6a2.274 2.274 0 00-2.274 2.274v4.042a2.274 2.274 0 004.547 0v-4.042A2.274 2.274 0 008.265 9.6zm7.326 0a2.274 2.274 0 00-2.274 2.274v4.042a2.274 2.274 0 104.548 0v-4.042A2.274 2.274 0 0015.59 9.6z\\"></path><path d=\\"M12.054 5.558a2.779 2.779 0 100-5.558 2.779 2.779 0 000 5.558z\\"></path></svg>",
-  "generic": "<svg viewBox=\\"0 0 24 24\\" width=\\"16\\" height=\\"16\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\" stroke-linejoin=\\"round\\"><rect x=\\"3\\" y=\\"3\\" width=\\"18\\" height=\\"18\\" rx=\\"3\\"/><path d=\\"M9 9h6v6H9z\\"/></svg>"
+const ICONS = {
+"openai": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>OpenAI</title><path d=\\"M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z\\"></path></svg>",
+"anthropic": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Anthropic</title><path d=\\"M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z\\"></path></svg>",
+"claude": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Claude</title><path d=\\"M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z\\" fill=\\"#D97757\\" fill-rule=\\"nonzero\\"></path></svg>",
+"google": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Google</title><path d=\\"M23 12.245c0-.905-.075-1.565-.236-2.25h-10.54v4.083h6.186c-.124 1.014-.797 2.542-2.294 3.569l-.021.136 3.332 2.53.23.022C21.779 18.417 23 15.593 23 12.245z\\" fill=\\"#4285F4\\"></path><path d=\\"M12.225 23c3.03 0 5.574-.978 7.433-2.665l-3.542-2.688c-.948.648-2.22 1.1-3.891 1.1a6.745 6.745 0 01-6.386-4.572l-.132.011-3.465 2.628-.045.124C4.043 20.531 7.835 23 12.225 23z\\" fill=\\"#34A853\\"></path><path d=\\"M5.84 14.175A6.65 6.65 0 015.463 12c0-.758.138-1.491.361-2.175l-.006-.147-3.508-2.67-.115.054A10.831 10.831 0 001 12c0 1.772.436 3.447 1.197 4.938l3.642-2.763z\\" fill=\\"#FBBC05\\"></path><path d=\\"M12.225 5.253c2.108 0 3.529.892 4.34 1.638l3.167-3.031C17.787 2.088 15.255 1 12.225 1 7.834 1 4.043 3.469 2.197 7.062l3.63 2.763a6.77 6.77 0 016.398-4.572z\\" fill=\\"#EB4335\\"></path></svg>",
+"gemini": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Gemini</title><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"#3186FF\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-0-_R_0_)\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-1-_R_0_)\\"></path><path d=\\"M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z\\" fill=\\"url(#lobe-icons-gemini-2-_R_0_)\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-0-_R_0_\\" x1=\\"7\\" x2=\\"11\\" y1=\\"15.5\\" y2=\\"12\\"><stop stop-color=\\"#08B962\\"></stop><stop offset=\\"1\\" stop-color=\\"#08B962\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-1-_R_0_\\" x1=\\"8\\" x2=\\"11.5\\" y1=\\"5.5\\" y2=\\"11\\"><stop stop-color=\\"#F94543\\"></stop><stop offset=\\"1\\" stop-color=\\"#F94543\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-gemini-2-_R_0_\\" x1=\\"3.5\\" x2=\\"17.5\\" y1=\\"13.5\\" y2=\\"12\\"><stop stop-color=\\"#FABC12\\"></stop><stop offset=\\".46\\" stop-color=\\"#FABC12\\" stop-opacity=\\"0\\"></stop></linearGradient></defs></svg>",
+"vertex": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>VertexAI</title><path d=\\"M11.995 20.216a1.892 1.892 0 100 3.785 1.892 1.892 0 000-3.785zm0 2.806a.927.927 0 11.927-.914.914.914 0 01-.927.914z\\" fill=\\"#4285F4\\"></path><path clip-rule=\\"evenodd\\" d=\\"M21.687 14.144c.237.038.452.16.605.344a.978.978 0 01-.18 1.3l-8.24 6.082a1.892 1.892 0 00-1.147-1.508l8.28-6.08a.991.991 0 01.682-.138z\\" fill=\\"#669DF6\\" fill-rule=\\"evenodd\\"></path><path clip-rule=\\"evenodd\\" d=\\"M10.122 21.842l-8.217-6.066a.952.952 0 01-.206-1.287.978.978 0 011.287-.206l8.28 6.08a1.893 1.893 0 00-1.144 1.479z\\" fill=\\"#AECBFA\\" fill-rule=\\"evenodd\\"></path><path d=\\"M4.273 4.475a.978.978 0 01-.965-.965V1.09a.978.978 0 111.943 0v2.42a.978.978 0 01-.978.965zM4.247 13.034a.978.978 0 100-1.956.978.978 0 000 1.956zM4.247 10.19a.978.978 0 100-1.956.978.978 0 000 1.956zM4.247 7.332a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#AECBFA\\"></path><path d=\\"M19.718 7.307a.978.978 0 01-.965-.979v-2.42a.965.965 0 011.93 0v2.42a.964.964 0 01-.965.979zM19.743 13.047a.978.978 0 100-1.956.978.978 0 000 1.956zM19.743 10.151a.978.978 0 100-1.956.978.978 0 000 1.956zM19.743 2.068a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#4285F4\\"></path><path d=\\"M11.995 15.917a.978.978 0 01-.965-.965v-2.459a.978.978 0 011.943 0v2.433a.976.976 0 01-.978.991zM11.995 18.762a.978.978 0 100-1.956.978.978 0 000 1.956zM11.995 10.64a.978.978 0 100-1.956.978.978 0 000 1.956zM11.995 7.783a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#669DF6\\"></path><path d=\\"M15.856 10.177a.978.978 0 01-.965-.965v-2.42a.977.977 0 011.702-.763.979.979 0 01.241.763v2.42a.978.978 0 01-.978.965zM15.869 4.913a.978.978 0 100-1.956.978.978 0 000 1.956zM15.869 15.853a.978.978 0 100-1.956.978.978 0 000 1.956zM15.869 12.996a.978.978 0 100-1.956.978.978 0 000 1.956z\\" fill=\\"#4285F4\\"></path><path d=\\"M8.121 15.853a.978.978 0 100-1.956.978.978 0 000 1.956zM8.121 7.783a.978.978 0 100-1.956.978.978 0 000 1.956zM8.121 4.913a.978.978 0 100-1.957.978.978 0 000 1.957zM8.134 12.996a.978.978 0 01-.978-.94V9.611a.965.965 0 011.93 0v2.445a.966.966 0 01-.952.94z\\" fill=\\"#AECBFA\\"></path></svg>",
+"deepseek": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>DeepSeek</title><path d=\\"M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z\\" fill=\\"#4D6BFE\\"></path></svg>",
+"minimax": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Minimax</title><defs><linearGradient id=\\"lobe-icons-minimax-_R_0_\\" x1=\\"0%\\" x2=\\"100.182%\\" y1=\\"50.057%\\" y2=\\"50.057%\\"><stop offset=\\"0%\\" stop-color=\\"#E2167E\\"></stop><stop offset=\\"100%\\" stop-color=\\"#FE603C\\"></stop></linearGradient></defs><path d=\\"M16.278 2c1.156 0 2.093.927 2.093 2.07v12.501a.74.74 0 00.744.709.74.74 0 00.743-.709V9.099a2.06 2.06 0 012.071-2.049A2.06 2.06 0 0124 9.1v6.561a.649.649 0 01-.652.645.649.649 0 01-.653-.645V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v7.472a2.037 2.037 0 01-2.048 2.026 2.037 2.037 0 01-2.048-2.026v-12.5a.785.785 0 00-.788-.753.785.785 0 00-.789.752l-.001 15.904A2.037 2.037 0 0113.441 22a2.037 2.037 0 01-2.048-2.026V18.04c0-.356.292-.645.652-.645.36 0 .652.289.652.645v1.934c0 .263.142.506.372.638.23.131.514.131.744 0a.734.734 0 00.372-.638V4.07c0-1.143.937-2.07 2.093-2.07zm-5.674 0c1.156 0 2.093.927 2.093 2.07v11.523a.648.648 0 01-.652.645.648.648 0 01-.652-.645V4.07a.785.785 0 00-.789-.78.785.785 0 00-.789.78v14.013a2.06 2.06 0 01-2.07 2.048 2.06 2.06 0 01-2.071-2.048V9.1a.762.762 0 00-.766-.758.762.762 0 00-.766.758v3.8a2.06 2.06 0 01-2.071 2.049A2.06 2.06 0 010 12.9v-1.378c0-.357.292-.646.652-.646.36 0 .653.29.653.646V12.9c0 .418.343.757.766.757s.766-.339.766-.757V9.099a2.06 2.06 0 012.07-2.048 2.06 2.06 0 012.071 2.048v8.984c0 .419.343.758.767.758.423 0 .766-.339.766-.758V4.07c0-1.143.937-2.07 2.093-2.07z\\" fill=\\"url(#lobe-icons-minimax-_R_0_)\\" fill-rule=\\"nonzero\\"></path></svg>",
+"kimi": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Kimi</title><path d=\\"M21.846 0a1.923 1.923 0 110 3.846H20.15a.226.226 0 01-.227-.226V1.923C19.923.861 20.784 0 21.846 0z\\"></path><path d=\\"M11.065 11.199l7.257-7.2c.137-.136.06-.41-.116-.41H14.3a.164.164 0 00-.117.051l-7.82 7.756c-.122.12-.302.013-.302-.179V3.82c0-.127-.083-.23-.185-.23H3.186c-.103 0-.186.103-.186.23V19.77c0 .128.083.23.186.23h2.69c.103 0 .186-.102.186-.23v-3.25c0-.069.025-.135.069-.178l2.424-2.406a.158.158 0 01.205-.023l6.484 4.772a7.677 7.677 0 003.453 1.283c.108.012.2-.095.2-.23v-3.06c0-.117-.07-.212-.164-.227a5.028 5.028 0 01-2.027-.807l-5.613-4.064c-.117-.078-.132-.279-.028-.381z\\"></path></svg>",
+"moonshot": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>MoonshotAI</title><path d=\\"M1.052 16.916l9.539 2.552a21.007 21.007 0 00.06 2.033l5.956 1.593a11.997 11.997 0 01-5.586.865l-.18-.016-.044-.004-.084-.009-.094-.01a11.605 11.605 0 01-.157-.02l-.107-.014-.11-.016a11.962 11.962 0 01-.32-.051l-.042-.008-.075-.013-.107-.02-.07-.015-.093-.019-.075-.016-.095-.02-.097-.023-.094-.022-.068-.017-.088-.022-.09-.024-.095-.025-.082-.023-.109-.03-.062-.02-.084-.025-.093-.028-.105-.034-.058-.019-.08-.026-.09-.031-.066-.024a6.293 6.293 0 01-.044-.015l-.068-.025-.101-.037-.057-.022-.08-.03-.087-.035-.088-.035-.079-.032-.095-.04-.063-.028-.063-.027a5.655 5.655 0 01-.041-.018l-.066-.03-.103-.047-.052-.024-.096-.046-.062-.03-.084-.04-.086-.044-.093-.047-.052-.027-.103-.055-.057-.03-.058-.032a6.49 6.49 0 01-.046-.026l-.094-.053-.06-.034-.051-.03-.072-.041-.082-.05-.093-.056-.052-.032-.084-.053-.061-.039-.079-.05-.07-.047-.053-.035a7.785 7.785 0 01-.054-.036l-.044-.03-.044-.03a6.066 6.066 0 01-.04-.028l-.057-.04-.076-.054-.069-.05-.074-.054-.056-.042-.076-.057-.076-.059-.086-.067-.045-.035-.064-.052-.074-.06-.089-.073-.046-.039-.046-.039a7.516 7.516 0 01-.043-.037l-.045-.04-.061-.053-.07-.062-.068-.06-.062-.058-.067-.062-.053-.05-.088-.084a13.28 13.28 0 01-.099-.097l-.029-.028-.041-.042-.069-.07-.05-.051-.05-.053a6.457 6.457 0 01-.168-.179l-.08-.088-.062-.07-.071-.08-.042-.049-.053-.062-.058-.068-.046-.056a7.175 7.175 0 01-.027-.033l-.045-.055-.066-.082-.041-.052-.05-.064-.02-.025a11.99 11.99 0 01-1.44-2.402zm-1.02-5.794l11.353 3.037a20.468 20.468 0 00-.469 2.011l10.817 2.894a12.076 12.076 0 01-1.845 2.005L.657 15.923l-.016-.046-.035-.104a11.965 11.965 0 01-.05-.153l-.007-.023a11.896 11.896 0 01-.207-.741l-.03-.126-.018-.08-.021-.097-.018-.081-.018-.09-.017-.084-.018-.094c-.026-.141-.05-.283-.071-.426l-.017-.118-.011-.083-.013-.102a12.01 12.01 0 01-.019-.161l-.005-.047a12.12 12.12 0 01-.034-2.145zm1.593-5.15l11.948 3.196c-.368.605-.705 1.231-1.01 1.875l11.295 3.022c-.142.82-.368 1.612-.668 2.365l-11.55-3.09L.124 10.26l.015-.1.008-.049.01-.067.015-.087.018-.098c.026-.148.056-.295.088-.442l.028-.124.02-.085.024-.097c.022-.09.045-.18.07-.268l.028-.102.023-.083.03-.1.025-.082.03-.096.026-.082.031-.095a11.896 11.896 0 011.01-2.232zm4.442-4.4L17.352 4.59a20.77 20.77 0 00-1.688 1.721l7.823 2.093c.267.852.442 1.744.513 2.665L2.106 5.213l.045-.065.027-.04.04-.055.046-.065.055-.076.054-.072.064-.086.05-.065.057-.073.055-.07.06-.074.055-.069.065-.077.054-.066.066-.077.053-.06.072-.082.053-.06.067-.074.054-.058.073-.078.058-.06.063-.067.168-.17.1-.098.059-.056.076-.071a12.084 12.084 0 012.272-1.677zM12.017 0h.097l.082.001.069.001.054.002.068.002.046.001.076.003.047.002.06.003.054.002.087.005.105.007.144.011.088.007.044.004.077.008.082.008.047.005.102.012.05.006.108.014.081.01.042.006.065.01.207.032.07.012.065.011.14.026.092.018.11.022.046.01.075.016.041.01L14.7.3l.042.01.065.015.049.012.071.017.096.024.112.03.113.03.113.032.05.015.07.02.078.024.073.023.05.016.05.016.076.025.099.033.102.036.048.017.064.023.093.034.11.041.116.045.1.04.047.02.06.024.041.018.063.026.04.018.057.025.11.048.1.046.074.035.075.036.06.028.092.046.091.045.102.052.053.028.049.026.046.024.06.033.041.022.052.029.088.05.106.06.087.051.057.034.053.032.096.059.088.055.098.062.036.024.064.041.084.056.04.027.062.042.062.043.023.017c.054.037.108.075.161.114l.083.06.065.048.056.043.086.065.082.064.04.03.05.041.086.069.079.065.085.071c.712.6 1.353 1.283 1.909 2.031L7.222.994l.062-.027.065-.028.081-.034.086-.035c.113-.045.227-.09.341-.131l.096-.035.093-.033.084-.03.096-.031c.087-.03.176-.058.264-.085l.091-.027.086-.025.102-.03.085-.023.1-.026L9.04.37l.09-.023.091-.022.095-.022.09-.02.098-.021.091-.02.095-.018.092-.018.1-.018.091-.016.098-.017.092-.014.097-.015.092-.013.102-.013.091-.012.105-.012.09-.01.105-.01c.093-.01.186-.018.28-.024l.106-.008.09-.005.11-.006.093-.004.1-.004.097-.002.099-.002.197-.002z\\"></path></svg>",
+"zhipu": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Zhipu</title><path d=\\"M11.991 23.503a.24.24 0 00-.244.248.24.24 0 00.244.249.24.24 0 00.245-.249.24.24 0 00-.22-.247l-.025-.001zM9.671 5.365a1.697 1.697 0 011.099 2.132l-.071.172-.016.04-.018.054c-.07.16-.104.32-.104.498-.035.71.47 1.279 1.186 1.314h.366c1.309.053 2.338 1.173 2.286 2.523-.052 1.332-1.152 2.38-2.478 2.327h-.174c-.715.018-1.274.64-1.239 1.368 0 .124.018.23.053.337.209.373.54.658.96.8.75.23 1.517-.125 1.9-.782l.018-.035c.402-.64 1.17-.96 1.92-.711.854.284 1.378 1.226 1.099 2.167a1.661 1.661 0 01-2.077 1.102 1.711 1.711 0 01-.907-.711l-.017-.035c-.2-.323-.463-.58-.851-.711l-.056-.018a1.646 1.646 0 00-1.954.746 1.66 1.66 0 01-1.065.764 1.677 1.677 0 01-1.989-1.279c-.209-.906.332-1.83 1.257-2.043a1.51 1.51 0 01.296-.035h.018c.68-.071 1.151-.622 1.116-1.333a1.307 1.307 0 00-.227-.693 2.515 2.515 0 01-.366-1.403 2.39 2.39 0 01.366-1.208c.14-.195.21-.444.227-.693.018-.71-.506-1.261-1.186-1.332l-.07-.018a1.43 1.43 0 01-.299-.07l-.05-.019a1.7 1.7 0 01-1.047-2.114 1.68 1.68 0 012.094-1.101zm-5.575 10.11c.26-.264.639-.367.994-.27.355.096.633.379.728.74.095.362-.007.748-.267 1.013-.402.41-1.053.41-1.455 0a1.062 1.062 0 010-1.482zm14.845-.294c.359-.09.738.024.992.297.254.274.344.665.237 1.025-.107.36-.396.634-.756.718-.551.128-1.1-.22-1.23-.781a1.05 1.05 0 01.757-1.26zm-.064-4.39c.314.32.49.753.49 1.206 0 .452-.176.886-.49 1.206-.315.32-.74.5-1.185.5-.444 0-.87-.18-1.184-.5a1.727 1.727 0 010-2.412 1.654 1.654 0 012.369 0zm-11.243.163c.364.484.447 1.128.218 1.691a1.665 1.665 0 01-2.188.923c-.855-.36-1.26-1.358-.907-2.228a1.68 1.68 0 011.33-1.038c.593-.08 1.183.169 1.547.652zm11.545-4.221c.368 0 .708.2.892.524.184.324.184.724 0 1.048a1.026 1.026 0 01-.892.524c-.568 0-1.03-.47-1.03-1.048 0-.579.462-1.048 1.03-1.048zm-14.358 0c.368 0 .707.2.891.524.184.324.184.724 0 1.048a1.026 1.026 0 01-.891.524c-.569 0-1.03-.47-1.03-1.048 0-.579.461-1.048 1.03-1.048zm10.031-1.475c.925 0 1.675.764 1.675 1.706s-.75 1.705-1.675 1.705-1.674-.763-1.674-1.705c0-.942.75-1.706 1.674-1.706zm-2.626-.684c.362-.082.653-.356.761-.718a1.062 1.062 0 00-.238-1.028 1.017 1.017 0 00-.996-.294c-.547.14-.881.7-.752 1.257.13.558.675.907 1.225.783zm0 16.876c.359-.087.644-.36.75-.72a1.062 1.062 0 00-.237-1.019 1.018 1.018 0 00-.985-.301 1.037 1.037 0 00-.762.717c-.108.361-.017.754.239 1.028.245.263.606.377.953.305l.043-.01zM17.19 3.5a.631.631 0 00.628-.64c0-.355-.279-.64-.628-.64a.631.631 0 00-.628.64c0 .355.28.64.628.64zm-10.38 0a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64a.631.631 0 00-.628.64c0 .355.279.64.628.64zm-5.182 7.852a.631.631 0 00-.628.64c0 .354.28.639.628.639a.63.63 0 00.627-.606l.001-.034a.62.62 0 00-.628-.64zm5.182 9.13a.631.631 0 00-.628.64c0 .355.279.64.628.64a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64zm10.38.018a.631.631 0 00-.628.64c0 .355.28.64.628.64a.631.631 0 00.628-.64c0-.355-.279-.64-.628-.64zm5.182-9.148a.631.631 0 00-.628.64c0 .354.279.639.628.639a.631.631 0 00.628-.64c0-.355-.28-.64-.628-.64zm-.384-4.992a.24.24 0 00.244-.249.24.24 0 00-.244-.249.24.24 0 00-.244.249c0 .142.122.249.244.249zM11.991.497a.24.24 0 00.245-.248A.24.24 0 0011.99 0a.24.24 0 00-.244.249c0 .133.108.236.223.247l.021.001zM2.011 6.36a.24.24 0 00.245-.249.24.24 0 00-.244-.249.24.24 0 00-.244.249.24.24 0 00.244.249zm0 11.263a.24.24 0 00-.243.248.24.24 0 00.244.249.24.24 0 00.244-.249.252.252 0 00-.244-.248zm19.995-.018a.24.24 0 00-.245.248.24.24 0 00.245.25.24.24 0 00.244-.25.252.252 0 00-.244-.248z\\" fill=\\"#3859FF\\" fill-rule=\\"nonzero\\"></path></svg>",
+"stepfun": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Stepfun</title><path d=\\"M22.012 0h1.032v.927H24v.968h-.956V3.78h-1.032V1.896h-1.878v-.97h1.878V0zM2.6 12.371V1.87h.969v10.502h-.97zm10.423.66h10.95v.918h-6.208v9.579h-4.742V13.03zM5.629 3.333v12.356H0v4.51h10.386V8L20.859 8l-.003-4.668-15.227.001z\\" fill=\\"url(#lobe-icons-stepfun-_R_0_)\\" fill-rule=\\"evenodd\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-stepfun-_R_0_\\" x1=\\"1.646\\" x2=\\"18.342\\" y1=\\"1.916\\" y2=\\"22.091\\"><stop stop-color=\\"#01A9FF\\"></stop><stop offset=\\"1\\" stop-color=\\"#0160FF\\"></stop></linearGradient></defs></svg>",
+"siliconflow": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>SiliconCloud</title><path clip-rule=\\"evenodd\\" d=\\"M22.956 6.521H12.522c-.577 0-1.044.468-1.044 1.044v3.13c0 .577-.466 1.044-1.043 1.044H1.044c-.577 0-1.044.467-1.044 1.044v4.174C0 17.533.467 18 1.044 18h10.434c.577 0 1.044-.467 1.044-1.043v-3.13c0-.578.466-1.044 1.043-1.044h9.391c.577 0 1.044-.467 1.044-1.044V7.565c0-.576-.467-1.044-1.044-1.044z\\" fill=\\"#6E29F6\\" fill-rule=\\"evenodd\\"></path></svg>",
+"openrouter": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>OpenRouter</title><path d=\\"M18.654 3.87a5.087 5.087 0 110 10.174L23.7 19.09c.64.641.187 1.737-.72 1.737H8.48a8.479 8.479 0 010-16.958h10.175zM8.479 7.26a5.087 5.087 0 100 10.176 5.087 5.087 0 000-10.175z\\"></path></svg>",
+"nvidia": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Nvidia</title><path d=\\"M10.212 8.976V7.62c.127-.01.256-.017.388-.021 3.596-.117 5.957 3.184 5.957 3.184s-2.548 3.647-5.282 3.647a3.227 3.227 0 01-1.063-.175v-4.109c1.4.174 1.681.812 2.523 2.258l1.873-1.627a4.905 4.905 0 00-3.67-1.846 6.594 6.594 0 00-.729.044m0-4.476v2.025c.13-.01.259-.019.388-.024 5.002-.174 8.261 4.226 8.261 4.226s-3.743 4.69-7.643 4.69c-.338 0-.675-.031-1.007-.092v1.25c.278.038.558.057.838.057 3.629 0 6.253-1.91 8.794-4.169.421.347 2.146 1.193 2.501 1.564-2.416 2.083-8.048 3.763-11.24 3.763-.308 0-.603-.02-.894-.048V19.5H24v-15H10.21zm0 9.756v1.068c-3.356-.616-4.287-4.21-4.287-4.21a7.173 7.173 0 014.287-2.138v1.172h-.005a3.182 3.182 0 00-2.502 1.178s.615 2.276 2.507 2.931m-5.961-3.3c1.436-1.935 3.604-3.148 5.961-3.336V6.523C5.81 6.887 2 10.723 2 10.723s2.158 6.427 8.21 7.015v-1.166C5.77 16 4.25 10.958 4.25 10.958h-.002z\\" fill=\\"#74B71B\\" fill-rule=\\"nonzero\\"></path></svg>",
+"groq": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Groq</title><path d=\\"M12.036 2c-3.853-.035-7 3-7.036 6.781-.035 3.782 3.055 6.872 6.908 6.907h2.42v-2.566h-2.292c-2.407.028-4.38-1.866-4.408-4.23-.029-2.362 1.901-4.298 4.308-4.326h.1c2.407 0 4.358 1.915 4.365 4.278v6.305c0 2.342-1.944 4.25-4.323 4.279a4.375 4.375 0 01-3.033-1.252l-1.851 1.818A7 7 0 0012.029 22h.092c3.803-.056 6.858-3.083 6.879-6.816v-6.5C18.907 4.963 15.817 2 12.036 2z\\"></path></svg>",
+"volcengine": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Volcengine</title><path d=\\"M19.44 10.153l-2.936 11.586a.215.215 0 00.214.261h5.87a.215.215 0 00.214-.261l-2.95-11.586a.214.214 0 00-.412 0zM3.28 12.778l-2.275 8.96A.214.214 0 001.22 22h4.532a.212.212 0 00.214-.165.214.214 0 000-.097l-2.276-8.96a.214.214 0 00-.41 0z\\" fill=\\"#00E5E5\\"></path><path d=\\"M7.29 5.359L3.148 21.738a.215.215 0 00.203.261h8.29a.214.214 0 00.215-.261L7.7 5.358a.214.214 0 00-.41 0z\\" fill=\\"#006EFF\\"></path><path d=\\"M14.44.15a.214.214 0 00-.41 0L8.366 21.739a.214.214 0 00.214.261H19.9a.216.216 0 00.171-.078.214.214 0 00.044-.183L14.439.15z\\" fill=\\"#006EFF\\"></path><path d=\\"M10.278 7.741L6.685 21.736a.214.214 0 00.214.264h7.17a.215.215 0 00.214-.264L10.688 7.741a.214.214 0 00-.41 0z\\" fill=\\"#00E5E5\\"></path></svg>",
+"alibaba": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Alibaba</title><path d=\\"M24 14.014c-2.8 1.512-5.62 2.896-8.759 3.524-.7.139-1.476.139-2.187.043-.678-.085-1.017-.682-.776-1.31.23-.585.536-1.181.93-1.671.852-1.065 1.814-2.034 2.678-3.088a15.75 15.75 0 001.422-2.054c.306-.511.164-1.129-.372-1.384-.897-.437-1.859-.745-2.81-1.075-.11-.043-.274.074-.492.149.273.244.47.425.743.67-2.821.48-5.49 1.16-8.08 2.098-.012.053-.033.095-.023.117.383.585.208 1.032-.35 1.394a2.365 2.365 0 00-.568.522c1.706.5 3.226.213 4.68-.735-.087-.127-.175-.244-.262-.372.546.096.874.394.918.862.011.107-.054.213-.087.32-.077-.086-.175-.17-.24-.267-.045-.064-.056-.138-.088-.245-1.728 1.15-3.587 1.438-5.632.842 0 .404-.022.745.011 1.075.022.287-.098.415-.36.564-.591.362-1.204.735-1.696 1.214-.59.585-.371 1.299.427 1.597.907.34 1.859.35 2.81.234 1.126-.139 2.23-.32 3.456-.49-1.433.67-2.844 1.14-4.33 1.33-1.04.14-2.078.214-3.106-.084-1.476-.415-2.133-1.501-1.75-2.96.361-1.363 1.236-2.449 2.176-3.45 3.139-3.332 7.108-5.024 11.7-5.365 1.072-.074 2.155.064 3.16.511 1.411.639 2.002 1.99 1.313 3.354-.448.905-1.072 1.735-1.695 2.555-.612.809-1.301 1.554-1.946 2.331-.186.234-.361.48-.503.745-.274.5-.088.83.492.778 1.213-.118 2.45-.213 3.62-.511 1.716-.437 3.389-1.054 5.084-1.597.175-.043.339-.107.492-.17z\\" fill=\\"#FF6003\\" fill-rule=\\"evenodd\\"></path></svg>",
+"qwen": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Qwen</title><path d=\\"M12.604 1.34c.393.69.784 1.382 1.174 2.075a.18.18 0 00.157.091h5.552c.174 0 .322.11.446.327l1.454 2.57c.19.337.24.478.024.837-.26.43-.513.864-.76 1.3l-.367.658c-.106.196-.223.28-.04.512l2.652 4.637c.172.301.111.494-.043.77-.437.785-.882 1.564-1.335 2.34-.159.272-.352.375-.68.37-.777-.016-1.552-.01-2.327.016a.099.099 0 00-.081.05 575.097 575.097 0 01-2.705 4.74c-.169.293-.38.363-.725.364-.997.003-2.002.004-3.017.002a.537.537 0 01-.465-.271l-1.335-2.323a.09.09 0 00-.083-.049H4.982c-.285.03-.553-.001-.805-.092l-1.603-2.77a.543.543 0 01-.002-.54l1.207-2.12a.198.198 0 000-.197 550.951 550.951 0 01-1.875-3.272l-.79-1.395c-.16-.31-.173-.496.095-.965.465-.813.927-1.625 1.387-2.436.132-.234.304-.334.584-.335a338.3 338.3 0 012.589-.001.124.124 0 00.107-.063l2.806-4.895a.488.488 0 01.422-.246c.524-.001 1.053 0 1.583-.006L11.704 1c.341-.003.724.032.9.34zm-3.432.403a.06.06 0 00-.052.03L6.254 6.788a.157.157 0 01-.135.078H3.253c-.056 0-.07.025-.041.074l5.81 10.156c.025.042.013.062-.034.063l-2.795.015a.218.218 0 00-.2.116l-1.32 2.31c-.044.078-.021.118.068.118l5.716.008c.046 0 .08.02.104.061l1.403 2.454c.046.081.092.082.139 0l5.006-8.76.783-1.382a.055.055 0 01.096 0l1.424 2.53a.122.122 0 00.107.062l2.763-.02a.04.04 0 00.035-.02.041.041 0 000-.04l-2.9-5.086a.108.108 0 010-.113l.293-.507 1.12-1.977c.024-.041.012-.062-.035-.062H9.2c-.059 0-.073-.026-.043-.077l1.434-2.505a.107.107 0 000-.114L9.225 1.774a.06.06 0 00-.053-.031zm6.29 8.02c.046 0 .058.02.034.06l-.832 1.465-2.613 4.585a.056.056 0 01-.05.029.058.058 0 01-.05-.029L8.498 9.841c-.02-.034-.01-.052.028-.054l.216-.012 6.722-.012z\\" fill=\\"url(#lobe-icons-qwen-_R_0_)\\" fill-rule=\\"nonzero\\"></path><defs><linearGradient id=\\"lobe-icons-qwen-_R_0_\\" x1=\\"0%\\" x2=\\"100%\\" y1=\\"0%\\" y2=\\"0%\\"><stop offset=\\"0%\\" stop-color=\\"#6336E7\\" stop-opacity=\\".84\\"></stop><stop offset=\\"100%\\" stop-color=\\"#6F69F7\\" stop-opacity=\\".84\\"></stop></linearGradient></defs></svg>",
+"bailian": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>BaiLian</title><path d=\\"M6.336 8.919v6.162l5.335-3.083L6.337 8.92z\\" fill=\\"#1C54E3\\"></path><path d=\\"M21.394 5.288s-.006-.006-.01-.006L17.01 2.754 6.336 8.92l5.335 3.082 9.701-5.6.016-.01a.635.635 0 00.006-1.1v-.003z\\" fill=\\"#AA9AFF\\"></path><path d=\\"M21.71 12.465a.62.62 0 00-.316.085s-.006 0-.009.003l-4.375 2.528 5.05 2.915h.006a2.06 2.06 0 00.28-1.04v-3.855a.637.637 0 00-.636-.636z\\" fill=\\"#00EAD1\\"></path><path d=\\"M22.06 17.996l-5.05-2.915L6.34 21.242l4.27 2.465s.016.006.022.012a2.102 2.102 0 002.093 0c.006-.003.016-.006.022-.012l8.538-4.93c.003 0 .006-.003.01-.006.321-.183.589-.45.775-.772h-.006l-.004-.003z\\" fill=\\"#00CEC9\\"></path><path d=\\"M11.672 11.998l-5.336 3.083-1.444.832-3.605 2.083H1.28c.173.303.416.555.709.738l.078.044.016.01.02.012 4.232 2.442 10.671-6.161-5.335-3.082z\\" fill=\\"#00EAD1\\"></path><path d=\\"M12.74.29c-.1-.06-.208-.107-.315-.148-.02-.006-.038-.016-.057-.022a2.121 2.121 0 00-.7-.12c-.233 0-.457.038-.668.11l-.031.01a2.196 2.196 0 00-.372.17L2.068 5.222s-.003 0-.006.003c-.324.183-.592.451-.781.773h.006l5.049 2.918L17.01 2.758 12.74.29z\\" fill=\\"#7347FF\\"></path><path d=\\"M1.287 6.001H1.28A2.06 2.06 0 001 7.041v9.915c0 .378.1.735.28 1.043h.007l5.049-2.918V8.919l-5.05-2.918z\\" fill=\\"#0423DA\\"></path></svg>",
+"baidu": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Baidu</title><path d=\\"M8.859 11.735c1.017-1.71 4.059-3.083 6.202.286 1.579 2.284 4.284 4.397 4.284 4.397s2.027 1.601.73 4.684c-1.24 2.956-5.64 1.607-6.005 1.49l-.024-.009s-1.746-.568-3.776-.112c-2.026.458-3.773.286-3.773.286l-.045-.001c-.328-.01-2.38-.187-3.001-2.968-.675-3.028 2.365-4.687 2.592-4.968.226-.288 1.802-1.37 2.816-3.085zm.986 1.738v2.032h-1.64s-1.64.138-2.213 2.014c-.2 1.252.177 1.99.242 2.148.067.157.596 1.073 1.927 1.342h3.078v-7.514l-1.394-.022zm3.588 2.191l-1.44.024v3.956s.064.985 1.44 1.344h3.541v-5.3h-1.528v3.979h-1.46s-.466-.068-.553-.447v-3.556zM9.82 16.715v3.06H8.58s-.863-.045-1.126-1.049c-.136-.445.02-.959.088-1.16.063-.203.353-.671.951-.85H9.82zm9.525-9.036c2.086 0 2.646 2.06 2.646 2.742 0 .688.284 3.597-2.309 3.655-2.595.057-2.704-1.77-2.704-3.08 0-1.374.277-3.317 2.367-3.317zM4.24 6.08c1.523-.135 2.645 1.55 2.762 2.513.07.625.393 3.486-1.975 4-2.364.515-3.244-2.249-2.984-3.544 0 0 .28-2.797 2.197-2.969zm8.847-1.483c.14-1.31 1.69-3.316 2.931-3.028 1.236.285 2.367 1.944 2.137 3.37-.224 1.428-1.345 3.313-3.095 3.082-1.748-.226-2.143-1.823-1.973-3.424zM9.425 1c1.307 0 2.364 1.519 2.364 3.398 0 1.879-1.057 3.4-2.364 3.4s-2.367-1.521-2.367-3.4C7.058 2.518 8.118 1 9.425 1z\\" fill=\\"#2932E1\\" fill-rule=\\"nonzero\\"></path></svg>",
+"tencent": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Tencent</title><path d=\\"M9.976 1L24 9.8l-10.587.015L10.723 23H5.489L8.18 9.8H3.244L1 5.4h8.077L9.976 1z\\" fill=\\"#0052D9\\" fill-rule=\\"evenodd\\"></path></svg>",
+"bedrock": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Bedrock</title><defs><linearGradient id=\\"lobe-icons-bedrock-_R_0_\\" x1=\\"80%\\" x2=\\"20%\\" y1=\\"20%\\" y2=\\"80%\\"><stop offset=\\"0%\\" stop-color=\\"#6350FB\\"></stop><stop offset=\\"50%\\" stop-color=\\"#3D8FFF\\"></stop><stop offset=\\"100%\\" stop-color=\\"#9AD8F8\\"></stop></linearGradient></defs><path d=\\"M13.05 15.513h3.08c.214 0 .389.177.389.394v1.82a1.704 1.704 0 011.296 1.661c0 .943-.755 1.708-1.685 1.708-.931 0-1.686-.765-1.686-1.708 0-.807.554-1.484 1.297-1.662v-1.425h-2.69v4.663a.395.395 0 01-.188.338l-2.69 1.641a.385.385 0 01-.405-.002l-4.926-3.086a.395.395 0 01-.185-.336V16.3L2.196 14.87A.395.395 0 012 14.555L2 14.528V9.406c0-.14.073-.27.192-.34l2.465-1.462V4.448c0-.129.062-.249.165-.322l.021-.014L9.77 1.058a.385.385 0 01.407 0l2.69 1.675a.395.395 0 01.185.336V7.6h3.856V5.683a1.704 1.704 0 01-1.296-1.662c0-.943.755-1.708 1.685-1.708.931 0 1.685.765 1.685 1.708 0 .807-.553 1.484-1.296 1.662v2.311a.391.391 0 01-.389.394h-4.245v1.806h6.624a1.69 1.69 0 011.64-1.313c.93 0 1.685.764 1.685 1.707 0 .943-.754 1.708-1.685 1.708a1.69 1.69 0 01-1.64-1.314H13.05v1.937h4.953l.915 1.18a1.66 1.66 0 01.84-.227c.931 0 1.685.764 1.685 1.707 0 .943-.754 1.708-1.685 1.708-.93 0-1.685-.765-1.685-1.708 0-.346.102-.668.276-.937l-.724-.935H13.05v1.806zM9.973 1.856L7.93 3.122V6.09h-.778V3.604L5.435 4.669v2.945l2.11 1.36L9.712 7.61V5.334h.778V7.83c0 .136-.07.263-.184.335L7.963 9.638v2.081l1.422 1.009-.446.646-1.406-.998-1.53 1.005-.423-.66 1.605-1.055v-1.99L5.038 8.29l-2.26 1.34v1.676l1.972-1.189.398.677-2.37 1.429V14.3l2.166 1.258 2.27-1.368.397.677-2.176 1.311V19.3l1.876 1.175 2.365-1.426.398.678-2.017 1.216 1.918 1.201 2.298-1.403v-5.78l-4.758 2.893-.4-.675 5.158-3.136V3.289L9.972 1.856zM16.13 18.47a.913.913 0 00-.908.92c0 .507.406.918.908.918a.913.913 0 00.907-.919.913.913 0 00-.907-.92zm3.63-3.81a.913.913 0 00-.908.92c0 .508.406.92.907.92a.913.913 0 00.908-.92.913.913 0 00-.908-.92zm1.555-4.99a.913.913 0 00-.908.92c0 .507.407.918.908.918a.913.913 0 00.907-.919.913.913 0 00-.907-.92zM17.296 3.1a.913.913 0 00-.907.92c0 .508.406.92.907.92a.913.913 0 00.908-.92.913.913 0 00-.908-.92z\\" fill=\\"url(#lobe-icons-bedrock-_R_0_)\\" fill-rule=\\"nonzero\\"></path></svg>",
+"azure": "<svg height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Azure</title><path d=\\"M7.242 1.613A1.11 1.11 0 018.295.857h6.977L8.03 22.316a1.11 1.11 0 01-1.052.755h-5.43a1.11 1.11 0 01-1.053-1.466L7.242 1.613z\\" fill=\\"url(#lobe-icons-azure-0-_R_0_)\\"></path><path d=\\"M18.397 15.296H7.4a.51.51 0 00-.347.882l7.066 6.595c.206.192.477.298.758.298h6.226l-2.706-7.775z\\" fill=\\"#0078D4\\"></path><path d=\\"M15.272.857H7.497L0 23.071h7.775l1.596-4.73 5.068 4.73h6.665l-2.707-7.775h-7.998L15.272.857z\\" fill=\\"url(#lobe-icons-azure-1-_R_0_)\\"></path><path d=\\"M17.193 1.613a1.11 1.11 0 00-1.052-.756h-7.81.035c.477 0 .9.304 1.052.756l6.748 19.992a1.11 1.11 0 01-1.052 1.466h-.12 7.895a1.11 1.11 0 001.052-1.466L17.193 1.613z\\" fill=\\"url(#lobe-icons-azure-2-_R_0_)\\"></path><defs><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-0-_R_0_\\" x1=\\"8.247\\" x2=\\"1.002\\" y1=\\"1.626\\" y2=\\"23.03\\"><stop stop-color=\\"#114A8B\\"></stop><stop offset=\\"1\\" stop-color=\\"#0669BC\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-1-_R_0_\\" x1=\\"14.042\\" x2=\\"12.324\\" y1=\\"15.302\\" y2=\\"15.888\\"><stop stop-opacity=\\".3\\"></stop><stop offset=\\".071\\" stop-opacity=\\".2\\"></stop><stop offset=\\".321\\" stop-opacity=\\".1\\"></stop><stop offset=\\".623\\" stop-opacity=\\".05\\"></stop><stop offset=\\"1\\" stop-opacity=\\"0\\"></stop></linearGradient><linearGradient gradientUnits=\\"userSpaceOnUse\\" id=\\"lobe-icons-azure-2-_R_0_\\" x1=\\"12.841\\" x2=\\"20.793\\" y1=\\"1.626\\" y2=\\"22.814\\"><stop stop-color=\\"#3CCBF4\\"></stop><stop offset=\\"1\\" stop-color=\\"#2892DF\\"></stop></linearGradient></defs></svg>",
+"ollama": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Ollama</title><path d=\\"M7.905 1.09c.216.085.411.225.588.41.295.306.544.744.734 1.263.191.522.315 1.1.362 1.68a5.054 5.054 0 012.049-.636l.051-.004c.87-.07 1.73.087 2.48.474.101.053.2.11.297.17.05-.569.172-1.134.36-1.644.19-.52.439-.957.733-1.264a1.67 1.67 0 01.589-.41c.257-.1.53-.118.796-.042.401.114.745.368 1.016.737.248.337.434.769.561 1.287.23.934.27 2.163.115 3.645l.053.04.026.019c.757.576 1.284 1.397 1.563 2.35.435 1.487.216 3.155-.534 4.088l-.018.021.002.003c.417.762.67 1.567.724 2.4l.002.03c.064 1.065-.2 2.137-.814 3.19l-.007.01.01.024c.472 1.157.62 2.322.438 3.486l-.006.039a.651.651 0 01-.747.536.648.648 0 01-.54-.742c.167-1.033.01-2.069-.48-3.123a.643.643 0 01.04-.617l.004-.006c.604-.924.854-1.83.8-2.72-.046-.779-.325-1.544-.8-2.273a.644.644 0 01.18-.886l.009-.006c.243-.159.467-.565.58-1.12a4.229 4.229 0 00-.095-1.974c-.205-.7-.58-1.284-1.105-1.683-.595-.454-1.383-.673-2.38-.61a.653.653 0 01-.632-.371c-.314-.665-.772-1.141-1.343-1.436a3.288 3.288 0 00-1.772-.332c-1.245.099-2.343.801-2.67 1.686a.652.652 0 01-.61.425c-1.067.002-1.893.252-2.497.703-.522.39-.878.935-1.066 1.588a4.07 4.07 0 00-.068 1.886c.112.558.331 1.02.582 1.269l.008.007c.212.207.257.53.109.785-.36.622-.629 1.549-.673 2.44-.05 1.018.186 1.902.719 2.536l.016.019a.643.643 0 01.095.69c-.576 1.236-.753 2.252-.562 3.052a.652.652 0 01-1.269.298c-.243-1.018-.078-2.184.473-3.498l.014-.035-.008-.012a4.339 4.339 0 01-.598-1.309l-.005-.019a5.764 5.764 0 01-.177-1.785c.044-.91.278-1.842.622-2.59l.012-.026-.002-.002c-.293-.418-.51-.953-.63-1.545l-.005-.024a5.352 5.352 0 01.093-2.49c.262-.915.777-1.701 1.536-2.269.06-.045.123-.09.186-.132-.159-1.493-.119-2.73.112-3.67.127-.518.314-.95.562-1.287.27-.368.614-.622 1.015-.737.266-.076.54-.059.797.042zm4.116 9.09c.936 0 1.8.313 2.446.855.63.527 1.005 1.235 1.005 1.94 0 .888-.406 1.58-1.133 2.022-.62.375-1.451.557-2.403.557-1.009 0-1.871-.259-2.493-.734-.617-.47-.963-1.13-.963-1.845 0-.707.398-1.417 1.056-1.946.668-.537 1.55-.849 2.485-.849zm0 .896a3.07 3.07 0 00-1.916.65c-.461.37-.722.835-.722 1.25 0 .428.21.829.61 1.134.455.347 1.124.548 1.943.548.799 0 1.473-.147 1.932-.426.463-.28.7-.686.7-1.257 0-.423-.246-.89-.683-1.256-.484-.405-1.14-.643-1.864-.643zm.662 1.21l.004.004c.12.151.095.37-.056.49l-.292.23v.446a.375.375 0 01-.376.373.375.375 0 01-.376-.373v-.46l-.271-.218a.347.347 0 01-.052-.49.353.353 0 01.494-.051l.215.172.22-.174a.353.353 0 01.49.051zm-5.04-1.919c.478 0 .867.39.867.871a.87.87 0 01-.868.871.87.87 0 01-.867-.87.87.87 0 01.867-.872zm8.706 0c.48 0 .868.39.868.871a.87.87 0 01-.868.871.87.87 0 01-.867-.87.87.87 0 01.867-.872zM7.44 2.3l-.003.002a.659.659 0 00-.285.238l-.005.006c-.138.189-.258.467-.348.832-.17.692-.216 1.631-.124 2.782.43-.128.899-.208 1.404-.237l.01-.001.019-.034c.046-.082.095-.161.148-.239.123-.771.022-1.692-.253-2.444-.134-.364-.297-.65-.453-.813a.628.628 0 00-.107-.09L7.44 2.3zm9.174.04l-.002.001a.628.628 0 00-.107.09c-.156.163-.32.45-.453.814-.29.794-.387 1.776-.23 2.572l.058.097.008.014h.03a5.184 5.184 0 011.466.212c.086-1.124.038-2.043-.128-2.722-.09-.365-.21-.643-.349-.832l-.004-.006a.659.659 0 00-.285-.239h-.004z\\"></path></svg>",
+"cline": "<svg fill=\\"currentColor\\" fill-rule=\\"evenodd\\" height=\\"1em\\" viewBox=\\"0 0 24 24\\" width=\\"1em\\" xmlns=\\"http://www.w3.org/2000/svg\\"><title>Cline</title><path d=\\"M17.035 3.991c2.75 0 4.98 2.24 4.98 5.003v1.667l1.45 2.896a1.01 1.01 0 01-.002.909l-1.448 2.864v1.668c0 2.762-2.23 5.002-4.98 5.002H7.074c-2.751 0-4.98-2.24-4.98-5.002V17.33l-1.48-2.855a1.01 1.01 0 01-.003-.927l1.482-2.887V8.994c0-2.763 2.23-5.003 4.98-5.003h9.962zM8.265 9.6a2.274 2.274 0 00-2.274 2.274v4.042a2.274 2.274 0 004.547 0v-4.042A2.274 2.274 0 008.265 9.6zm7.326 0a2.274 2.274 0 00-2.274 2.274v4.042a2.274 2.274 0 104.548 0v-4.042A2.274 2.274 0 0015.59 9.6z\\"></path><path d=\\"M12.054 5.558a2.779 2.779 0 100-5.558 2.779 2.779 0 000 5.558z\\"></path></svg>",
+"generic": "<svg viewBox=\\"0 0 24 24\\" width=\\"16\\" height=\\"16\\" fill=\\"none\\" stroke=\\"currentColor\\" stroke-width=\\"2\\" stroke-linecap=\\"round\\" stroke-linejoin=\\"round\\"><rect x=\\"3\\" y=\\"3\\" width=\\"18\\" height=\\"18\\" rx=\\"3\\"/><path d=\\"M9 9h6v6H9z\\"/></svg>"
 };
-  function getBrandKey(idOrName) {
-  if (!idOrName) return "generic";
-  const s = String(idOrName).toLowerCase();
-  if (s.includes("openai") || s.includes("gpt") || s.includes("chatgpt") || s.includes("o1") || s.includes("o3")) return "openai";
-  if (s.includes("claude")) return "claude";
-  if (s.includes("anthropic")) return "anthropic";
-  if (s.includes("gemini")) return "gemini";
-  if (s.includes("google") || s.includes("gemma")) return "google";
-  if (s.includes("vertex")) return "vertex";
-  if (s.includes("deepseek")) return "deepseek";
-  if (s.includes("minimax")) return "minimax";
-  if (s.includes("moonshot")) return "moonshot";
-  if (s.includes("kimi")) return "kimi";
-  if (s.includes("zhipu") || s.includes("glm") || s.includes("chatglm")) return "zhipu";
-  if (s.includes("stepfun") || s.includes("step-")) return "stepfun";
-  if (s.includes("silicon") || s.includes("sf-")) return "siliconflow";
-  if (s.includes("openrouter")) return "openrouter";
-  if (s.includes("nvidia")) return "nvidia";
-  if (s.includes("groq")) return "groq";
-  if (s.includes("volc") || s.includes("ark") || s.includes("doubao") || s.includes("bytedance")) return "volcengine";
-  if (s.includes("qwen")) return "qwen";
-  if (s.includes("bailian")) return "bailian";
-  if (s.includes("alibaba") || s.includes("dashscope") || s.includes("aliyun")) return "alibaba";
-  if (s.includes("baidu") || s.includes("wenxin") || s.includes("ernie")) return "baidu";
-  if (s.includes("tencent") || s.includes("hunyuan")) return "tencent";
-  if (s.includes("bedrock") || s.includes("aws")) return "bedrock";
-  if (s.includes("azure")) return "azure";
-  if (s.includes("ollama")) return "ollama";
-  if (s.includes("cline")) return "cline";
-  return "generic";
-  }
-  function getBrandIcon(idOrName) {
-  const key = getBrandKey(idOrName);
-  return ICONS[key] || ICONS.generic;
-  }
-  function renderBrandIcon(idOrName) {
-  const svg = getBrandIcon(idOrName);
-  return \`<span class="ico">\${svg}</span>\`;
-  }
-  const UI_ICONS = {
-  eye: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
-  eyeOff: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>',
-  sun: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>',
-  moon: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
-  monitor: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
-  logout: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
-  search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
-  activity: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
-  sliders: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg>',
-  shield: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
-  server: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
-  download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
-  upload: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
-  };
-  function uiIcon(name) {
-  return UI_ICONS[name] || '';
-  }
-  window.BRAND_ICONS = ICONS;
-  window.UI_ICONS = UI_ICONS;
-  window.uiIcon = uiIcon;
-  window.getBrandKey = getBrandKey;
-  window.getBrandIcon = getBrandIcon;
-  window.renderBrandIcon = renderBrandIcon;
+function getBrandKey(idOrName) {
+if (!idOrName) return "generic";
+const s = String(idOrName).toLowerCase();
+if (s.includes("openai") || s.includes("gpt") || s.includes("chatgpt") || s.includes("o1") || s.includes("o3")) return "openai";
+if (s.includes("claude")) return "claude";
+if (s.includes("anthropic")) return "anthropic";
+if (s.includes("gemini")) return "gemini";
+if (s.includes("google") || s.includes("gemma")) return "google";
+if (s.includes("vertex")) return "vertex";
+if (s.includes("deepseek")) return "deepseek";
+if (s.includes("minimax")) return "minimax";
+if (s.includes("moonshot")) return "moonshot";
+if (s.includes("kimi")) return "kimi";
+if (s.includes("zhipu") || s.includes("glm") || s.includes("chatglm")) return "zhipu";
+if (s.includes("stepfun") || s.includes("step-")) return "stepfun";
+if (s.includes("silicon") || s.includes("sf-")) return "siliconflow";
+if (s.includes("openrouter")) return "openrouter";
+if (s.includes("nvidia")) return "nvidia";
+if (s.includes("groq")) return "groq";
+if (s.includes("volc") || s.includes("ark") || s.includes("doubao") || s.includes("bytedance")) return "volcengine";
+if (s.includes("qwen")) return "qwen";
+if (s.includes("bailian")) return "bailian";
+if (s.includes("alibaba") || s.includes("dashscope") || s.includes("aliyun")) return "alibaba";
+if (s.includes("baidu") || s.includes("wenxin") || s.includes("ernie")) return "baidu";
+if (s.includes("tencent") || s.includes("hunyuan")) return "tencent";
+if (s.includes("bedrock") || s.includes("aws")) return "bedrock";
+if (s.includes("azure")) return "azure";
+if (s.includes("ollama")) return "ollama";
+if (s.includes("cline")) return "cline";
+return "generic";
+}
+function getBrandIcon(idOrName) {
+const key = getBrandKey(idOrName);
+return ICONS[key] || ICONS.generic;
+}
+function renderBrandIcon(idOrName) {
+const svg = getBrandIcon(idOrName);
+return \`<span class="ico">\${svg}</span>\`;
+}
+const UI_ICONS = {
+eye: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+eyeOff: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>',
+sun: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>',
+moon: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
+monitor: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+logout: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+plus: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
+activity: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+sliders: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg>',
+shield: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
+server: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
+download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+upload: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+};
+function uiIcon(name) {
+return UI_ICONS[name] || '';
+}
+window.BRAND_ICONS = ICONS;
+window.UI_ICONS = UI_ICONS;
+window.uiIcon = uiIcon;
+window.getBrandKey = getBrandKey;
+window.getBrandIcon = getBrandIcon;
+window.renderBrandIcon = renderBrandIcon;
 })();
 </script>
-  <script>
+
+<script>
 (function () {
-  const usageState = {
-  subTab: 'models', // 'models' | 'providers' | 'keys'
-  };
-  function fmtN(n) {
-  if (n === undefined || n === null || isNaN(n)) return '0';
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-  return Number(n).toLocaleString();
-  }
-  function fmtBytes(b) {
-  if (!b) return '0 B';
-  if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
-  if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
-  return b + ' B';
-  }
-  function renderKPIs(usage) {
-  const totals = usage?.totals || {};
-  const reqs = totals.requests || 0;
-  const succ = totals.success !== undefined ? totals.success : (reqs - (totals.failed || 0));
-  const succRate = reqs > 0 ? (succ / reqs) * 100 : 0;
-  const inT = totals.input_tokens || 0;
-  const outT = totals.output_tokens || 0;
-  const cRead = totals.cache_read_tokens || 0;
-  const totalT = inT + outT + cRead;
-  const hitRate = totals.cache_hit_rate !== undefined ? totals.cache_hit_rate * 100 : ((inT + cRead > 0) ? (cRead / (inT + cRead)) * 100 : 0);
-  const avgTtft = totals.avg_ttft_ms || 0;
-  const tps = totals.tps || totals.tok_per_sec || 0;
-  const upBytes = totals.up_bytes || 0;
-  const downBytes = totals.down_bytes || 0;
-  const setVal = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = val;
-  };
-  setVal('statRequests', Number(reqs).toLocaleString());
-  setVal('statSuccess', reqs > 0 ? succRate.toFixed(1) + '%' : '-');
-  setVal('statTokens', fmtN(totalT));
-  setVal('statCacheHit', hitRate > 0 ? hitRate.toFixed(1) + '%' : '0%');
-  setVal('statTTFT', avgTtft > 0 ? Math.round(avgTtft) + 'ms' : '-');
-  setVal('statTPS', tps > 0 ? tps.toFixed(1) + ' tok/s' : '-');
-  setVal('statBandwidth', \`\${fmtBytes(upBytes)} ↑ / \${fmtBytes(downBytes)} ↓\`);
-  const modelCount = Array.isArray(usage?.models)
-    ? usage.models.length
-    : Object.keys(usage?.models || {}).length;
-  const provCount = Object.keys(usage?.providers || {}).length;
-  setVal('statActiveScope', \`\${modelCount} 模型 / \${provCount} 供应商\`);
-  }
-  function renderStackedBarChart(usage) {
-  const container = document.getElementById('usageChartBox');
-  if (!container) return;
-  container.innerHTML = '';
-  const series = usage?.series || [];
-  if (series.length === 0) {
-    container.classList.add('hidden');
-    container.hidden = true;
-    return;
-  }
-  container.classList.remove('hidden');
-  container.hidden = false;
-  const width = 720;
-  const height = 140;
-  const padL = 36;
-  const padR = 16;
-  const padT = 12;
-  const padB = 28;
-  const chartW = width - padL - padR;
-  const chartH = height - padT - padB;
-  const baselineY = padT + chartH;
-  let peak = 1;
-  series.forEach((p) => {
-    const inp = (p.input_tokens || p.in_tokens || 0) + (p.cache_read_tokens || 0);
-    const out = p.output_tokens || p.out_tokens || 0;
-    const sum = inp + out;
-    if (sum > peak) peak = sum;
-  });
-  const n = series.length;
-  const step = chartW / n;
-  const barW = Math.max(3, Math.min(24, Math.floor(step * 0.72)));
-  const svgNs = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNs, 'svg');
-  svg.setAttribute('viewBox', \`0 0 \${width} \${height}\`);
-  svg.setAttribute('class', 'chart-svg');
-  const axis = document.createElementNS(svgNs, 'line');
-  axis.setAttribute('x1', String(padL));
-  axis.setAttribute('y1', String(baselineY));
-  axis.setAttribute('x2', String(width - padR));
-  axis.setAttribute('y2', String(baselineY));
-  axis.setAttribute('class', 'chart-axis');
-  svg.appendChild(axis);
-  let lastLabelX = -100;
-  const minLabelGap = 46;
-  series.forEach((p, idx) => {
-    const inp = (p.input_tokens || p.in_tokens || 0) + (p.cache_read_tokens || 0);
-    const out = p.output_tokens || p.out_tokens || 0;
-    const totalTokens = inp + out;
-    const reqCount = p.requests || p.calls || 0;
-    const totalBarH = Math.round((totalTokens / peak) * chartH);
-    const inH = Math.round((inp / peak) * chartH);
-    const outH = Math.max(0, totalBarH - inH);
-    const x = padL + idx * step + (step - barW) / 2;
-    const g = document.createElementNS(svgNs, 'g');
-    g.setAttribute('class', 'chart-bar-group');
-    const title = document.createElementNS(svgNs, 'title');
-    const timeLabel = p.label || (p.timestamp ? new Date(p.timestamp * 1000).toLocaleDateString() : \`#\${idx + 1}\`);
-    title.textContent = \`\${timeLabel}\\n总计: \${fmtN(totalTokens)} tok (输入+缓存: \${fmtN(inp)}, 输出: \${fmtN(out)})\\n请求数: \${reqCount}\${p.avg_ttft_ms ? \` · TTFT: \${Math.round(p.avg_ttft_ms)}ms\` : ''}\${p.tps ? \` · TPS: \${p.tps} tok/s\` : ''}\`;
-    g.appendChild(title);
-    if (inH > 0) {
-    const inRect = document.createElementNS(svgNs, 'rect');
-    inRect.setAttribute('x', String(x));
-    inRect.setAttribute('y', String(baselineY - inH));
-    inRect.setAttribute('width', String(barW));
-    inRect.setAttribute('height', String(inH));
-    inRect.setAttribute('rx', '2');
-    inRect.setAttribute('class', 'chart-rect chart-rect--in');
-    g.appendChild(inRect);
-    }
-    if (outH > 0) {
-    const outRect = document.createElementNS(svgNs, 'rect');
-    outRect.setAttribute('x', String(x));
-    outRect.setAttribute('y', String(baselineY - inH - outH));
-    outRect.setAttribute('width', String(barW));
-    outRect.setAttribute('height', String(outH));
-    outRect.setAttribute('rx', '2');
-    outRect.setAttribute('class', 'chart-rect chart-rect--out');
-    g.appendChild(outRect);
-    }
-    const centerX = x + barW / 2;
-    const isLast = idx === n - 1;
-    if ((centerX - lastLabelX >= minLabelGap && (!isLast || centerX - lastLabelX >= minLabelGap)) || idx === 0) {
-    const text = document.createElementNS(svgNs, 'text');
-    text.setAttribute('x', String(centerX));
-    text.setAttribute('y', String(baselineY + 16));
-    text.setAttribute('text-anchor', 'middle');
-    text.setAttribute('class', 'chart-label');
-    let shortLabel = String(p.label || '');
-    if (shortLabel.includes('-')) {
-      const parts = shortLabel.split('-');
-      shortLabel = parts.slice(1).join('/');
-    }
-    text.textContent = shortLabel;
-    g.appendChild(text);
-    lastLabelX = centerX;
-    }
-    svg.appendChild(g);
-  });
-  container.appendChild(svg);
-  }
-  function renderHeatmap(usage) {
-  const container = document.getElementById('usageHeatmapBox');
-  const wrapper = document.getElementById('usageHeatmapWrapper');
-  if (!container) return;
-  container.innerHTML = '';
-  const heatmap = usage?.heatmap;
-  if (!heatmap || !heatmap.days || heatmap.days.length === 0) {
-    if (wrapper) {
-    wrapper.classList.add('hidden');
-    wrapper.hidden = true;
-    }
-    container.classList.add('hidden');
-    container.hidden = true;
-    return;
-  }
-  if (wrapper) {
-    wrapper.classList.remove('hidden');
-    wrapper.hidden = false;
-  }
-  container.classList.remove('hidden');
-  container.hidden = false;
-  const dayMap = new Map();
-  let maxTokens = 1;
-  heatmap.days.forEach((d) => {
-    const t = d.tokens || d.Tokens || 0;
-    const c = d.calls || d.Calls || 0;
-    dayMap.set(d.date || d.Date, { tokens: t, calls: c });
-    if (t > maxTokens) maxTokens = t;
-  });
-  const svgNs = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNs, 'svg');
-  svg.setAttribute('viewBox', '0 0 636 84');
-  svg.setAttribute('class', 'heatmap-svg');
-  const startDate = new Date(heatmap.from || heatmap.From || Date.now() - 52 * 7 * 86400000);
-  const cellSize = 10;
-  const gap = 2;
-  for (let w = 0; w < 53; w++) {
-    for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
-    const offsetDays = w * 7 + dayOfWeek;
-    const curDate = new Date(startDate.getTime() + offsetDays * 86400000);
-    const y = curDate.getFullYear();
-    const m = String(curDate.getMonth() + 1).padStart(2, '0');
-    const d = String(curDate.getDate()).padStart(2, '0');
-    const dateKey = \`\${y}-\${m}-\${d}\`;
-    const info = dayMap.get(dateKey) || { tokens: 0, calls: 0 };
-    const tokens = info.tokens;
-    const calls = info.calls;
-    let level = 0;
-    if (tokens > 0) {
-      const ratio = tokens / maxTokens;
-      if (ratio > 0.6) level = 4;
-      else if (ratio > 0.3) level = 3;
-      else if (ratio > 0.1) level = 2;
-      else level = 1;
-    }
-    const rect = document.createElementNS(svgNs, 'rect');
-    rect.setAttribute('x', String(w * (cellSize + gap)));
-    rect.setAttribute('y', String(dayOfWeek * (cellSize + gap)));
-    rect.setAttribute('width', String(cellSize));
-    rect.setAttribute('height', String(cellSize));
-    rect.setAttribute('rx', '2');
-    rect.setAttribute('class', \`heat-cell heat-l\${level}\`);
-    const title = document.createElementNS(svgNs, 'title');
-    title.textContent = \`\${dateKey}: \${calls} 请求 · \${fmtN(tokens)} tok\`;
-    rect.appendChild(title);
-    svg.appendChild(rect);
-    }
-  }
-  container.appendChild(svg);
-  }
-  function renderBreakdown(usage) {
-  const container = document.getElementById('usageBreakdownList');
-  if (!container) return;
-  container.innerHTML = '';
-  const subTab = usageState.subTab;
-  if (subTab === 'models') {
-    renderBreakdownModels(container, usage);
-  } else if (subTab === 'providers') {
-    renderBreakdownProviders(container, usage);
-  } else if (subTab === 'keys') {
-    renderBreakdownKeys(container, usage);
-  }
-  }
-  function renderBreakdownModels(container, usage) {
-  const raw = usage?.models;
-  let list = [];
-  if (Array.isArray(raw)) {
-    list = raw.map((m) => ({
-    name: m.model || m.name || 'unknown',
-    requests: m.requests || 0,
-    successes: m.successes || (m.requests - (m.failed || 0)),
-    inTokens: m.in_tokens || m.input_tokens || 0,
-    outTokens: m.out_tokens || m.output_tokens || 0,
-    cacheRead: m.cache_read_tokens || 0,
-    cacheHitRate: m.cache_hit_rate || 0,
-    avgTtft: m.avg_ttft_ms || 0,
-    tps: m.tps || 0,
-    }));
-  } else if (raw && typeof raw === 'object') {
-    list = Object.entries(raw).map(([k, s]) => ({
-    name: k,
-    requests: s.requests || 0,
-    successes: s.successes || (s.requests - (s.failed || 0)),
-    inTokens: s.in_tokens || s.input_tokens || 0,
-    outTokens: s.out_tokens || s.output_tokens || 0,
-    cacheRead: s.cache_read_tokens || 0,
-    cacheHitRate: s.cache_hit_rate || 0,
-    avgTtft: s.avg_ttft_ms || 0,
-    tps: s.tps || 0,
-    }));
-  }
-  if (list.length === 0) {
-    renderEmptyRow(container, '当前周期暂无模型用量记录');
-    return;
-  }
-  list.sort((a, b) => b.requests - a.requests);
-  list.forEach((m) => {
-    const totalT = m.inTokens + m.outTokens + m.cacheRead;
-    const rate = m.requests > 0 ? (m.successes / m.requests) * 100 : 0;
-    const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(m.name) : '';
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = \`
-    <span class="dot \${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span>
-    \${icoHtml}
-    <div class="who">
-      <div class="name">
-      <span>\${escapeHtml(m.name)}</span>
-      <span class="pill">\${m.requests.toLocaleString()} 次</span>
-      <span class="pill pill--accent">\${fmtN(totalT)} tok</span>
-      </div>
-      <div class="sub">成功率: \${rate.toFixed(1)}% · 缓存: \${fmtN(m.cacheRead)}\${m.avgTtft ? ' · TTFT ' + Math.round(m.avgTtft) + 'ms' : ''}\${m.tps ? ' · ' + m.tps.toFixed(1) + ' tok/s' : ''}</div>
-    </div>
-    <div class="fields">
-      <span class="pill tabular">\${rate.toFixed(1)}%</span>
-    </div>
-    \`;
-    container.appendChild(row);
-  });
-  }
-  function renderBreakdownProviders(container, usage) {
-  const raw = usage?.providers;
-  let list = [];
-  if (raw && typeof raw === 'object') {
-    list = Object.entries(raw).map(([k, s]) => ({
-    name: k,
-    requests: s.requests || 0,
-    successes: s.successes || (s.requests - (s.failed || 0)),
-    inTokens: s.in_tokens || 0,
-    outTokens: s.out_tokens || 0,
-    cacheRead: s.cache_read_tokens || 0,
-    cacheHitRate: s.cache_hit_rate || 0,
-    avgTtft: s.avg_ttft_ms || 0,
-    tps: s.tps || 0,
-    }));
-  }
-  if (list.length === 0) {
-    renderEmptyRow(container, '当前周期暂无供应商用量记录');
-    return;
-  }
-  list.sort((a, b) => b.requests - a.requests);
-  list.forEach((p) => {
-    const totalT = p.inTokens + p.outTokens + p.cacheRead;
-    const rate = p.requests > 0 ? (p.successes / p.requests) * 100 : 0;
-    const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.name) : '';
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = \`
-    <span class="dot \${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span>
-    \${icoHtml}
-    <div class="who">
-      <div class="name">
-      <span>\${escapeHtml(p.name)}</span>
-      <span class="pill">\${p.requests.toLocaleString()} 次</span>
-      <span class="pill pill--accent">\${fmtN(totalT)} tok</span>
-      </div>
-      <div class="sub">成功率: \${rate.toFixed(1)}% · 缓存命中: \${(p.cacheHitRate * 100).toFixed(1)}%\${p.avgTtft ? ' · TTFT ' + Math.round(p.avgTtft) + 'ms' : ''}\${p.tps ? ' · ' + p.tps.toFixed(1) + ' tok/s' : ''}</div>
-    </div>
-    <div class="fields">
-      <span class="pill tabular">\${rate.toFixed(1)}%</span>
-    </div>
-    \`;
-    container.appendChild(row);
-  });
-  }
-  function renderBreakdownKeys(container, usage) {
-  const list = usage?.keys || [];
-  if (list.length === 0) {
-    renderEmptyRow(container, '当前周期暂无密钥用量记录');
-    return;
-  }
-  list.sort((a, b) => b.requests - a.requests);
-  list.forEach((k) => {
-    const totalT = (k.in_tokens || 0) + (k.out_tokens || 0) + (k.cache_read_tokens || 0);
-    const reqs = k.requests || 0;
-    const succ = k.successes || (reqs - (k.failed || 0));
-    const rate = reqs > 0 ? (succ / reqs) * 100 : 0;
-    const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(k.provider) : '';
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = \`
-    <span class="dot \${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span>
-    \${icoHtml}
-    <div class="who">
-      <div class="name">
-      <span>\${escapeHtml(k.provider)} / \${escapeHtml(k.key_id)}</span>
-      <span class="pill">\${reqs.toLocaleString()} 次</span>
-      <span class="pill pill--accent">\${fmtN(totalT)} tok</span>
-      </div>
-      <div class="sub">成功率: \${rate.toFixed(1)}%\${k.avg_ttft_ms ? ' · TTFT ' + Math.round(k.avg_ttft_ms) + 'ms' : ''}\${k.tps ? ' · ' + k.tps.toFixed(1) + ' tok/s' : ''}</div>
-    </div>
-    <div class="fields">
-      <span class="pill tabular">\${rate.toFixed(1)}%</span>
-    </div>
-    \`;
-    container.appendChild(row);
-  });
-  }
-  function renderEmptyRow(container, text) {
-  const emptyRow = document.createElement('div');
-  emptyRow.className = 'row text-muted';
-  emptyRow.textContent = text;
-  container.appendChild(emptyRow);
-  }
-  function buildTraceWaterfall(trace) {
-  const wrap = document.createElement('div');
-  wrap.className = 'trace-waterfall-wrap';
-  const ownMs = trace.own_ms || 0;
-  const queuedMs = trace.queued_ms || 0;
-  const sentMs = trace.sent_ms || 0;
-  const ttftMs = trace.ttft_ms || 0;
-  const flowMs = trace.flow_ms || 0;
-  const retriedMs = trace.retried_ms || 0;
-  const totalMs = trace.total_ms || (ownMs + queuedMs + sentMs + ttftMs + flowMs + retriedMs);
-  wrap.innerHTML = \`
-    <div class="waterfall-metrics">
-    <div class="wf-item"><span class="wf-label">网关内部开销:</span> <span class="tabular">\${ownMs}ms</span></div>
-    <div class="wf-item"><span class="wf-label">并发排队:</span> <span class="tabular">\${queuedMs}ms</span></div>
-    <div class="wf-item"><span class="wf-label">上游建连:</span> <span class="tabular">\${sentMs}ms</span></div>
-    <div class="wf-item"><span class="wf-label">首字到达 (TTFT):</span> <span class="tabular">\${ttftMs}ms</span></div>
-    <div class="wf-item"><span class="wf-label">流生成 (Flow):</span> <span class="tabular">\${flowMs}ms</span></div>
-    \${retriedMs > 0 ? \`<div class="wf-item"><span class="wf-label text-danger">重试耗时:</span> <span class="tabular text-danger">\${retriedMs}ms</span></div>\` : ''}
-    <div class="wf-item wf-item--total"><span class="wf-label">总延迟:</span> <span class="tabular"><strong>\${totalMs}ms</strong></span></div>
-    </div>
-    <div class="mt-3">
-    <div class="form-label mb-1">上游重试与路由跳跃 (Tries / Hops):</div>
-    <div class="tries-list" id="trace_tries_\${trace.id}"></div>
-    </div>
-    <div class="mt-3 trace-headers-grid">
-    \${renderScrubbedHeaders('客户端脱敏请求头 (Request Headers)', trace.req_headers)}
-    \${renderScrubbedHeaders('上游响应头 (Response Headers)', trace.tries?.[0]?.resp_headers)}
-    </div>
-  \`;
-  const triesList = wrap.querySelector(\`#trace_tries_\${trace.id}\`);
-  const tries = trace.tries || [];
-  if (tries.length === 0) {
-    const none = document.createElement('div');
-    none.className = 'text-muted text-sm';
-    none.textContent = '单次直连成功，无重试记录';
-    triesList.appendChild(none);
-  } else {
-    tries.forEach((tr) => {
-    const trRow = document.createElement('div');
-    trRow.className = 'try-row';
-    const isOk = tr.status >= 200 && tr.status < 300;
-    const brandIco = window.renderBrandIcon ? window.renderBrandIcon(tr.provider) : '';
-    trRow.innerHTML = \`
-      <span class="dot \${isOk ? 'dot--ok' : 'dot--err'}"></span>
-      \${brandIco}
-      <div class="flex-1">
-      <div>
-        <strong>Hop #\${tr.attempt}</strong>:
-        <span>\${escapeHtml(tr.provider)} / \${escapeHtml(tr.key_id)}</span>
-        <span class="pill \${isOk ? 'pill--green' : 'pill--red'}">HTTP \${tr.status}</span>
-        <span class="tabular">(\${tr.ms}ms\${tr.ttft_ms ? ', TTFT ' + tr.ttft_ms + 'ms' : ''})</span>
-        \${tr.cooldown_applied_sec ? \`<span class="pill pill--amber">触发冷却 \${tr.cooldown_applied_sec}s</span>\` : ''}
-      </div>
-      \${tr.error_snippet ? \`<div class="text-danger text-sm mt-1">\${escapeHtml(tr.error_snippet)}</div>\` : ''}
-      </div>
-    \`;
-    triesList.appendChild(trRow);
-    });
-  }
-  return wrap;
-  }
-  function renderScrubbedHeaders(title, headers) {
-  if (!headers || Object.keys(headers).length === 0) {
-    return '';
-  }
-  const lines = Object.entries(headers)
-    .map(([k, v]) => \`\${escapeHtml(k)}: \${escapeHtml(v)}\`)
-    .join('\\n');
-  return \`
-    <details class="headers-details mt-2">
-    <summary class="form-label">\${escapeHtml(title)}</summary>
-    <pre class="headers-pre"><code class="input--code">\${lines}</code></pre>
-    </details>
-  \`;
-  }
-  function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-  }
-  window.USAGE = {
-  state: usageState,
-  renderKPIs,
-  renderStackedBarChart,
-  renderHeatmap,
-  renderBreakdown,
-  buildTraceWaterfall,
-  };
+const hostKind = window.__HOST_KIND__ || (location.hostname.includes('hub') ? 'hub' : 'full');
+const capabilities = {
+hub: {
+vaultHub: true,
+nodeManager: true,
+vaultClient: false,
+runModes: false,
+kbModels: false,
+oauthLogin: false,
+usageAndTraces: false,
+systemUpdate: false,
+},
+full: {
+vaultHub: false,
+nodeManager: false,
+vaultClient: true,
+runModes: true,
+kbModels: true,
+oauthLogin: true,
+usageAndTraces: true,
+systemUpdate: true,
+},
+lite: {
+vaultHub: false,
+nodeManager: false,
+vaultClient: false,
+runModes: false,
+kbModels: false,
+oauthLogin: false,
+usageAndTraces: false,
+systemUpdate: false,
+},
+}[hostKind] || capabilities.full;
+function normalizeImportedConfig(raw, defaultOrigin) {
+const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
+const providers = {};
+for (const [pId, p] of Object.entries(src.providers || {})) {
+if (!p || typeof p !== 'object') continue;
+let apiKeys = Array.isArray(p.api_keys) ? p.api_keys.map((k) => ({ ...k })) : [];
+if (apiKeys.length === 0 && p.keys && typeof p.keys === 'object') {
+apiKeys = Object.entries(p.keys).map(([lbl, secret], idx) => ({
+id: \`k_\${lbl || idx}\`,
+label: lbl,
+key: typeof secret === 'string' ? secret : (secret?.key || ''),
+enabled: typeof secret === 'object' ? secret.enabled !== false : true,
+origin: (typeof secret === 'object' && secret.origin) || p.origin || defaultOrigin || 'vault',
+}));
+}
+providers[pId] = {
+...p,
+name: p.name || pId,
+enabled: p.enabled !== false,
+origin: p.origin || defaultOrigin || 'vault',
+api_keys: apiKeys,
+};
+delete providers[pId].keys;
+}
+const agentModels = {};
+for (const [mName, m] of Object.entries(src.agent_models || {})) {
+if (!m || typeof m !== 'object') continue;
+let candidates = Array.isArray(m.candidates) ? m.candidates.map((c) => ({ ...c })) : [];
+if (candidates.length === 0 && Array.isArray(m.keys)) {
+candidates = m.keys.map((k) => ({
+provider: k.provider || '',
+key_label: k.key_label || k.key || '',
+target_model: k.target_model || k.model || mName,
+enabled: k.enabled !== false,
+weight: k.weight || 1,
+}));
+}
+agentModels[mName] = {
+routing_strategy: m.routing_strategy || 'sticky_failover',
+active_key: m.active_key || '',
+enabled: m.enabled !== false,
+candidates,
+};
+}
+const kbModels = {};
+const rawKb = src.kb_models || src.candidates || {};
+for (const [cat, list] of Object.entries(rawKb)) {
+if (!Array.isArray(list)) continue;
+kbModels[cat] = list.map((c) => ({
+provider: c.provider || '',
+key_label: c.key_label || c.key || '',
+model: c.model || c.target_model || '',
+max_concurrency: Number(c.max_concurrency || c.max_conc) || 4,
+enabled: c.enabled !== false,
+}));
+}
+return {
+providers,
+agent_models: agentModels,
+kb_models: kbModels,
+settings: src.settings && typeof src.settings === 'object' ? { ...src.settings } : {},
+};
+}
+const HOST = {
+kind: hostKind,
+capabilities,
+getToken() {
+return localStorage.getItem('llmproxy_admin_token') || '';
+},
+setToken(token) {
+if (token) {
+localStorage.setItem('llmproxy_admin_token', token);
+} else {
+localStorage.removeItem('llmproxy_admin_token');
+}
+},
+showLogin() {
+const scr = document.getElementById('loginScreen');
+if (scr) {
+scr.hidden = false;
+scr.classList.remove('hidden');
+const err = document.getElementById('loginError');
+if (err) {
+err.hidden = true;
+err.classList.add('hidden');
+err.textContent = '';
+}
+const pwd = document.getElementById('loginPassword');
+if (pwd) pwd.focus();
+}
+},
+hideLogin() {
+const scr = document.getElementById('loginScreen');
+if (scr) {
+scr.hidden = true;
+scr.classList.add('hidden');
+}
+},
+async login(password) {
+HOST.setToken(password);
+try {
+const res = await fetch('/api/admin/auth/login', {
+method: 'POST',
+headers: { 'content-type': 'application/json', 'authorization': \`Bearer \${password}\` },
+body: JSON.stringify({ password }),
+});
+if (res.ok) {
+HOST.hideLogin();
+return { ok: true };
+}
+if (res.status === 429) {
+let retry = '';
+try {
+const body = await res.json();
+if (body && body.retry_after_sec) retry = \`（约 \${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）\`;
+} catch (_) {}
+HOST.setToken('');
+return { ok: false, error: \`尝试过于频繁，已临时锁定\${retry}\` };
+}
+} catch (_) {}
+try {
+const testRes = await fetch('/api/config', {
+headers: { 'authorization': \`Bearer \${password}\` },
+});
+if (testRes.status === 429) {
+HOST.setToken('');
+return { ok: false, error: '尝试过于频繁，已临时锁定，请稍后重试' };
+}
+if (testRes.status === 401) {
+HOST.setToken('');
+return { ok: false, error: '管理员凭据错误，请重试' };
+}
+HOST.hideLogin();
+return { ok: true };
+} catch (err) {
+return { ok: false, error: err.message || '网络连接失败' };
+}
+},
+async request(path, options = {}) {
+const headers = {
+'content-type': 'application/json',
+...(options.headers || {}),
+};
+const token = HOST.getToken();
+if (token && !headers['authorization']) {
+headers['authorization'] = \`Bearer \${token}\`;
+}
+const res = await fetch(path, {
+...options,
+headers,
+});
+if (res.status === 401) {
+HOST.showLogin();
+}
+return res;
+},
+async getConfig() {
+const res = await HOST.request('/api/config');
+return res.json();
+},
+async saveConfig(config) {
+const res = await HOST.request('/api/config', {
+method: 'POST',
+body: JSON.stringify(config),
+});
+return { status: res.status, data: await res.json() };
+},
+async getNodes() {
+const res = await HOST.request('/api/admin/nodes');
+return res.json();
+},
+async issueNode(data) {
+const res = await HOST.request('/api/admin/nodes', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async patchNode(id, data) {
+const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}\`, {
+method: 'PATCH',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async rotateNode(id) {
+const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}/rotate\`, {
+method: 'POST',
+});
+return res.json();
+},
+async deleteNode(id) {
+const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}\`, {
+method: 'DELETE',
+});
+return res.json();
+},
+async getUsage(period = 'today', tz = 'Asia/Shanghai') {
+const res = await HOST.request(\`/api/admin/usage?period=\${period}&tz=\${encodeURIComponent(tz)}\`);
+return res.json();
+},
+async getTraces() {
+const res = await HOST.request('/api/admin/traces');
+return res.json();
+},
+async clearTraces() {
+const res = await HOST.request('/api/admin/traces', { method: 'DELETE' });
+return res.json();
+},
+async getLanes() {
+const res = await HOST.request('/api/lanes');
+return res.json();
+},
+async getCooldowns() {
+const res = await HOST.request('/api/admin/cooldowns');
+return res.json();
+},
+async clearCooldowns(target) {
+const path = target ? \`/api/admin/cooldowns?target=\${encodeURIComponent(target)}\` : '/api/admin/cooldowns';
+const res = await HOST.request(path, { method: 'DELETE' });
+return res.json();
+},
+async switchMode(mode) {
+const res = await HOST.request('/api/admin/mode', {
+method: 'POST',
+body: JSON.stringify({ mode }),
+});
+return res.json();
+},
+async probeModels(data) {
+const res = await HOST.request('/api/admin/probe-models', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async verifyKey(data) {
+const res = await HOST.request('/api/admin/verify-key', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async detectProvider(data) {
+const res = await HOST.request('/api/admin/detect-provider', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async checkBalance(data) {
+const res = await HOST.request('/api/admin/balance', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async getPresetsExtra() {
+const res = await HOST.request('/api/admin/presets-extra');
+try {
+return await res.json();
+} catch (_) {
+return { ok: false };
+}
+},
+async syncAutoList(data) {
+const res = await HOST.request('/api/admin/autolist-sync', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async startOAuth(data) {
+const res = await HOST.request('/api/admin/oauth/start', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async pollOAuth(data) {
+const res = await HOST.request('/api/admin/oauth/poll', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async testCandidate(data) {
+const res = await HOST.request('/api/admin/test-candidate', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async testAgentModel(data) {
+const res = await HOST.request('/api/admin/test-agent-model', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async exportConfig() {
+if (hostKind === 'hub') {
+const cfg = await HOST.getConfig();
+const json = JSON.stringify(cfg, null, 2);
+return {
+ok: true,
+blob: async () => new Blob([json], { type: 'application/json' }),
+json: async () => cfg,
+};
+}
+return HOST.request('/api/admin/config/export');
+},
+async importConfig(data) {
+if (hostKind === 'hub') {
+const mode = data?.mode || 'merge';
+const raw = data?.config || data || {};
+const cur = await HOST.getConfig();
+const norm = normalizeImportedConfig(raw, 'vault');
+const target = mode === 'overwrite'
+? {
+_version: cur?._version || 1,
+providers: norm.providers,
+agent_models: norm.agent_models,
+kb_models: norm.kb_models,
+settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
+}
+: {
+...cur,
+providers: { ...(cur?.providers || {}), ...norm.providers },
+agent_models: { ...(cur?.agent_models || {}), ...norm.agent_models },
+kb_models: { ...(cur?.kb_models || {}), ...norm.kb_models },
+settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
+};
+const saved = await HOST.saveConfig(target);
+return saved?.data || saved || { ok: true };
+}
+const res = await HOST.request('/api/admin/config/import', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+return res.json();
+},
+async getAccessInfo() {
+const res = await HOST.request('/api/admin/access-info');
+try {
+return await res.json();
+} catch (_) {
+return { ok: false };
+}
+},
+async updateAccessKey(data) {
+const res = await HOST.request('/api/admin/access-key', {
+method: 'POST',
+body: JSON.stringify(data),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok };
+}
+},
+async fetchVaultManifest(customHubUrl, customToken) {
+const hubUrl = customHubUrl || '';
+const token = customToken || '';
+const target = hubUrl ? \`\${hubUrl.replace(/\\/+$/, '')}/api/vault/manifest\` : '/api/vault/manifest';
+const headers = {};
+if (token) headers['authorization'] = \`Bearer \${token}\`;
+const res = await HOST.request(target, { headers });
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+async fetchVaultCredentials(provider, key_label, customHubUrl, customToken) {
+const hubUrl = customHubUrl || '';
+const token = customToken || '';
+const target = hubUrl ? \`\${hubUrl.replace(/\\/+$/, '')}/api/vault/fetch\` : '/api/vault/fetch';
+const headers = {};
+if (token) headers['authorization'] = \`Bearer \${token}\`;
+const res = await HOST.request(target, {
+method: 'POST',
+headers,
+body: JSON.stringify({ provider, key_label }),
+});
+try {
+return await res.json();
+} catch (_) {
+return { ok: res.ok, status: res.status };
+}
+},
+};
+HOST.api = HOST;
+window.HOST = HOST;
 })();
 </script>
-  <script>
+<script>
 (function () {
-  const hostKind = window.__HOST_KIND__ || (location.hostname.includes('hub') ? 'hub' : 'full');
-  const capabilities = {
-  hub: {
-    vaultHub: true,
-    nodeManager: true,
-    vaultClient: false,
-    runModes: false,
-    kbModels: false,
-    oauthLogin: false,
-    usageAndTraces: false,
-    systemUpdate: false,
-  },
-  full: {
-    vaultHub: false,
-    nodeManager: false,
-    vaultClient: true,
-    runModes: true,
-    kbModels: true,
-    oauthLogin: true,
-    usageAndTraces: true,
-    systemUpdate: true,
-  },
-  lite: {
-    vaultHub: false,
-    nodeManager: false,
-    vaultClient: false,
-    runModes: false,
-    kbModels: false,
-    oauthLogin: false,
-    usageAndTraces: false,
-    systemUpdate: false,
-  },
-  }[hostKind] || capabilities.full;
-  function normalizeImportedConfig(raw, defaultOrigin) {
-  const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
-  const providers = {};
-  for (const [pId, p] of Object.entries(src.providers || {})) {
-    if (!p || typeof p !== 'object') continue;
-    let apiKeys = Array.isArray(p.api_keys) ? p.api_keys.map((k) => ({ ...k })) : [];
-    if (apiKeys.length === 0 && p.keys && typeof p.keys === 'object') {
-    apiKeys = Object.entries(p.keys).map(([lbl, secret], idx) => ({
-      id: \`k_\${lbl || idx}\`,
-      label: lbl,
-      key: typeof secret === 'string' ? secret : (secret?.key || ''),
-      enabled: typeof secret === 'object' ? secret.enabled !== false : true,
-      origin: (typeof secret === 'object' && secret.origin) || p.origin || defaultOrigin || 'vault',
-    }));
-    }
-    providers[pId] = {
-    ...p,
-    name: p.name || pId,
-    enabled: p.enabled !== false,
-    origin: p.origin || defaultOrigin || 'vault',
-    api_keys: apiKeys,
-    };
-    delete providers[pId].keys;
-  }
-  const agentModels = {};
-  for (const [mName, m] of Object.entries(src.agent_models || {})) {
-    if (!m || typeof m !== 'object') continue;
-    let candidates = Array.isArray(m.candidates) ? m.candidates.map((c) => ({ ...c })) : [];
-    if (candidates.length === 0 && Array.isArray(m.keys)) {
-    candidates = m.keys.map((k) => ({
-      provider: k.provider || '',
-      key_label: k.key_label || k.key || '',
-      target_model: k.target_model || k.model || mName,
-      enabled: k.enabled !== false,
-      weight: k.weight || 1,
-    }));
-    }
-    agentModels[mName] = {
-    routing_strategy: m.routing_strategy || 'sticky_failover',
-    active_key: m.active_key || '',
-    enabled: m.enabled !== false,
-    candidates,
-    };
-  }
-  const kbModels = {};
-  const rawKb = src.kb_models || src.candidates || {};
-  for (const [cat, list] of Object.entries(rawKb)) {
-    if (!Array.isArray(list)) continue;
-    kbModels[cat] = list.map((c) => ({
-    provider: c.provider || '',
-    key_label: c.key_label || c.key || '',
-    model: c.model || c.target_model || '',
-    max_concurrency: Number(c.max_concurrency || c.max_conc) || 4,
-    enabled: c.enabled !== false,
-    }));
-  }
-  return {
-    providers,
-    agent_models: agentModels,
-    kb_models: kbModels,
-    settings: src.settings && typeof src.settings === 'object' ? { ...src.settings } : {},
-  };
-  }
-  const HOST = {
-  kind: hostKind,
-  capabilities,
-  getToken() {
-    return localStorage.getItem('llmproxy_admin_token') || '';
-  },
-  setToken(token) {
-    if (token) {
-    localStorage.setItem('llmproxy_admin_token', token);
-    } else {
-    localStorage.removeItem('llmproxy_admin_token');
-    }
-  },
-  showLogin() {
-    const scr = document.getElementById('loginScreen');
-    if (scr) {
-    scr.hidden = false;
-    scr.classList.remove('hidden');
-    const err = document.getElementById('loginError');
-    if (err) {
-      err.hidden = true;
-      err.classList.add('hidden');
-      err.textContent = '';
-    }
-    const pwd = document.getElementById('loginPassword');
-    if (pwd) pwd.focus();
-    }
-  },
-  hideLogin() {
-    const scr = document.getElementById('loginScreen');
-    if (scr) {
-    scr.hidden = true;
-    scr.classList.add('hidden');
-    }
-  },
-  async login(password) {
-    HOST.setToken(password);
-    try {
-    const res = await fetch('/api/admin/auth/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'authorization': \`Bearer \${password}\` },
-      body: JSON.stringify({ password }),
-    });
-    if (res.ok) {
-      HOST.hideLogin();
-      return { ok: true };
-    }
-    if (res.status === 429) {
-      let retry = '';
-      try {
-      const body = await res.json();
-      if (body && body.retry_after_sec) retry = \`（约 \${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）\`;
-      } catch (_) {}
-      HOST.setToken('');
-      return { ok: false, error: \`尝试过于频繁，已临时锁定\${retry}\` };
-    }
-    } catch (_) {}
-    try {
-    const testRes = await fetch('/api/config', {
-      headers: { 'authorization': \`Bearer \${password}\` },
-    });
-    if (testRes.status === 429) {
-      HOST.setToken('');
-      return { ok: false, error: '尝试过于频繁，已临时锁定，请稍后重试' };
-    }
-    if (testRes.status === 401) {
-      HOST.setToken('');
-      return { ok: false, error: '管理员凭据错误，请重试' };
-    }
-    HOST.hideLogin();
-    return { ok: true };
-    } catch (err) {
-    return { ok: false, error: err.message || '网络连接失败' };
-    }
-  },
-  async request(path, options = {}) {
-    const headers = {
-    'content-type': 'application/json',
-    ...(options.headers || {}),
-    };
-    const token = HOST.getToken();
-    if (token && !headers['authorization']) {
-    headers['authorization'] = \`Bearer \${token}\`;
-    }
-    const res = await fetch(path, {
-    ...options,
-    headers,
-    });
-    if (res.status === 401) {
-    HOST.showLogin();
-    }
-    return res;
-  },
-  async getConfig() {
-    const res = await HOST.request('/api/config');
-    return res.json();
-  },
-  async saveConfig(config) {
-    const res = await HOST.request('/api/config', {
-    method: 'POST',
-    body: JSON.stringify(config),
-    });
-    return { status: res.status, data: await res.json() };
-  },
-  async getNodes() {
-    const res = await HOST.request('/api/admin/nodes');
-    return res.json();
-  },
-  async issueNode(data) {
-    const res = await HOST.request('/api/admin/nodes', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async patchNode(id, data) {
-    const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}\`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async rotateNode(id) {
-    const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}/rotate\`, {
-    method: 'POST',
-    });
-    return res.json();
-  },
-  async deleteNode(id) {
-    const res = await HOST.request(\`/api/admin/nodes/\${encodeURIComponent(id)}\`, {
-    method: 'DELETE',
-    });
-    return res.json();
-  },
-  async getUsage(period = 'today', tz = 'Asia/Shanghai') {
-    const res = await HOST.request(\`/api/admin/usage?period=\${period}&tz=\${encodeURIComponent(tz)}\`);
-    return res.json();
-  },
-  async getTraces() {
-    const res = await HOST.request('/api/admin/traces');
-    return res.json();
-  },
-  async clearTraces() {
-    const res = await HOST.request('/api/admin/traces', { method: 'DELETE' });
-    return res.json();
-  },
-  async getLanes() {
-    const res = await HOST.request('/api/lanes');
-    return res.json();
-  },
-  async getCooldowns() {
-    const res = await HOST.request('/api/admin/cooldowns');
-    return res.json();
-  },
-  async clearCooldowns(target) {
-    const path = target ? \`/api/admin/cooldowns?target=\${encodeURIComponent(target)}\` : '/api/admin/cooldowns';
-    const res = await HOST.request(path, { method: 'DELETE' });
-    return res.json();
-  },
-  async switchMode(mode) {
-    const res = await HOST.request('/api/admin/mode', {
-    method: 'POST',
-    body: JSON.stringify({ mode }),
-    });
-    return res.json();
-  },
-  async probeModels(data) {
-    const res = await HOST.request('/api/admin/probe-models', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async verifyKey(data) {
-    const res = await HOST.request('/api/admin/verify-key', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async detectProvider(data) {
-    const res = await HOST.request('/api/admin/detect-provider', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async checkBalance(data) {
-    const res = await HOST.request('/api/admin/balance', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async getPresetsExtra() {
-    const res = await HOST.request('/api/admin/presets-extra');
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: false };
-    }
-  },
-  async syncAutoList(data) {
-    const res = await HOST.request('/api/admin/autolist-sync', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async startOAuth(data) {
-    const res = await HOST.request('/api/admin/oauth/start', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async pollOAuth(data) {
-    const res = await HOST.request('/api/admin/oauth/poll', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async testCandidate(data) {
-    const res = await HOST.request('/api/admin/test-candidate', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async testAgentModel(data) {
-    const res = await HOST.request('/api/admin/test-agent-model', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async exportConfig() {
-    if (hostKind === 'hub') {
-    const cfg = await HOST.getConfig();
-    const json = JSON.stringify(cfg, null, 2);
-    return {
-      ok: true,
-      blob: async () => new Blob([json], { type: 'application/json' }),
-      json: async () => cfg,
-    };
-    }
-    return HOST.request('/api/admin/config/export');
-  },
-  async importConfig(data) {
-    if (hostKind === 'hub') {
-    const mode = data?.mode || 'merge';
-    const raw = data?.config || data || {};
-    const cur = await HOST.getConfig();
-    const norm = normalizeImportedConfig(raw, 'vault');
-    const target = mode === 'overwrite'
-      ? {
-        _version: cur?._version || 1,
-        providers: norm.providers,
-        agent_models: norm.agent_models,
-        kb_models: norm.kb_models,
-        settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
-      }
-      : {
-        ...cur,
-        providers: { ...(cur?.providers || {}), ...norm.providers },
-        agent_models: { ...(cur?.agent_models || {}), ...norm.agent_models },
-        kb_models: { ...(cur?.kb_models || {}), ...norm.kb_models },
-        settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
-      };
-    const saved = await HOST.saveConfig(target);
-    return saved?.data || saved || { ok: true };
-    }
-    const res = await HOST.request('/api/admin/config/import', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    return res.json();
-  },
-  async getAccessInfo() {
-    const res = await HOST.request('/api/admin/access-info');
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: false };
-    }
-  },
-  async updateAccessKey(data) {
-    const res = await HOST.request('/api/admin/access-key', {
-    method: 'POST',
-    body: JSON.stringify(data),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok };
-    }
-  },
-  async fetchVaultManifest(customHubUrl, customToken) {
-    const hubUrl = customHubUrl || '';
-    const token = customToken || '';
-    const target = hubUrl ? \`\${hubUrl.replace(/\\/+$/, '')}/api/vault/manifest\` : '/api/vault/manifest';
-    const headers = {};
-    if (token) headers['authorization'] = \`Bearer \${token}\`;
-    const res = await HOST.request(target, { headers });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  async fetchVaultCredentials(provider, key_label, customHubUrl, customToken) {
-    const hubUrl = customHubUrl || '';
-    const token = customToken || '';
-    const target = hubUrl ? \`\${hubUrl.replace(/\\/+$/, '')}/api/vault/fetch\` : '/api/vault/fetch';
-    const headers = {};
-    if (token) headers['authorization'] = \`Bearer \${token}\`;
-    const res = await HOST.request(target, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ provider, key_label }),
-    });
-    try {
-    return await res.json();
-    } catch (_) {
-    return { ok: res.ok, status: res.status };
-    }
-  },
-  };
-  HOST.api = HOST;
-  window.HOST = HOST;
-})();
-</script>
-  <script>
-(function () {
-  const state = {
-  config: null,
-  nodes: [],
-  usage: null,
-  traces: [],
-  lanes: {},
-  cooldowns: {},
-  activeTab: 'activity',
-  activeEditorKey: null,
-  modelSubMode: 'agent',
-  providerQuery: '',
-  providerFilter: 'all',
-  modelQuery: '',
-  filterOnlyRetried: false,
-  currentPeriod: 'today',
-  lanesTimer: null,
-  batchVerifying: false,
-  };
-  function toast(msg, type = 'info') {
-  const box = document.getElementById('toastBox');
-  if (!box) return;
-  const el = document.createElement('div');
-  el.className = 'toast';
-  const dot = document.createElement('span');
-  dot.className = \`dot dot--\${type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'ok'}\`;
-  const txt = document.createElement('span');
-  txt.textContent = msg;
-  el.appendChild(dot);
-  el.appendChild(txt);
-  box.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
-  }
-  function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-  }
-  function setupStaticIcons() {
-  const setIcon = (id, name) => {
-    const el = document.getElementById(id);
-    if (el && window.uiIcon) el.innerHTML = window.uiIcon(name);
-  };
-  setIcon('brandMark', 'server');
-  setIcon('loginBrandMark', 'server');
-  setIcon('logoutBtn', 'logout');
-  setIcon('providerSearchIcon', 'search');
-  setIcon('modelSearchIcon', 'search');
-  }
-  async function init() {
-  setupStaticIcons();
-  setupLoginScreen();
-  setupCapabilities();
-  setupTheme();
-  setupPrivacyMask();
-  setupKeyboardShortcuts();
-  setupNavigation();
-  setupCreationForms();
-  setupToolbars();
-  setupConfigBackup();
-  if (window.HOST.getToken()) {
-    await loadData();
-  }
-  startLanesPolling();
-  }
-  function setupLoginScreen() {
-  const loginForm = document.getElementById('loginForm');
-  const pwdInput = document.getElementById('loginPassword');
-  const errEl = document.getElementById('loginError');
-  const badge = document.getElementById('loginHostBadge');
-  if (badge) {
-    badge.textContent = window.HOST.kind === 'hub' ? 'Hub' : 'Full';
-  }
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pwd = (pwdInput?.value || '').trim();
-    if (!pwd) {
-      if (errEl) {
-      errEl.textContent = '请输入管理员密码';
-      errEl.hidden = false;
-      errEl.classList.remove('hidden');
-      }
-      return;
-    }
-    const res = await window.HOST.login(pwd);
-    if (res.ok) {
-      toast('登录成功', 'ok');
-      if (errEl) {
-      errEl.hidden = true;
-      errEl.classList.add('hidden');
-      }
-      await loadData();
-    } else {
-      if (errEl) {
-      errEl.textContent = res.error || '密码验证失败，请重试';
-      errEl.hidden = false;
-      errEl.classList.remove('hidden');
-      }
-    }
-    });
-  }
-  if (!window.HOST.getToken()) {
-    window.HOST.showLogin();
-  }
-  }
-  function setupCapabilities() {
-  const caps = window.HOST.capabilities;
-  const isHub = window.HOST.kind === 'hub';
-  const brandRole = document.getElementById('brandRole');
-  if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
-  const navModels = document.getElementById('navModels');
-  const navNodes = document.getElementById('navNodes');
-  const navActivity = document.getElementById('navActivity');
-  const topVersionBox = document.getElementById('topVersionBox');
-  const modeSwitchBox = document.getElementById('modeSwitchBox');
-  const vaultSyncBar = document.getElementById('vaultSyncBar');
-  const cfgVaultLinkBox = document.getElementById('cfgVaultLinkBox');
-  const hubOverviewBox = document.getElementById('hubOverviewBox');
-  const fullOverviewBox = document.getElementById('fullOverviewBox');
-  const btnClearAllCooldowns = document.getElementById('btnClearAllCooldowns');
-  if (navModels) navModels.hidden = false;
-  if (navNodes) navNodes.hidden = !caps.nodeManager;
-  if (navActivity) navActivity.hidden = false;
-  if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
-  if (modeSwitchBox) modeSwitchBox.hidden = !caps.runModes;
-  if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
-  if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
-  if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
-  if (fullOverviewBox) fullOverviewBox.hidden = isHub;
-  if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.runModes;
-  state.activeTab = 'activity';
-  switchTab(state.activeTab);
-  }
-  function setupTheme() {
-  const btn = document.getElementById('themeToggleBtn');
-  if (!btn) return;
-  const saved = localStorage.getItem('llmproxy_theme') || 'auto';
-  applyTheme(saved);
-  btn.addEventListener('click', () => {
-    const cur = document.documentElement.getAttribute('data-theme') || 'auto';
-    const next = cur === 'dark' ? 'light' : cur === 'light' ? 'auto' : 'dark';
-    applyTheme(next);
-    localStorage.setItem('llmproxy_theme', next);
-  });
-  }
-  function applyTheme(theme) {
-  const btn = document.getElementById('themeToggleBtn');
-  if (theme === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('moon');
-  } else if (theme === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light');
-    if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('sun');
-  } else {
-    document.documentElement.removeAttribute('data-theme');
-    if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('monitor');
-  }
-  }
-  function setupPrivacyMask() {
-  const btn = document.getElementById('btnPrivacyMask');
-  if (!btn) return;
-  const isMasked = localStorage.getItem('llmproxy_privacy_mask') === '1';
-  if (isMasked) {
-    document.body.classList.add('privacy-masked');
-  }
-  if (window.uiIcon) {
-    btn.innerHTML = window.uiIcon(isMasked ? 'eyeOff' : 'eye');
-  }
-  btn.addEventListener('click', () => {
-    const active = document.body.classList.toggle('privacy-masked');
-    localStorage.setItem('llmproxy_privacy_mask', active ? '1' : '0');
-    if (window.uiIcon) {
-    btn.innerHTML = window.uiIcon(active ? 'eyeOff' : 'eye');
-    }
-    toast(active ? '隐私遮罩已开启' : '隐私遮罩已关闭', 'info');
-  });
-  }
-  function setupKeyboardShortcuts() {
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-    const pForm = document.getElementById('addProviderForm');
-    const mForm = document.getElementById('addModelForm');
-    const nForm = document.getElementById('issueNodeForm');
-    let closedSomething = false;
-    if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
-    if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
-    if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
-    if (state.activeEditorKey) {
-      state.activeEditorKey = null;
-      closedSomething = true;
-      if (state.activeTab === 'providers') renderProvidersList();
-      else if (state.activeTab === 'models') renderModelsList();
-      else if (state.activeTab === 'nodes') renderNodesList();
-      else if (state.activeTab === 'activity') renderTracesList();
-    }
-    if (closedSomething) toast('已取消操作并关闭编辑器', 'info');
-    } else if (e.key === '/') {
-    const targetTag = (e.target.tagName || '').toLowerCase();
-    if (targetTag !== 'input' && targetTag !== 'textarea' && targetTag !== 'select') {
-      const firstInput = document.querySelector(\`section:not([hidden]) input:not([readonly])\`);
-      if (firstInput) {
-      e.preventDefault();
-      firstInput.focus();
-      }
-    }
-    }
-  });
-  }
-  function startLanesPolling() {
-  if (!window.HOST.capabilities.runModes) return;
-  if (state.lanesTimer) clearInterval(state.lanesTimer);
-  const poll = async () => {
-    if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
-    if (state.activeTab !== 'providers' && state.activeTab !== 'models') return;
-    try {
-    const [lanesRes, cdRes] = await Promise.all([
-      window.HOST.getLanes(),
-      window.HOST.getCooldowns(),
-    ]);
-    if (lanesRes && lanesRes.ok) {
-      state.lanes = lanesRes.lane_map || {};
-    }
-    if (cdRes) {
-      state.cooldowns = cdRes;
-    }
-    } catch (_) {}
-  };
-  state.lanesTimer = setInterval(poll, 3000);
-  }
-  function setupNavigation() {
-  const seg = document.getElementById('navSeg');
-  if (!seg) return;
-  seg.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-    const tab = btn.getAttribute('data-tab');
-    if (tab) switchTab(tab);
-    });
-  });
-  document.addEventListener('click', async (e) => {
-    const target = e.target instanceof Element ? e.target.closest('button[id^="btn_detect_ed_"]') : null;
-    if (!target) return;
-    const pId = target.id.slice('btn_detect_ed_'.length);
-    if (!pId || target.disabled) return;
-    target.disabled = true;
-    try {
-    const baseEl = document.getElementById(\`ed_p_base_\${pId}\`);
-    const res = await window.HOST.detectProvider({
-      provider: pId,
-      base_url: baseEl ? baseEl.value.trim() : '',
-    });
-    if (res && res.ok) {
-      const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
-      toast(\`协议探测成功\${protocols ? \`: \${protocols}\` : ''}\`, 'ok');
-      if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
-    } else {
-      toast(\`协议探测失败: \${(res && res.error) || '未知错误'}\`, 'err');
-    }
-    } catch (err) {
-    toast(\`协议探测失败: \${err.message}\`, 'err');
-    } finally {
-    target.disabled = false;
-    }
-  });
-  const logoutBtn = document.getElementById('logoutBtn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-    window.HOST.setToken('');
-    window.HOST.showLogin();
-    });
-  }
-  const modeBtnAgent = document.getElementById('modeBtnAgent');
-  const modeBtnKB = document.getElementById('modeBtnKB');
-  if (modeBtnAgent && modeBtnKB) {
-    modeBtnAgent.addEventListener('click', () => switchRunMode('agent'));
-    modeBtnKB.addEventListener('click', () => switchRunMode('kb'));
-  }
-  const btnIssueNode = document.getElementById('btnIssueNode');
-  if (btnIssueNode) {
-    btnIssueNode.addEventListener('click', () => {
-    const form = document.getElementById('issueNodeForm');
-    if (form) form.hidden = !form.hidden;
-    });
-  }
-  const btnDoIssue = document.getElementById('btnDoIssue');
-  if (btnDoIssue) {
-    btnDoIssue.addEventListener('click', handleIssueNode);
-  }
-  const btnSyncManifest = document.getElementById('btnSyncManifest');
-  if (btnSyncManifest) {
-    btnSyncManifest.addEventListener('click', handleSyncManifest);
-  }
-  const btnSyncKeys = document.getElementById('btnSyncKeys');
-  if (btnSyncKeys) {
-    btnSyncKeys.addEventListener('click', handleSyncFromVault);
-  }
-  const periodSeg = document.getElementById('activityPeriodSeg');
-  if (periodSeg) {
-    periodSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const p = btn.getAttribute('data-period');
-      if (!p || p === state.currentPeriod) return;
-      state.currentPeriod = p;
-      periodSeg.querySelectorAll('.seg-btn').forEach((b) => {
-      if (b.getAttribute('data-period') === p) b.classList.add('active');
-      else b.classList.remove('active');
-      });
-      await loadActivityData();
-    });
-    });
-  }
-  const dimSeg = document.getElementById('usageDimensionSeg');
-  if (dimSeg) {
-    dimSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const dim = btn.getAttribute('data-dim');
-      if (!dim) return;
-      window.USAGE.state.subTab = dim;
-      dimSeg.querySelectorAll('.seg-btn').forEach((b) => {
-      if (b.getAttribute('data-dim') === dim) b.classList.add('active');
-      else b.classList.remove('active');
-      });
-      if (state.usage) window.USAGE.renderBreakdown(state.usage);
-    });
-    });
-  }
-  const btnClearTraces = document.getElementById('btnClearTraces');
-  if (btnClearTraces) {
-    btnClearTraces.addEventListener('click', async () => {
-    if (!confirm('确定清空所有请求轨迹与监控日志吗？')) return;
-    try {
-      const res = await window.HOST.clearTraces();
-      if (res && res.ok) {
-      toast('轨迹已清空', 'ok');
-      await loadActivityData();
-      }
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-    });
-  }
-  const btnFilterRetried = document.getElementById('btnFilterRetried');
-  if (btnFilterRetried) {
-    btnFilterRetried.addEventListener('click', () => {
-    state.filterOnlyRetried = !state.filterOnlyRetried;
-    btnFilterRetried.classList.toggle('active', state.filterOnlyRetried);
-    renderTracesList();
-    });
-  }
-  }
-  const PRESETS_META = {
-  openai: ['openai', 'OpenAI (官方)', 'https://api.openai.com/v1', 'openai-completions'],
-  anthropic: ['anthropic', 'Anthropic (官方)', 'https://api.anthropic.com/v1', 'anthropic-messages'],
-  gemini: ['gemini', 'Google Gemini (OpenAI兼容)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
-  deepseek: ['deepseek', 'DeepSeek (官方)', 'https://api.deepseek.com/v1', 'openai-completions'],
-  openrouter: ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
-  groq: ['groq', 'Groq Cloud', 'https://api.groq.com/openai/v1', 'openai-completions'],
-  xai: ['xai', 'xAI', 'https://api.x.ai/v1', 'openai-completions'],
-  'minimax-global': ['minimax', 'MiniMax (Global)', 'https://api.minimaxi.chat/v1', 'openai-completions'],
-  'minimax-cn': ['minimax', 'MiniMax (国内)', 'https://api.minimax.chat/v1', 'openai-completions'],
-  'kimi-cn': ['kimi', 'Kimi / Moonshot (国内)', 'https://api.moonshot.cn/v1', 'openai-completions'],
-  'kimi-global': ['kimi', 'Kimi / Moonshot (Global)', 'https://api.moonshot.ai/v1', 'openai-completions'],
-  zhipu: ['zhipu', '智谱 BigModel (PayG)', 'https://open.bigmodel.cn/api/paas/v4', 'openai-completions'],
-  'zhipu-coding': ['zhipu', '智谱 Coding', 'https://open.bigmodel.cn/api/coding/paas/v4', 'openai-completions'],
-  volcengine: ['volcengine', '火山方舟 Ark (PayG)', 'https://ark.cn-beijing.volces.com/api/v3', 'openai-completions'],
-  'volcengine-coding': ['volcengine', '火山方舟 Coding', 'https://ark.cn-beijing.volces.com/api/coding/v3', 'openai-completions'],
-  'stepfun-cn': ['stepfun', '阶跃星辰 Stepfun (国内)', 'https://api.stepfun.com/v1', 'openai-completions'],
-  'stepfun-global': ['stepfun', '阶跃星辰 Stepfun (Global)', 'https://api.stepfun.ai/v1', 'openai-completions'],
-  alibaba: ['alibaba', '阿里百炼 / DashScope (国内)', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
-  'alibaba-intl': ['alibaba', '阿里百炼 / DashScope (国际)', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
-  siliconflow: ['siliconflow', 'SiliconFlow (硅基流动)', 'https://api.siliconflow.cn/v1', 'openai-completions'],
-  ollama: ['ollama', 'Ollama (本地)', 'http://localhost:11434/v1', 'openai-completions'],
-  };
-  function parseCurl(text) {
-  let s = String(text || '').trim();
-  const head = /^curl(?:\\.exe)?(?=\\s)/i.exec(s);
-  if (!head) return null;
-  s = s.slice(head[0].length).replace(/(?:\\\\|\\^|\`)[ \\t]*\\r?\\n/g, ' ');
-  const words = [];
-  let w = null;
-  for (let i = 0; i < s.length;) {
-    const c = s[i];
-    if (/\\s/.test(c)) { if (w !== null) words.push(w); w = null; i++; continue; }
-    w ??= '';
-    if (c === "'") {
-    let j = i + 1;
-    const k = s.indexOf("'", j);
-    if (k < 0) { w += s.slice(j); break; }
-    w += s.slice(j, k);
-    i = k + 1;
-    } else if (c === '"') {
-    for (i++; i < s.length && s[i] !== '"'; i++) {
-      if (s[i] === '\\\\' && i + 1 < s.length) i++;
-      w += s[i] ?? '';
-    }
-    i++;
-    } else {
-    w += c;
-    i++;
-    }
-  }
-  if (w !== null) words.push(w);
-  let url = '';
-  const headers = [];
-  let body = '';
-  for (let i = 0; i < words.length; i++) {
-    const x = words[i];
-    let opt = x, val = null;
-    if (/^-[Hd]/.test(x)) { opt = x.slice(0, 2); val = x.slice(2); }
-    else if (/^(-H|--header|-d|--data|--data-raw|--json|--url)$/.test(x)) val = words[++i] ?? '';
-    else if (x.startsWith('-')) continue;
-    else { if (!url) url = x; continue; }
-    if (opt === '-H' || opt === '--header') headers.push(val);
-    else if (opt === '--url') url = val;
-    else if (/^(-d|--data(-raw)?|--json)$/.test(opt)) body = val;
-  }
-  let key = '';
-  for (const h of headers) {
-    const m = /^\\s*(authorization|x-api-key|x-goog-api-key|api-key)\\s*:\\s*(.*?)\\s*$/i.exec(h);
-    if (m) {
-    const val = m[1].toLowerCase() === 'authorization' ? m[2].replace(/^bearer\\s+/i, '') : m[2];
-    if (val && !/^\\$|^<.*>|your[_-]?key/i.test(val)) {
-      key = val.trim();
-      break;
-    }
-    }
-  }
-  let protocol = 'openai-completions';
-  let base = url;
-  if (/\\/messages\\b/i.test(url)) {
-    protocol = 'anthropic-messages';
-    base = url.replace(/\\/messages.*$/i, '');
-  } else if (/\\/chat\\/completions\\b/i.test(url)) {
-    protocol = 'openai-completions';
-    base = url.replace(/\\/chat\\/completions.*$/i, '');
-  } else if (/\\/v1beta\\b/i.test(url) || /generativelanguage/i.test(url)) {
-    protocol = 'gemini';
-  }
-  let model = '';
-  try {
-    const parsedBody = JSON.parse(body.replace(/\\\\"/g, '"'));
-    if (typeof parsedBody?.model === 'string') model = parsedBody.model.trim();
-  } catch (_) {}
-  return { url, base, protocol, key, model };
-  }
-  function populatePresetDropdown() {
-  const sel = document.getElementById('newProvPreset');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
-  for (const [key, meta] of Object.entries(PRESETS_META)) {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = meta[1];
-    sel.appendChild(opt);
-  }
-  }
-  function setupToolbars() {
-  const provSearch = document.getElementById('providerSearchInput');
-  if (provSearch) {
-    provSearch.addEventListener('input', (e) => {
-    state.providerQuery = (e.target.value || '').trim().toLowerCase();
-    renderProvidersList();
-    });
-  }
-  const provFilter = document.getElementById('providerFilterSeg');
-  if (provFilter) {
-    provFilter.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const f = btn.getAttribute('data-filter') || 'all';
-      state.providerFilter = f;
-      provFilter.querySelectorAll('.seg-btn').forEach((b) => {
-      b.classList.toggle('active', b.getAttribute('data-filter') === f);
-      });
-      renderProvidersList();
-    });
-    });
-  }
-  const modelSearch = document.getElementById('modelSearchInput');
-  if (modelSearch) {
-    modelSearch.addEventListener('input', (e) => {
-    state.modelQuery = (e.target.value || '').trim().toLowerCase();
-    renderModelsList();
-    });
-  }
-  const modelSubSeg = document.getElementById('modelPipelineSeg');
-  if (modelSubSeg) {
-    modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const m = btn.getAttribute('data-submode') || 'agent';
-      state.modelSubMode = m;
-      modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
-      b.classList.toggle('active', b.getAttribute('data-submode') === m);
-      });
-      renderModelsList();
-    });
-    });
-  }
-  document.getElementById('btnHubRefreshOverview')?.addEventListener('click', loadData);
-  document.getElementById('btnHubBatchVerifyAll')?.addEventListener('click', verifyAllHubKeys);
-  document.getElementById('btnGoProvidersFromHub')?.addEventListener('click', () => switchTab('providers'));
-  document.getElementById('btnGoNodesFromHub')?.addEventListener('click', () => switchTab('nodes'));
-  }
-  function setupConfigBackup() {
-  document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
-    try {
-    const res = await window.HOST.exportConfig();
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = \`llmproxy_config_\${Date.now()}.json\`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast('配置已导出下载', 'ok');
-    } catch (e) {
-    toast(\`导出失败: \${e.message}\`, 'err');
-    }
-  });
-  const importInput = document.getElementById('importConfigFile');
-  document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
-    importInput?.click();
-  });
-  if (importInput) {
-    importInput.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-      const parsed = JSON.parse(reader.result);
-      const mode = document.getElementById('importConfigMode')?.value || 'merge';
-      const res = await window.HOST.importConfig({ mode, config: parsed });
-      if (res && (res.ok || res._version !== undefined)) {
-        toast('配置恢复导入成功', 'ok');
-        await loadData();
-      } else {
-        toast(res?.error || '导入失败', 'err');
-      }
-      } catch (err) {
-      toast(\`解析配置失败: \${err.message}\`, 'err');
-      } finally {
-      importInput.value = '';
-      }
-    };
-    reader.readAsText(file);
-    });
-  }
-  }
-  function setupCreationForms() {
-  populatePresetDropdown();
-  const pForm = document.getElementById('addProviderForm');
-  const mForm = document.getElementById('addModelForm');
-  const toggle = (el, show) => {
-    if (!el) return;
-    el.hidden = show !== undefined ? !show : !el.hidden;
-    el.classList.toggle('hidden', el.hidden);
-  };
-  document.getElementById('btnAddProvider')?.addEventListener('click', () => toggle(pForm));
-  document.getElementById('btnCancelAddProvider')?.addEventListener('click', () => toggle(pForm, false));
-  const btnToggleCurl = document.getElementById('btnToggleCurlPaste');
-  const curlWrap = document.getElementById('curlPasteWrap');
-  const curlInput = document.getElementById('curlPasteInput');
-  if (btnToggleCurl && curlInput) {
-    btnToggleCurl.addEventListener('click', () => {
-    const target = curlWrap || curlInput;
-    target.hidden = !target.hidden;
-    target.classList.toggle('hidden', target.hidden);
-    if (!target.hidden) curlInput.focus();
-    });
-    curlInput.addEventListener('input', () => {
-    const parsed = parseCurl(curlInput.value);
-    if (parsed) {
-      if (parsed.base) document.getElementById('newProvBaseUrl').value = parsed.base;
-      if (parsed.key) document.getElementById('newProvApiKey').value = parsed.key;
-      if (parsed.protocol) document.getElementById('newProvApiType').value = parsed.protocol;
-      if (parsed.model) {
-      const mId = document.getElementById('newProvId');
-      if (mId && !mId.value) mId.value = parsed.model.split('/')[0].split('-')[0];
-      }
-      toast('已从 cURL 自动解析填充 Base URL 与密钥！', 'ok');
-    }
-    });
-  }
-  const btnDetect = document.getElementById('btnDetectProvider');
-  if (btnDetect) {
-    btnDetect.addEventListener('click', async () => {
-    const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
-    const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
-    if (!baseUrl) return toast('请先输入 Base URL', 'warn');
-    toast('正在探测上游支持协议与延迟...', 'info');
-    try {
-      const res = await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
-      if (res && res.ok) {
-      toast(\`探测成功！已发现协议支持 (延迟: \${res.latency_ms || 0}ms)\`, 'ok');
-      if (res.base_url) document.getElementById('newProvBaseUrl').value = res.base_url;
-      if (res.protocol) document.getElementById('newProvApiType').value = res.protocol;
-      } else {
-      const probe = await window.HOST.probeModels({ base_url: baseUrl, api_key: apiKey });
-      if (probe && (probe.ok || probe.count)) {
-        toast(\`探测成功: 发现 \${probe.count || probe.models?.length || 0} 个可用模型\`, 'ok');
-      } else {
-        toast(\`协议探测完成: Base URL 有效\`, 'info');
-      }
-      }
-    } catch (e) {
-      toast(\`探测完成: \${e.message}\`, 'info');
-    }
-    });
-  }
-  document.getElementById('newProvPreset')?.addEventListener('change', (e) => {
-    const m = PRESETS_META[e.target.value];
-    if (m) {
-    document.getElementById('newProvId').value = m[0];
-    document.getElementById('newProvName').value = m[1];
-    document.getElementById('newProvBaseUrl').value = m[2];
-    document.getElementById('newProvApiType').value = m[3];
-    }
-  });
-  document.getElementById('btnConfirmAddProvider')?.addEventListener('click', async () => {
-    const id = (document.getElementById('newProvId')?.value || '').trim();
-    const name = (document.getElementById('newProvName')?.value || '').trim() || id;
-    const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
-    const apiType = document.getElementById('newProvApiType')?.value || 'openai-completions';
-    const keyAlias = (document.getElementById('newProvKeyAlias')?.value || '').trim() || 'k1';
-    const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
-    if (!id) return toast('请输入供应商标识 ID', 'warn');
-    if (!baseUrl) return toast('请输入 Base URL', 'warn');
-    state.config = state.config || { providers: {}, agent_models: {} };
-    state.config.providers = state.config.providers || {};
-    if (state.config.providers[id]) return toast(\`供应商 \${id} 已存在\`, 'warn');
-    const api_keys = apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin: 'local' }] : [];
-    state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: 'local', api_keys };
-    state.activeEditorKey = \`p_\${id}\`;
-    toggle(pForm, false);
-    await persistConfig('供应商创建成功');
-  });
-  document.getElementById('btnAddModel')?.addEventListener('click', () => {
-    toggle(mForm);
-    if (mForm && !mForm.hidden) populateModelProvidersDropdown();
-  });
-  document.getElementById('btnCancelAddModel')?.addEventListener('click', () => toggle(mForm, false));
-  document.getElementById('btnConfirmAddModel')?.addEventListener('click', async () => {
-    const mName = (document.getElementById('newModelName')?.value || '').trim();
-    const prov = (document.getElementById('newModelProvider')?.value || '').trim();
-    const target = (document.getElementById('newModelTarget')?.value || '').trim() || mName;
-    if (!mName) return toast('请输入逻辑模型名称', 'warn');
-    state.config = state.config || { providers: {}, agent_models: {} };
-    state.config.agent_models = state.config.agent_models || {};
-    const firstKey = state.config?.providers?.[prov]?.api_keys?.[0];
-    const keyLabel = firstKey?.label || firstKey?.id || 'k1';
-    const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
-    state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
-    state.activeEditorKey = \`m_\${mName}\`;
-    toggle(mForm, false);
-    await persistConfig('模型添加成功');
-  });
-  }
-  function populateModelProvidersDropdown() {
-  const sel = document.getElementById('newModelProvider');
-  if (!sel) return;
-  sel.innerHTML = '';
-  const provs = Object.keys(state.config?.providers || {}).sort();
-  if (provs.length === 0) {
-    sel.innerHTML = '<option value="">(暂无供应商)</option>';
-  } else {
-    provs.forEach((pId) => {
-    const pName = state.config.providers[pId]?.name || pId;
-    const opt = document.createElement('option');
-    opt.value = pId;
-    opt.textContent = \`\${pName} (\${pId})\`;
-    sel.appendChild(opt);
-    });
-  }
-  }
-  function switchTab(tab) {
-  state.activeTab = tab;
-  state.activeEditorKey = null;
-  document.querySelectorAll('.seg-btn').forEach((b) => {
-    if (b.getAttribute('data-tab') === tab) {
-    b.classList.add('active');
-    } else {
-    b.classList.remove('active');
-    }
-  });
-  const views = {
-    models: document.getElementById('viewModels'),
-    providers: document.getElementById('viewProviders'),
-    nodes: document.getElementById('viewNodes'),
-    activity: document.getElementById('viewActivity'),
-    settings: document.getElementById('viewSettings'),
-  };
-  for (const [k, v] of Object.entries(views)) {
-    if (v) v.hidden = k !== tab;
-  }
-  if (tab === 'activity') {
-    if (window.HOST.kind === 'hub') {
-    renderHubOverview();
-    } else if (window.HOST.capabilities.usageAndTraces) {
-    loadActivityData();
-    }
-  }
-  }
-  async function switchRunMode(mode) {
-  if (!window.HOST.capabilities.runModes) return;
-  try {
-    const res = await window.HOST.switchMode(mode);
-    if (res && res.ok) {
-    toast(\`已切换至 \${mode === 'agent' ? 'Agent 模式' : 'KB 知识库模式'}\`, 'ok');
-    if (state.config && state.config.settings) {
-      state.config.settings.run_mode = mode;
-    }
-    state.modelSubMode = mode;
-    updateRunModeUI(mode);
-    renderModelsList();
-    } else {
-    toast(res.error || '切换模式失败', 'err');
-    }
-  } catch (e) {
-    toast(e.message, 'err');
-  }
-  }
-  function updateRunModeUI(mode) {
-  const isAgent = mode === 'agent';
-  const btnAgent = document.getElementById('modeBtnAgent');
-  const btnKB = document.getElementById('modeBtnKB');
-  if (btnAgent && btnKB) {
-    btnAgent.classList.toggle('active', isAgent);
-    btnKB.classList.toggle('active', !isAgent);
-  }
-  const modelSubSeg = document.getElementById('modelPipelineSeg');
-  if (modelSubSeg) {
-    modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
-    b.classList.toggle('active', b.getAttribute('data-submode') === mode);
-    });
-  }
-  }
-  async function loadData() {
-  try {
-    const cfgResp = await window.HOST.getConfig();
-    if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
-    state.config = cfgResp;
-    const verEl = document.getElementById('configVersionDisplay');
-    if (verEl) verEl.textContent = \`v\${cfgResp._version || 1}\`;
-    if (state.config.settings && state.config.settings.run_mode) {
-      state.modelSubMode = state.config.settings.run_mode;
-      updateRunModeUI(state.config.settings.run_mode);
-    }
-    renderProvidersList();
-    renderModelsList();
-    renderSettingsView();
-    }
-    if (window.HOST.capabilities.nodeManager) {
-    await loadNodesData();
-    }
-    if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
-    renderHubOverview();
-    } else if (window.HOST.capabilities.usageAndTraces && state.activeTab === 'activity') {
-    await loadActivityData();
-    }
-  } catch (e) {
-    toast(\`数据加载失败: \${e.message}\`, 'err');
-  }
-  }
-  async function loadNodesData() {
-  try {
-    const res = await window.HOST.getNodes();
-    if (res && res.ok) {
-    state.nodes = res.nodes || [];
-    renderNodesList();
-    if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
-      renderHubOverview();
-    }
-    }
-  } catch (e) {
-    toast(\`节点加载失败: \${e.message}\`, 'err');
-  }
-  }
-  function renderHubOverview() {
-  const kpiGrid = document.getElementById('hubKpiGrid');
-  const provBody = document.getElementById('hubProviderStatsBody');
-  const nodeBody = document.getElementById('hubNodeStatsBody');
-  const summarySub = document.getElementById('hubHealthSummarySub');
-  if (!kpiGrid || !provBody || !nodeBody) return;
-  const cfg = state.config || {};
-  const providers = cfg.providers || {};
-  const provEntries = Object.entries(providers).sort(([a], [b]) => a.localeCompare(b));
-  const agentModels = cfg.agent_models || {};
-  const kbModels = cfg.kb_models || {};
-  const nodes = state.nodes || [];
-  let enabledProvs = 0;
-  let totalKeys = 0;
-  let enabledKeys = 0;
-  let okKeys = 0;
-  let failKeys = 0;
-  let untestedKeys = 0;
-  for (const [, p] of provEntries) {
-    if (p.enabled !== false) enabledProvs++;
-    const keys = p.api_keys || [];
-    for (const k of keys) {
-    totalKeys++;
-    if (k.enabled !== false) enabledKeys++;
-    if (k.last_ok === true) okKeys++;
-    else if (k.last_ok === false) failKeys++;
-    else untestedKeys++;
-    }
-  }
-  const agentModelCount = Object.keys(agentModels).length;
-  let agentCandCount = 0;
-  for (const m of Object.values(agentModels)) {
-    agentCandCount += (m?.candidates || []).length;
-  }
-  let kbCandCount = 0;
-  for (const list of Object.values(kbModels)) {
-    if (Array.isArray(list)) kbCandCount += list.length;
-  }
-  let activeNodes = 0;
-  let totalSyncs = 0;
-  let total304 = 0;
-  for (const n of nodes) {
-    if (n.enabled) activeNodes++;
-    totalSyncs += Number(n.sync_count || 0);
-    total304 += Number(n.hit_304_count || 0);
-  }
-  const testedCount = okKeys + failKeys;
-  const healthRate = testedCount > 0 ? \`\${Math.round((okKeys / testedCount) * 100)}%\` : '-';
-  const kpis = [
-    { label: '纳管供应商', value: String(provEntries.length), sub: \`\${enabledProvs} 个已启用\` },
-    { label: 'API 密钥总量', value: String(totalKeys), sub: \`\${enabledKeys} 把已启用\` },
-    { label: '密钥探活健康度', value: healthRate, sub: \`正常 \${okKeys} · 异常 \${failKeys} · 未测 \${untestedKeys}\` },
-    { label: 'Agent 路由模型', value: String(agentModelCount), sub: \`\${agentCandCount} 个上游候选\` },
-    { label: '知识库流水线', value: String(kbCandCount), sub: '4 条 KB 并发通道' },
-    { label: '注册中转节点', value: String(nodes.length), sub: \`\${activeNodes} 个在线启用\` },
-    { label: '节点同步 / 304', value: String(totalSyncs), sub: \`304 缓存命中 \${total304} 次\` },
-    { label: '当前配置版本', value: \`v\${cfg._version || 1}\`, sub: 'EdgeOne KV CAS' },
-  ];
-  kpiGrid.innerHTML = kpis.map((item) => \`
-    <div class="kpi-card">
-    <span class="kpi-label">\${escapeHtml(item.label)}</span>
-    <span class="kpi-value">\${escapeHtml(item.value)}</span>
-    <span class="kpi-sub">\${escapeHtml(item.sub)}</span>
-    </div>
-  \`).join('');
-  if (summarySub) {
-    summarySub.textContent = \`共 \${provEntries.length} 个供应商、\${totalKeys} 把密钥（已探活正常 \${okKeys}，异常 \${failKeys}，未测 \${untestedKeys}）\`;
-  }
-  if (provEntries.length === 0) {
-    provBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无供应商配置，点击右上角「管理供应商」添加或导入</td></tr>';
-  } else {
-    provBody.innerHTML = '';
-    for (const [pId, p] of provEntries) {
-    const keys = p.api_keys || [];
-    const pTotal = keys.length;
-    const pEnabled = keys.filter((k) => k.enabled !== false).length;
-    const pOk = keys.filter((k) => k.last_ok === true).length;
-    const pFail = keys.filter((k) => k.last_ok === false).length;
-    const pLat = keys.reduce((acc, k) => (k.last_latency_ms ? Math.min(acc, k.last_latency_ms) : acc), Infinity);
-    const latText = Number.isFinite(pLat) ? \`\${pLat}ms\` : '-';
-    const pct = pTotal > 0 ? Math.round(((pOk > 0 ? pOk : (pFail > 0 ? 0 : pEnabled)) / pTotal) * 100) : 0;
-    const barCls = pFail > 0 && pOk === 0 ? 'health-fill--err' : pOk > 0 ? 'health-fill--ok' : 'health-fill--warn';
-    const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
-    const tr = document.createElement('tr');
-    tr.innerHTML = \`
-      <td>
-      <div class="name">\${icoHtml}<span>\${escapeHtml(p.name || pId)}</span><span class="pill">\${escapeHtml(pId)}</span></div>
-      </td>
-      <td><span class="pill">\${escapeHtml(p.api_type || 'openai')}</span></td>
-      <td class="tabular">\${pEnabled} / \${pTotal}</td>
-      <td>
-      <div class="health-bar">
-        <svg viewBox="0 0 100 6" width="72" height="6">
-        <rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" opacity="0.12"></rect>
-        <rect x="0" y="0" width="\${pct}" height="6" rx="3" class="health-fill \${barCls}"></rect>
-        </svg>
-        <span class="text-xs text-muted">\${pOk}正常 / \${pFail}异常</span>
-      </div>
-      </td>
-      <td class="tabular">\${latText}</td>
-      <td>
-      <button class="btn btn--sm btn-hub-verify-prov" data-pid="\${escapeHtml(pId)}" type="button">探活</button>
-      </td>
-    \`;
-    tr.querySelector('.btn-hub-verify-prov').addEventListener('click', () => verifyProviderKeys(pId));
-    provBody.appendChild(tr);
-    }
-  }
-  if (nodes.length === 0) {
-    nodeBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无中转节点，可在「中转节点」页签签发 NODE_TOKEN</td></tr>';
-  } else {
-    nodeBody.innerHTML = nodes.map((n) => \`
-    <tr>
-      <td><strong>\${escapeHtml(n.name || n.id)}</strong></td>
-      <td><span class="pill pill--accent">\${escapeHtml(n.role || 'full')}</span></td>
-      <td><span class="pill \${n.enabled ? 'pill--green' : 'pill--red'}">\${n.enabled ? '在线启用' : '已吊销'}</span></td>
-      <td class="tabular">\${escapeHtml(n.last_ip || '-')}</td>
-      <td class="tabular">\${n.sync_count || 0} / \${n.hit_304_count || 0}</td>
-      <td class="tabular">\${n.last_seen ? formatTime(n.last_seen) : '未激活'}</td>
-    </tr>
-    \`).join('');
-  }
-  }
-  async function verifyProviderKeys(pId) {
-  const p = state.config?.providers?.[pId];
-  if (!p) return;
-  const keys = p.api_keys || [];
-  if (keys.length === 0) return toast(\`\${p.name || pId} 暂无密钥可探活\`, 'warn');
-  toast(\`正在探活 \${p.name || pId} (\${keys.length} 把密钥)...\`, 'info');
-  let okCount = 0;
-  for (let i = 0; i < keys.length; i++) {
-    const k = keys[i];
-    const lbl = k.label || k.id || \`key-\${i}\`;
-    try {
-    const r = await window.HOST.verifyKey({
-      provider: pId,
-      api_key: k.key,
-      key: k.key,
-      key_label: lbl,
-      base_url: p.base_url || '',
-      api_type: p.api_type || 'openai-completions',
-    });
-    k.last_ok = !!(r && (r.ok || r.valid));
-    k.last_status = r?.status || (k.last_ok ? 200 : 0);
-    k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
-    k.last_checked_at = new Date().toISOString();
-    if (k.last_ok) okCount++;
-    } catch (_) {
-    k.last_ok = false;
-    }
-  }
-  toast(\`\${p.name || pId} 探活完成: \${okCount}/\${keys.length} 正常\`, okCount === keys.length ? 'ok' : 'warn');
-  if (window.HOST.kind === 'hub') renderHubOverview();
-  renderProvidersList();
-  }
-  async function verifyAllHubKeys() {
-  if (state.batchVerifying) return;
-  const providers = state.config?.providers || {};
-  const pIds = Object.keys(providers).sort();
-  if (pIds.length === 0) return toast('暂无供应商可探活', 'warn');
-  const btn = document.getElementById('btnHubBatchVerifyAll');
-  state.batchVerifying = true;
-  if (btn) btn.disabled = true;
-  let total = 0;
-  let ok = 0;
-  try {
-    toast(\`开始批量探活 \${pIds.length} 个供应商密钥池...\`, 'info');
-    for (const pId of pIds) {
-    const p = providers[pId];
-    const keys = (p?.api_keys || []).filter((k) => k.enabled !== false);
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      total++;
-      const lbl = k.label || k.id || \`key-\${i}\`;
-      try {
-      const r = await window.HOST.verifyKey({
-        provider: pId,
-        api_key: k.key,
-        key: k.key,
-        key_label: lbl,
-        base_url: p.base_url || '',
-        api_type: p.api_type || 'openai-completions',
-      });
-      k.last_ok = !!(r && (r.ok || r.valid));
-      k.last_status = r?.status || (k.last_ok ? 200 : 0);
-      k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
-      k.last_checked_at = new Date().toISOString();
-      if (k.last_ok) ok++;
-      } catch (_) {
-      k.last_ok = false;
-      }
-    }
-    renderHubOverview();
-    }
-    toast(\`全部密钥探活完成: \${ok}/\${total} 正常\`, ok === total ? 'ok' : 'warn');
-  } finally {
-    state.batchVerifying = false;
-    if (btn) btn.disabled = false;
-    renderProvidersList();
-  }
-  }
-  async function loadActivityData() {
-  try {
-    const [usageRes, tracesRes] = await Promise.all([
-    window.HOST.getUsage(state.currentPeriod),
-    window.HOST.getTraces(),
-    ]);
-    if (usageRes && usageRes.ok) {
-    state.usage = usageRes;
-    window.USAGE.renderKPIs(usageRes);
-    window.USAGE.renderStackedBarChart(usageRes);
-    window.USAGE.renderHeatmap(usageRes);
-    window.USAGE.renderBreakdown(usageRes);
-    }
-    if (tracesRes && tracesRes.ok) {
-    state.traces = tracesRes.traces || [];
-    renderTracesList();
-    }
-  } catch (e) {
-    toast(\`统计加载失败: \${e.message}\`, 'err');
-  }
-  }
-  async function handleSyncManifest() {
-  let hubUrl = state.config?.vault?.url || '';
-  let nodeToken = state.config?.vault?.node_token || '';
-  if (!hubUrl) {
-    const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
-    if (!inputUrl) return;
-    hubUrl = inputUrl.trim();
-    const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
-    nodeToken = inputToken.trim();
-    state.config.vault = { url: hubUrl, node_token: nodeToken };
-  }
-  toast('正在连接中枢拉取清单...', 'info');
-  try {
-    const apiFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-    const res = await apiFn(hubUrl, nodeToken);
-    if (res && (res.ok || res.providers)) {
-    const provs = res.providers || {};
-    const pKeys = Object.keys(provs);
-    state.config.providers = state.config.providers || {};
-    for (const [pId, pData] of Object.entries(provs)) {
-      if (!state.config.providers[pId]) {
-      state.config.providers[pId] = {
-        id: pId,
-        name: pData.name || pId,
-        base_url: pData.base_url || '',
-        anthropic_base_url: pData.anthropic_base_url || '',
-        preset_id: pData.preset_id || '',
-        origin: 'vault',
-        enabled: true,
-        api_keys: (pData.keys || []).map((lbl) => ({
-        id: \`k_\${lbl}\`,
-        label: lbl,
-        key: '••••••••',
-        origin: 'vault',
-        enabled: true,
-        })),
-      };
-      } else {
-      const ep = state.config.providers[pId];
-      ep.origin = 'vault';
-      if (pData.base_url) ep.base_url = pData.base_url;
-      if (pData.preset_id) ep.preset_id = pData.preset_id;
-      if (pData.anthropic_base_url) ep.anthropic_base_url = pData.anthropic_base_url;
-      }
-    }
-    renderProvidersList();
-    toast(\`成功拉取中枢清单: 共 \${pKeys.length} 个供应商可同步\`, 'ok');
-    } else {
-    toast(\`拉取清单失败: \${res?.error || '无法连接中枢'}\`, 'err');
-    }
-  } catch (e) {
-    toast(\`中枢连接异常: \${e.message}\`, 'err');
-  }
-  }
-  async function handleSyncFromVault() {
-  let hubUrl = state.config?.vault?.url || '';
-  let nodeToken = state.config?.vault?.node_token || '';
-  if (!hubUrl) {
-    const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
-    if (!inputUrl) return;
-    hubUrl = inputUrl.trim();
-    const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
-    nodeToken = inputToken.trim();
-    state.config.vault = { url: hubUrl, node_token: nodeToken };
-  }
-  toast('正在连接 Vault 中枢同步密钥...', 'info');
-  try {
-    const manifestFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-    const manifestRes = await manifestFn(hubUrl, nodeToken);
-    if (!manifestRes || (!manifestRes.ok && !manifestRes.providers)) {
-    toast(\`拉取 Vault 清单失败: \${manifestRes?.error || '请求未成功'}\`, 'err');
-    return;
-    }
-    const provs = manifestRes.providers || {};
-    const pKeys = Object.keys(provs);
-    if (pKeys.length === 0) {
-    toast('Vault 中枢暂无可同步的共享供应商', 'warn');
-    return;
-    }
-    state.config.providers = state.config.providers || {};
-    let totalSyncedKeys = 0;
-    const credFn = window.HOST.api?.fetchVaultCredentials || window.HOST.fetchVaultCredentials;
-    for (const pId of pKeys) {
-    try {
-      const credRes = await credFn(pId, undefined, hubUrl, nodeToken);
-      if (credRes && (credRes.ok || credRes.provider_config)) {
-      const pCfg = credRes.provider_config || {};
-      if (!state.config.providers[pId]) {
-        state.config.providers[pId] = {
-        id: pId,
-        name: pCfg.name || provs[pId].name || pId,
-        base_url: pCfg.base_url || provs[pId].base_url || '',
-        anthropic_base_url: pCfg.anthropic_base_url || '',
-        preset_id: pCfg.preset_id || provs[pId].preset_id || '',
-        origin: 'vault',
-        enabled: true,
-        api_keys: [],
-        };
-      }
-      const p = state.config.providers[pId];
-      p.origin = 'vault';
-      if (pCfg.base_url) p.base_url = pCfg.base_url;
-      if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
-      if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
-      if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
-      p.api_keys = p.api_keys || [];
-      const keyMap = pCfg.keys || {};
-      for (const [lbl, secret] of Object.entries(keyMap)) {
-        const existing = p.api_keys.find((k) => k.label === lbl || k.id === lbl);
-        if (existing) {
-        existing.key = secret;
-        existing.origin = 'vault';
-        existing.enabled = true;
-        } else {
-        p.api_keys.push({
-          id: \`k_\${lbl}\`,
-          label: lbl,
-          key: secret,
-          origin: 'vault',
-          enabled: true,
-        });
-        }
-        totalSyncedKeys++;
-      }
-      }
-    } catch (err) {
-      console.warn(\`Fetch credentials for \${pId} failed:\`, err);
-    }
-    }
-    await persistConfig(\`从 Vault 同步成功: 更新了 \${totalSyncedKeys} 把密钥\`);
-  } catch (e) {
-    toast(\`Vault 同步异常: \${e.message}\`, 'err');
-  }
-  }
-  function renderProvidersList() {
-  const container = document.getElementById('providersList');
-  if (!container) return;
-  container.innerHTML = '';
-  const providers = (state.config && state.config.providers) || {};
-  const q = state.providerQuery || '';
-  const f = state.providerFilter || 'all';
-  const pKeys = Object.keys(providers).sort().filter((pId) => {
-    const p = providers[pId] || {};
-    const keys = p.api_keys || [];
-    if (q) {
-    const hay = \`\${pId} \${p.name || ''} \${p.base_url || ''} \${p.preset_id || ''}\`.toLowerCase();
-    if (!hay.includes(q)) return false;
-    }
-    if (f === 'enabled') return p.enabled !== false && keys.length > 0;
-    if (f === 'healthy') return keys.some((k) => k.last_ok === true);
-    if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
-    return true;
-  });
-  if (pKeys.length === 0) {
-    const emptyRow = document.createElement('div');
-    emptyRow.className = 'row row--static text-muted';
-    emptyRow.textContent = q || f !== 'all' ? '没有符合筛选条件的供应商' : '暂无已配置供应商，请点击上方「添加供应商」';
-    container.appendChild(emptyRow);
-    return;
-  }
-  for (const pId of pKeys) {
-    const p = providers[pId] || {};
-    const keys = p.api_keys || [];
-    const keyCount = keys.length;
-    const okCount = keys.filter((k) => k.last_ok === true).length;
-    const failCount = keys.filter((k) => k.last_ok === false).length;
-    const isLocal = p.origin === 'local';
-    const isExpanded = state.activeEditorKey === \`p_\${pId}\`;
-    const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
-    let busyCount = 0;
-    let waitCount = 0;
-    if (state.lanes) {
-    for (const [laneKey, laneVal] of Object.entries(state.lanes)) {
-      if (laneKey.startsWith(pId + ':') || laneKey === pId) {
-      busyCount += laneVal.Busy || 0;
-      waitCount += laneVal.Waiting || 0;
-      }
-    }
-    }
-    const row = document.createElement('div');
-    row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
-    const dot = document.createElement('span');
-    const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCount === 0)
-    ? 'dot--err'
-    : okCount > 0
-      ? 'dot--ok'
-      : 'dot--warn';
-    dot.className = \`dot \${dotCls}\`;
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.innerHTML = \`
-    <div class="name">
-      \${brandIcon}
-      <span>\${escapeHtml(p.name || pId)}</span>
-      <span class="pill">\${escapeHtml(pId)}</span>
-      \${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
-      \${okCount > 0 ? \`<span class="pill pill--green">\${okCount}/\${keyCount} 正常</span>\` : ''}
-      \${failCount > 0 ? \`<span class="pill pill--red">\${failCount} 异常</span>\` : ''}
-      \${busyCount > 0 ? \`<span class="pill pill--accent">运行中: \${busyCount}\${waitCount ? \` (排队:\${waitCount})\` : ''}</span>\` : ''}
-      \${p._balance ? \`<span class="pill pill--green">\${escapeHtml(p._balance)}</span>\` : ''}
-    </div>
-    <div class="sub">\${escapeHtml(p.base_url || '未配置 Base URL')}</div>
-    \`;
-    const fields = document.createElement('div');
-    fields.className = 'fields';
-    fields.innerHTML = \`
-    <span class="pill tabular">\${keyCount} 把 Key</span>
-    <span class="caret">▾</span>
-    \`;
-    row.appendChild(dot);
-    row.appendChild(who);
-    row.appendChild(fields);
-    row.addEventListener('click', (ev) => {
-    if (ev.target.closest('button') || ev.target.closest('input')) return;
-    state.activeEditorKey = isExpanded ? null : \`p_\${pId}\`;
-    renderProvidersList();
-    });
-    container.appendChild(row);
-    if (isExpanded) {
-    const editor = document.createElement('div');
-    editor.className = 'editor';
-    editor.appendChild(buildProviderEditor(pId, p));
-    container.appendChild(editor);
-    }
-  }
-  }
-  function buildProviderEditor(pId, p) {
-  const wrap = document.createElement('div');
-  const keys = p.api_keys || [];
-  wrap.innerHTML = \`
-    <div class="form-grid">
-    <div class="form-group">
-      <label class="form-label">供应商标识 / 名称</label>
-      <input class="input" id="ed_p_name_\${pId}" value="\${escapeHtml(p.name || pId)}">
-    </div>
-    <div class="form-group">
-      <div class="form-label">
-      <span>Base URL (OpenAI 协议)</span>
-      <button class="btn btn--sm" id="btn_detect_ed_\${pId}" type="button">自动探测协议</button>
-      </div>
-      <input class="input input--code" id="ed_p_base_\${pId}" value="\${escapeHtml(p.base_url || '')}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Anthropic Base URL (可选)</label>
-      <input class="input input--code" id="ed_p_ant_\${pId}" value="\${escapeHtml(p.anthropic_base_url || '')}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">预设规则绑定</label>
-      <input class="input input--code" id="ed_p_preset_\${pId}" value="\${escapeHtml(p.preset_id || '')}" placeholder="如 minimax, deepseek">
-    </div>
-    </div>
-    <!-- Advanced Settings Toggle -->
-    <details class="headers-details mt-3">
-    <summary class="form-label">高级配置 (配额刷新、余额查询与自动纳管)</summary>
-    <div class="form-grid mt-2">
-      <div class="form-group">
-      <label class="form-label">每日重置时间 (quota_reset_at)</label>
-      <input class="input" id="ed_p_reset_\${pId}" value="\${escapeHtml(p.quota_reset_at || '00:00+08:00')}">
-      </div>
-      <div class="form-group">
-      <label class="form-label">单 Key RPM 限制 (rpm_per_key)</label>
-      <input class="input" id="ed_p_rpm_\${pId}" type="number" value="\${p.rpm_per_key || ''}" placeholder="不限">
-      </div>
-      <div class="form-group">
-      <label class="form-label">自定义余额查询 URL (balance_url)</label>
-      <input class="input input--code" id="ed_p_bal_url_\${pId}" value="\${escapeHtml(p.balance_url || '')}" placeholder="https://api.../user/balance">
-      </div>
-      <div class="form-group">
-      <label class="form-label">余额提取 JSONPath (balance_path)</label>
-      <input class="input input--code" id="ed_p_bal_path_\${pId}" value="\${escapeHtml(p.balance_path || '')}" placeholder="$.balance">
-      </div>
-    </div>
-    <div class="section-bar mt-2 flex-end">
-      <button class="btn btn--sm" id="btn_autolist_sync_\${pId}" type="button">立即刷新并纳管模型</button>
-    </div>
-    </details>
-    <div class="section-bar mt-4">
-    <span class="form-label">API 密钥池 (\${keys.length})</span>
-    <div class="fields">
-      <button class="btn btn--sm" id="btn_batch_test_keys_\${pId}" type="button">一键测全部 Key</button>
-      <button class="btn btn--sm btn--primary" id="btn_oauth_start_\${pId}" type="button" \${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
-    </div>
-    </div>
-    <!-- OAuth inline prompt box -->
-    <div class="snippet-box hidden mb-3" id="oauth_box_\${pId}" hidden>
-    <div class="snippet-header">
-      <span class="form-label">MiniMax OAuth 设备授权码:</span>
-      <span class="pill pill--amber" id="oauth_status_\${pId}">等待扫码...</span>
-    </div>
-    <div class="text-sm mt-1">
-      请点击访问：<a id="oauth_link_\${pId}" href="#" target="_blank" class="tabular"></a>
-      并在页面中输入验证码：<strong class="tabular" id="oauth_code_\${pId}"></strong>
-    </div>
-    </div>
-    <!-- Per-Key Table -->
-    <div class="card">
-    <div class="table-wrap">
-      <table class="data-table">
-      <thead>
-        <tr>
-        <th>启用</th>
-        <th>标签</th>
-        <th>Key 密文</th>
-        <th>归属</th>
-        <th>状态</th>
-        <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="p_keys_tbody_\${pId}"></tbody>
-      </table>
-    </div>
-    </div>
-    <div class="form-grid mt-3">
-    <div class="form-group">
-      <input class="input" id="new_key_lbl_\${pId}" placeholder="Key 标签 (如 pool-01)">
-    </div>
-    <div class="form-group">
-      <input class="input input--code privacy-mask" id="new_key_val_\${pId}" placeholder="粘贴完整 API Key">
-    </div>
-    <div class="form-group flex-end">
-      <button class="btn btn--primary" id="btn_add_key_\${pId}" type="button">添加 Key</button>
-    </div>
-    </div>
-    <!-- Model Probing & Pills Area -->
-    <div class="section-bar mt-4">
-    <span class="form-label">模型探测与一键纳管</span>
-    <div class="fields">
-      <button class="btn btn--sm" id="btn_check_balance_\${pId}" type="button">查询余额</button>
-      <button class="btn btn--sm btn--primary" id="btn_probe_prov_\${pId}" type="button">探测模型</button>
-    </div>
-    </div>
-    <div id="probe_pills_container_\${pId}" class="hidden" hidden>
-    <div class="section-bar mt-1">
-      <input class="input input--code flex-1 mr-2" id="probe_pills_filter_\${pId}" placeholder="过滤探测到的模型...">
-      <span class="text-muted text-xs" id="probe_pills_count_\${pId}"></span>
-    </div>
-    <div class="probe-pills-wrap" id="probe_pills_list_\${pId}"></div>
-    </div>
-    <div class="form-actions">
-    <button class="btn btn--danger" id="btn_del_prov_\${pId}" type="button">删除此供应商</button>
-    <button class="btn btn--primary" id="btn_save_prov_\${pId}" type="button">保存供应商配置</button>
-    </div>
-  \`;
-  const tbody = wrap.querySelector(\`#p_keys_tbody_\${pId}\`);
-  keys.forEach((k, idx) => {
-    const tr = document.createElement('tr');
-    const keyTarget = \`\${pId}:\${k.label || k.id || \`key-\${idx}\`}\`;
-    const isCooldown = state.cooldowns?.[keyTarget] || false;
-    let statusHtml = \`<span class="pill \${isCooldown ? 'pill--amber' : 'pill--green'}">\${isCooldown ? '冷却中' : '就绪'}</span>\`;
-    if (k.last_ok === true) {
-    statusHtml = \`<span class="pill pill--green tabular">正常 \${k.last_latency_ms || 0}ms</span>\`;
-    } else if (k.last_ok === false) {
-    statusHtml = \`<span class="pill pill--red">异常\${k.last_status ? \` (\${k.last_status})\` : ''}</span>\`;
-    }
-    tr.innerHTML = \`
-    <td><input type="checkbox" class="k_enable_cb" data-idx="\${idx}" \${k.enabled !== false ? 'checked' : ''}></td>
-    <td><strong>\${escapeHtml(k.label || k.id || \`key-\${idx}\`)}</strong></td>
-    <td><span class="tabular privacy-mask">\${escapeHtml(k.key)}</span></td>
-    <td><span class="pill">\${k.origin === 'local' ? '本地' : '共享'}</span></td>
-    <td>\${statusHtml}</td>
-    <td>
-      <div class="fields">
-      <button class="btn btn--sm btn_verify_k" data-idx="\${idx}" type="button">校验</button>
-      <button class="btn btn--sm btn--danger btn_del_k" data-idx="\${idx}" type="button">删除</button>
-      </div>
-    </td>
-    \`;
-    tr.querySelector('.k_enable_cb').addEventListener('change', (e) => {
-    k.enabled = e.target.checked;
-    });
-    tr.querySelector('.btn_verify_k').addEventListener('click', async () => {
-    const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
-    const keyLabel = k.label || k.id || \`key-\${idx}\`;
-    toast(\`正在校验 Key [\${keyLabel}]...\`, 'info');
-    try {
-      const res = await window.HOST.verifyKey({
-      provider: pId,
-      api_key: k.key,
-      key: k.key,
-      key_label: keyLabel,
-      base_url: baseUrl,
-      api_type: p.api_type || 'openai-completions',
-      });
-      if (res && (res.ok || res.valid || res.latency_ms !== undefined)) {
-      const lat = res.latency_ms ?? res.ms ?? 0;
-      k.last_ok = true;
-      k.last_latency_ms = lat;
-      k.last_status = res.status || 200;
-      toast(\`Key [\${keyLabel}] 校验成功: 延迟 \${lat}ms\`, 'ok');
-      } else {
-      k.last_ok = false;
-      k.last_status = res?.status || 0;
-      toast(\`Key [\${keyLabel}] 校验失败: \${res?.error || '无效凭据'}\`, 'err');
-      }
-      renderProvidersList();
-      if (window.HOST.kind === 'hub') renderHubOverview();
-    } catch (e) {
-      toast(\`校验异常: \${e.message}\`, 'err');
-    }
-    });
-    tr.querySelector('.btn_del_k').addEventListener('click', () => {
-    p.api_keys.splice(idx, 1);
-    renderProvidersList();
-    });
-    tbody.appendChild(tr);
-  });
-  wrap.querySelector(\`#btn_check_balance_\${pId}\`).addEventListener('click', async () => {
-    const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
-    const firstKey = p.api_keys?.[0]?.key || '';
-    const balUrl = wrap.querySelector(\`#ed_p_bal_url_\${pId}\`)?.value.trim() || p.balance_url || '';
-    const balPath = wrap.querySelector(\`#ed_p_bal_path_\${pId}\`)?.value.trim() || p.balance_path || '';
-    toast(\`正在查询供应商 \${pId} 余额...\`, 'info');
-    try {
-    const res = await window.HOST.checkBalance({
-      provider: pId,
-      base_url: baseUrl,
-      api_key: firstKey,
-      balance_url: balUrl,
-      balance_path: balPath,
-    });
-    if (res && (res.ok || res.balance !== undefined)) {
-      const bal = res.formatted || res.balance || '正常可用';
-      p._balance = String(bal);
-      toast(\`余额查询成功: \${bal}\`, 'ok');
-      renderProvidersList();
-    } else {
-      toast(\`余额查询不可用: \${res?.error || '上游无余额接口'}\`, 'warn');
-    }
-    } catch (e) {
-    toast(\`查询异常: \${e.message}\`, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_batch_test_keys_\${pId}\`).addEventListener('click', async () => {
-    toast(\`正在一键测试 \${keys.length} 把 Key...\`, 'info');
-    let succ = 0;
-    const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
-    for (const k of keys) {
-    try {
-      const r = await window.HOST.verifyKey({
-      provider: pId,
-      api_key: k.key,
-      base_url: baseUrl,
-      key_label: k.label,
-      });
-      if (r && (r.ok || r.valid)) succ++;
-    } catch (_) {}
-    }
-    toast(\`一键测试完成: \${succ}/\${keys.length} 把 Key 正常可用\`, succ === keys.length ? 'ok' : 'warn');
-  });
-  wrap.querySelector(\`#btn_oauth_start_\${pId}\`).addEventListener('click', async () => {
-    toast('正在发起 OAuth 设备登录请求...', 'info');
-    try {
-    const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
-    if (res && (res.ok || res.device_code)) {
-      const box = wrap.querySelector(\`#oauth_box_\${pId}\`);
-      box.hidden = false;
-      box.classList.remove('hidden');
-      const link = wrap.querySelector(\`#oauth_link_\${pId}\`);
-      link.href = res.verification_uri || 'https://api.minimax.chat';
-      link.textContent = res.verification_uri || '前往授权页面';
-      wrap.querySelector(\`#oauth_code_\${pId}\`).textContent = res.user_code || res.device_code;
-      const intervalSec = (res.interval || 5) * 1000;
-      const pollTimer = setInterval(async () => {
-      try {
-        const pollRes = await window.HOST.pollOAuth({
-        device_code: res.device_code,
-        endpoint: 'https://api.minimax.chat/oauth/token',
-        });
-        if (pollRes && (pollRes.ok || pollRes.access_token)) {
-        clearInterval(pollTimer);
-        wrap.querySelector(\`#oauth_status_\${pId}\`).textContent = '授权成功！';
-        p.api_keys = p.api_keys || [];
-        p.api_keys.push({
-          id: \`k_oauth_\${Date.now().toString(36)}\`,
-          label: 'oauth-token',
-          key: pollRes.access_token,
-          enabled: true,
-          origin: 'local',
-        });
-        await persistConfig('OAuth 授权成功，密钥已保存');
-        }
-      } catch (_) {}
-      }, intervalSec);
-      setTimeout(() => clearInterval(pollTimer), (res.expires_in || 300) * 1000);
-    } else {
-      toast(res?.error || '发起 OAuth 失败', 'err');
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_probe_prov_\${pId}\`).addEventListener('click', async () => {
-    const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
-    const firstKey = p.api_keys?.[0]?.key || '';
-    toast(\`正在探测供应商 \${pId} 模型...\`, 'info');
-    try {
-    const res = await window.HOST.probeModels({
-      provider: pId,
-      base_url: baseUrl,
-      api_key: firstKey,
-      api_type: p.api_type || 'openai-completions',
-    });
-    const models = res?.models || [];
-    if (models.length > 0) {
-      toast(\`探测成功: 发现 \${models.length} 个可用模型\`, 'ok');
-      const cont = wrap.querySelector(\`#probe_pills_container_\${pId}\`);
-      cont.hidden = false;
-      cont.classList.remove('hidden');
-      const list = wrap.querySelector(\`#probe_pills_list_\${pId}\`);
-      list.innerHTML = '';
-      wrap.querySelector(\`#probe_pills_count_\${pId}\`).textContent = \`共 \${models.length} 个，点击一键纳管\`;
-      const renderPills = (filter = '') => {
-      list.innerHTML = '';
-      const filtered = models.filter((m) => m.toLowerCase().includes(filter.toLowerCase())).slice(0, 48);
-      filtered.forEach((modelName) => {
-        const pill = document.createElement('span');
-        pill.className = 'probe-pill';
-        pill.textContent = modelName;
-        pill.title = \`点击一键纳管 \${modelName} 到 Agent 路由\`;
-        pill.addEventListener('click', async () => {
-        state.config.agent_models = state.config.agent_models || {};
-        const firstKeyLabel = p.api_keys?.[0]?.label || 'k1';
-        state.config.agent_models[modelName] = {
-          routing_strategy: 'sticky_failover',
-          active_key: '',
-          enabled: true,
-          candidates: [
-          { provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
-          ],
-        };
-        await persistConfig(\`已成功纳管模型: \${modelName}\`);
-        });
-        list.appendChild(pill);
-      });
-      };
-      renderPills();
-      wrap.querySelector(\`#probe_pills_filter_\${pId}\`).addEventListener('input', (e) => {
-      renderPills(e.target.value);
-      });
-    } else {
-      toast('未探测到可用模型列表', 'warn');
-    }
-    } catch (e) {
-    toast(\`探测异常: \${e.message}\`, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_autolist_sync_\${pId}\`).addEventListener('click', async () => {
-    toast('正在同步模型列表并纳管...', 'info');
-    try {
-    const res = await window.HOST.syncAutoList({ provider: pId });
-    if (res && res.ok) {
-      toast('模型同步纳管成功！', 'ok');
-      await loadData();
-    } else {
-      toast('已触发自动纳管请求', 'info');
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_add_key_\${pId}\`).addEventListener('click', () => {
-    const lbl = wrap.querySelector(\`#new_key_lbl_\${pId}\`).value.trim();
-    const val = wrap.querySelector(\`#new_key_val_\${pId}\`).value.trim();
-    if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
-    p.api_keys = p.api_keys || [];
-    p.api_keys.push({
-    id: \`k_\${Date.now().toString(36)}\`,
-    label: lbl,
-    key: val,
-    enabled: true,
-    origin: 'vault',
-    });
-    renderProvidersList();
-  });
-  wrap.querySelector(\`#btn_save_prov_\${pId}\`).addEventListener('click', async () => {
-    p.name = wrap.querySelector(\`#ed_p_name_\${pId}\`).value.trim();
-    p.base_url = wrap.querySelector(\`#ed_p_base_\${pId}\`).value.trim();
-    p.anthropic_base_url = wrap.querySelector(\`#ed_p_ant_\${pId}\`).value.trim();
-    p.preset_id = wrap.querySelector(\`#ed_p_preset_\${pId}\`).value.trim();
-    p.quota_reset_at = wrap.querySelector(\`#ed_p_reset_\${pId}\`).value.trim();
-    const rpm = Number(wrap.querySelector(\`#ed_p_rpm_\${pId}\`).value);
-    if (rpm > 0) p.rpm_per_key = rpm;
-    p.balance_url = wrap.querySelector(\`#ed_p_bal_url_\${pId}\`).value.trim();
-    p.balance_path = wrap.querySelector(\`#ed_p_bal_path_\${pId}\`).value.trim();
-    await persistConfig('供应商保存成功');
-  });
-  wrap.querySelector(\`#btn_del_prov_\${pId}\`).addEventListener('click', async () => {
-    if (!confirm(\`确定删除供应商 \${pId} 吗？\`)) return;
-    delete state.config.providers[pId];
-    state.activeEditorKey = null;
-    await persistConfig('供应商已删除');
-  });
-  return wrap;
-  }
-  function renderNodesList() {
-  const container = document.getElementById('nodesList');
-  if (!container) return;
-  container.innerHTML = '';
-  const nodes = state.nodes || [];
-  if (nodes.length === 0) {
-    const emptyRow = document.createElement('div');
-    emptyRow.className = 'row text-muted';
-    emptyRow.textContent = '暂无中转节点，点击上方「＋ 签发新节点」一键生成';
-    container.appendChild(emptyRow);
-    return;
-  }
-  for (const node of nodes) {
-    const isExpanded = state.activeEditorKey === \`node_\${node.id}\`;
-    const row = document.createElement('div');
-    row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
-    const dot = document.createElement('span');
-    dot.className = \`dot \${node.enabled ? 'dot--ok' : 'dot--err'}\`;
-    const who = document.createElement('div');
-    who.className = 'who';
-    const modelsScope = (node.scope?.models || []).join(', ') || '*';
-    const provsScope = (node.scope?.providers || []).join(', ') || '*';
-    who.innerHTML = \`
-    <div class="name">
-      <span>\${escapeHtml(node.name || node.id)}</span>
-      <span class="pill pill--accent">\${escapeHtml(node.role)}</span>
-      \${!node.enabled ? '<span class="pill pill--red">已吊销</span>' : ''}
-    </div>
-    <div class="sub">模型: \${escapeHtml(modelsScope)} · 供应商: \${escapeHtml(provsScope)} · Token: \${escapeHtml(node.token_prefix)}</div>
-    \`;
-    const fields = document.createElement('div');
-    fields.className = 'fields';
-    fields.innerHTML = \`
-    <span class="pill">\${node.last_seen ? '活跃: ' + formatTime(node.last_seen) : '未激活'}</span>
-    <span class="caret">▾</span>
-    \`;
-    row.appendChild(dot);
-    row.appendChild(who);
-    row.appendChild(fields);
-    row.addEventListener('click', (ev) => {
-    if (ev.target.closest('button') || ev.target.closest('input')) return;
-    state.activeEditorKey = isExpanded ? null : \`node_\${node.id}\`;
-    renderNodesList();
-    });
-    container.appendChild(row);
-    if (isExpanded) {
-    const editor = document.createElement('div');
-    editor.className = 'editor';
-    editor.appendChild(buildNodeEditor(node));
-    container.appendChild(editor);
-    }
-  }
-  }
-  function buildNodeEditor(node) {
-  const wrap = document.createElement('div');
-  const isEnabled = node.enabled;
-  wrap.innerHTML = \`
-    <div class="form-grid">
-    <div class="form-group">
-      <label class="form-label">节点名称</label>
-      <input class="input" id="ed_node_name_\${node.id}" value="\${escapeHtml(node.name)}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">租约时长 (秒)</label>
-      <input class="input tabular" id="ed_node_ttl_\${node.id}" type="number" value="\${node.lease_ttl || 86400}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">允许供应商 (逗号分隔，* 为全量)</label>
-      <input class="input" id="ed_node_provs_\${node.id}" value="\${escapeHtml((node.scope?.providers || []).join(','))}">
-    </div>
-    <div class="form-group">
-      <label class="form-label">允许模型 (逗号分隔，* 为全量)</label>
-      <input class="input" id="ed_node_models_\${node.id}" value="\${escapeHtml((node.scope?.models || []).join(','))}">
-    </div>
-    </div>
-    <div class="form-actions">
-    <button class="btn btn--danger" id="btn_toggle_node_\${node.id}" type="button">\${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
-    <button class="btn" id="btn_rotate_node_\${node.id}" type="button">轮换 Token</button>
-    <button class="btn btn--danger" id="btn_del_node_\${node.id}" type="button">删除节点</button>
-    <button class="btn btn--primary" id="btn_save_node_\${node.id}" type="button">保存节点配置</button>
-    </div>
-    <div class="editor-section" id="node_token_display_box_\${node.id}" hidden>
-    <div class="form-grid form-grid--2">
-      <div class="form-group">
-      <label class="form-label">新生成的 NODE_TOKEN (仅展示一次，请立即复制)</label>
-      <input class="input input--code" readonly id="node_new_token_val_\${node.id}">
-      </div>
-      <div class="form-group">
-      <label class="form-label">一键启动环境变量</label>
-      <input class="input input--code" readonly id="node_new_env_val_\${node.id}">
-      </div>
-    </div>
-    </div>
-  \`;
-  wrap.querySelector(\`#btn_save_node_\${node.id}\`).addEventListener('click', async () => {
-    const name = wrap.querySelector(\`#ed_node_name_\${node.id}\`).value.trim();
-    const leaseTtl = Number(wrap.querySelector(\`#ed_node_ttl_\${node.id}\`).value) || 86400;
-    const provsStr = wrap.querySelector(\`#ed_node_provs_\${node.id}\`).value.trim();
-    const modelsStr = wrap.querySelector(\`#ed_node_models_\${node.id}\`).value.trim();
-    const scope = {
-    providers: provsStr ? provsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
-    models: modelsStr ? modelsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
-    };
-    try {
-    const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope });
-    if (res && res.ok) {
-      toast('节点配置更新成功', 'ok');
-      await loadNodesData();
-    } else {
-      toast(res.error || '更新失败', 'err');
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_toggle_node_\${node.id}\`).addEventListener('click', async () => {
-    try {
-    const res = await window.HOST.patchNode(node.id, { enabled: !isEnabled });
-    if (res && res.ok) {
-      toast(isEnabled ? '节点已吊销' : '节点已恢复', 'ok');
-      await loadNodesData();
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_rotate_node_\${node.id}\`).addEventListener('click', async () => {
-    if (!confirm('轮换 Token 会使旧 Token 立即失效，确定继续吗？')) return;
-    try {
-    const res = await window.HOST.rotateNode(node.id);
-    if (res && res.ok) {
-      toast('Token 轮换成功！', 'ok');
-      const box = wrap.querySelector(\`#node_token_display_box_\${node.id}\`);
-      box.hidden = false;
-      wrap.querySelector(\`#node_new_token_val_\${node.id}\`).value = res.node_token;
-      wrap.querySelector(\`#node_new_env_val_\${node.id}\`).value = res.bootstrap_env;
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  wrap.querySelector(\`#btn_del_node_\${node.id}\`).addEventListener('click', async () => {
-    if (!confirm(\`确认永久删除节点 \${node.name} 吗？\`)) return;
-    try {
-    const res = await window.HOST.deleteNode(node.id);
-    if (res && res.ok) {
-      toast('节点已删除', 'ok');
-      state.activeEditorKey = null;
-      await loadNodesData();
-    }
-    } catch (e) {
-    toast(e.message, 'err');
-    }
-  });
-  return wrap;
-  }
-  async function handleIssueNode() {
-  const name = document.getElementById('issueNodeName').value.trim();
-  const role = document.getElementById('issueNodeRole').value;
-  const leaseTtl = Number(document.getElementById('issueNodeTTL').value) || 86400;
-  if (!name) return toast('请输入节点名称', 'warn');
-  try {
-    const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl });
-    if (res && res.ok) {
-    toast('节点签发成功！', 'ok');
-    const tokenDisplay = document.getElementById('issuedTokenDisplay');
-    if (tokenDisplay) {
-      tokenDisplay.hidden = false;
-      document.getElementById('issuedTokenVal').value = res.node_token;
-      document.getElementById('issuedEnvVal').value = res.bootstrap_env;
-    }
-    await loadNodesData();
-    } else {
-    toast(res.error || '签发失败', 'err');
-    }
-  } catch (e) {
-    toast(e.message, 'err');
-  }
-  }
-  function renderModelsList() {
-  const container = document.getElementById('modelsList');
-  if (!container) return;
-  container.innerHTML = '';
-  const isAgent = (state.modelSubMode || 'agent') === 'agent';
-  const btnAddModel = document.getElementById('btnAddModel');
-  if (btnAddModel) {
-    btnAddModel.hidden = !isAgent;
-    btnAddModel.classList.toggle('hidden', !isAgent);
-  }
-  if (isAgent) {
-    renderAgentModels(container);
-  } else {
-    renderKBPipelines(container);
-  }
-  }
-  function renderAgentModels(container) {
-  const models = state.config?.agent_models || {};
-  const q = state.modelQuery || '';
-  const mKeys = Object.keys(models).sort().filter((mName) => {
-    if (!q) return true;
-    const m = models[mName] || {};
-    const cands = (m.candidates || []).map((c) => \`\${c.provider} \${c.target_model}\`).join(' ');
-    return \`\${mName} \${cands}\`.toLowerCase().includes(q);
-  });
-  if (mKeys.length === 0) {
-    const emptyRow = document.createElement('div');
-    emptyRow.className = 'row row--static text-muted';
-    emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
-    container.appendChild(emptyRow);
-    return;
-  }
-  for (const mName of mKeys) {
-    const m = models[mName] || {};
-    const cCount = (m.candidates || []).length;
-    const isExpanded = state.activeEditorKey === \`m_\${mName}\`;
-    const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
-    const row = document.createElement('div');
-    row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
-    const dot = document.createElement('span');
-    dot.className = \`dot \${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}\`;
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.innerHTML = \`
-    <div class="name">
-      \${brandIcon}
-      <span>\${escapeHtml(mName)}</span>
-      <span class="pill pill--accent">\${escapeHtml(m.routing_strategy || 'sticky_failover')}</span>
-      \${m._lastTestLatency ? \`<span class="pill pill--green">\${m._lastTestLatency}ms</span>\` : ''}
-    </div>
-    <div class="sub">首选 Key: \${escapeHtml(m.active_key || '未指定')} · 候选池: \${cCount} 个</div>
-    \`;
-    const fields = document.createElement('div');
-    fields.className = 'fields';
-    fields.innerHTML = \`
-    <button class="btn btn--sm btn_test_agent_m" data-model="\${escapeHtml(mName)}" type="button">测试路由</button>
-    <span class="pill">\${cCount} 候选</span>
-    <span class="caret">▾</span>
-    \`;
-    fields.querySelector('.btn_test_agent_m').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    toast(\`正在测试模型 \${mName} 路由...\`, 'info');
-    try {
-      const res = await window.HOST.testAgentModel({ model: mName });
-      if (res && res.ok) {
-      const lat = res.latency_ms || res.ms || 0;
-      m._lastTestLatency = lat;
-      toast(\`测试通过！耗时: \${lat}ms (优胜: \${res.winner_provider || '直连'})\`, 'ok');
-      renderAgentModels(container);
-      } else {
-      toast(\`测试失败: \${res?.error || '路由无响应'}\`, 'err');
-      }
-    } catch (err) {
-      toast(\`测试异常: \${err.message}\`, 'err');
-    }
-    });
-    row.appendChild(dot);
-    row.appendChild(who);
-    row.appendChild(fields);
-    row.addEventListener('click', (ev) => {
-    if (ev.target.closest('button') || ev.target.closest('input')) return;
-    state.activeEditorKey = isExpanded ? null : \`m_\${mName}\`;
-    renderModelsList();
-    });
-    container.appendChild(row);
-    if (isExpanded) {
-    const editor = document.createElement('div');
-    editor.className = 'editor';
-    editor.appendChild(buildModelEditor(mName, m));
-    container.appendChild(editor);
-    }
-  }
-  }
-  function buildModelEditor(mName, m) {
-  const wrap = document.createElement('div');
-  const candidates = m.candidates || [];
-  wrap.innerHTML = \`
-    <div class="form-grid form-grid--2">
-    <div class="form-group">
-      <label class="form-label">路由策略覆盖</label>
-      <select class="select" id="ed_m_strat_\${mName}">
-      <option value="sticky_failover" \${m.routing_strategy === 'sticky_failover' ? 'selected' : ''}>粘性故障转移 (推荐)</option>
-      <option value="round_robin" \${m.routing_strategy === 'round_robin' ? 'selected' : ''}>标准轮询 (Round Robin)</option>
-      <option value="manual" \${m.routing_strategy === 'manual' ? 'selected' : ''}>手动严格直通</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">首选粘性 Key (active_key)</label>
-      <input class="input" id="ed_m_act_\${mName}" value="\${escapeHtml(m.active_key || '')}" placeholder="格式: provider:key_label">
-    </div>
-    </div>
-    <div class="section-bar mt-4">
-    <span class="form-label">候选 Key 列表 (\${candidates.length})</span>
-    </div>
-    <div class="card">
-    <div class="table-wrap">
-      <table class="data-table">
-      <thead>
-        <tr>
-        <th>供应商</th>
-        <th>Key 标签</th>
-        <th>目标模型</th>
-        <th>权重</th>
-        <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="m_cands_tbody_\${mName}"></tbody>
-      </table>
-    </div>
-    </div>
-    <div class="form-grid mt-3">
-    <div class="form-group">
-      <input class="input" id="new_c_prov_\${mName}" placeholder="供应商 ID (如 minimax)">
-    </div>
-    <div class="form-group">
-      <input class="input" id="new_c_lbl_\${mName}" placeholder="Key 标签 (如 pool-01)">
-    </div>
-    <div class="form-group">
-      <input class="input" id="new_c_target_\${mName}" placeholder="上游真实模型 (留空同名)">
-    </div>
-    </div>
-    <div class="section-bar mt-2 flex-end">
-    <button class="btn btn--primary" id="btn_add_cand_\${mName}" type="button">添加候选</button>
-    </div>
-    <div class="form-actions">
-    <button class="btn btn--danger" id="btn_del_model_\${mName}" type="button">删除此模型</button>
-    <button class="btn btn--primary" id="btn_save_model_\${mName}" type="button">保存模型配置</button>
-    </div>
-  \`;
-  const tbody = wrap.querySelector(\`#m_cands_tbody_\${mName}\`);
-  candidates.forEach((c, idx) => {
-    const tr = document.createElement('tr');
-    const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
-    tr.innerHTML = \`
-    <td>\${brandIco}<strong>\${escapeHtml(c.provider)}</strong></td>
-    <td><span class="pill">\${escapeHtml(c.key_label)}</span></td>
-    <td><span class="tabular">\${escapeHtml(c.target_model || '原名')}</span></td>
-    <td><span class="tabular">\${c.weight || 1}</span></td>
-    <td>
-      <button class="btn btn--sm btn_del_cand" data-idx="\${idx}">移除</button>
-    </td>
-    \`;
-    tr.querySelector('.btn_del_cand').addEventListener('click', () => {
-    candidates.splice(idx, 1);
-    renderModelsList();
-    });
-    tbody.appendChild(tr);
-  });
-  wrap.querySelector(\`#btn_add_cand_\${mName}\`).addEventListener('click', () => {
-    const prov = wrap.querySelector(\`#new_c_prov_\${mName}\`).value.trim();
-    const lbl = wrap.querySelector(\`#new_c_lbl_\${mName}\`).value.trim();
-    const target = wrap.querySelector(\`#new_c_target_\${mName}\`).value.trim();
-    if (!prov || !lbl) return toast('请填写供应商和 Key 标签', 'warn');
-    candidates.push({
-    provider: prov,
-    key_label: lbl,
-    target_model: target || '',
-    enabled: true,
-    weight: 1,
-    });
-    renderModelsList();
-  });
-  wrap.querySelector(\`#btn_save_model_\${mName}\`).addEventListener('click', async () => {
-    m.routing_strategy = wrap.querySelector(\`#ed_m_strat_\${mName}\`).value;
-    m.active_key = wrap.querySelector(\`#ed_m_act_\${mName}\`).value.trim();
-    await persistConfig('模型配置保存成功');
-  });
-  wrap.querySelector(\`#btn_del_model_\${mName}\`).addEventListener('click', async () => {
-    if (!confirm(\`确定删除模型 \${mName} 吗？\`)) return;
-    delete state.config.agent_models[mName];
-    state.activeEditorKey = null;
-    await persistConfig('模型已删除');
-  });
-  return wrap;
-  }
-  function renderKBPipelines(container) {
-  const pipelines = [
-    { id: 'chat', name: '对话流水线', path: '/v1/chat/completions', desc: 'RAG 生成对话专用高并发通道' },
-    { id: 'embedding', name: '向量嵌入流水线', path: '/v1/embeddings', desc: '文档分块高吞吐向量化' },
-    { id: 'reranker', name: '重排流水线', path: '/v1/rerank', desc: '多候选语义重排打分' },
-    { id: 'ocr', name: '图文解析流水线', path: '/v1/ocr', desc: '文档图像多模态 OCR 提取' },
-  ];
-  state.config.kb_models = state.config.kb_models || {};
-  pipelines.forEach((pl) => {
-    const cands = state.config.kb_models[pl.id] || [];
-    const isExpanded = state.activeEditorKey === \`kb_\${pl.id}\`;
-    const row = document.createElement('div');
-    row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
-    const dot = document.createElement('span');
-    dot.className = \`dot \${cands.length > 0 ? 'dot--ok' : 'dot--warn'}\`;
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.innerHTML = \`
-    <div class="name">
-      <span>\${pl.path}</span>
-      <span class="pill pill--accent">\${pl.name}</span>
-      <span class="pill">\${cands.length} 候选实例</span>
-    </div>
-    <div class="sub">\${pl.desc}</div>
-    \`;
-    const fields = document.createElement('div');
-    fields.className = 'fields';
-    fields.innerHTML = \`
-    <span class="caret">▾</span>
-    \`;
-    row.appendChild(dot);
-    row.appendChild(who);
-    row.appendChild(fields);
-    row.addEventListener('click', (ev) => {
-    if (ev.target.closest('button') || ev.target.closest('input')) return;
-    state.activeEditorKey = isExpanded ? null : \`kb_\${pl.id}\`;
-    renderModelsList();
-    });
-    container.appendChild(row);
-    if (isExpanded) {
-    const editor = document.createElement('div');
-    editor.className = 'editor';
-    editor.appendChild(buildKBPipelineEditor(pl.id, pl, cands));
-    container.appendChild(editor);
-    }
-  });
-  }
-  function buildKBPipelineEditor(cat, pl, cands) {
-  const wrap = document.createElement('div');
-  wrap.innerHTML = \`
-    <div class="section-bar">
-    <span class="form-label">\${pl.name} (\${pl.path}) 候选池列表</span>
-    </div>
-    <div class="card">
-    <div class="table-wrap">
-      <table class="data-table">
-      <thead>
-        <tr>
-        <th>启用</th>
-        <th>供应商</th>
-        <th>Key 标签</th>
-        <th>目标模型 ID</th>
-        <th>并发限制</th>
-        <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="kb_cands_tbody_\${cat}"></tbody>
-      </table>
-    </div>
-    </div>
-    <div class="form-grid mt-3">
-    <div class="form-group">
-      <input class="input" id="new_kb_prov_\${cat}" placeholder="供应商 ID">
-    </div>
-    <div class="form-group">
-      <input class="input" id="new_kb_key_\${cat}" placeholder="Key 标签">
-    </div>
-    <div class="form-group">
-      <input class="input" id="new_kb_model_\${cat}" placeholder="上游真实模型 ID">
-    </div>
-    <div class="form-group">
-      <input class="input tabular" id="new_kb_conc_\${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
-    </div>
-    <div class="form-group flex-end">
-      <button class="btn btn--primary" id="btn_add_kb_cand_\${cat}" type="button">添加候选</button>
-    </div>
-    </div>
-    <div class="form-actions">
-    <button class="btn btn--primary" id="btn_save_kb_\${cat}" type="button">保存流水线配置</button>
-    </div>
-  \`;
-  const tbody = wrap.querySelector(\`#kb_cands_tbody_\${cat}\`);
-  cands.forEach((c, idx) => {
-    const tr = document.createElement('tr');
-    const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
-    tr.innerHTML = \`
-    <td><input type="checkbox" class="kb_c_en" data-idx="\${idx}" \${c.enabled !== false ? 'checked' : ''}></td>
-    <td>\${brandIco}<strong>\${escapeHtml(c.provider)}</strong></td>
-    <td><span class="pill">\${escapeHtml(c.key_label || c.key)}</span></td>
-    <td><span class="tabular">\${escapeHtml(c.model)}</span></td>
-    <td><span class="tabular">\${c.max_concurrency || c.max_conc || 4}</span></td>
-    <td>
-      <button class="btn btn--sm btn_test_kb_cand" data-idx="\${idx}" type="button">测试管道</button>
-      <button class="btn btn--sm btn--danger btn_del_kb_cand" data-idx="\${idx}" type="button">移除</button>
-    </td>
-    \`;
-    tr.querySelector('.kb_c_en').addEventListener('change', (e) => {
-    c.enabled = e.target.checked;
-    });
-    tr.querySelector('.btn_test_kb_cand').addEventListener('click', async () => {
-    toast(\`正在烟雾测试 [\${cat}] 候选 \${c.provider}/\${c.model}...\`, 'info');
-    try {
-      const res = await window.HOST.testCandidate({
-      provider: c.provider,
-      key_label: c.key_label || c.key,
-      model: c.model,
-      type: cat,
-      });
-      if (res && res.ok) {
-      toast(\`管道测试通过！延迟: \${res.latency_ms || res.ms || 0}ms\`, 'ok');
-      } else {
-      toast(\`测试失败: \${res?.error || '无响应'}\`, 'err');
-      }
-    } catch (e) {
-      toast(\`测试异常: \${e.message}\`, 'err');
-    }
-    });
-    tr.querySelector('.btn_del_kb_cand').addEventListener('click', () => {
-    cands.splice(idx, 1);
-    renderModelsList();
-    });
-    tbody.appendChild(tr);
-  });
-  wrap.querySelector(\`#btn_add_kb_cand_\${cat}\`).addEventListener('click', () => {
-    const prov = wrap.querySelector(\`#new_kb_prov_\${cat}\`).value.trim();
-    const kLbl = wrap.querySelector(\`#new_kb_key_\${cat}\`).value.trim();
-    const mdl = wrap.querySelector(\`#new_kb_model_\${cat}\`).value.trim();
-    const conc = Number(wrap.querySelector(\`#new_kb_conc_\${cat}\`).value) || 4;
-    if (!prov || !mdl) return toast('请填写供应商与模型 ID', 'warn');
-    cands.push({
-    provider: prov,
-    key_label: kLbl,
-    model: mdl,
-    max_concurrency: conc,
-    enabled: true,
-    });
-    state.config.kb_models[cat] = cands;
-    renderModelsList();
-  });
-  wrap.querySelector(\`#btn_save_kb_\${cat}\`).addEventListener('click', async () => {
-    state.config.kb_models[cat] = cands;
-    await persistConfig('知识库流水线配置保存成功');
-  });
-  return wrap;
-  }
-  function renderTracesList() {
-  const container = document.getElementById('tracesList');
-  if (!container) return;
-  container.innerHTML = '';
-  const traces = state.traces || [];
-  const filtered = state.filterOnlyRetried
-    ? traces.filter((t) => t.status >= 400 || (t.tries && t.tries.length > 1) || (t.retried_ms || 0) > 0)
-    : traces;
-  if (filtered.length === 0) {
-    const emptyRow = document.createElement('div');
-    emptyRow.className = 'row text-muted';
-    emptyRow.textContent = '暂无符合条件的请求轨迹';
-    container.appendChild(emptyRow);
-    return;
-  }
-  for (const t of filtered) {
-    const isExpanded = state.activeEditorKey === \`tr_\${t.id}\`;
-    const triesCount = (t.tries || []).length;
-    const isOk = t.status >= 200 && t.status < 300;
-    const hasRetries = triesCount > 1 || (t.retried_ms || 0) > 0;
-    const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(t.winner_provider || t.req_model) : '';
-    const row = document.createElement('div');
-    row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
-    const dot = document.createElement('span');
-    dot.className = \`dot \${!isOk ? 'dot--err' : hasRetries ? 'dot--warn' : 'dot--ok'}\`;
-    const who = document.createElement('div');
-    who.className = 'who';
-    who.innerHTML = \`
-    <div class="name">
-      \${brandIcon}
-      <span>\${formatTime(t.ts)}</span>
-      <span class="tabular">\${escapeHtml(t.req_model)}</span>
-      <span class="text-muted">→</span>
-      <span class="pill">\${escapeHtml(t.winner_provider || 'none')}</span>
-      \${hasRetries ? \`<span class="pill pill--amber">\${triesCount}次尝试</span>\` : ''}
-    </div>
-    <div class="sub">\${escapeHtml(t.endpoint)} · \${t.total_ms || 0}ms (TTFT \${t.ttft_ms || 0}ms)</div>
-    \`;
-    const fields = document.createElement('div');
-    fields.className = 'fields';
-    fields.innerHTML = \`
-    <span class="pill \${isOk ? 'pill--green' : 'pill--red'}">HTTP \${t.status}</span>
-    <span class="caret">▾</span>
-    \`;
-    row.appendChild(dot);
-    row.appendChild(who);
-    row.appendChild(fields);
-    row.addEventListener('click', () => {
-    state.activeEditorKey = isExpanded ? null : \`tr_\${t.id}\`;
-    renderTracesList();
-    });
-    container.appendChild(row);
-    if (isExpanded) {
-    const editor = document.createElement('div');
-    editor.className = 'editor';
-    editor.appendChild(window.USAGE.buildTraceWaterfall(t));
-    container.appendChild(editor);
-    }
-  }
-  }
-  function renderSettingsView() {
-  const s = state.config?.settings || {};
-  const isFull = window.HOST.capabilities.runModes;
-  const setVal = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.value = val !== undefined ? val : '';
-  };
-  setVal('cfgRoutingStrategy', s.agent_routing_strategy || 'sticky_failover');
-  setVal('cfgFirstByteTimeout', s.agent_first_byte_timeout_sec || 120);
-  setVal('cfgCooldown429', s.cooldown_rate_limit_sec || 15);
-  setVal('cfgCooldown5xx', s.cooldown_server_error_sec || 30);
-  setVal('cfgCooldownNet', s.cooldown_network_error_sec || 15);
-  setVal('cfgCooldownAuth', s.cooldown_auth_error_sec || 86400);
-  const gwBox = document.getElementById('gatewayAccessCenter');
-  const modeBox = document.getElementById('modeScheduleBox');
-  const backupBox = document.getElementById('configBackupBox');
-  if (gwBox) gwBox.hidden = !isFull;
-  if (modeBox) modeBox.hidden = !isFull;
-  if (backupBox) backupBox.hidden = false;
-  if (isFull) {
-    const baseOrigin = location.origin || 'http://127.0.0.1:3425';
-    const localBase = \`\${baseOrigin}/v1\`;
-    const clientKey = s.client_key || s.proxy_api_key || 'sk-proxy-key';
-    const gwBaseUrl = document.getElementById('gwBaseUrl');
-    if (gwBaseUrl) gwBaseUrl.value = localBase;
-    const gwClientKey = document.getElementById('gwClientKey');
-    if (gwClientKey) gwClientKey.value = clientKey;
-    const snippetClaude = document.getElementById('snippetClaude');
-    if (snippetClaude) snippetClaude.textContent = \`export ANTHROPIC_BASE_URL="\${localBase}" ANTHROPIC_API_KEY="\${clientKey}"\`;
-    const snippetCursor = document.getElementById('snippetCursor');
-    if (snippetCursor) snippetCursor.textContent = \`OPENAI_BASE_URL="\${localBase}" OPENAI_API_KEY="\${clientKey}"\`;
-    const btnGen = document.getElementById('btnGenClientKey');
-    if (btnGen) {
-    btnGen.onclick = () => {
-      const rand = \`sk-proxy-\${Math.random().toString(36).slice(2, 10)}\${Math.random().toString(36).slice(2, 10)}\`;
-      if (gwClientKey) gwClientKey.value = rand;
-      if (snippetClaude) snippetClaude.textContent = \`export ANTHROPIC_BASE_URL="\${localBase}" ANTHROPIC_API_KEY="\${rand}"\`;
-      if (snippetCursor) snippetCursor.textContent = \`OPENAI_BASE_URL="\${localBase}" OPENAI_API_KEY="\${rand}"\`;
-    };
-    }
-    const btnSaveKey = document.getElementById('btnSaveClientKey');
-    if (btnSaveKey) {
-    btnSaveKey.onclick = async () => {
-      const k = (gwClientKey?.value || '').trim();
-      s.client_key = k;
-      s.proxy_api_key = k;
-      await window.HOST.updateAccessKey({ client_key: k });
-      await persistConfig('客户端鉴权密钥更新成功');
-    };
-    }
-    const btnCopyClaude = document.getElementById('btnCopyClaudeSnippet');
-    if (btnCopyClaude) {
-    btnCopyClaude.onclick = () => {
-      navigator.clipboard.writeText(snippetClaude?.textContent || '');
-      toast('已复制 Claude Code 配置', 'ok');
-    };
-    }
-    const btnCopyCursor = document.getElementById('btnCopyCursorSnippet');
-    if (btnCopyCursor) {
-    btnCopyCursor.onclick = () => {
-      navigator.clipboard.writeText(snippetCursor?.textContent || '');
-      toast('已复制 Cursor 配置', 'ok');
-    };
-    }
-    const schedEnabled = document.getElementById('cfgModeSchedEnabled');
-    if (schedEnabled) schedEnabled.checked = !!s.mode_schedule_enabled;
-    setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
-    setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
-    setVal('cfgModeSchedWebhook', s.mode_schedule_webhook_url || '');
-    setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
-    setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
-    const btnClearCd = document.getElementById('btnClearAllCooldowns');
-    if (btnClearCd) {
-    btnClearCd.onclick = async () => {
-      if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
-      try {
-      const res = await window.HOST.clearCooldowns();
-      if (res && res.ok) toast('已清除所有冷却状态', 'ok');
-      } catch (e) {
-      toast(e.message, 'err');
-      }
-    };
-    }
-  }
-  if (window.HOST.capabilities.vaultClient) {
-    const v = state.config?.vault || {};
-    setVal('cfgVaultUrl', v.url || '');
-    setVal('cfgVaultToken', v.node_token || '');
-  }
-  const btnSave = document.getElementById('btnSaveSettings');
-  if (btnSave) {
-    btnSave.onclick = async () => {
-    s.agent_routing_strategy = document.getElementById('cfgRoutingStrategy').value;
-    s.agent_first_byte_timeout_sec = Number(document.getElementById('cfgFirstByteTimeout').value) || 120;
-    s.cooldown_rate_limit_sec = Number(document.getElementById('cfgCooldown429').value) || 15;
-    s.cooldown_server_error_sec = Number(document.getElementById('cfgCooldown5xx').value) || 30;
-    s.cooldown_network_error_sec = Number(document.getElementById('cfgCooldownNet').value) || 15;
-    s.cooldown_auth_error_sec = Number(document.getElementById('cfgCooldownAuth').value) || 86400;
-    if (isFull) {
-      s.mode_schedule_enabled = !!document.getElementById('cfgModeSchedEnabled')?.checked;
-      s.mode_schedule_agent_window = document.getElementById('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
-      s.mode_schedule_timezone = document.getElementById('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
-      s.mode_schedule_webhook_url = document.getElementById('cfgModeSchedWebhook')?.value.trim() || '';
-      s.ocr_max_inflight = Number(document.getElementById('cfgOcrInflight')?.value) || 4;
-      s.kb_global_max_concurrency = Number(document.getElementById('cfgKbConcurrency')?.value) || 16;
-    }
-    if (window.HOST.capabilities.vaultClient) {
-      const vUrl = document.getElementById('cfgVaultUrl')?.value.trim();
-      const vToken = document.getElementById('cfgVaultToken')?.value.trim();
-      if (vUrl || vToken) {
-      state.config.vault = {
-        url: vUrl || '',
-        node_token: vToken || '',
-      };
-      }
-    }
-    await persistConfig('设置保存成功');
-    };
-  }
-  }
-  async function persistConfig(successMsg) {
-  try {
-    const res = await window.HOST.saveConfig(state.config);
-    const data = res?.data || res || {};
-    const isConflict = res?.status === 409 ||
-    data?.error === 'config_version_conflict' ||
-    res?.error === 'config_version_conflict' ||
-    data?.code === 'cas_version_conflict' ||
-    data?.error?.code === 'cas_version_conflict' ||
-    (typeof data?.error === 'string' && data.error.includes('conflict'));
-    if (isConflict) {
-    toast('配置版本冲突 (CAS)：其他会话已修改配置，已自动加载最新版本', 'warn');
-    await loadData();
-    return;
-    }
-    if (res?.status === 200 || data?.ok || data?._version !== undefined) {
-    if (data.config) {
-      state.config = data.config;
-      if (data._version) state.config._version = data._version;
-    } else if (data._version !== undefined || data.providers) {
-      state.config = data;
-    }
-    const ver = state.config?._version || data._version;
-    const verEl = document.getElementById('configVersionDisplay');
-    if (verEl && ver) verEl.textContent = \`v\${ver}\`;
-    toast(successMsg || '保存成功', 'ok');
-    renderProvidersList();
-    renderModelsList();
-    renderSettingsView();
-    } else {
-    const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
-    toast(errMsg, 'err');
-    }
-  } catch (e) {
-    toast(\`保存异常: \${e.message}\`, 'err');
-  }
-  }
-  function formatTime(isoOrSec) {
-  if (!isoOrSec) return '';
-  const d = typeof isoOrSec === 'number' ? new Date(isoOrSec * 1000) : new Date(isoOrSec);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-  window.addEventListener('DOMContentLoaded', init);
+const state = {
+config: null,
+nodes: [],
+usage: null,
+traces: [],
+lanes: {},
+cooldowns: {},
+activeTab: 'activity',
+activeEditorKey: null,
+modelSubMode: 'agent',
+providerQuery: '',
+providerFilter: 'all',
+modelQuery: '',
+filterOnlyRetried: false,
+currentPeriod: 'today',
+lanesTimer: null,
+batchVerifying: false,
+};
+function toast(msg, type = 'info') {
+const box = document.getElementById('toastBox');
+if (!box) return;
+const el = document.createElement('div');
+el.className = 'toast';
+const dot = document.createElement('span');
+dot.className = \`dot dot--\${type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'ok'}\`;
+const txt = document.createElement('span');
+txt.textContent = msg;
+el.appendChild(dot);
+el.appendChild(txt);
+box.appendChild(el);
+setTimeout(() => el.remove(), 3200);
+}
+function escapeHtml(str) {
+if (!str) return '';
+return String(str)
+.replace(/&/g, '&amp;')
+.replace(/</g, '&lt;')
+.replace(/>/g, '&gt;')
+.replace(/"/g, '&quot;');
+}
+function setupStaticIcons() {
+const setIcon = (id, name) => {
+const el = document.getElementById(id);
+if (el && window.uiIcon) el.innerHTML = window.uiIcon(name);
+};
+setIcon('brandMark', 'server');
+setIcon('loginBrandMark', 'server');
+setIcon('logoutBtn', 'logout');
+setIcon('providerSearchIcon', 'search');
+setIcon('modelSearchIcon', 'search');
+}
+async function init() {
+setupStaticIcons();
+setupLoginScreen();
+setupCapabilities();
+setupTheme();
+setupPrivacyMask();
+setupKeyboardShortcuts();
+setupNavigation();
+setupCreationForms();
+setupToolbars();
+setupConfigBackup();
+if (window.HOST.getToken()) {
+await loadData();
+}
+startLanesPolling();
+}
+function setupLoginScreen() {
+const loginForm = document.getElementById('loginForm');
+const pwdInput = document.getElementById('loginPassword');
+const errEl = document.getElementById('loginError');
+const badge = document.getElementById('loginHostBadge');
+if (badge) {
+badge.textContent = window.HOST.kind === 'hub' ? 'Hub' : 'Full';
+}
+if (loginForm) {
+loginForm.addEventListener('submit', async (e) => {
+e.preventDefault();
+const pwd = (pwdInput?.value || '').trim();
+if (!pwd) {
+if (errEl) {
+errEl.textContent = '请输入管理员密码';
+errEl.hidden = false;
+errEl.classList.remove('hidden');
+}
+return;
+}
+const res = await window.HOST.login(pwd);
+if (res.ok) {
+toast('登录成功', 'ok');
+if (errEl) {
+errEl.hidden = true;
+errEl.classList.add('hidden');
+}
+await loadData();
+} else {
+if (errEl) {
+errEl.textContent = res.error || '密码验证失败，请重试';
+errEl.hidden = false;
+errEl.classList.remove('hidden');
+}
+}
+});
+}
+if (!window.HOST.getToken()) {
+window.HOST.showLogin();
+}
+}
+function setupCapabilities() {
+const caps = window.HOST.capabilities;
+const isHub = window.HOST.kind === 'hub';
+const brandRole = document.getElementById('brandRole');
+if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
+const navModels = document.getElementById('navModels');
+const navNodes = document.getElementById('navNodes');
+const navActivity = document.getElementById('navActivity');
+const topVersionBox = document.getElementById('topVersionBox');
+const modeSwitchBox = document.getElementById('modeSwitchBox');
+const vaultSyncBar = document.getElementById('vaultSyncBar');
+const cfgVaultLinkBox = document.getElementById('cfgVaultLinkBox');
+const hubOverviewBox = document.getElementById('hubOverviewBox');
+const fullOverviewBox = document.getElementById('fullOverviewBox');
+const btnClearAllCooldowns = document.getElementById('btnClearAllCooldowns');
+if (navModels) navModels.hidden = false;
+if (navNodes) navNodes.hidden = !caps.nodeManager;
+if (navActivity) navActivity.hidden = false;
+if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
+if (modeSwitchBox) modeSwitchBox.hidden = !caps.runModes;
+if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
+if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
+if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
+if (fullOverviewBox) fullOverviewBox.hidden = isHub;
+if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.runModes;
+state.activeTab = 'activity';
+switchTab(state.activeTab);
+}
+function setupTheme() {
+const btn = document.getElementById('themeToggleBtn');
+if (!btn) return;
+const saved = localStorage.getItem('llmproxy_theme') || 'auto';
+applyTheme(saved);
+btn.addEventListener('click', () => {
+const cur = document.documentElement.getAttribute('data-theme') || 'auto';
+const next = cur === 'dark' ? 'light' : cur === 'light' ? 'auto' : 'dark';
+applyTheme(next);
+localStorage.setItem('llmproxy_theme', next);
+});
+}
+function applyTheme(theme) {
+const btn = document.getElementById('themeToggleBtn');
+if (theme === 'dark') {
+document.documentElement.setAttribute('data-theme', 'dark');
+if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('moon');
+} else if (theme === 'light') {
+document.documentElement.setAttribute('data-theme', 'light');
+if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('sun');
+} else {
+document.documentElement.removeAttribute('data-theme');
+if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('monitor');
+}
+}
+function setupPrivacyMask() {
+const btn = document.getElementById('btnPrivacyMask');
+if (!btn) return;
+const isMasked = localStorage.getItem('llmproxy_privacy_mask') === '1';
+if (isMasked) {
+document.body.classList.add('privacy-masked');
+}
+if (window.uiIcon) {
+btn.innerHTML = window.uiIcon(isMasked ? 'eyeOff' : 'eye');
+}
+btn.addEventListener('click', () => {
+const active = document.body.classList.toggle('privacy-masked');
+localStorage.setItem('llmproxy_privacy_mask', active ? '1' : '0');
+if (window.uiIcon) {
+btn.innerHTML = window.uiIcon(active ? 'eyeOff' : 'eye');
+}
+toast(active ? '隐私遮罩已开启' : '隐私遮罩已关闭', 'info');
+});
+}
+function setupKeyboardShortcuts() {
+document.addEventListener('keydown', (e) => {
+if (e.key === 'Escape') {
+const pForm = document.getElementById('addProviderForm');
+const mForm = document.getElementById('addModelForm');
+const nForm = document.getElementById('issueNodeForm');
+let closedSomething = false;
+if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
+if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
+if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
+if (state.activeEditorKey) {
+state.activeEditorKey = null;
+closedSomething = true;
+if (state.activeTab === 'providers') renderProvidersList();
+else if (state.activeTab === 'models') renderModelsList();
+else if (state.activeTab === 'nodes') renderNodesList();
+else if (state.activeTab === 'activity') renderTracesList();
+}
+if (closedSomething) toast('已取消操作并关闭编辑器', 'info');
+} else if (e.key === '/') {
+const targetTag = (e.target.tagName || '').toLowerCase();
+if (targetTag !== 'input' && targetTag !== 'textarea' && targetTag !== 'select') {
+const firstInput = document.querySelector(\`section:not([hidden]) input:not([readonly])\`);
+if (firstInput) {
+e.preventDefault();
+firstInput.focus();
+}
+}
+}
+});
+}
+function startLanesPolling() {
+if (!window.HOST.capabilities.runModes) return;
+if (state.lanesTimer) clearInterval(state.lanesTimer);
+const poll = async () => {
+if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
+if (state.activeTab !== 'providers' && state.activeTab !== 'models') return;
+try {
+const [lanesRes, cdRes] = await Promise.all([
+window.HOST.getLanes(),
+window.HOST.getCooldowns(),
+]);
+if (lanesRes && lanesRes.ok) {
+state.lanes = lanesRes.lane_map || {};
+}
+if (cdRes) {
+state.cooldowns = cdRes;
+}
+} catch (_) {}
+};
+state.lanesTimer = setInterval(poll, 3000);
+}
+function setupNavigation() {
+const seg = document.getElementById('navSeg');
+if (!seg) return;
+seg.querySelectorAll('.seg-btn').forEach((btn) => {
+btn.addEventListener('click', () => {
+const tab = btn.getAttribute('data-tab');
+if (tab) switchTab(tab);
+});
+});
+document.addEventListener('click', async (e) => {
+const target = e.target instanceof Element ? e.target.closest('button[id^="btn_detect_ed_"]') : null;
+if (!target) return;
+const pId = target.id.slice('btn_detect_ed_'.length);
+if (!pId || target.disabled) return;
+target.disabled = true;
+try {
+const baseEl = document.getElementById(\`ed_p_base_\${pId}\`);
+const res = await window.HOST.detectProvider({
+provider: pId,
+base_url: baseEl ? baseEl.value.trim() : '',
+});
+if (res && res.ok) {
+const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
+toast(\`协议探测成功\${protocols ? \`: \${protocols}\` : ''}\`, 'ok');
+if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
+} else {
+toast(\`协议探测失败: \${(res && res.error) || '未知错误'}\`, 'err');
+}
+} catch (err) {
+toast(\`协议探测失败: \${err.message}\`, 'err');
+} finally {
+target.disabled = false;
+}
+});
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+logoutBtn.addEventListener('click', () => {
+window.HOST.setToken('');
+window.HOST.showLogin();
+});
+}
+const modeBtnAgent = document.getElementById('modeBtnAgent');
+const modeBtnKB = document.getElementById('modeBtnKB');
+if (modeBtnAgent && modeBtnKB) {
+modeBtnAgent.addEventListener('click', () => switchRunMode('agent'));
+modeBtnKB.addEventListener('click', () => switchRunMode('kb'));
+}
+const btnIssueNode = document.getElementById('btnIssueNode');
+if (btnIssueNode) {
+btnIssueNode.addEventListener('click', () => {
+const form = document.getElementById('issueNodeForm');
+if (form) form.hidden = !form.hidden;
+});
+}
+const btnDoIssue = document.getElementById('btnDoIssue');
+if (btnDoIssue) {
+btnDoIssue.addEventListener('click', handleIssueNode);
+}
+const btnSyncManifest = document.getElementById('btnSyncManifest');
+if (btnSyncManifest) {
+btnSyncManifest.addEventListener('click', handleSyncManifest);
+}
+const btnSyncKeys = document.getElementById('btnSyncKeys');
+if (btnSyncKeys) {
+btnSyncKeys.addEventListener('click', handleSyncFromVault);
+}
+const periodSeg = document.getElementById('activityPeriodSeg');
+if (periodSeg) {
+periodSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const p = btn.getAttribute('data-period');
+if (!p || p === state.currentPeriod) return;
+state.currentPeriod = p;
+periodSeg.querySelectorAll('.seg-btn').forEach((b) => {
+if (b.getAttribute('data-period') === p) b.classList.add('active');
+else b.classList.remove('active');
+});
+await loadActivityData();
+});
+});
+}
+const dimSeg = document.getElementById('usageDimensionSeg');
+if (dimSeg) {
+dimSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+btn.addEventListener('click', () => {
+const dim = btn.getAttribute('data-dim');
+if (!dim) return;
+window.USAGE.state.subTab = dim;
+dimSeg.querySelectorAll('.seg-btn').forEach((b) => {
+if (b.getAttribute('data-dim') === dim) b.classList.add('active');
+else b.classList.remove('active');
+});
+if (state.usage) window.USAGE.renderBreakdown(state.usage);
+});
+});
+}
+const btnClearTraces = document.getElementById('btnClearTraces');
+if (btnClearTraces) {
+btnClearTraces.addEventListener('click', async () => {
+if (!confirm('确定清空所有请求轨迹与监控日志吗？')) return;
+try {
+const res = await window.HOST.clearTraces();
+if (res && res.ok) {
+toast('轨迹已清空', 'ok');
+await loadActivityData();
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+}
+const btnFilterRetried = document.getElementById('btnFilterRetried');
+if (btnFilterRetried) {
+btnFilterRetried.addEventListener('click', () => {
+state.filterOnlyRetried = !state.filterOnlyRetried;
+btnFilterRetried.classList.toggle('active', state.filterOnlyRetried);
+renderTracesList();
+});
+}
+}
+const PRESETS_META = {
+openai: ['openai', 'OpenAI (官方)', 'https://api.openai.com/v1', 'openai-completions'],
+anthropic: ['anthropic', 'Anthropic (官方)', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+gemini: ['gemini', 'Google Gemini (OpenAI兼容)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
+deepseek: ['deepseek', 'DeepSeek (官方)', 'https://api.deepseek.com/v1', 'openai-completions'],
+openrouter: ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
+groq: ['groq', 'Groq Cloud', 'https://api.groq.com/openai/v1', 'openai-completions'],
+xai: ['xai', 'xAI', 'https://api.x.ai/v1', 'openai-completions'],
+'minimax-global': ['minimax', 'MiniMax (Global)', 'https://api.minimaxi.chat/v1', 'openai-completions'],
+'minimax-cn': ['minimax', 'MiniMax (国内)', 'https://api.minimax.chat/v1', 'openai-completions'],
+'kimi-cn': ['kimi', 'Kimi / Moonshot (国内)', 'https://api.moonshot.cn/v1', 'openai-completions'],
+'kimi-global': ['kimi', 'Kimi / Moonshot (Global)', 'https://api.moonshot.ai/v1', 'openai-completions'],
+zhipu: ['zhipu', '智谱 BigModel (PayG)', 'https://open.bigmodel.cn/api/paas/v4', 'openai-completions'],
+'zhipu-coding': ['zhipu', '智谱 Coding', 'https://open.bigmodel.cn/api/coding/paas/v4', 'openai-completions'],
+volcengine: ['volcengine', '火山方舟 Ark (PayG)', 'https://ark.cn-beijing.volces.com/api/v3', 'openai-completions'],
+'volcengine-coding': ['volcengine', '火山方舟 Coding', 'https://ark.cn-beijing.volces.com/api/coding/v3', 'openai-completions'],
+'stepfun-cn': ['stepfun', '阶跃星辰 Stepfun (国内)', 'https://api.stepfun.com/v1', 'openai-completions'],
+'stepfun-global': ['stepfun', '阶跃星辰 Stepfun (Global)', 'https://api.stepfun.ai/v1', 'openai-completions'],
+alibaba: ['alibaba', '阿里百炼 / DashScope (国内)', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
+'alibaba-intl': ['alibaba', '阿里百炼 / DashScope (国际)', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
+siliconflow: ['siliconflow', 'SiliconFlow (硅基流动)', 'https://api.siliconflow.cn/v1', 'openai-completions'],
+ollama: ['ollama', 'Ollama (本地)', 'http://localhost:11434/v1', 'openai-completions'],
+};
+function parseCurl(text) {
+let s = String(text || '').trim();
+const head = /^curl(?:\\.exe)?(?=\\s)/i.exec(s);
+if (!head) return null;
+s = s.slice(head[0].length).replace(/(?:\\\\|\\^|\`)[ \\t]*\\r?\\n/g, ' ');
+const words = [];
+let w = null;
+for (let i = 0; i < s.length;) {
+const c = s[i];
+if (/\\s/.test(c)) { if (w !== null) words.push(w); w = null; i++; continue; }
+w ??= '';
+if (c === "'") {
+let j = i + 1;
+const k = s.indexOf("'", j);
+if (k < 0) { w += s.slice(j); break; }
+w += s.slice(j, k);
+i = k + 1;
+} else if (c === '"') {
+for (i++; i < s.length && s[i] !== '"'; i++) {
+if (s[i] === '\\\\' && i + 1 < s.length) i++;
+w += s[i] ?? '';
+}
+i++;
+} else {
+w += c;
+i++;
+}
+}
+if (w !== null) words.push(w);
+let url = '';
+const headers = [];
+let body = '';
+for (let i = 0; i < words.length; i++) {
+const x = words[i];
+let opt = x, val = null;
+if (/^-[Hd]/.test(x)) { opt = x.slice(0, 2); val = x.slice(2); }
+else if (/^(-H|--header|-d|--data|--data-raw|--json|--url)$/.test(x)) val = words[++i] ?? '';
+else if (x.startsWith('-')) continue;
+else { if (!url) url = x; continue; }
+if (opt === '-H' || opt === '--header') headers.push(val);
+else if (opt === '--url') url = val;
+else if (/^(-d|--data(-raw)?|--json)$/.test(opt)) body = val;
+}
+let key = '';
+for (const h of headers) {
+const m = /^\\s*(authorization|x-api-key|x-goog-api-key|api-key)\\s*:\\s*(.*?)\\s*$/i.exec(h);
+if (m) {
+const val = m[1].toLowerCase() === 'authorization' ? m[2].replace(/^bearer\\s+/i, '') : m[2];
+if (val && !/^\\$|^<.*>|your[_-]?key/i.test(val)) {
+key = val.trim();
+break;
+}
+}
+}
+let protocol = 'openai-completions';
+let base = url;
+if (/\\/messages\\b/i.test(url)) {
+protocol = 'anthropic-messages';
+base = url.replace(/\\/messages.*$/i, '');
+} else if (/\\/chat\\/completions\\b/i.test(url)) {
+protocol = 'openai-completions';
+base = url.replace(/\\/chat\\/completions.*$/i, '');
+} else if (/\\/v1beta\\b/i.test(url) || /generativelanguage/i.test(url)) {
+protocol = 'gemini';
+}
+let model = '';
+try {
+const parsedBody = JSON.parse(body.replace(/\\\\"/g, '"'));
+if (typeof parsedBody?.model === 'string') model = parsedBody.model.trim();
+} catch (_) {}
+return { url, base, protocol, key, model };
+}
+function populatePresetDropdown() {
+const sel = document.getElementById('newProvPreset');
+if (!sel) return;
+sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
+for (const [key, meta] of Object.entries(PRESETS_META)) {
+const opt = document.createElement('option');
+opt.value = key;
+opt.textContent = meta[1];
+sel.appendChild(opt);
+}
+}
+function setupToolbars() {
+const provSearch = document.getElementById('providerSearchInput');
+if (provSearch) {
+provSearch.addEventListener('input', (e) => {
+state.providerQuery = (e.target.value || '').trim().toLowerCase();
+renderProvidersList();
+});
+}
+const provFilter = document.getElementById('providerFilterSeg');
+if (provFilter) {
+provFilter.querySelectorAll('.seg-btn').forEach((btn) => {
+btn.addEventListener('click', () => {
+const f = btn.getAttribute('data-filter') || 'all';
+state.providerFilter = f;
+provFilter.querySelectorAll('.seg-btn').forEach((b) => {
+b.classList.toggle('active', b.getAttribute('data-filter') === f);
+});
+renderProvidersList();
+});
+});
+}
+const modelSearch = document.getElementById('modelSearchInput');
+if (modelSearch) {
+modelSearch.addEventListener('input', (e) => {
+state.modelQuery = (e.target.value || '').trim().toLowerCase();
+renderModelsList();
+});
+}
+const modelSubSeg = document.getElementById('modelPipelineSeg');
+if (modelSubSeg) {
+modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+btn.addEventListener('click', () => {
+const m = btn.getAttribute('data-submode') || 'agent';
+state.modelSubMode = m;
+modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
+b.classList.toggle('active', b.getAttribute('data-submode') === m);
+});
+renderModelsList();
+});
+});
+}
+document.getElementById('btnHubRefreshOverview')?.addEventListener('click', loadData);
+document.getElementById('btnHubBatchVerifyAll')?.addEventListener('click', verifyAllHubKeys);
+document.getElementById('btnGoProvidersFromHub')?.addEventListener('click', () => switchTab('providers'));
+document.getElementById('btnGoNodesFromHub')?.addEventListener('click', () => switchTab('nodes'));
+}
+function setupConfigBackup() {
+document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
+try {
+const res = await window.HOST.exportConfig();
+const blob = await res.blob();
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = \`llmproxy_config_\${Date.now()}.json\`;
+a.click();
+URL.revokeObjectURL(url);
+toast('配置已导出下载', 'ok');
+} catch (e) {
+toast(\`导出失败: \${e.message}\`, 'err');
+}
+});
+const importInput = document.getElementById('importConfigFile');
+document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
+importInput?.click();
+});
+if (importInput) {
+importInput.addEventListener('change', async (e) => {
+const file = e.target.files?.[0];
+if (!file) return;
+const reader = new FileReader();
+reader.onload = async () => {
+try {
+const parsed = JSON.parse(reader.result);
+const mode = document.getElementById('importConfigMode')?.value || 'merge';
+const res = await window.HOST.importConfig({ mode, config: parsed });
+if (res && (res.ok || res._version !== undefined)) {
+toast('配置恢复导入成功', 'ok');
+await loadData();
+} else {
+toast(res?.error || '导入失败', 'err');
+}
+} catch (err) {
+toast(\`解析配置失败: \${err.message}\`, 'err');
+} finally {
+importInput.value = '';
+}
+};
+reader.readAsText(file);
+});
+}
+}
+function setupCreationForms() {
+populatePresetDropdown();
+const pForm = document.getElementById('addProviderForm');
+const mForm = document.getElementById('addModelForm');
+const toggle = (el, show) => {
+if (!el) return;
+el.hidden = show !== undefined ? !show : !el.hidden;
+el.classList.toggle('hidden', el.hidden);
+};
+document.getElementById('btnAddProvider')?.addEventListener('click', () => toggle(pForm));
+document.getElementById('btnCancelAddProvider')?.addEventListener('click', () => toggle(pForm, false));
+const btnToggleCurl = document.getElementById('btnToggleCurlPaste');
+const curlWrap = document.getElementById('curlPasteWrap');
+const curlInput = document.getElementById('curlPasteInput');
+if (btnToggleCurl && curlInput) {
+btnToggleCurl.addEventListener('click', () => {
+const target = curlWrap || curlInput;
+target.hidden = !target.hidden;
+target.classList.toggle('hidden', target.hidden);
+if (!target.hidden) curlInput.focus();
+});
+curlInput.addEventListener('input', () => {
+const parsed = parseCurl(curlInput.value);
+if (parsed) {
+if (parsed.base) document.getElementById('newProvBaseUrl').value = parsed.base;
+if (parsed.key) document.getElementById('newProvApiKey').value = parsed.key;
+if (parsed.protocol) document.getElementById('newProvApiType').value = parsed.protocol;
+if (parsed.model) {
+const mId = document.getElementById('newProvId');
+if (mId && !mId.value) mId.value = parsed.model.split('/')[0].split('-')[0];
+}
+toast('已从 cURL 自动解析填充 Base URL 与密钥！', 'ok');
+}
+});
+}
+const btnDetect = document.getElementById('btnDetectProvider');
+if (btnDetect) {
+btnDetect.addEventListener('click', async () => {
+const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
+const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+if (!baseUrl) return toast('请先输入 Base URL', 'warn');
+toast('正在探测上游支持协议与延迟...', 'info');
+try {
+const res = await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
+if (res && res.ok) {
+toast(\`探测成功！已发现协议支持 (延迟: \${res.latency_ms || 0}ms)\`, 'ok');
+if (res.base_url) document.getElementById('newProvBaseUrl').value = res.base_url;
+if (res.protocol) document.getElementById('newProvApiType').value = res.protocol;
+} else {
+const probe = await window.HOST.probeModels({ base_url: baseUrl, api_key: apiKey });
+if (probe && (probe.ok || probe.count)) {
+toast(\`探测成功: 发现 \${probe.count || probe.models?.length || 0} 个可用模型\`, 'ok');
+} else {
+toast(\`协议探测完成: Base URL 有效\`, 'info');
+}
+}
+} catch (e) {
+toast(\`探测完成: \${e.message}\`, 'info');
+}
+});
+}
+document.getElementById('newProvPreset')?.addEventListener('change', (e) => {
+const m = PRESETS_META[e.target.value];
+if (m) {
+document.getElementById('newProvId').value = m[0];
+document.getElementById('newProvName').value = m[1];
+document.getElementById('newProvBaseUrl').value = m[2];
+document.getElementById('newProvApiType').value = m[3];
+}
+});
+document.getElementById('btnConfirmAddProvider')?.addEventListener('click', async () => {
+const id = (document.getElementById('newProvId')?.value || '').trim();
+const name = (document.getElementById('newProvName')?.value || '').trim() || id;
+const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
+const apiType = document.getElementById('newProvApiType')?.value || 'openai-completions';
+const keyAlias = (document.getElementById('newProvKeyAlias')?.value || '').trim() || 'k1';
+const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+if (!id) return toast('请输入供应商标识 ID', 'warn');
+if (!baseUrl) return toast('请输入 Base URL', 'warn');
+state.config = state.config || { providers: {}, agent_models: {} };
+state.config.providers = state.config.providers || {};
+if (state.config.providers[id]) return toast(\`供应商 \${id} 已存在\`, 'warn');
+const api_keys = apiKey ? [{ id: keyAlias, label: keyAlias, key: apiKey, enabled: true, origin: 'local' }] : [];
+state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: 'local', api_keys };
+state.activeEditorKey = \`p_\${id}\`;
+toggle(pForm, false);
+await persistConfig('供应商创建成功');
+});
+document.getElementById('btnAddModel')?.addEventListener('click', () => {
+toggle(mForm);
+if (mForm && !mForm.hidden) populateModelProvidersDropdown();
+});
+document.getElementById('btnCancelAddModel')?.addEventListener('click', () => toggle(mForm, false));
+document.getElementById('btnConfirmAddModel')?.addEventListener('click', async () => {
+const mName = (document.getElementById('newModelName')?.value || '').trim();
+const prov = (document.getElementById('newModelProvider')?.value || '').trim();
+const target = (document.getElementById('newModelTarget')?.value || '').trim() || mName;
+if (!mName) return toast('请输入逻辑模型名称', 'warn');
+state.config = state.config || { providers: {}, agent_models: {} };
+state.config.agent_models = state.config.agent_models || {};
+const firstKey = state.config?.providers?.[prov]?.api_keys?.[0];
+const keyLabel = firstKey?.label || firstKey?.id || 'k1';
+const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
+state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
+state.activeEditorKey = \`m_\${mName}\`;
+toggle(mForm, false);
+await persistConfig('模型添加成功');
+});
+}
+function populateModelProvidersDropdown() {
+const sel = document.getElementById('newModelProvider');
+if (!sel) return;
+sel.innerHTML = '';
+const provs = Object.keys(state.config?.providers || {}).sort();
+if (provs.length === 0) {
+sel.innerHTML = '<option value="">(暂无供应商)</option>';
+} else {
+provs.forEach((pId) => {
+const pName = state.config.providers[pId]?.name || pId;
+const opt = document.createElement('option');
+opt.value = pId;
+opt.textContent = \`\${pName} (\${pId})\`;
+sel.appendChild(opt);
+});
+}
+}
+function switchTab(tab) {
+state.activeTab = tab;
+state.activeEditorKey = null;
+document.querySelectorAll('.seg-btn').forEach((b) => {
+if (b.getAttribute('data-tab') === tab) {
+b.classList.add('active');
+} else {
+b.classList.remove('active');
+}
+});
+const views = {
+models: document.getElementById('viewModels'),
+providers: document.getElementById('viewProviders'),
+nodes: document.getElementById('viewNodes'),
+activity: document.getElementById('viewActivity'),
+settings: document.getElementById('viewSettings'),
+};
+for (const [k, v] of Object.entries(views)) {
+if (v) v.hidden = k !== tab;
+}
+if (tab === 'activity') {
+if (window.HOST.kind === 'hub') {
+renderHubOverview();
+} else if (window.HOST.capabilities.usageAndTraces) {
+loadActivityData();
+}
+}
+}
+async function switchRunMode(mode) {
+if (!window.HOST.capabilities.runModes) return;
+try {
+const res = await window.HOST.switchMode(mode);
+if (res && res.ok) {
+toast(\`已切换至 \${mode === 'agent' ? 'Agent 模式' : 'KB 知识库模式'}\`, 'ok');
+if (state.config && state.config.settings) {
+state.config.settings.run_mode = mode;
+}
+state.modelSubMode = mode;
+updateRunModeUI(mode);
+renderModelsList();
+} else {
+toast(res.error || '切换模式失败', 'err');
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+}
+function updateRunModeUI(mode) {
+const isAgent = mode === 'agent';
+const btnAgent = document.getElementById('modeBtnAgent');
+const btnKB = document.getElementById('modeBtnKB');
+if (btnAgent && btnKB) {
+btnAgent.classList.toggle('active', isAgent);
+btnKB.classList.toggle('active', !isAgent);
+}
+const modelSubSeg = document.getElementById('modelPipelineSeg');
+if (modelSubSeg) {
+modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
+b.classList.toggle('active', b.getAttribute('data-submode') === mode);
+});
+}
+}
+async function loadData() {
+try {
+const cfgResp = await window.HOST.getConfig();
+if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
+state.config = cfgResp;
+const verEl = document.getElementById('configVersionDisplay');
+if (verEl) verEl.textContent = \`v\${cfgResp._version || 1}\`;
+if (state.config.settings && state.config.settings.run_mode) {
+state.modelSubMode = state.config.settings.run_mode;
+updateRunModeUI(state.config.settings.run_mode);
+}
+renderProvidersList();
+renderModelsList();
+renderSettingsView();
+}
+if (window.HOST.capabilities.nodeManager) {
+await loadNodesData();
+}
+if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+renderHubOverview();
+} else if (window.HOST.capabilities.usageAndTraces && state.activeTab === 'activity') {
+await loadActivityData();
+}
+} catch (e) {
+toast(\`数据加载失败: \${e.message}\`, 'err');
+}
+}
+async function loadNodesData() {
+try {
+const res = await window.HOST.getNodes();
+if (res && res.ok) {
+state.nodes = res.nodes || [];
+renderNodesList();
+if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+renderHubOverview();
+}
+}
+} catch (e) {
+toast(\`节点加载失败: \${e.message}\`, 'err');
+}
+}
+function renderHubOverview() {
+const kpiGrid = document.getElementById('hubKpiGrid');
+const provBody = document.getElementById('hubProviderStatsBody');
+const nodeBody = document.getElementById('hubNodeStatsBody');
+const summarySub = document.getElementById('hubHealthSummarySub');
+if (!kpiGrid || !provBody || !nodeBody) return;
+const cfg = state.config || {};
+const providers = cfg.providers || {};
+const provEntries = Object.entries(providers).sort(([a], [b]) => a.localeCompare(b));
+const agentModels = cfg.agent_models || {};
+const kbModels = cfg.kb_models || {};
+const nodes = state.nodes || [];
+let enabledProvs = 0;
+let totalKeys = 0;
+let enabledKeys = 0;
+let okKeys = 0;
+let failKeys = 0;
+let untestedKeys = 0;
+for (const [, p] of provEntries) {
+if (p.enabled !== false) enabledProvs++;
+const keys = p.api_keys || [];
+for (const k of keys) {
+totalKeys++;
+if (k.enabled !== false) enabledKeys++;
+if (k.last_ok === true) okKeys++;
+else if (k.last_ok === false) failKeys++;
+else untestedKeys++;
+}
+}
+const agentModelCount = Object.keys(agentModels).length;
+let agentCandCount = 0;
+for (const m of Object.values(agentModels)) {
+agentCandCount += (m?.candidates || []).length;
+}
+let kbCandCount = 0;
+for (const list of Object.values(kbModels)) {
+if (Array.isArray(list)) kbCandCount += list.length;
+}
+let activeNodes = 0;
+let totalSyncs = 0;
+let total304 = 0;
+for (const n of nodes) {
+if (n.enabled) activeNodes++;
+totalSyncs += Number(n.sync_count || 0);
+total304 += Number(n.hit_304_count || 0);
+}
+const testedCount = okKeys + failKeys;
+const healthRate = testedCount > 0 ? \`\${Math.round((okKeys / testedCount) * 100)}%\` : '-';
+const kpis = [
+{ label: '纳管供应商', value: String(provEntries.length), sub: \`\${enabledProvs} 个已启用\` },
+{ label: 'API 密钥总量', value: String(totalKeys), sub: \`\${enabledKeys} 把已启用\` },
+{ label: '密钥探活健康度', value: healthRate, sub: \`正常 \${okKeys} · 异常 \${failKeys} · 未测 \${untestedKeys}\` },
+{ label: 'Agent 路由模型', value: String(agentModelCount), sub: \`\${agentCandCount} 个上游候选\` },
+{ label: '知识库流水线', value: String(kbCandCount), sub: '4 条 KB 并发通道' },
+{ label: '注册中转节点', value: String(nodes.length), sub: \`\${activeNodes} 个在线启用\` },
+{ label: '节点同步 / 304', value: String(totalSyncs), sub: \`304 缓存命中 \${total304} 次\` },
+{ label: '当前配置版本', value: \`v\${cfg._version || 1}\`, sub: 'EdgeOne KV CAS' },
+];
+kpiGrid.innerHTML = kpis.map((item) => \`
+<div class="kpi-card">
+<span class="kpi-label">\${escapeHtml(item.label)}</span>
+<span class="kpi-value">\${escapeHtml(item.value)}</span>
+<span class="kpi-sub">\${escapeHtml(item.sub)}</span>
+</div>
+\`).join('');
+if (summarySub) {
+summarySub.textContent = \`共 \${provEntries.length} 个供应商、\${totalKeys} 把密钥（已探活正常 \${okKeys}，异常 \${failKeys}，未测 \${untestedKeys}）\`;
+}
+if (provEntries.length === 0) {
+provBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无供应商配置，点击右上角「管理供应商」添加或导入</td></tr>';
+} else {
+provBody.innerHTML = '';
+for (const [pId, p] of provEntries) {
+const keys = p.api_keys || [];
+const pTotal = keys.length;
+const pEnabled = keys.filter((k) => k.enabled !== false).length;
+const pOk = keys.filter((k) => k.last_ok === true).length;
+const pFail = keys.filter((k) => k.last_ok === false).length;
+const pLat = keys.reduce((acc, k) => (k.last_latency_ms ? Math.min(acc, k.last_latency_ms) : acc), Infinity);
+const latText = Number.isFinite(pLat) ? \`\${pLat}ms\` : '-';
+const pct = pTotal > 0 ? Math.round(((pOk > 0 ? pOk : (pFail > 0 ? 0 : pEnabled)) / pTotal) * 100) : 0;
+const barCls = pFail > 0 && pOk === 0 ? 'health-fill--err' : pOk > 0 ? 'health-fill--ok' : 'health-fill--warn';
+const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+const tr = document.createElement('tr');
+tr.innerHTML = \`
+<td>
+<div class="name">\${icoHtml}<span>\${escapeHtml(p.name || pId)}</span><span class="pill">\${escapeHtml(pId)}</span></div>
+</td>
+<td><span class="pill">\${escapeHtml(p.api_type || 'openai')}</span></td>
+<td class="tabular">\${pEnabled} / \${pTotal}</td>
+<td>
+<div class="health-bar">
+<svg viewBox="0 0 100 6" width="72" height="6">
+<rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" opacity="0.12"></rect>
+<rect x="0" y="0" width="\${pct}" height="6" rx="3" class="health-fill \${barCls}"></rect>
+</svg>
+<span class="text-xs text-muted">\${pOk}正常 / \${pFail}异常</span>
+</div>
+</td>
+<td class="tabular">\${latText}</td>
+<td>
+<button class="btn btn--sm btn-hub-verify-prov" data-pid="\${escapeHtml(pId)}" type="button">探活</button>
+</td>
+\`;
+tr.querySelector('.btn-hub-verify-prov').addEventListener('click', () => verifyProviderKeys(pId));
+provBody.appendChild(tr);
+}
+}
+if (nodes.length === 0) {
+nodeBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无中转节点，可在「中转节点」页签签发 NODE_TOKEN</td></tr>';
+} else {
+nodeBody.innerHTML = nodes.map((n) => \`
+<tr>
+<td><strong>\${escapeHtml(n.name || n.id)}</strong></td>
+<td><span class="pill pill--accent">\${escapeHtml(n.role || 'full')}</span></td>
+<td><span class="pill \${n.enabled ? 'pill--green' : 'pill--red'}">\${n.enabled ? '在线启用' : '已吊销'}</span></td>
+<td class="tabular">\${escapeHtml(n.last_ip || '-')}</td>
+<td class="tabular">\${n.sync_count || 0} / \${n.hit_304_count || 0}</td>
+<td class="tabular">\${n.last_seen ? formatTime(n.last_seen) : '未激活'}</td>
+</tr>
+\`).join('');
+}
+}
+async function verifyProviderKeys(pId) {
+const p = state.config?.providers?.[pId];
+if (!p) return;
+const keys = p.api_keys || [];
+if (keys.length === 0) return toast(\`\${p.name || pId} 暂无密钥可探活\`, 'warn');
+toast(\`正在探活 \${p.name || pId} (\${keys.length} 把密钥)...\`, 'info');
+let okCount = 0;
+for (let i = 0; i < keys.length; i++) {
+const k = keys[i];
+const lbl = k.label || k.id || \`key-\${i}\`;
+try {
+const r = await window.HOST.verifyKey({
+provider: pId,
+api_key: k.key,
+key: k.key,
+key_label: lbl,
+base_url: p.base_url || '',
+api_type: p.api_type || 'openai-completions',
+});
+k.last_ok = !!(r && (r.ok || r.valid));
+k.last_status = r?.status || (k.last_ok ? 200 : 0);
+k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
+k.last_checked_at = new Date().toISOString();
+if (k.last_ok) okCount++;
+} catch (_) {
+k.last_ok = false;
+}
+}
+toast(\`\${p.name || pId} 探活完成: \${okCount}/\${keys.length} 正常\`, okCount === keys.length ? 'ok' : 'warn');
+if (window.HOST.kind === 'hub') renderHubOverview();
+renderProvidersList();
+}
+async function verifyAllHubKeys() {
+if (state.batchVerifying) return;
+const providers = state.config?.providers || {};
+const pIds = Object.keys(providers).sort();
+if (pIds.length === 0) return toast('暂无供应商可探活', 'warn');
+const btn = document.getElementById('btnHubBatchVerifyAll');
+state.batchVerifying = true;
+if (btn) btn.disabled = true;
+let total = 0;
+let ok = 0;
+try {
+toast(\`开始批量探活 \${pIds.length} 个供应商密钥池...\`, 'info');
+for (const pId of pIds) {
+const p = providers[pId];
+const keys = (p?.api_keys || []).filter((k) => k.enabled !== false);
+for (let i = 0; i < keys.length; i++) {
+const k = keys[i];
+total++;
+const lbl = k.label || k.id || \`key-\${i}\`;
+try {
+const r = await window.HOST.verifyKey({
+provider: pId,
+api_key: k.key,
+key: k.key,
+key_label: lbl,
+base_url: p.base_url || '',
+api_type: p.api_type || 'openai-completions',
+});
+k.last_ok = !!(r && (r.ok || r.valid));
+k.last_status = r?.status || (k.last_ok ? 200 : 0);
+k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
+k.last_checked_at = new Date().toISOString();
+if (k.last_ok) ok++;
+} catch (_) {
+k.last_ok = false;
+}
+}
+renderHubOverview();
+}
+toast(\`全部密钥探活完成: \${ok}/\${total} 正常\`, ok === total ? 'ok' : 'warn');
+} finally {
+state.batchVerifying = false;
+if (btn) btn.disabled = false;
+renderProvidersList();
+}
+}
+async function loadActivityData() {
+try {
+const [usageRes, tracesRes] = await Promise.all([
+window.HOST.getUsage(state.currentPeriod),
+window.HOST.getTraces(),
+]);
+if (usageRes && usageRes.ok) {
+state.usage = usageRes;
+window.USAGE.renderKPIs(usageRes);
+window.USAGE.renderStackedBarChart(usageRes);
+window.USAGE.renderHeatmap(usageRes);
+window.USAGE.renderBreakdown(usageRes);
+}
+if (tracesRes && tracesRes.ok) {
+state.traces = tracesRes.traces || [];
+renderTracesList();
+}
+} catch (e) {
+toast(\`统计加载失败: \${e.message}\`, 'err');
+}
+}
+async function handleSyncManifest() {
+let hubUrl = state.config?.vault?.url || '';
+let nodeToken = state.config?.vault?.node_token || '';
+if (!hubUrl) {
+const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
+if (!inputUrl) return;
+hubUrl = inputUrl.trim();
+const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
+nodeToken = inputToken.trim();
+state.config.vault = { url: hubUrl, node_token: nodeToken };
+}
+toast('正在连接中枢拉取清单...', 'info');
+try {
+const apiFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
+const res = await apiFn(hubUrl, nodeToken);
+if (res && (res.ok || res.providers)) {
+const provs = res.providers || {};
+const pKeys = Object.keys(provs);
+state.config.providers = state.config.providers || {};
+for (const [pId, pData] of Object.entries(provs)) {
+if (!state.config.providers[pId]) {
+state.config.providers[pId] = {
+id: pId,
+name: pData.name || pId,
+base_url: pData.base_url || '',
+anthropic_base_url: pData.anthropic_base_url || '',
+preset_id: pData.preset_id || '',
+origin: 'vault',
+enabled: true,
+api_keys: (pData.keys || []).map((lbl) => ({
+id: \`k_\${lbl}\`,
+label: lbl,
+key: '••••••••',
+origin: 'vault',
+enabled: true,
+})),
+};
+} else {
+const ep = state.config.providers[pId];
+ep.origin = 'vault';
+if (pData.base_url) ep.base_url = pData.base_url;
+if (pData.preset_id) ep.preset_id = pData.preset_id;
+if (pData.anthropic_base_url) ep.anthropic_base_url = pData.anthropic_base_url;
+}
+}
+renderProvidersList();
+toast(\`成功拉取中枢清单: 共 \${pKeys.length} 个供应商可同步\`, 'ok');
+} else {
+toast(\`拉取清单失败: \${res?.error || '无法连接中枢'}\`, 'err');
+}
+} catch (e) {
+toast(\`中枢连接异常: \${e.message}\`, 'err');
+}
+}
+async function handleSyncFromVault() {
+let hubUrl = state.config?.vault?.url || '';
+let nodeToken = state.config?.vault?.node_token || '';
+if (!hubUrl) {
+const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
+if (!inputUrl) return;
+hubUrl = inputUrl.trim();
+const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
+nodeToken = inputToken.trim();
+state.config.vault = { url: hubUrl, node_token: nodeToken };
+}
+toast('正在连接 Vault 中枢同步密钥...', 'info');
+try {
+const manifestFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
+const manifestRes = await manifestFn(hubUrl, nodeToken);
+if (!manifestRes || (!manifestRes.ok && !manifestRes.providers)) {
+toast(\`拉取 Vault 清单失败: \${manifestRes?.error || '请求未成功'}\`, 'err');
+return;
+}
+const provs = manifestRes.providers || {};
+const pKeys = Object.keys(provs);
+if (pKeys.length === 0) {
+toast('Vault 中枢暂无可同步的共享供应商', 'warn');
+return;
+}
+state.config.providers = state.config.providers || {};
+let totalSyncedKeys = 0;
+const credFn = window.HOST.api?.fetchVaultCredentials || window.HOST.fetchVaultCredentials;
+for (const pId of pKeys) {
+try {
+const credRes = await credFn(pId, undefined, hubUrl, nodeToken);
+if (credRes && (credRes.ok || credRes.provider_config)) {
+const pCfg = credRes.provider_config || {};
+if (!state.config.providers[pId]) {
+state.config.providers[pId] = {
+id: pId,
+name: pCfg.name || provs[pId].name || pId,
+base_url: pCfg.base_url || provs[pId].base_url || '',
+anthropic_base_url: pCfg.anthropic_base_url || '',
+preset_id: pCfg.preset_id || provs[pId].preset_id || '',
+origin: 'vault',
+enabled: true,
+api_keys: [],
+};
+}
+const p = state.config.providers[pId];
+p.origin = 'vault';
+if (pCfg.base_url) p.base_url = pCfg.base_url;
+if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
+if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
+if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
+p.api_keys = p.api_keys || [];
+const keyMap = pCfg.keys || {};
+for (const [lbl, secret] of Object.entries(keyMap)) {
+const existing = p.api_keys.find((k) => k.label === lbl || k.id === lbl);
+if (existing) {
+existing.key = secret;
+existing.origin = 'vault';
+existing.enabled = true;
+} else {
+p.api_keys.push({
+id: \`k_\${lbl}\`,
+label: lbl,
+key: secret,
+origin: 'vault',
+enabled: true,
+});
+}
+totalSyncedKeys++;
+}
+}
+} catch (err) {
+console.warn(\`Fetch credentials for \${pId} failed:\`, err);
+}
+}
+await persistConfig(\`从 Vault 同步成功: 更新了 \${totalSyncedKeys} 把密钥\`);
+} catch (e) {
+toast(\`Vault 同步异常: \${e.message}\`, 'err');
+}
+}
+function renderProvidersList() {
+const container = document.getElementById('providersList');
+if (!container) return;
+container.innerHTML = '';
+const providers = (state.config && state.config.providers) || {};
+const q = state.providerQuery || '';
+const f = state.providerFilter || 'all';
+const pKeys = Object.keys(providers).sort().filter((pId) => {
+const p = providers[pId] || {};
+const keys = p.api_keys || [];
+if (q) {
+const hay = \`\${pId} \${p.name || ''} \${p.base_url || ''} \${p.preset_id || ''}\`.toLowerCase();
+if (!hay.includes(q)) return false;
+}
+if (f === 'enabled') return p.enabled !== false && keys.length > 0;
+if (f === 'healthy') return keys.some((k) => k.last_ok === true);
+if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
+return true;
+});
+if (pKeys.length === 0) {
+const emptyRow = document.createElement('div');
+emptyRow.className = 'row row--static text-muted';
+emptyRow.textContent = q || f !== 'all' ? '没有符合筛选条件的供应商' : '暂无已配置供应商，请点击上方「添加供应商」';
+container.appendChild(emptyRow);
+return;
+}
+for (const pId of pKeys) {
+const p = providers[pId] || {};
+const keys = p.api_keys || [];
+const keyCount = keys.length;
+const okCount = keys.filter((k) => k.last_ok === true).length;
+const failCount = keys.filter((k) => k.last_ok === false).length;
+const isLocal = p.origin === 'local';
+const isExpanded = state.activeEditorKey === \`p_\${pId}\`;
+const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+let busyCount = 0;
+let waitCount = 0;
+if (state.lanes) {
+for (const [laneKey, laneVal] of Object.entries(state.lanes)) {
+if (laneKey.startsWith(pId + ':') || laneKey === pId) {
+busyCount += laneVal.Busy || 0;
+waitCount += laneVal.Waiting || 0;
+}
+}
+}
+const row = document.createElement('div');
+row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
+const dot = document.createElement('span');
+const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCount === 0)
+? 'dot--err'
+: okCount > 0
+? 'dot--ok'
+: 'dot--warn';
+dot.className = \`dot \${dotCls}\`;
+const who = document.createElement('div');
+who.className = 'who';
+who.innerHTML = \`
+<div class="name">
+\${brandIcon}
+<span>\${escapeHtml(p.name || pId)}</span>
+<span class="pill">\${escapeHtml(pId)}</span>
+\${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
+\${okCount > 0 ? \`<span class="pill pill--green">\${okCount}/\${keyCount} 正常</span>\` : ''}
+\${failCount > 0 ? \`<span class="pill pill--red">\${failCount} 异常</span>\` : ''}
+\${busyCount > 0 ? \`<span class="pill pill--accent">运行中: \${busyCount}\${waitCount ? \` (排队:\${waitCount})\` : ''}</span>\` : ''}
+\${p._balance ? \`<span class="pill pill--green">\${escapeHtml(p._balance)}</span>\` : ''}
+</div>
+<div class="sub">\${escapeHtml(p.base_url || '未配置 Base URL')}</div>
+\`;
+const fields = document.createElement('div');
+fields.className = 'fields';
+fields.innerHTML = \`
+<span class="pill tabular">\${keyCount} 把 Key</span>
+<span class="caret">▾</span>
+\`;
+row.appendChild(dot);
+row.appendChild(who);
+row.appendChild(fields);
+row.addEventListener('click', (ev) => {
+if (ev.target.closest('button') || ev.target.closest('input')) return;
+state.activeEditorKey = isExpanded ? null : \`p_\${pId}\`;
+renderProvidersList();
+});
+container.appendChild(row);
+if (isExpanded) {
+const editor = document.createElement('div');
+editor.className = 'editor';
+editor.appendChild(buildProviderEditor(pId, p));
+container.appendChild(editor);
+}
+}
+}
+function buildProviderEditor(pId, p) {
+const wrap = document.createElement('div');
+const keys = p.api_keys || [];
+wrap.innerHTML = \`
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">供应商标识 / 名称</label>
+<input class="input" id="ed_p_name_\${pId}" value="\${escapeHtml(p.name || pId)}">
+</div>
+<div class="form-group">
+<div class="form-label">
+<span>Base URL (OpenAI 协议)</span>
+<button class="btn btn--sm" id="btn_detect_ed_\${pId}" type="button">自动探测协议</button>
+</div>
+<input class="input input--code" id="ed_p_base_\${pId}" value="\${escapeHtml(p.base_url || '')}">
+</div>
+<div class="form-group">
+<label class="form-label">Anthropic Base URL (可选)</label>
+<input class="input input--code" id="ed_p_ant_\${pId}" value="\${escapeHtml(p.anthropic_base_url || '')}">
+</div>
+<div class="form-group">
+<label class="form-label">预设规则绑定</label>
+<input class="input input--code" id="ed_p_preset_\${pId}" value="\${escapeHtml(p.preset_id || '')}" placeholder="如 minimax, deepseek">
+</div>
+</div>
+<!-- Advanced Settings Toggle -->
+<details class="headers-details mt-3">
+<summary class="form-label">高级配置 (配额刷新、余额查询与自动纳管)</summary>
+<div class="form-grid mt-2">
+<div class="form-group">
+<label class="form-label">每日重置时间 (quota_reset_at)</label>
+<input class="input" id="ed_p_reset_\${pId}" value="\${escapeHtml(p.quota_reset_at || '00:00+08:00')}">
+</div>
+<div class="form-group">
+<label class="form-label">单 Key RPM 限制 (rpm_per_key)</label>
+<input class="input" id="ed_p_rpm_\${pId}" type="number" value="\${p.rpm_per_key || ''}" placeholder="不限">
+</div>
+<div class="form-group">
+<label class="form-label">自定义余额查询 URL (balance_url)</label>
+<input class="input input--code" id="ed_p_bal_url_\${pId}" value="\${escapeHtml(p.balance_url || '')}" placeholder="https://api.../user/balance">
+</div>
+<div class="form-group">
+<label class="form-label">余额提取 JSONPath (balance_path)</label>
+<input class="input input--code" id="ed_p_bal_path_\${pId}" value="\${escapeHtml(p.balance_path || '')}" placeholder="$.balance">
+</div>
+</div>
+<div class="section-bar mt-2 flex-end">
+<button class="btn btn--sm" id="btn_autolist_sync_\${pId}" type="button">立即刷新并纳管模型</button>
+</div>
+</details>
+<div class="section-bar mt-4">
+<span class="form-label">API 密钥池 (\${keys.length})</span>
+<div class="fields">
+<button class="btn btn--sm" id="btn_batch_test_keys_\${pId}" type="button">一键测全部 Key</button>
+<button class="btn btn--sm btn--primary" id="btn_oauth_start_\${pId}" type="button" \${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
+</div>
+</div>
+<!-- OAuth inline prompt box -->
+<div class="snippet-box hidden mb-3" id="oauth_box_\${pId}" hidden>
+<div class="snippet-header">
+<span class="form-label">MiniMax OAuth 设备授权码:</span>
+<span class="pill pill--amber" id="oauth_status_\${pId}">等待扫码...</span>
+</div>
+<div class="text-sm mt-1">
+请点击访问：<a id="oauth_link_\${pId}" href="#" target="_blank" class="tabular"></a>
+并在页面中输入验证码：<strong class="tabular" id="oauth_code_\${pId}"></strong>
+</div>
+</div>
+<!-- Per-Key Table -->
+<div class="card">
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>启用</th>
+<th>标签</th>
+<th>Key 密文</th>
+<th>归属</th>
+<th>状态</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody id="p_keys_tbody_\${pId}"></tbody>
+</table>
+</div>
+</div>
+<div class="form-grid mt-3">
+<div class="form-group">
+<input class="input" id="new_key_lbl_\${pId}" placeholder="Key 标签 (如 pool-01)">
+</div>
+<div class="form-group">
+<input class="input input--code privacy-mask" id="new_key_val_\${pId}" placeholder="粘贴完整 API Key">
+</div>
+<div class="form-group flex-end">
+<button class="btn btn--primary" id="btn_add_key_\${pId}" type="button">添加 Key</button>
+</div>
+</div>
+<!-- Model Probing & Pills Area -->
+<div class="section-bar mt-4">
+<span class="form-label">模型探测与一键纳管</span>
+<div class="fields">
+<button class="btn btn--sm" id="btn_check_balance_\${pId}" type="button">查询余额</button>
+<button class="btn btn--sm btn--primary" id="btn_probe_prov_\${pId}" type="button">探测模型</button>
+</div>
+</div>
+<div id="probe_pills_container_\${pId}" class="hidden" hidden>
+<div class="section-bar mt-1">
+<input class="input input--code flex-1 mr-2" id="probe_pills_filter_\${pId}" placeholder="过滤探测到的模型...">
+<span class="text-muted text-xs" id="probe_pills_count_\${pId}"></span>
+</div>
+<div class="probe-pills-wrap" id="probe_pills_list_\${pId}"></div>
+</div>
+<div class="form-actions">
+<button class="btn btn--danger" id="btn_del_prov_\${pId}" type="button">删除此供应商</button>
+<button class="btn btn--primary" id="btn_save_prov_\${pId}" type="button">保存供应商配置</button>
+</div>
+\`;
+const tbody = wrap.querySelector(\`#p_keys_tbody_\${pId}\`);
+keys.forEach((k, idx) => {
+const tr = document.createElement('tr');
+const keyTarget = \`\${pId}:\${k.label || k.id || \`key-\${idx}\`}\`;
+const isCooldown = state.cooldowns?.[keyTarget] || false;
+let statusHtml = \`<span class="pill \${isCooldown ? 'pill--amber' : 'pill--green'}">\${isCooldown ? '冷却中' : '就绪'}</span>\`;
+if (k.last_ok === true) {
+statusHtml = \`<span class="pill pill--green tabular">正常 \${k.last_latency_ms || 0}ms</span>\`;
+} else if (k.last_ok === false) {
+statusHtml = \`<span class="pill pill--red">异常\${k.last_status ? \` (\${k.last_status})\` : ''}</span>\`;
+}
+tr.innerHTML = \`
+<td><input type="checkbox" class="k_enable_cb" data-idx="\${idx}" \${k.enabled !== false ? 'checked' : ''}></td>
+<td><strong>\${escapeHtml(k.label || k.id || \`key-\${idx}\`)}</strong></td>
+<td><span class="tabular privacy-mask">\${escapeHtml(k.key)}</span></td>
+<td><span class="pill">\${k.origin === 'local' ? '本地' : '共享'}</span></td>
+<td>\${statusHtml}</td>
+<td>
+<div class="fields">
+<button class="btn btn--sm btn_verify_k" data-idx="\${idx}" type="button">校验</button>
+<button class="btn btn--sm btn--danger btn_del_k" data-idx="\${idx}" type="button">删除</button>
+</div>
+</td>
+\`;
+tr.querySelector('.k_enable_cb').addEventListener('change', (e) => {
+k.enabled = e.target.checked;
+});
+tr.querySelector('.btn_verify_k').addEventListener('click', async () => {
+const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
+const keyLabel = k.label || k.id || \`key-\${idx}\`;
+toast(\`正在校验 Key [\${keyLabel}]...\`, 'info');
+try {
+const res = await window.HOST.verifyKey({
+provider: pId,
+api_key: k.key,
+key: k.key,
+key_label: keyLabel,
+base_url: baseUrl,
+api_type: p.api_type || 'openai-completions',
+});
+if (res && (res.ok || res.valid || res.latency_ms !== undefined)) {
+const lat = res.latency_ms ?? res.ms ?? 0;
+k.last_ok = true;
+k.last_latency_ms = lat;
+k.last_status = res.status || 200;
+toast(\`Key [\${keyLabel}] 校验成功: 延迟 \${lat}ms\`, 'ok');
+} else {
+k.last_ok = false;
+k.last_status = res?.status || 0;
+toast(\`Key [\${keyLabel}] 校验失败: \${res?.error || '无效凭据'}\`, 'err');
+}
+renderProvidersList();
+if (window.HOST.kind === 'hub') renderHubOverview();
+} catch (e) {
+toast(\`校验异常: \${e.message}\`, 'err');
+}
+});
+tr.querySelector('.btn_del_k').addEventListener('click', () => {
+p.api_keys.splice(idx, 1);
+renderProvidersList();
+});
+tbody.appendChild(tr);
+});
+wrap.querySelector(\`#btn_check_balance_\${pId}\`).addEventListener('click', async () => {
+const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
+const firstKey = p.api_keys?.[0]?.key || '';
+const balUrl = wrap.querySelector(\`#ed_p_bal_url_\${pId}\`)?.value.trim() || p.balance_url || '';
+const balPath = wrap.querySelector(\`#ed_p_bal_path_\${pId}\`)?.value.trim() || p.balance_path || '';
+toast(\`正在查询供应商 \${pId} 余额...\`, 'info');
+try {
+const res = await window.HOST.checkBalance({
+provider: pId,
+base_url: baseUrl,
+api_key: firstKey,
+balance_url: balUrl,
+balance_path: balPath,
+});
+if (res && (res.ok || res.balance !== undefined)) {
+const bal = res.formatted || res.balance || '正常可用';
+p._balance = String(bal);
+toast(\`余额查询成功: \${bal}\`, 'ok');
+renderProvidersList();
+} else {
+toast(\`余额查询不可用: \${res?.error || '上游无余额接口'}\`, 'warn');
+}
+} catch (e) {
+toast(\`查询异常: \${e.message}\`, 'err');
+}
+});
+wrap.querySelector(\`#btn_batch_test_keys_\${pId}\`).addEventListener('click', async () => {
+toast(\`正在一键测试 \${keys.length} 把 Key...\`, 'info');
+let succ = 0;
+const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
+for (const k of keys) {
+try {
+const r = await window.HOST.verifyKey({
+provider: pId,
+api_key: k.key,
+base_url: baseUrl,
+key_label: k.label,
+});
+if (r && (r.ok || r.valid)) succ++;
+} catch (_) {}
+}
+toast(\`一键测试完成: \${succ}/\${keys.length} 把 Key 正常可用\`, succ === keys.length ? 'ok' : 'warn');
+});
+wrap.querySelector(\`#btn_oauth_start_\${pId}\`).addEventListener('click', async () => {
+toast('正在发起 OAuth 设备登录请求...', 'info');
+try {
+const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
+if (res && (res.ok || res.device_code)) {
+const box = wrap.querySelector(\`#oauth_box_\${pId}\`);
+box.hidden = false;
+box.classList.remove('hidden');
+const link = wrap.querySelector(\`#oauth_link_\${pId}\`);
+link.href = res.verification_uri || 'https://api.minimax.chat';
+link.textContent = res.verification_uri || '前往授权页面';
+wrap.querySelector(\`#oauth_code_\${pId}\`).textContent = res.user_code || res.device_code;
+const intervalSec = (res.interval || 5) * 1000;
+const pollTimer = setInterval(async () => {
+try {
+const pollRes = await window.HOST.pollOAuth({
+device_code: res.device_code,
+endpoint: 'https://api.minimax.chat/oauth/token',
+});
+if (pollRes && (pollRes.ok || pollRes.access_token)) {
+clearInterval(pollTimer);
+wrap.querySelector(\`#oauth_status_\${pId}\`).textContent = '授权成功！';
+p.api_keys = p.api_keys || [];
+p.api_keys.push({
+id: \`k_oauth_\${Date.now().toString(36)}\`,
+label: 'oauth-token',
+key: pollRes.access_token,
+enabled: true,
+origin: 'local',
+});
+await persistConfig('OAuth 授权成功，密钥已保存');
+}
+} catch (_) {}
+}, intervalSec);
+setTimeout(() => clearInterval(pollTimer), (res.expires_in || 300) * 1000);
+} else {
+toast(res?.error || '发起 OAuth 失败', 'err');
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+wrap.querySelector(\`#btn_probe_prov_\${pId}\`).addEventListener('click', async () => {
+const baseUrl = wrap.querySelector(\`#ed_p_base_\${pId}\`)?.value.trim() || p.base_url || '';
+const firstKey = p.api_keys?.[0]?.key || '';
+toast(\`正在探测供应商 \${pId} 模型...\`, 'info');
+try {
+const res = await window.HOST.probeModels({
+provider: pId,
+base_url: baseUrl,
+api_key: firstKey,
+api_type: p.api_type || 'openai-completions',
+});
+const models = res?.models || [];
+if (models.length > 0) {
+toast(\`探测成功: 发现 \${models.length} 个可用模型\`, 'ok');
+const cont = wrap.querySelector(\`#probe_pills_container_\${pId}\`);
+cont.hidden = false;
+cont.classList.remove('hidden');
+const list = wrap.querySelector(\`#probe_pills_list_\${pId}\`);
+list.innerHTML = '';
+wrap.querySelector(\`#probe_pills_count_\${pId}\`).textContent = \`共 \${models.length} 个，点击一键纳管\`;
+const renderPills = (filter = '') => {
+list.innerHTML = '';
+const filtered = models.filter((m) => m.toLowerCase().includes(filter.toLowerCase())).slice(0, 48);
+filtered.forEach((modelName) => {
+const pill = document.createElement('span');
+pill.className = 'probe-pill';
+pill.textContent = modelName;
+pill.title = \`点击一键纳管 \${modelName} 到 Agent 路由\`;
+pill.addEventListener('click', async () => {
+state.config.agent_models = state.config.agent_models || {};
+const firstKeyLabel = p.api_keys?.[0]?.label || 'k1';
+state.config.agent_models[modelName] = {
+routing_strategy: 'sticky_failover',
+active_key: '',
+enabled: true,
+candidates: [
+{ provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
+],
+};
+await persistConfig(\`已成功纳管模型: \${modelName}\`);
+});
+list.appendChild(pill);
+});
+};
+renderPills();
+wrap.querySelector(\`#probe_pills_filter_\${pId}\`).addEventListener('input', (e) => {
+renderPills(e.target.value);
+});
+} else {
+toast('未探测到可用模型列表', 'warn');
+}
+} catch (e) {
+toast(\`探测异常: \${e.message}\`, 'err');
+}
+});
+wrap.querySelector(\`#btn_autolist_sync_\${pId}\`).addEventListener('click', async () => {
+toast('正在同步模型列表并纳管...', 'info');
+try {
+const res = await window.HOST.syncAutoList({ provider: pId });
+if (res && res.ok) {
+toast('模型同步纳管成功！', 'ok');
+await loadData();
+} else {
+toast('已触发自动纳管请求', 'info');
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+wrap.querySelector(\`#btn_add_key_\${pId}\`).addEventListener('click', () => {
+const lbl = wrap.querySelector(\`#new_key_lbl_\${pId}\`).value.trim();
+const val = wrap.querySelector(\`#new_key_val_\${pId}\`).value.trim();
+if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
+p.api_keys = p.api_keys || [];
+p.api_keys.push({
+id: \`k_\${Date.now().toString(36)}\`,
+label: lbl,
+key: val,
+enabled: true,
+origin: 'vault',
+});
+renderProvidersList();
+});
+wrap.querySelector(\`#btn_save_prov_\${pId}\`).addEventListener('click', async () => {
+p.name = wrap.querySelector(\`#ed_p_name_\${pId}\`).value.trim();
+p.base_url = wrap.querySelector(\`#ed_p_base_\${pId}\`).value.trim();
+p.anthropic_base_url = wrap.querySelector(\`#ed_p_ant_\${pId}\`).value.trim();
+p.preset_id = wrap.querySelector(\`#ed_p_preset_\${pId}\`).value.trim();
+p.quota_reset_at = wrap.querySelector(\`#ed_p_reset_\${pId}\`).value.trim();
+const rpm = Number(wrap.querySelector(\`#ed_p_rpm_\${pId}\`).value);
+if (rpm > 0) p.rpm_per_key = rpm;
+p.balance_url = wrap.querySelector(\`#ed_p_bal_url_\${pId}\`).value.trim();
+p.balance_path = wrap.querySelector(\`#ed_p_bal_path_\${pId}\`).value.trim();
+await persistConfig('供应商保存成功');
+});
+wrap.querySelector(\`#btn_del_prov_\${pId}\`).addEventListener('click', async () => {
+if (!confirm(\`确定删除供应商 \${pId} 吗？\`)) return;
+delete state.config.providers[pId];
+state.activeEditorKey = null;
+await persistConfig('供应商已删除');
+});
+return wrap;
+}
+function renderNodesList() {
+const container = document.getElementById('nodesList');
+if (!container) return;
+container.innerHTML = '';
+const nodes = state.nodes || [];
+if (nodes.length === 0) {
+const emptyRow = document.createElement('div');
+emptyRow.className = 'row text-muted';
+emptyRow.textContent = '暂无中转节点，点击上方「＋ 签发新节点」一键生成';
+container.appendChild(emptyRow);
+return;
+}
+for (const node of nodes) {
+const isExpanded = state.activeEditorKey === \`node_\${node.id}\`;
+const row = document.createElement('div');
+row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
+const dot = document.createElement('span');
+dot.className = \`dot \${node.enabled ? 'dot--ok' : 'dot--err'}\`;
+const who = document.createElement('div');
+who.className = 'who';
+const modelsScope = (node.scope?.models || []).join(', ') || '*';
+const provsScope = (node.scope?.providers || []).join(', ') || '*';
+who.innerHTML = \`
+<div class="name">
+<span>\${escapeHtml(node.name || node.id)}</span>
+<span class="pill pill--accent">\${escapeHtml(node.role)}</span>
+\${!node.enabled ? '<span class="pill pill--red">已吊销</span>' : ''}
+</div>
+<div class="sub">模型: \${escapeHtml(modelsScope)} · 供应商: \${escapeHtml(provsScope)} · Token: \${escapeHtml(node.token_prefix)}</div>
+\`;
+const fields = document.createElement('div');
+fields.className = 'fields';
+fields.innerHTML = \`
+<span class="pill">\${node.last_seen ? '活跃: ' + formatTime(node.last_seen) : '未激活'}</span>
+<span class="caret">▾</span>
+\`;
+row.appendChild(dot);
+row.appendChild(who);
+row.appendChild(fields);
+row.addEventListener('click', (ev) => {
+if (ev.target.closest('button') || ev.target.closest('input')) return;
+state.activeEditorKey = isExpanded ? null : \`node_\${node.id}\`;
+renderNodesList();
+});
+container.appendChild(row);
+if (isExpanded) {
+const editor = document.createElement('div');
+editor.className = 'editor';
+editor.appendChild(buildNodeEditor(node));
+container.appendChild(editor);
+}
+}
+}
+function buildNodeEditor(node) {
+const wrap = document.createElement('div');
+const isEnabled = node.enabled;
+wrap.innerHTML = \`
+<div class="form-grid">
+<div class="form-group">
+<label class="form-label">节点名称</label>
+<input class="input" id="ed_node_name_\${node.id}" value="\${escapeHtml(node.name)}">
+</div>
+<div class="form-group">
+<label class="form-label">租约时长 (秒)</label>
+<input class="input tabular" id="ed_node_ttl_\${node.id}" type="number" value="\${node.lease_ttl || 86400}">
+</div>
+<div class="form-group">
+<label class="form-label">允许供应商 (逗号分隔，* 为全量)</label>
+<input class="input" id="ed_node_provs_\${node.id}" value="\${escapeHtml((node.scope?.providers || []).join(','))}">
+</div>
+<div class="form-group">
+<label class="form-label">允许模型 (逗号分隔，* 为全量)</label>
+<input class="input" id="ed_node_models_\${node.id}" value="\${escapeHtml((node.scope?.models || []).join(','))}">
+</div>
+</div>
+<div class="form-actions">
+<button class="btn btn--danger" id="btn_toggle_node_\${node.id}" type="button">\${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
+<button class="btn" id="btn_rotate_node_\${node.id}" type="button">轮换 Token</button>
+<button class="btn btn--danger" id="btn_del_node_\${node.id}" type="button">删除节点</button>
+<button class="btn btn--primary" id="btn_save_node_\${node.id}" type="button">保存节点配置</button>
+</div>
+<div class="editor-section" id="node_token_display_box_\${node.id}" hidden>
+<div class="form-grid form-grid--2">
+<div class="form-group">
+<label class="form-label">新生成的 NODE_TOKEN (仅展示一次，请立即复制)</label>
+<input class="input input--code" readonly id="node_new_token_val_\${node.id}">
+</div>
+<div class="form-group">
+<label class="form-label">一键启动环境变量</label>
+<input class="input input--code" readonly id="node_new_env_val_\${node.id}">
+</div>
+</div>
+</div>
+\`;
+wrap.querySelector(\`#btn_save_node_\${node.id}\`).addEventListener('click', async () => {
+const name = wrap.querySelector(\`#ed_node_name_\${node.id}\`).value.trim();
+const leaseTtl = Number(wrap.querySelector(\`#ed_node_ttl_\${node.id}\`).value) || 86400;
+const provsStr = wrap.querySelector(\`#ed_node_provs_\${node.id}\`).value.trim();
+const modelsStr = wrap.querySelector(\`#ed_node_models_\${node.id}\`).value.trim();
+const scope = {
+providers: provsStr ? provsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
+models: modelsStr ? modelsStr.split(',').map((s) => s.trim()).filter(Boolean) : ['*'],
+};
+try {
+const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope });
+if (res && res.ok) {
+toast('节点配置更新成功', 'ok');
+await loadNodesData();
+} else {
+toast(res.error || '更新失败', 'err');
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+wrap.querySelector(\`#btn_toggle_node_\${node.id}\`).addEventListener('click', async () => {
+try {
+const res = await window.HOST.patchNode(node.id, { enabled: !isEnabled });
+if (res && res.ok) {
+toast(isEnabled ? '节点已吊销' : '节点已恢复', 'ok');
+await loadNodesData();
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+wrap.querySelector(\`#btn_rotate_node_\${node.id}\`).addEventListener('click', async () => {
+if (!confirm('轮换 Token 会使旧 Token 立即失效，确定继续吗？')) return;
+try {
+const res = await window.HOST.rotateNode(node.id);
+if (res && res.ok) {
+toast('Token 轮换成功！', 'ok');
+const box = wrap.querySelector(\`#node_token_display_box_\${node.id}\`);
+box.hidden = false;
+wrap.querySelector(\`#node_new_token_val_\${node.id}\`).value = res.node_token;
+wrap.querySelector(\`#node_new_env_val_\${node.id}\`).value = res.bootstrap_env;
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+wrap.querySelector(\`#btn_del_node_\${node.id}\`).addEventListener('click', async () => {
+if (!confirm(\`确认永久删除节点 \${node.name} 吗？\`)) return;
+try {
+const res = await window.HOST.deleteNode(node.id);
+if (res && res.ok) {
+toast('节点已删除', 'ok');
+state.activeEditorKey = null;
+await loadNodesData();
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+});
+return wrap;
+}
+async function handleIssueNode() {
+const name = document.getElementById('issueNodeName').value.trim();
+const role = document.getElementById('issueNodeRole').value;
+const leaseTtl = Number(document.getElementById('issueNodeTTL').value) || 86400;
+if (!name) return toast('请输入节点名称', 'warn');
+try {
+const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl });
+if (res && res.ok) {
+toast('节点签发成功！', 'ok');
+const tokenDisplay = document.getElementById('issuedTokenDisplay');
+if (tokenDisplay) {
+tokenDisplay.hidden = false;
+document.getElementById('issuedTokenVal').value = res.node_token;
+document.getElementById('issuedEnvVal').value = res.bootstrap_env;
+}
+await loadNodesData();
+} else {
+toast(res.error || '签发失败', 'err');
+}
+} catch (e) {
+toast(e.message, 'err');
+}
+}
+function renderModelsList() {
+const container = document.getElementById('modelsList');
+if (!container) return;
+container.innerHTML = '';
+const isAgent = (state.modelSubMode || 'agent') === 'agent';
+const btnAddModel = document.getElementById('btnAddModel');
+if (btnAddModel) {
+btnAddModel.hidden = !isAgent;
+btnAddModel.classList.toggle('hidden', !isAgent);
+}
+if (isAgent) {
+renderAgentModels(container);
+} else {
+renderKBPipelines(container);
+}
+}
+function renderAgentModels(container) {
+const models = state.config?.agent_models || {};
+const q = state.modelQuery || '';
+const mKeys = Object.keys(models).sort().filter((mName) => {
+if (!q) return true;
+const m = models[mName] || {};
+const cands = (m.candidates || []).map((c) => \`\${c.provider} \${c.target_model}\`).join(' ');
+return \`\${mName} \${cands}\`.toLowerCase().includes(q);
+});
+if (mKeys.length === 0) {
+const emptyRow = document.createElement('div');
+emptyRow.className = 'row row--static text-muted';
+emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
+container.appendChild(emptyRow);
+return;
+}
+for (const mName of mKeys) {
+const m = models[mName] || {};
+const cCount = (m.candidates || []).length;
+const isExpanded = state.activeEditorKey === \`m_\${mName}\`;
+const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
+const row = document.createElement('div');
+row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
+const dot = document.createElement('span');
+dot.className = \`dot \${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}\`;
+const who = document.createElement('div');
+who.className = 'who';
+who.innerHTML = \`
+<div class="name">
+\${brandIcon}
+<span>\${escapeHtml(mName)}</span>
+<span class="pill pill--accent">\${escapeHtml(m.routing_strategy || 'sticky_failover')}</span>
+\${m._lastTestLatency ? \`<span class="pill pill--green">\${m._lastTestLatency}ms</span>\` : ''}
+</div>
+<div class="sub">首选 Key: \${escapeHtml(m.active_key || '未指定')} · 候选池: \${cCount} 个</div>
+\`;
+const fields = document.createElement('div');
+fields.className = 'fields';
+fields.innerHTML = \`
+<button class="btn btn--sm btn_test_agent_m" data-model="\${escapeHtml(mName)}" type="button">测试路由</button>
+<span class="pill">\${cCount} 候选</span>
+<span class="caret">▾</span>
+\`;
+fields.querySelector('.btn_test_agent_m').addEventListener('click', async (e) => {
+e.stopPropagation();
+toast(\`正在测试模型 \${mName} 路由...\`, 'info');
+try {
+const res = await window.HOST.testAgentModel({ model: mName });
+if (res && res.ok) {
+const lat = res.latency_ms || res.ms || 0;
+m._lastTestLatency = lat;
+toast(\`测试通过！耗时: \${lat}ms (优胜: \${res.winner_provider || '直连'})\`, 'ok');
+renderAgentModels(container);
+} else {
+toast(\`测试失败: \${res?.error || '路由无响应'}\`, 'err');
+}
+} catch (err) {
+toast(\`测试异常: \${err.message}\`, 'err');
+}
+});
+row.appendChild(dot);
+row.appendChild(who);
+row.appendChild(fields);
+row.addEventListener('click', (ev) => {
+if (ev.target.closest('button') || ev.target.closest('input')) return;
+state.activeEditorKey = isExpanded ? null : \`m_\${mName}\`;
+renderModelsList();
+});
+container.appendChild(row);
+if (isExpanded) {
+const editor = document.createElement('div');
+editor.className = 'editor';
+editor.appendChild(buildModelEditor(mName, m));
+container.appendChild(editor);
+}
+}
+}
+function buildModelEditor(mName, m) {
+const wrap = document.createElement('div');
+const candidates = m.candidates || [];
+wrap.innerHTML = \`
+<div class="form-grid form-grid--2">
+<div class="form-group">
+<label class="form-label">路由策略覆盖</label>
+<select class="select" id="ed_m_strat_\${mName}">
+<option value="sticky_failover" \${m.routing_strategy === 'sticky_failover' ? 'selected' : ''}>粘性故障转移 (推荐)</option>
+<option value="round_robin" \${m.routing_strategy === 'round_robin' ? 'selected' : ''}>标准轮询 (Round Robin)</option>
+<option value="manual" \${m.routing_strategy === 'manual' ? 'selected' : ''}>手动严格直通</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">首选粘性 Key (active_key)</label>
+<input class="input" id="ed_m_act_\${mName}" value="\${escapeHtml(m.active_key || '')}" placeholder="格式: provider:key_label">
+</div>
+</div>
+<div class="section-bar mt-4">
+<span class="form-label">候选 Key 列表 (\${candidates.length})</span>
+</div>
+<div class="card">
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>供应商</th>
+<th>Key 标签</th>
+<th>目标模型</th>
+<th>权重</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody id="m_cands_tbody_\${mName}"></tbody>
+</table>
+</div>
+</div>
+<div class="form-grid mt-3">
+<div class="form-group">
+<input class="input" id="new_c_prov_\${mName}" placeholder="供应商 ID (如 minimax)">
+</div>
+<div class="form-group">
+<input class="input" id="new_c_lbl_\${mName}" placeholder="Key 标签 (如 pool-01)">
+</div>
+<div class="form-group">
+<input class="input" id="new_c_target_\${mName}" placeholder="上游真实模型 (留空同名)">
+</div>
+</div>
+<div class="section-bar mt-2 flex-end">
+<button class="btn btn--primary" id="btn_add_cand_\${mName}" type="button">添加候选</button>
+</div>
+<div class="form-actions">
+<button class="btn btn--danger" id="btn_del_model_\${mName}" type="button">删除此模型</button>
+<button class="btn btn--primary" id="btn_save_model_\${mName}" type="button">保存模型配置</button>
+</div>
+\`;
+const tbody = wrap.querySelector(\`#m_cands_tbody_\${mName}\`);
+candidates.forEach((c, idx) => {
+const tr = document.createElement('tr');
+const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
+tr.innerHTML = \`
+<td>\${brandIco}<strong>\${escapeHtml(c.provider)}</strong></td>
+<td><span class="pill">\${escapeHtml(c.key_label)}</span></td>
+<td><span class="tabular">\${escapeHtml(c.target_model || '原名')}</span></td>
+<td><span class="tabular">\${c.weight || 1}</span></td>
+<td>
+<button class="btn btn--sm btn_del_cand" data-idx="\${idx}">移除</button>
+</td>
+\`;
+tr.querySelector('.btn_del_cand').addEventListener('click', () => {
+candidates.splice(idx, 1);
+renderModelsList();
+});
+tbody.appendChild(tr);
+});
+wrap.querySelector(\`#btn_add_cand_\${mName}\`).addEventListener('click', () => {
+const prov = wrap.querySelector(\`#new_c_prov_\${mName}\`).value.trim();
+const lbl = wrap.querySelector(\`#new_c_lbl_\${mName}\`).value.trim();
+const target = wrap.querySelector(\`#new_c_target_\${mName}\`).value.trim();
+if (!prov || !lbl) return toast('请填写供应商和 Key 标签', 'warn');
+candidates.push({
+provider: prov,
+key_label: lbl,
+target_model: target || '',
+enabled: true,
+weight: 1,
+});
+renderModelsList();
+});
+wrap.querySelector(\`#btn_save_model_\${mName}\`).addEventListener('click', async () => {
+m.routing_strategy = wrap.querySelector(\`#ed_m_strat_\${mName}\`).value;
+m.active_key = wrap.querySelector(\`#ed_m_act_\${mName}\`).value.trim();
+await persistConfig('模型配置保存成功');
+});
+wrap.querySelector(\`#btn_del_model_\${mName}\`).addEventListener('click', async () => {
+if (!confirm(\`确定删除模型 \${mName} 吗？\`)) return;
+delete state.config.agent_models[mName];
+state.activeEditorKey = null;
+await persistConfig('模型已删除');
+});
+return wrap;
+}
+function renderKBPipelines(container) {
+const pipelines = [
+{ id: 'chat', name: '对话流水线', path: '/v1/chat/completions', desc: 'RAG 生成对话专用高并发通道' },
+{ id: 'embedding', name: '向量嵌入流水线', path: '/v1/embeddings', desc: '文档分块高吞吐向量化' },
+{ id: 'reranker', name: '重排流水线', path: '/v1/rerank', desc: '多候选语义重排打分' },
+{ id: 'ocr', name: '图文解析流水线', path: '/v1/ocr', desc: '文档图像多模态 OCR 提取' },
+];
+state.config.kb_models = state.config.kb_models || {};
+pipelines.forEach((pl) => {
+const cands = state.config.kb_models[pl.id] || [];
+const isExpanded = state.activeEditorKey === \`kb_\${pl.id}\`;
+const row = document.createElement('div');
+row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
+const dot = document.createElement('span');
+dot.className = \`dot \${cands.length > 0 ? 'dot--ok' : 'dot--warn'}\`;
+const who = document.createElement('div');
+who.className = 'who';
+who.innerHTML = \`
+<div class="name">
+<span>\${pl.path}</span>
+<span class="pill pill--accent">\${pl.name}</span>
+<span class="pill">\${cands.length} 候选实例</span>
+</div>
+<div class="sub">\${pl.desc}</div>
+\`;
+const fields = document.createElement('div');
+fields.className = 'fields';
+fields.innerHTML = \`
+<span class="caret">▾</span>
+\`;
+row.appendChild(dot);
+row.appendChild(who);
+row.appendChild(fields);
+row.addEventListener('click', (ev) => {
+if (ev.target.closest('button') || ev.target.closest('input')) return;
+state.activeEditorKey = isExpanded ? null : \`kb_\${pl.id}\`;
+renderModelsList();
+});
+container.appendChild(row);
+if (isExpanded) {
+const editor = document.createElement('div');
+editor.className = 'editor';
+editor.appendChild(buildKBPipelineEditor(pl.id, pl, cands));
+container.appendChild(editor);
+}
+});
+}
+function buildKBPipelineEditor(cat, pl, cands) {
+const wrap = document.createElement('div');
+wrap.innerHTML = \`
+<div class="section-bar">
+<span class="form-label">\${pl.name} (\${pl.path}) 候选池列表</span>
+</div>
+<div class="card">
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>启用</th>
+<th>供应商</th>
+<th>Key 标签</th>
+<th>目标模型 ID</th>
+<th>并发限制</th>
+<th>操作</th>
+</tr>
+</thead>
+<tbody id="kb_cands_tbody_\${cat}"></tbody>
+</table>
+</div>
+</div>
+<div class="form-grid mt-3">
+<div class="form-group">
+<input class="input" id="new_kb_prov_\${cat}" placeholder="供应商 ID">
+</div>
+<div class="form-group">
+<input class="input" id="new_kb_key_\${cat}" placeholder="Key 标签">
+</div>
+<div class="form-group">
+<input class="input" id="new_kb_model_\${cat}" placeholder="上游真实模型 ID">
+</div>
+<div class="form-group">
+<input class="input tabular" id="new_kb_conc_\${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
+</div>
+<div class="form-group flex-end">
+<button class="btn btn--primary" id="btn_add_kb_cand_\${cat}" type="button">添加候选</button>
+</div>
+</div>
+<div class="form-actions">
+<button class="btn btn--primary" id="btn_save_kb_\${cat}" type="button">保存流水线配置</button>
+</div>
+\`;
+const tbody = wrap.querySelector(\`#kb_cands_tbody_\${cat}\`);
+cands.forEach((c, idx) => {
+const tr = document.createElement('tr');
+const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
+tr.innerHTML = \`
+<td><input type="checkbox" class="kb_c_en" data-idx="\${idx}" \${c.enabled !== false ? 'checked' : ''}></td>
+<td>\${brandIco}<strong>\${escapeHtml(c.provider)}</strong></td>
+<td><span class="pill">\${escapeHtml(c.key_label || c.key)}</span></td>
+<td><span class="tabular">\${escapeHtml(c.model)}</span></td>
+<td><span class="tabular">\${c.max_concurrency || c.max_conc || 4}</span></td>
+<td>
+<button class="btn btn--sm btn_test_kb_cand" data-idx="\${idx}" type="button">测试管道</button>
+<button class="btn btn--sm btn--danger btn_del_kb_cand" data-idx="\${idx}" type="button">移除</button>
+</td>
+\`;
+tr.querySelector('.kb_c_en').addEventListener('change', (e) => {
+c.enabled = e.target.checked;
+});
+tr.querySelector('.btn_test_kb_cand').addEventListener('click', async () => {
+toast(\`正在烟雾测试 [\${cat}] 候选 \${c.provider}/\${c.model}...\`, 'info');
+try {
+const res = await window.HOST.testCandidate({
+provider: c.provider,
+key_label: c.key_label || c.key,
+model: c.model,
+type: cat,
+});
+if (res && res.ok) {
+toast(\`管道测试通过！延迟: \${res.latency_ms || res.ms || 0}ms\`, 'ok');
+} else {
+toast(\`测试失败: \${res?.error || '无响应'}\`, 'err');
+}
+} catch (e) {
+toast(\`测试异常: \${e.message}\`, 'err');
+}
+});
+tr.querySelector('.btn_del_kb_cand').addEventListener('click', () => {
+cands.splice(idx, 1);
+renderModelsList();
+});
+tbody.appendChild(tr);
+});
+wrap.querySelector(\`#btn_add_kb_cand_\${cat}\`).addEventListener('click', () => {
+const prov = wrap.querySelector(\`#new_kb_prov_\${cat}\`).value.trim();
+const kLbl = wrap.querySelector(\`#new_kb_key_\${cat}\`).value.trim();
+const mdl = wrap.querySelector(\`#new_kb_model_\${cat}\`).value.trim();
+const conc = Number(wrap.querySelector(\`#new_kb_conc_\${cat}\`).value) || 4;
+if (!prov || !mdl) return toast('请填写供应商与模型 ID', 'warn');
+cands.push({
+provider: prov,
+key_label: kLbl,
+model: mdl,
+max_concurrency: conc,
+enabled: true,
+});
+state.config.kb_models[cat] = cands;
+renderModelsList();
+});
+wrap.querySelector(\`#btn_save_kb_\${cat}\`).addEventListener('click', async () => {
+state.config.kb_models[cat] = cands;
+await persistConfig('知识库流水线配置保存成功');
+});
+return wrap;
+}
+function renderTracesList() {
+const container = document.getElementById('tracesList');
+if (!container) return;
+container.innerHTML = '';
+const traces = state.traces || [];
+const filtered = state.filterOnlyRetried
+? traces.filter((t) => t.status >= 400 || (t.tries && t.tries.length > 1) || (t.retried_ms || 0) > 0)
+: traces;
+if (filtered.length === 0) {
+const emptyRow = document.createElement('div');
+emptyRow.className = 'row text-muted';
+emptyRow.textContent = '暂无符合条件的请求轨迹';
+container.appendChild(emptyRow);
+return;
+}
+for (const t of filtered) {
+const isExpanded = state.activeEditorKey === \`tr_\${t.id}\`;
+const triesCount = (t.tries || []).length;
+const isOk = t.status >= 200 && t.status < 300;
+const hasRetries = triesCount > 1 || (t.retried_ms || 0) > 0;
+const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(t.winner_provider || t.req_model) : '';
+const row = document.createElement('div');
+row.className = \`row \${isExpanded ? 'expanded' : ''}\`;
+const dot = document.createElement('span');
+dot.className = \`dot \${!isOk ? 'dot--err' : hasRetries ? 'dot--warn' : 'dot--ok'}\`;
+const who = document.createElement('div');
+who.className = 'who';
+who.innerHTML = \`
+<div class="name">
+\${brandIcon}
+<span>\${formatTime(t.ts)}</span>
+<span class="tabular">\${escapeHtml(t.req_model)}</span>
+<span class="text-muted">→</span>
+<span class="pill">\${escapeHtml(t.winner_provider || 'none')}</span>
+\${hasRetries ? \`<span class="pill pill--amber">\${triesCount}次尝试</span>\` : ''}
+</div>
+<div class="sub">\${escapeHtml(t.endpoint)} · \${t.total_ms || 0}ms (TTFT \${t.ttft_ms || 0}ms)</div>
+\`;
+const fields = document.createElement('div');
+fields.className = 'fields';
+fields.innerHTML = \`
+<span class="pill \${isOk ? 'pill--green' : 'pill--red'}">HTTP \${t.status}</span>
+<span class="caret">▾</span>
+\`;
+row.appendChild(dot);
+row.appendChild(who);
+row.appendChild(fields);
+row.addEventListener('click', () => {
+state.activeEditorKey = isExpanded ? null : \`tr_\${t.id}\`;
+renderTracesList();
+});
+container.appendChild(row);
+if (isExpanded) {
+const editor = document.createElement('div');
+editor.className = 'editor';
+editor.appendChild(window.USAGE.buildTraceWaterfall(t));
+container.appendChild(editor);
+}
+}
+}
+function renderSettingsView() {
+const s = state.config?.settings || {};
+const isFull = window.HOST.capabilities.runModes;
+const setVal = (id, val) => {
+const el = document.getElementById(id);
+if (el) el.value = val !== undefined ? val : '';
+};
+setVal('cfgRoutingStrategy', s.agent_routing_strategy || 'sticky_failover');
+setVal('cfgFirstByteTimeout', s.agent_first_byte_timeout_sec || 120);
+setVal('cfgCooldown429', s.cooldown_rate_limit_sec || 15);
+setVal('cfgCooldown5xx', s.cooldown_server_error_sec || 30);
+setVal('cfgCooldownNet', s.cooldown_network_error_sec || 15);
+setVal('cfgCooldownAuth', s.cooldown_auth_error_sec || 86400);
+const gwBox = document.getElementById('gatewayAccessCenter');
+const modeBox = document.getElementById('modeScheduleBox');
+const backupBox = document.getElementById('configBackupBox');
+if (gwBox) gwBox.hidden = !isFull;
+if (modeBox) modeBox.hidden = !isFull;
+if (backupBox) backupBox.hidden = false;
+if (isFull) {
+const baseOrigin = location.origin || 'http://127.0.0.1:3425';
+const localBase = \`\${baseOrigin}/v1\`;
+const clientKey = s.client_key || s.proxy_api_key || 'sk-proxy-key';
+const gwBaseUrl = document.getElementById('gwBaseUrl');
+if (gwBaseUrl) gwBaseUrl.value = localBase;
+const gwClientKey = document.getElementById('gwClientKey');
+if (gwClientKey) gwClientKey.value = clientKey;
+const snippetClaude = document.getElementById('snippetClaude');
+if (snippetClaude) snippetClaude.textContent = \`export ANTHROPIC_BASE_URL="\${localBase}" ANTHROPIC_API_KEY="\${clientKey}"\`;
+const snippetCursor = document.getElementById('snippetCursor');
+if (snippetCursor) snippetCursor.textContent = \`OPENAI_BASE_URL="\${localBase}" OPENAI_API_KEY="\${clientKey}"\`;
+const btnGen = document.getElementById('btnGenClientKey');
+if (btnGen) {
+btnGen.onclick = () => {
+const rand = \`sk-proxy-\${Math.random().toString(36).slice(2, 10)}\${Math.random().toString(36).slice(2, 10)}\`;
+if (gwClientKey) gwClientKey.value = rand;
+if (snippetClaude) snippetClaude.textContent = \`export ANTHROPIC_BASE_URL="\${localBase}" ANTHROPIC_API_KEY="\${rand}"\`;
+if (snippetCursor) snippetCursor.textContent = \`OPENAI_BASE_URL="\${localBase}" OPENAI_API_KEY="\${rand}"\`;
+};
+}
+const btnSaveKey = document.getElementById('btnSaveClientKey');
+if (btnSaveKey) {
+btnSaveKey.onclick = async () => {
+const k = (gwClientKey?.value || '').trim();
+s.client_key = k;
+s.proxy_api_key = k;
+await window.HOST.updateAccessKey({ client_key: k });
+await persistConfig('客户端鉴权密钥更新成功');
+};
+}
+const btnCopyClaude = document.getElementById('btnCopyClaudeSnippet');
+if (btnCopyClaude) {
+btnCopyClaude.onclick = () => {
+navigator.clipboard.writeText(snippetClaude?.textContent || '');
+toast('已复制 Claude Code 配置', 'ok');
+};
+}
+const btnCopyCursor = document.getElementById('btnCopyCursorSnippet');
+if (btnCopyCursor) {
+btnCopyCursor.onclick = () => {
+navigator.clipboard.writeText(snippetCursor?.textContent || '');
+toast('已复制 Cursor 配置', 'ok');
+};
+}
+const schedEnabled = document.getElementById('cfgModeSchedEnabled');
+if (schedEnabled) schedEnabled.checked = !!s.mode_schedule_enabled;
+setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
+setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
+setVal('cfgModeSchedWebhook', s.mode_schedule_webhook_url || '');
+setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
+setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
+const btnClearCd = document.getElementById('btnClearAllCooldowns');
+if (btnClearCd) {
+btnClearCd.onclick = async () => {
+if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
+try {
+const res = await window.HOST.clearCooldowns();
+if (res && res.ok) toast('已清除所有冷却状态', 'ok');
+} catch (e) {
+toast(e.message, 'err');
+}
+};
+}
+}
+if (window.HOST.capabilities.vaultClient) {
+const v = state.config?.vault || {};
+setVal('cfgVaultUrl', v.url || '');
+setVal('cfgVaultToken', v.node_token || '');
+}
+const btnSave = document.getElementById('btnSaveSettings');
+if (btnSave) {
+btnSave.onclick = async () => {
+s.agent_routing_strategy = document.getElementById('cfgRoutingStrategy').value;
+s.agent_first_byte_timeout_sec = Number(document.getElementById('cfgFirstByteTimeout').value) || 120;
+s.cooldown_rate_limit_sec = Number(document.getElementById('cfgCooldown429').value) || 15;
+s.cooldown_server_error_sec = Number(document.getElementById('cfgCooldown5xx').value) || 30;
+s.cooldown_network_error_sec = Number(document.getElementById('cfgCooldownNet').value) || 15;
+s.cooldown_auth_error_sec = Number(document.getElementById('cfgCooldownAuth').value) || 86400;
+if (isFull) {
+s.mode_schedule_enabled = !!document.getElementById('cfgModeSchedEnabled')?.checked;
+s.mode_schedule_agent_window = document.getElementById('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
+s.mode_schedule_timezone = document.getElementById('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
+s.mode_schedule_webhook_url = document.getElementById('cfgModeSchedWebhook')?.value.trim() || '';
+s.ocr_max_inflight = Number(document.getElementById('cfgOcrInflight')?.value) || 4;
+s.kb_global_max_concurrency = Number(document.getElementById('cfgKbConcurrency')?.value) || 16;
+}
+if (window.HOST.capabilities.vaultClient) {
+const vUrl = document.getElementById('cfgVaultUrl')?.value.trim();
+const vToken = document.getElementById('cfgVaultToken')?.value.trim();
+if (vUrl || vToken) {
+state.config.vault = {
+url: vUrl || '',
+node_token: vToken || '',
+};
+}
+}
+await persistConfig('设置保存成功');
+};
+}
+}
+async function persistConfig(successMsg) {
+try {
+const res = await window.HOST.saveConfig(state.config);
+const data = res?.data || res || {};
+const isConflict = res?.status === 409 ||
+data?.error === 'config_version_conflict' ||
+res?.error === 'config_version_conflict' ||
+data?.code === 'cas_version_conflict' ||
+data?.error?.code === 'cas_version_conflict' ||
+(typeof data?.error === 'string' && data.error.includes('conflict'));
+if (isConflict) {
+toast('配置版本冲突 (CAS)：其他会话已修改配置，已自动加载最新版本', 'warn');
+await loadData();
+return;
+}
+if (res?.status === 200 || data?.ok || data?._version !== undefined) {
+if (data.config) {
+state.config = data.config;
+if (data._version) state.config._version = data._version;
+} else if (data._version !== undefined || data.providers) {
+state.config = data;
+}
+const ver = state.config?._version || data._version;
+const verEl = document.getElementById('configVersionDisplay');
+if (verEl && ver) verEl.textContent = \`v\${ver}\`;
+toast(successMsg || '保存成功', 'ok');
+renderProvidersList();
+renderModelsList();
+renderSettingsView();
+} else {
+const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
+toast(errMsg, 'err');
+}
+} catch (e) {
+toast(\`保存异常: \${e.message}\`, 'err');
+}
+}
+function formatTime(isoOrSec) {
+if (!isoOrSec) return '';
+const d = typeof isoOrSec === 'number' ? new Date(isoOrSec * 1000) : new Date(isoOrSec);
+return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+window.addEventListener('DOMContentLoaded', init);
 })();
 </script>
 </body>
-</html>
-`;
+</html>`;
 }
 
 export function onRequestGet(context) {
