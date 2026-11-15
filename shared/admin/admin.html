@@ -2,437 +2,543 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LLMProxy 控制台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>LLMProxy2 控制台</title>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <!-- 46px Top Navigation Bar -->
-  <header class="top">
-    <div class="brand">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-      </svg>
-      <span>llmproxy</span>
-      <span id="brandRole" class="brand-badge">Hub</span>
-    </div>
-
-    <nav class="seg" id="navSeg">
-      <button class="seg-btn" id="navModels" data-tab="models" hidden>模型与路由</button>
-      <button class="seg-btn active" id="navProviders" data-tab="providers">供应商</button>
-      <button class="seg-btn" id="navNodes" data-tab="nodes" hidden>中转节点</button>
-      <button class="seg-btn" id="navActivity" data-tab="activity" hidden>统计与轨迹</button>
-      <button class="seg-btn" id="navSettings" data-tab="settings">设置</button>
-    </nav>
-
-    <div class="top-actions">
-      <div id="modeSwitchBox" class="seg" hidden>
-        <button id="modeBtnAgent" class="seg-btn active">Agent</button>
-        <button id="modeBtnKB" class="seg-btn">KB</button>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark" id="brandMark"></span>
+        <span class="brand-name">LLMProxy2</span>
+        <span class="badge-role" id="brandRole"></span>
       </div>
-      <div id="topVersionBox">
-        <span id="configVersionDisplay" class="pill pill--accent">v1</span>
+
+      <nav class="nav-wrap" aria-label="主导航">
+        <div class="seg" id="navSeg">
+          <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
+          <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
+          <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
+          <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
+          <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
+        </div>
+      </nav>
+
+      <div class="header-actions">
+        <div class="seg" id="modeSwitchBox" hidden>
+          <button class="seg-btn" id="modeBtnAgent" type="button">Agent</button>
+          <button class="seg-btn" id="modeBtnKB" type="button">KB</button>
+        </div>
+        <span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span>
+        <button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button>
+        <button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button>
+        <button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button>
       </div>
-      <button id="btnPrivacyMask" class="btn btn--sm" title="隐私遮罩 (隐藏密钥与敏感URL)">👁️</button>
-      <button id="themeToggleBtn" class="btn btn--sm" title="切换深色/浅色">🌓</button>
-      <button id="logoutBtn" class="btn btn--sm">退出</button>
     </div>
   </header>
 
-  <!-- Max-Width 920px Central Corridor -->
-  <main class="corridor">
-    <!-- Hub Sync Bar (Full Node Only) -->
-    <div id="vaultSyncBar" class="section-bar mb-3" hidden>
-      <div class="name">
-        <span id="vaultSyncTitle">☁️ EdgeOne 中枢同步</span>
-        <span id="vaultSyncBadge" class="pill pill--green">在线</span>
-      </div>
-      <div class="fields">
-        <button class="btn btn--sm" id="btnSyncManifest">拉取清单</button>
-        <button class="btn btn--sm btn--primary" id="btnSyncKeys">从 Vault 同步</button>
-      </div>
-    </div>
-
-    <!-- 1. View: Models & Routes (Full Role Only) -->
-    <section id="viewModels" hidden>
-      <div class="section-bar">
-        <h2 class="section-title">模型与路由分发</h2>
-        <button id="btnAddModel" class="btn primary sm" type="button">＋ 添加模型</button>
-      </div>
-
-      <!-- Inline Add Model Form -->
-      <div class="list mb-3 hidden" id="addModelForm" hidden>
-        <div class="editor">
-          <div class="editor-grid">
-            <div class="form-group">
-              <label class="form-label" for="newModelName">逻辑模型名称</label>
-              <input class="input" id="newModelName" placeholder="如：gpt-4o-mini">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newModelProvider">候选供应商</label>
-              <select class="select" id="newModelProvider"></select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newModelTarget">上游目标模型 ID</label>
-              <input class="input input--code" id="newModelTarget" placeholder="留空同逻辑名">
-            </div>
+  <main class="main-wrap">
+    <!-- 1. 概览与统计 -->
+    <section id="viewActivity">
+      <!-- Hub Overview Dashboard -->
+      <div id="hubOverviewBox" hidden>
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">中枢控制面概览</h1>
+            <p class="view-sub" id="hubOverviewSub">实时统计密钥池健康度、模型路由规模与中转节点同步状态</p>
           </div>
-          <div class="section-bar mt-3 flex-end gap-2">
-            <button class="btn sm" id="btnCancelAddModel" type="button">取消</button>
-            <button class="btn primary sm" id="btnConfirmAddModel" type="button">确认添加模型</button>
+          <div class="view-actions">
+            <button class="btn" id="btnHubRefreshOverview" type="button">刷新状态</button>
+            <button class="btn btn--primary" id="btnHubBatchVerifyAll" type="button">批量探活全部密钥</button>
           </div>
         </div>
-      </div>
 
-      <div class="list" id="modelsList"></div>
-    </section>
+        <div class="kpi-grid" id="hubKpiGrid"></div>
 
-    <!-- 2. View: Providers (Hub & Full Role) -->
-    <section id="viewProviders">
-      <div class="section-bar">
-        <h2 class="section-title">供应商与密钥池</h2>
-        <button id="btnAddProvider" class="btn primary sm" type="button">＋ 添加供应商</button>
-      </div>
-
-      <!-- Inline Add Provider Form -->
-      <div class="list mb-3 hidden" id="addProviderForm" hidden>
-        <div class="editor">
-          <!-- cURL Paste Auto-Parser (M3) -->
-          <div class="form-group mb-2">
-            <div class="section-bar">
-              <span class="form-label">快捷导入与预设</span>
-              <button type="button" class="btn btn--sm" id="btnToggleCurlPaste">📋 粘贴 cURL 导入</button>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">供应商密钥池与探活健康分布</h2>
+              <div class="card-sub" id="hubHealthSummarySub"></div>
             </div>
-            <textarea class="input input--code hidden mt-1" id="curlPasteInput" rows="3" placeholder="在此粘贴完整 cURL 命令 (如 curl https://api.openai.com/v1/chat/completions -H 'Authorization: Bearer sk-...')" hidden></textarea>
+            <button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button>
           </div>
-
-          <div class="editor-grid">
-            <div class="form-group">
-              <label class="form-label" for="newProvPreset">预设模板与厂商</label>
-              <select class="select" id="newProvPreset">
-                <option value="custom">自定义 (Custom)</option>
-                <optgroup label="主流厂商">
-                  <option value="openai">OpenAI (官方)</option>
-                  <option value="anthropic">Anthropic (官方)</option>
-                  <option value="gemini">Google Gemini (OpenAI兼容)</option>
-                  <option value="deepseek">DeepSeek (官方)</option>
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="groq">Groq Cloud</option>
-                  <option value="xai">xAI</option>
-                </optgroup>
-                <optgroup label="国内大模型与聚合平台">
-                  <option value="minimax-global">MiniMax (Global)</option>
-                  <option value="minimax-cn">MiniMax (国内)</option>
-                  <option value="kimi-cn">Kimi / Moonshot (国内)</option>
-                  <option value="kimi-global">Kimi / Moonshot (Global)</option>
-                  <option value="zhipu">智谱 BigModel (PayG)</option>
-                  <option value="zhipu-coding">智谱 Coding</option>
-                  <option value="volcengine">火山方舟 Ark (PayG)</option>
-                  <option value="volcengine-coding">火山方舟 Coding</option>
-                  <option value="stepfun-cn">阶跃星辰 Stepfun (国内)</option>
-                  <option value="stepfun-global">阶跃星辰 Stepfun (Global)</option>
-                  <option value="alibaba">阿里百炼 / DashScope (国内)</option>
-                  <option value="alibaba-intl">阿里百炼 / DashScope (国际)</option>
-                  <option value="siliconflow">SiliconFlow (硅基流动)</option>
-                  <option value="ollama">Ollama (本地)</option>
-                </optgroup>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newProvId">供应商 ID</label>
-              <input class="input input--code" id="newProvId" placeholder="如 openai">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newProvName">显示名称</label>
-              <input class="input" id="newProvName" placeholder="如 OpenAI">
-            </div>
-            <div class="form-group">
-              <div class="section-bar">
-                <label class="form-label" for="newProvBaseUrl">Base URL</label>
-                <button type="button" class="btn btn--sm" id="btnDetectProvider">自动探测协议</button>
-              </div>
-              <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.openai.com/v1">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newProvApiType">协议类型</label>
-              <select class="select" id="newProvApiType">
-                <option value="openai-completions">openai-completions</option>
-                <option value="anthropic-messages">anthropic-messages</option>
-                <option value="gemini">gemini</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newProvKeyAlias">初始 Key 别名</label>
-              <input class="input" id="newProvKeyAlias" value="k1">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="newProvApiKey">初始 API Key</label>
-              <input class="input input--code" id="newProvApiKey" type="password" autocomplete="new-password" placeholder="sk-...">
-            </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>供应商</th>
+                  <th>协议</th>
+                  <th>启用 / 总密钥</th>
+                  <th>健康分布</th>
+                  <th>最近探活延迟</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="hubProviderStatsBody"></tbody>
+            </table>
           </div>
-          <div class="section-bar mt-3 flex-end gap-2">
-            <button class="btn sm" id="btnCancelAddProvider" type="button">取消</button>
-            <button class="btn primary sm" id="btnConfirmAddProvider" type="button">确认创建并保存</button>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">中转节点同步遥测</h2>
+              <div class="card-sub">节点配置拉取、304 缓存命中及活跃租约</div>
+            </div>
+            <button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>节点名称</th>
+                  <th>角色</th>
+                  <th>状态</th>
+                  <th>最近 IP</th>
+                  <th>同步 / 304 命中</th>
+                  <th>最近活跃</th>
+                </tr>
+              </thead>
+              <tbody id="hubNodeStatsBody"></tbody>
+            </table>
           </div>
         </div>
       </div>
 
-      <div class="list" id="providersList"></div>
-    </section>
-
-    <!-- 3. View: Nodes (Hub Role Only) -->
-    <section id="viewNodes" hidden>
-      <div class="section-bar">
-        <h2 class="section-title">中转节点管理</h2>
-        <button class="btn btn--primary" id="btnIssueNode">＋ 签发新节点</button>
-      </div>
-
-      <!-- Inline Issue Form -->
-      <div class="list mb-3" id="issueNodeForm" hidden>
-        <div class="editor">
-          <div class="editor-grid">
-            <div class="form-group">
-              <label class="form-label" for="issueNodeName">节点名称</label>
-              <input class="input" id="issueNodeName" placeholder="如：香港 NAT 小鸡 01">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="issueNodeRole">节点角色</label>
-              <select class="select" id="issueNodeRole">
-                <option value="lite" selected>lite (NAT 极简节点，纯内存零落盘)</option>
-                <option value="full">full (标准完整节点，含本地持久化)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="issueNodeTTL">租约时长 (秒)</label>
-              <input class="input" id="issueNodeTTL" type="number" value="86400">
+      <!-- Full Node Analytics & Traces -->
+      <div id="fullOverviewBox" hidden>
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">网关运行概览</h1>
+            <p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p>
+          </div>
+          <div class="view-actions">
+            <div class="seg" id="activityPeriodSeg">
+              <button class="seg-btn active" data-period="today" type="button">今日</button>
+              <button class="seg-btn" data-period="7d" type="button">近 7 天</button>
+              <button class="seg-btn" data-period="30d" type="button">近 30 天</button>
+              <button class="seg-btn" data-period="all" type="button">全部</button>
             </div>
           </div>
-          <div class="section-bar mt-3 flex-end">
-            <button class="btn btn--primary" id="btnDoIssue">生成 Token 并签发</button>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">请求总数</span>
+            <span class="kpi-value" id="statRequests">0</span>
           </div>
-          <div class="form-group mt-3" id="issuedTokenDisplay" hidden>
-            <label class="form-label text-danger" for="issuedTokenVal">一次性 NODE_TOKEN (刷新页面后不再显示，请立即保存):</label>
-            <input class="input input--code" id="issuedTokenVal" readonly>
-            <label class="form-label mt-2" for="issuedEnvVal">一键启动命令:</label>
-            <input class="input input--code" id="issuedEnvVal" readonly>
+          <div class="kpi-card">
+            <span class="kpi-label">请求成功率</span>
+            <span class="kpi-value" id="statSuccess">-</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Token 总消耗</span>
+            <span class="kpi-value" id="statTokens">0</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">缓存命中率</span>
+            <span class="kpi-value" id="statCacheHit">0%</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">平均首字 (TTFT)</span>
+            <span class="kpi-value" id="statTTFT">-</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">平均生成速率</span>
+            <span class="kpi-value" id="statTPS">-</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">上下行流量</span>
+            <span class="kpi-value" id="statBandwidth">0 B</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">活跃路由 / 供应商</span>
+            <span class="kpi-value" id="statActiveScope">-</span>
           </div>
         </div>
-      </div>
 
-      <div class="list" id="nodesList"></div>
-    </section>
+        <div class="card card-pad" id="usageChartBox" hidden></div>
 
-    <!-- 4. View: Activity & Traces (Full Role Only) -->
-    <section id="viewActivity" hidden>
-      <!-- KPI Tiles (M7) -->
-      <div class="stat-summary">
-        <div class="stat-card">
-          <div class="stat-label">总请求数</div>
-          <div class="stat-val" id="statRequests">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">成功率</div>
-          <div class="stat-val" id="statSuccess">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">总 Token</div>
-          <div class="stat-val" id="statTokens">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">缓存命中率</div>
-          <div class="stat-val" id="statCacheHit">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">平均 TTFT</div>
-          <div class="stat-val" id="statTTFT">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">解码速率 (TPS)</div>
-          <div class="stat-val" id="statTPS">-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">吞吐带宽</div>
-          <div class="stat-val" id="statBandwidth">-</div>
-        </div>
-      </div>
-
-      <!-- Time-Series Interactive SVG Histogram (M9) -->
-      <div class="section-bar">
-        <h2 class="section-title">请求用量时间线分布 (Timeline Histogram)</h2>
-        <div class="seg" id="activityPeriodSeg">
-          <button class="seg-btn active" data-period="today">今日</button>
-          <button class="seg-btn" data-period="7d">近 7 天</button>
-          <button class="seg-btn" data-period="30d">近 30 天</button>
-          <button class="seg-btn" data-period="all">全部</button>
-        </div>
-      </div>
-      <div id="usageChartBox" class="chart-box mb-3"></div>
-
-      <!-- 53-Week Contribution Heatmap (M9) -->
-      <div class="section-bar">
-        <h2 class="section-title">53 周活跃贡献热力图 (53-Week Heatmap)</h2>
-      </div>
-      <div id="usageHeatmapBox" class="heatmap-box mb-3"></div>
-
-      <!-- 3-Dimension Breakdown: Models / Providers / Keys (M10) -->
-      <div class="section-bar">
-        <div class="seg" id="usageDimensionSeg">
-          <button class="seg-btn active" data-dim="models">按模型 (Models)</button>
-          <button class="seg-btn" data-dim="providers">按供应商 (Providers)</button>
-          <button class="seg-btn" data-dim="keys">按密钥 (Keys)</button>
-        </div>
-        <div class="fields">
-          <button class="btn btn--sm btn--danger" id="btnClearTraces">清空记录</button>
-        </div>
-      </div>
-      <div class="list mb-3" id="usageBreakdownList"></div>
-
-      <!-- Recent 60 Traces Replay (M8, M12) -->
-      <div class="section-bar">
-        <h2 class="section-title">最近 60 条请求轨迹回放 (Recent Traces)</h2>
-        <div class="fields">
-          <button class="btn btn--sm" id="btnFilterRetried">仅看异常/重试</button>
-        </div>
-      </div>
-      <div class="list" id="tracesList"></div>
-    </section>
-
-    <!-- 5. View: Settings (Hub & Full Role) -->
-    <section id="viewSettings" hidden>
-      <div class="section-bar">
-        <h2 class="section-title">全局运行时设置</h2>
-        <button class="btn btn--primary" id="btnSaveSettings">保存设置</button>
-      </div>
-
-      <!-- Gateway Access Center (M16, Full Only) -->
-      <div id="gatewayAccessCenter" class="list mb-3" hidden>
-        <div class="editor">
+        <div class="card card-pad" id="usageHeatmapWrapper" hidden>
           <div class="section-bar">
-            <h3 class="section-title">⚡ 网关接入中心 (Gateway Access Center)</h3>
+            <span class="form-label">年度调用热力图</span>
           </div>
-          <div class="editor-grid">
-            <div class="form-group">
-              <label class="form-label" for="gwBaseUrl">本地直连 Base URL</label>
-              <input class="input input--code" id="gwBaseUrl" readonly value="http://127.0.0.1:3425/v1">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="gwClientKey">CLIENT_KEY (客户端 API Key)</label>
-              <div class="fields">
-                <input class="input input--code flex-1" id="gwClientKey" placeholder="sk-...">
-                <button class="btn btn--sm" id="btnGenClientKey" type="button">随机生成</button>
-                <button class="btn btn--sm btn--primary" id="btnSaveClientKey" type="button">更新</button>
-              </div>
+          <div class="heatmap-scroll" id="usageHeatmapBox"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">多维用量统计</h2>
+            <div class="seg" id="usageDimensionSeg">
+              <button class="seg-btn active" data-dim="models" type="button">按模型</button>
+              <button class="seg-btn" data-dim="providers" type="button">按供应商</button>
+              <button class="seg-btn" data-dim="keys" type="button">按密钥</button>
             </div>
           </div>
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">Claude Code 快速接入:</span>
-              <button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button>
+          <div id="usageBreakdownList"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">最近请求轨迹</h2>
+            <div class="fields">
+              <button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button>
+              <button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button>
             </div>
-            <code class="snippet-code" id="snippetClaude">export ANTHROPIC_BASE_URL="http://127.0.0.1:3425/v1" ANTHROPIC_API_KEY="..."</code>
           </div>
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">Cursor / OpenAI SDK 接入:</span>
-              <button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button>
-            </div>
-            <code class="snippet-code" id="snippetCursor">OPENAI_BASE_URL="http://127.0.0.1:3425/v1" OPENAI_API_KEY="..."</code>
+          <div id="tracesList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 供应商与密钥池 -->
+    <section id="viewProviders" hidden>
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">供应商与密钥池</h1>
+          <p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p>
+        </div>
+        <div class="view-actions">
+          <div class="fields" id="vaultSyncBar" hidden>
+            <button class="btn" id="btnSyncManifest" type="button">拉取中枢清单</button>
+            <button class="btn" id="btnSyncKeys" type="button">从 Vault 同步密钥</button>
           </div>
+          <button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button>
         </div>
       </div>
 
-      <!-- Mode Schedule & Advanced Concurrency (U4, Full Only) -->
-      <div id="modeScheduleBox" class="list mb-3" hidden>
-        <div class="editor">
-          <div class="section-bar">
-            <h3 class="section-title">⏰ 模式计划与并发配额 (Mode Schedule & Concurrency)</h3>
-            <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button">一键解除所有冷却</button>
-          </div>
-          <div class="editor-grid">
-            <div class="form-group">
-              <label class="form-label"><input type="checkbox" id="cfgModeSchedEnabled"> 启用模式计划自动切换</label>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgModeSchedWindow">Agent 模式生效时间窗口</label>
-              <input class="input" id="cfgModeSchedWindow" placeholder="08:30-22:30">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgModeSchedTz">调度参考时区</label>
-              <input class="input" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgModeSchedWebhook">切换通知 Webhook URL</label>
-              <input class="input input--code" id="cfgModeSchedWebhook" placeholder="https://...">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgOcrInflight">OCR 最大并发 (ocr_max_inflight)</label>
-              <input class="input" id="cfgOcrInflight" type="number" value="4">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgKbConcurrency">KB 全局最大并发 (kb_global_max_concurrency)</label>
-              <input class="input" id="cfgKbConcurrency" type="number" value="16">
-            </div>
-          </div>
+      <div class="card card-pad" id="addProviderForm" hidden>
+        <div class="section-bar">
+          <h2 class="card-title">新增供应商</h2>
+          <button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button>
         </div>
-      </div>
 
-      <!-- Config Backup (JSON Export & Import) (U4, Full Only) -->
-      <div id="configBackupBox" class="list mb-3" hidden>
-        <div class="editor">
-          <div class="section-bar">
-            <h3 class="section-title">📦 配置备份与迁移 (Config Backup & Import)</h3>
+        <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
+          <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">快速预设</label>
+            <select class="select" id="newProvPreset"></select>
           </div>
-          <div class="fields gap-2">
-            <button class="btn btn--primary" id="btnExportConfig" type="button">导出配置 JSON</button>
-            <button class="btn" id="btnTriggerImport" type="button">导入配置恢复...</button>
-            <input type="file" id="importConfigFile" accept=".json" class="hidden" hidden>
-            <select class="select" id="importConfigMode">
-              <option value="merge">合并模式 (Merge)</option>
-              <option value="overwrite">覆盖模式 (Overwrite)</option>
+          <div class="form-group">
+            <label class="form-label">供应商 ID</label>
+            <input class="input input--code" id="newProvId" placeholder="例如 deepseek">
+          </div>
+          <div class="form-group">
+            <label class="form-label">显示名称</label>
+            <input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">
+          </div>
+          <div class="form-group form-group--span2">
+            <div class="form-label">
+              <span>Base URL</span>
+              <button class="btn btn--sm" id="btnDetectProvider" type="button">探测协议</button>
+            </div>
+            <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">上游协议类型</label>
+            <select class="select" id="newProvApiType">
+              <option value="openai-completions">OpenAI Chat Completions</option>
+              <option value="anthropic-messages">Anthropic Messages</option>
+              <option value="gemini">Google Gemini</option>
             </select>
           </div>
+          <div class="form-group">
+            <label class="form-label">初始 Key 标签</label>
+            <input class="input" id="newProvKeyAlias" placeholder="例如 pool-01">
+          </div>
+          <div class="form-group form-group--span2">
+            <label class="form-label">初始 API Key</label>
+            <input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)">
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn" id="btnCancelAddProvider" type="button">取消</button>
+          <button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button>
         </div>
       </div>
 
-      <!-- General Settings -->
-      <div class="list">
-        <div class="editor">
-          <div class="editor-grid">
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-ico" id="providerSearchIcon"></span>
+          <input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
+        </div>
+        <div class="seg" id="providerFilterSeg">
+          <button class="seg-btn active" data-filter="all" type="button">全部</button>
+          <button class="seg-btn" data-filter="enabled" type="button">已启用</button>
+          <button class="seg-btn" data-filter="healthy" type="button">探活通过</button>
+          <button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button>
+        </div>
+      </div>
+
+      <div class="card" id="providersList"></div>
+    </section>
+
+    <!-- 3. 模型与路由 -->
+    <section id="viewModels" hidden>
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">模型路由与流水线</h1>
+          <p class="view-sub" id="modelsSubtitle">配置 Agent 逻辑模型映射及知识库 (KB) 高并发候选流水线</p>
+        </div>
+        <div class="view-actions">
+          <div class="seg" id="modelPipelineSeg">
+            <button class="seg-btn active" data-submode="agent" type="button">Agent 路由</button>
+            <button class="seg-btn" data-submode="kb" type="button">KB 流水线</button>
+          </div>
+          <button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button>
+        </div>
+      </div>
+
+      <div class="card card-pad" id="addModelForm" hidden>
+        <h2 class="card-title mb-3">新增 Agent 逻辑模型</h2>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">对外模型名</label>
+            <input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5">
+          </div>
+          <div class="form-group">
+            <label class="form-label">首选供应商</label>
+            <select class="select" id="newModelProvider"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">上游目标模型 ID</label>
+            <input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" id="btnCancelAddModel" type="button">取消</button>
+          <button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-box">
+          <span class="search-ico" id="modelSearchIcon"></span>
+          <input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商">
+        </div>
+      </div>
+
+      <div class="card" id="modelsList"></div>
+    </section>
+
+    <!-- 4. 中转节点 (Hub) -->
+    <section id="viewNodes" hidden>
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">中转节点管理</h1>
+          <p class="view-sub">签发、轮换及吊销下游网关节点的 Vault 同步凭证与权限范围</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn--primary" id="btnIssueNode" type="button">签发新节点</button>
+        </div>
+      </div>
+
+      <div class="card card-pad" id="issueNodeForm" hidden>
+        <h2 class="card-title mb-3">签发新中转节点凭证</h2>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">节点名称</label>
+            <input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
+          </div>
+          <div class="form-group">
+            <label class="form-label">节点角色</label>
+            <select class="select" id="issueNodeRole">
+              <option value="full">Full (全功能代理网关)</option>
+              <option value="lite">Lite (轻量本地代理)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">租约时长 (秒)</label>
+            <input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
+        </div>
+
+        <div class="editor-section" id="issuedTokenDisplay" hidden>
+          <div class="form-grid form-grid--2">
             <div class="form-group">
-              <label class="form-label" for="cfgRoutingStrategy">默认调度策略</label>
-              <select class="select" id="cfgRoutingStrategy">
-                <option value="sticky_failover">粘性故障转移 (sticky_failover)</option>
-                <option value="round_robin">标准轮询 (round_robin)</option>
-                <option value="manual">手动严格直通 (manual)</option>
+              <label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
+              <input class="input input--code" id="issuedTokenVal" readonly>
+            </div>
+            <div class="form-group">
+              <label class="form-label">节点启动环境变量</label>
+              <input class="input input--code" id="issuedEnvVal" readonly>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="nodesList"></div>
+    </section>
+
+    <!-- 5. 系统设置 -->
+    <section id="viewSettings" hidden>
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">系统设置与备份</h1>
+          <p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button>
+        </div>
+      </div>
+
+      <!-- 1. Gateway Access Center (Full) -->
+      <div class="card card-pad" id="gatewayAccessCenter" hidden>
+        <div class="section-bar">
+          <h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2>
+        </div>
+        <div class="form-grid form-grid--2">
+          <div class="form-group">
+            <label class="form-label">网关入口地址 (Base URL)</label>
+            <input class="input input--code" id="gwBaseUrl" readonly>
+          </div>
+          <div class="form-group">
+            <div class="form-label">
+              <span>客户端鉴权密钥</span>
+              <div class="fields">
+                <button class="btn btn--sm" id="btnGenClientKey" type="button">随机生成</button>
+                <button class="btn btn--sm btn--primary" id="btnSaveClientKey" type="button">保存密钥</button>
+              </div>
+            </div>
+            <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
+          </div>
+        </div>
+        <div class="form-grid form-grid--2 mt-3">
+          <div class="snippet-box">
+            <div class="snippet-header">
+              <span class="form-label">Claude Code 环境变量</span>
+              <button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button>
+            </div>
+            <code class="snippet-code" id="snippetClaude"></code>
+          </div>
+          <div class="snippet-box">
+            <div class="snippet-header">
+              <span class="form-label">OpenAI / Cursor 配置</span>
+              <button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button>
+            </div>
+            <code class="snippet-code" id="snippetCursor"></code>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Routing & Cooldown Policy -->
+      <div class="card card-pad">
+        <div class="section-bar">
+          <h2 class="card-title"><span class="step-num">2</span>全局路由与异常冷却策略</h2>
+          <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">默认路由策略</label>
+            <select class="select" id="cfgRoutingStrategy">
+              <option value="sticky_failover">粘性故障转移</option>
+              <option value="round_robin">标准轮询</option>
+              <option value="manual">手动直通</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">首字超时 (秒)</label>
+            <input class="input tabular" id="cfgFirstByteTimeout" type="number" placeholder="120">
+          </div>
+          <div class="form-group">
+            <label class="form-label">429 限流冷却 (秒)</label>
+            <input class="input tabular" id="cfgCooldown429" type="number" placeholder="15">
+          </div>
+          <div class="form-group">
+            <label class="form-label">5xx 服务端异常冷却 (秒)</label>
+            <input class="input tabular" id="cfgCooldown5xx" type="number" placeholder="30">
+          </div>
+          <div class="form-group">
+            <label class="form-label">网络超时冷却 (秒)</label>
+            <input class="input tabular" id="cfgCooldownNet" type="number" placeholder="15">
+          </div>
+          <div class="form-group">
+            <label class="form-label">401/403 鉴权失败冷却 (秒)</label>
+            <input class="input tabular" id="cfgCooldownAuth" type="number" placeholder="86400">
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Mode Schedule & Concurrency (Full) -->
+      <div class="card card-pad" id="modeScheduleBox" hidden>
+        <div class="section-bar">
+          <h2 class="card-title"><span class="step-num">3</span>运行模式定时调度与并发保护</h2>
+          <label class="form-label">
+            <input type="checkbox" id="cfgModeSchedEnabled">
+            <span>启用自动时段切换</span>
+          </label>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Agent 模式时段</label>
+            <input class="input input--code" id="cfgModeSchedWindow" placeholder="08:30-22:30">
+          </div>
+          <div class="form-group">
+            <label class="form-label">时区</label>
+            <input class="input input--code" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
+          </div>
+          <div class="form-group">
+            <label class="form-label">状态变更 Webhook</label>
+            <input class="input input--code" id="cfgModeSchedWebhook" placeholder="https://...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">OCR 最大并发数</label>
+            <input class="input tabular" id="cfgOcrInflight" type="number" placeholder="4">
+          </div>
+          <div class="form-group">
+            <label class="form-label">KB 全局并发上限</label>
+            <input class="input tabular" id="cfgKbConcurrency" type="number" placeholder="16">
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Vault Client Link (Full) -->
+      <div class="card card-pad" id="cfgVaultLinkBox" hidden>
+        <div class="section-bar">
+          <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
+        </div>
+        <div class="form-grid form-grid--2">
+          <div class="form-group" id="cfgVaultUrlGroup">
+            <label class="form-label">Vault 中枢地址</label>
+            <input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">
+          </div>
+          <div class="form-group" id="cfgVaultTokenGroup">
+            <label class="form-label">节点同步 Token</label>
+            <input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Config Backup & Restore (Hub + Full) -->
+      <div class="card card-pad" id="configBackupBox">
+        <div class="section-bar">
+          <h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2>
+        </div>
+        <div class="form-grid form-grid--2">
+          <div class="form-group">
+            <label class="form-label">导出当前完整配置 (JSON)</label>
+            <div>
+              <button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">导入 v1 / v2 配置文件</label>
+            <div class="fields">
+              <select class="select" id="importConfigMode">
+                <option value="merge">增量合并 (保留现有)</option>
+                <option value="overwrite">全量覆盖</option>
               </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgFirstByteTimeout">首字节超时 (秒，总硬超时固定300s)</label>
-              <input class="input" id="cfgFirstByteTimeout" type="number" value="120">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgCooldown429">429 限流冷却秒数</label>
-              <input class="input" id="cfgCooldown429" type="number" value="15">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgCooldown5xx">5xx 服务端错误冷却秒数</label>
-              <input class="input" id="cfgCooldown5xx" type="number" value="30">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgCooldownNet">网络错误冷却秒数</label>
-              <input class="input" id="cfgCooldownNet" type="number" value="15">
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cfgCooldownAuth">401/403 鉴权错误冷却秒数</label>
-              <input class="input" id="cfgCooldownAuth" type="number" value="86400">
-            </div>
-            <div class="form-group" id="cfgVaultUrlGroup" hidden>
-              <label class="form-label" for="cfgVaultUrl">EdgeOne Hub 中枢 URL</label>
-              <input class="input input--code" id="cfgVaultUrl" placeholder="如 https://hub.example.com">
-            </div>
-            <div class="form-group" id="cfgVaultTokenGroup" hidden>
-              <label class="form-label" for="cfgVaultToken">Hub NODE_TOKEN 访问凭据</label>
-              <input class="input input--code" id="cfgVaultToken" placeholder="如 stk_node_...">
+              <input type="file" id="importConfigFile" accept=".json,application/json" hidden>
+              <button class="btn btn--primary" id="btnTriggerImport" type="button">选择文件导入</button>
             </div>
           </div>
         </div>
@@ -440,24 +546,25 @@
     </section>
   </main>
 
-  <!-- In-Page Magpie Login Overlay (M14) -->
-  <div id="loginScreen" class="login-overlay hidden" hidden>
+  <!-- Login Overlay -->
+  <div class="login-overlay hidden" id="loginScreen" hidden>
     <div class="login-card">
-      <div class="login-brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-        </svg>
-        <span class="login-title">LLMProxy 控制台</span>
-        <span id="loginHostBadge" class="brand-badge">Full</span>
+      <div class="login-head">
+        <div class="brand">
+          <span class="brand-mark" id="loginBrandMark"></span>
+          <span class="brand-name">LLMProxy2</span>
+        </div>
+        <span class="badge-role" id="loginHostBadge"></span>
       </div>
-      <p class="login-sub">请输入管理员凭据 (ADMIN_PASSWORD) 进行身份校验</p>
-      <form id="loginForm" class="login-form">
+      <form id="loginForm">
         <div class="form-group">
-          <label class="form-label" for="loginPassword">管理密码 / 访问凭据</label>
-          <input type="password" id="loginPassword" class="input input--code" placeholder="••••••••" autocomplete="current-password">
+          <label class="form-label" for="loginPassword">管理员密码</label>
+          <input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码">
         </div>
         <div class="login-error hidden" id="loginError" hidden></div>
-        <button type="submit" id="loginSubmitBtn" class="btn btn--primary login-btn">登录控制台</button>
+        <div class="form-actions">
+          <button class="btn btn--primary" type="submit">验证并登录</button>
+        </div>
       </form>
     </div>
   </div>

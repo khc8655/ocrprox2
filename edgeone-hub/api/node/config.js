@@ -47,15 +47,34 @@ export async function handleNodeConfigRequest(request, env, kv) {
   const leaseUntil = nowSec + leaseTtl;
   const graceUntil = leaseUntil + graceTtl;
 
-  // Touch node's last_seen (throttled)
-  touchNodeLastSeen(node.id, kv, config._version).catch(() => {});
-
   // 4. Compute ETag
   const etag = computeEtag({
     v: config._version || 1,
     scope: node.scope,
     payload,
   });
+
+  const ifNoneMatch = request.headers.get('if-none-match');
+  const is304 = Boolean(ifNoneMatch && ifNoneMatch === etag);
+  const clientIp =
+    (request.headers.get('eo-connecting-ip') ||
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for') ||
+      '')
+      .split(',')[0]
+      .trim() || null;
+
+  let telemetry = null;
+  try {
+    const reqClone = request.clone();
+    const reqJson = await reqClone.json();
+    if (reqJson && typeof reqJson.telemetry === 'object') {
+      telemetry = reqJson.telemetry;
+    }
+  } catch (_) {}
+
+  // Touch node's last_seen and sync counters
+  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, telemetry }).catch(() => {});
 
   const responseHeaders = {
     'ETag': etag,
@@ -65,8 +84,7 @@ export async function handleNodeConfigRequest(request, env, kv) {
   };
 
   // 5. ETag 304 Zero-Payload Check
-  const ifNoneMatch = request.headers.get('if-none-match');
-  if (ifNoneMatch && ifNoneMatch === etag) {
+  if (is304) {
     return new Response(null, {
       status: 304,
       headers: responseHeaders,

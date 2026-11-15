@@ -38,6 +38,73 @@
     },
   }[hostKind] || capabilities.full;
 
+  function normalizeImportedConfig(raw, defaultOrigin) {
+    const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
+    const providers = {};
+    for (const [pId, p] of Object.entries(src.providers || {})) {
+      if (!p || typeof p !== 'object') continue;
+      let apiKeys = Array.isArray(p.api_keys) ? p.api_keys.map((k) => ({ ...k })) : [];
+      if (apiKeys.length === 0 && p.keys && typeof p.keys === 'object') {
+        apiKeys = Object.entries(p.keys).map(([lbl, secret], idx) => ({
+          id: `k_${lbl || idx}`,
+          label: lbl,
+          key: typeof secret === 'string' ? secret : (secret?.key || ''),
+          enabled: typeof secret === 'object' ? secret.enabled !== false : true,
+          origin: (typeof secret === 'object' && secret.origin) || p.origin || defaultOrigin || 'vault',
+        }));
+      }
+      providers[pId] = {
+        ...p,
+        name: p.name || pId,
+        enabled: p.enabled !== false,
+        origin: p.origin || defaultOrigin || 'vault',
+        api_keys: apiKeys,
+      };
+      delete providers[pId].keys;
+    }
+
+    const agentModels = {};
+    for (const [mName, m] of Object.entries(src.agent_models || {})) {
+      if (!m || typeof m !== 'object') continue;
+      let candidates = Array.isArray(m.candidates) ? m.candidates.map((c) => ({ ...c })) : [];
+      if (candidates.length === 0 && Array.isArray(m.keys)) {
+        candidates = m.keys.map((k) => ({
+          provider: k.provider || '',
+          key_label: k.key_label || k.key || '',
+          target_model: k.target_model || k.model || mName,
+          enabled: k.enabled !== false,
+          weight: k.weight || 1,
+        }));
+      }
+      agentModels[mName] = {
+        routing_strategy: m.routing_strategy || 'sticky_failover',
+        active_key: m.active_key || '',
+        enabled: m.enabled !== false,
+        candidates,
+      };
+    }
+
+    const kbModels = {};
+    const rawKb = src.kb_models || src.candidates || {};
+    for (const [cat, list] of Object.entries(rawKb)) {
+      if (!Array.isArray(list)) continue;
+      kbModels[cat] = list.map((c) => ({
+        provider: c.provider || '',
+        key_label: c.key_label || c.key || '',
+        model: c.model || c.target_model || '',
+        max_concurrency: Number(c.max_concurrency || c.max_conc) || 4,
+        enabled: c.enabled !== false,
+      }));
+    }
+
+    return {
+      providers,
+      agent_models: agentModels,
+      kb_models: kbModels,
+      settings: src.settings && typeof src.settings === 'object' ? { ...src.settings } : {},
+    };
+  }
+
   const HOST = {
     kind: hostKind,
     capabilities,
@@ -334,10 +401,42 @@
     },
 
     async exportConfig() {
+      if (hostKind === 'hub') {
+        const cfg = await HOST.getConfig();
+        const json = JSON.stringify(cfg, null, 2);
+        return {
+          ok: true,
+          blob: async () => new Blob([json], { type: 'application/json' }),
+          json: async () => cfg,
+        };
+      }
       return HOST.request('/api/admin/config/export');
     },
 
     async importConfig(data) {
+      if (hostKind === 'hub') {
+        const mode = data?.mode || 'merge';
+        const raw = data?.config || data || {};
+        const cur = await HOST.getConfig();
+        const norm = normalizeImportedConfig(raw, 'vault');
+        const target = mode === 'overwrite'
+          ? {
+              _version: cur?._version || 1,
+              providers: norm.providers,
+              agent_models: norm.agent_models,
+              kb_models: norm.kb_models,
+              settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
+            }
+          : {
+              ...cur,
+              providers: { ...(cur?.providers || {}), ...norm.providers },
+              agent_models: { ...(cur?.agent_models || {}), ...norm.agent_models },
+              kb_models: { ...(cur?.kb_models || {}), ...norm.kb_models },
+              settings: { ...(cur?.settings || {}), ...(norm.settings || {}) },
+            };
+        const saved = await HOST.saveConfig(target);
+        return saved?.data || saved || { ok: true };
+      }
       const res = await HOST.request('/api/admin/config/import', {
         method: 'POST',
         body: JSON.stringify(data),

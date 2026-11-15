@@ -74,8 +74,11 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') 
     },
     created_at: nowIso,
     last_seen: null,
+    last_ip: null,
     last_config_version: 0,
-    last_binary_version: 'v2.0.0',
+    last_binary_version: 'v2.1.2',
+    sync_count: 0,
+    hit_304_count: 0,
   };
 
   nodes.push(node);
@@ -174,9 +177,9 @@ export async function findNodeByToken(rawToken, kv) {
 }
 
 /**
- * Update node last_seen (throttled to avoid excessive KV writes).
+ * Update node last_seen and sync telemetry (throttled on repeated 304s to avoid excessive KV writes).
  */
-export async function touchNodeLastSeen(nodeId, kv, configVer = 0) {
+export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
   const nodes = await loadNodes(kv);
   const node = nodes.find((n) => n.id === nodeId);
   if (!node) return;
@@ -184,8 +187,24 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0) {
   const now = Date.now();
   const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
 
-  // Throttle to once every 5 minutes (300_000 ms) unless first time
-  if (now - lastTime < 300_000) return;
+  node.sync_count = (Number(node.sync_count) || 0) + 1;
+  if (meta && meta.is304) {
+    node.hit_304_count = (Number(node.hit_304_count) || 0) + 1;
+  }
+  if (meta && meta.ip) {
+    node.last_ip = String(meta.ip);
+  }
+  if (meta && meta.telemetry && typeof meta.telemetry === 'object') {
+    node.telemetry = {
+      requests: Number(meta.telemetry.requests) || 0,
+      success: Number(meta.telemetry.success) || 0,
+      tokens: Number(meta.telemetry.tokens) || 0,
+      updated_at: new Date(now).toISOString(),
+    };
+  }
+
+  // Throttle repeated 304 writes to once every 60s unless first sync or full 200 pull
+  if (lastTime > 0 && meta?.is304 && now - lastTime < 60_000) return;
 
   node.last_seen = new Date(now).toISOString();
   if (configVer) node.last_config_version = configVer;

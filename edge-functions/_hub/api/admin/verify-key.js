@@ -1,8 +1,36 @@
-import { checkAdminAuth, isMaskedSecret, resolveKvBinding, resolveEnv, loadConfig } from '../../lib/config.js';
+import { checkAdminAuth, isMaskedSecret, resolveKvBinding, resolveEnv, loadConfig, CONFIG_KV_KEY } from '../../lib/config.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { resolveModelsUrl, scrubSecrets, extractModelIds } from '../../lib/models.js';
 
 const isMaskedKey = isMaskedSecret;
+
+async function persistKeyHealth(env, provider, keyLabel, result) {
+  if (!provider) return;
+  try {
+    const kv = resolveKvBinding(env);
+    if (!kv) return;
+    const config = await loadConfig(kv);
+    const prov = config?.providers?.[provider];
+    if (!prov || !Array.isArray(prov.api_keys)) return;
+    const match = keyLabel
+      ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
+      : prov.api_keys[0];
+    if (!match) return;
+    match.last_ok = Boolean(result.valid);
+    match.last_status = Number(result.status) || 0;
+    match.last_latency_ms = Number(result.latency_ms) || 0;
+    if (result.models_count !== undefined) {
+      match.last_models_count = Number(result.models_count) || 0;
+    }
+    match.last_checked_at = new Date().toISOString();
+    const serialized = JSON.stringify(config);
+    if (typeof kv.put === 'function') {
+      await kv.put(CONFIG_KV_KEY, serialized);
+    } else if (typeof kv.setItem === 'function') {
+      await kv.setItem(CONFIG_KV_KEY, serialized);
+    }
+  } catch (_) {}
+}
 
 function findUnmaskedKey(prov, keyLabel) {
   if (!prov) return null;
@@ -165,6 +193,13 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       modelsCount = models.length;
     } catch (_) {}
 
+    await persistKeyHealth(env, provider, keyLabel, {
+      valid: true,
+      status: resp.status,
+      latency_ms,
+      models_count: modelsCount,
+    });
+
     return new Response(
       JSON.stringify({
         ok: true,
@@ -196,6 +231,12 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       }
     } catch (_) {}
   }
+
+  await persistKeyHealth(env, provider, keyLabel, {
+    valid: false,
+    status: resp.status,
+    latency_ms,
+  });
 
   return new Response(
     JSON.stringify({

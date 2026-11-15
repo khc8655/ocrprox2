@@ -11,11 +11,16 @@
     traces: [],
     lanes: {},
     cooldowns: {},
-    activeTab: 'providers',
+    activeTab: 'activity',
     activeEditorKey: null,
+    modelSubMode: 'agent',
+    providerQuery: '',
+    providerFilter: 'all',
+    modelQuery: '',
     filterOnlyRetried: false,
     currentPeriod: 'today',
     lanesTimer: null,
+    batchVerifying: false,
   };
 
   function toast(msg, type = 'info') {
@@ -42,8 +47,21 @@
       .replace(/"/g, '&quot;');
   }
 
+  function setupStaticIcons() {
+    const setIcon = (id, name) => {
+      const el = document.getElementById(id);
+      if (el && window.uiIcon) el.innerHTML = window.uiIcon(name);
+    };
+    setIcon('brandMark', 'server');
+    setIcon('loginBrandMark', 'server');
+    setIcon('logoutBtn', 'logout');
+    setIcon('providerSearchIcon', 'search');
+    setIcon('modelSearchIcon', 'search');
+  }
+
   // --- Initializer ---
   async function init() {
+    setupStaticIcons();
     setupLoginScreen();
     setupCapabilities();
     setupTheme();
@@ -51,6 +69,8 @@
     setupKeyboardShortcuts();
     setupNavigation();
     setupCreationForms();
+    setupToolbars();
+    setupConfigBackup();
     // Only fetch data when a credential is already present. An unauthenticated
     // page load must not issue /api/* requests: every one of those is a 401 and
     // would otherwise burn the anti-bruteforce budget (5 hits = 10 min lockout).
@@ -121,19 +141,23 @@
     const topVersionBox = document.getElementById('topVersionBox');
     const modeSwitchBox = document.getElementById('modeSwitchBox');
     const vaultSyncBar = document.getElementById('vaultSyncBar');
-    const cfgVaultUrlGroup = document.getElementById('cfgVaultUrlGroup');
-    const cfgVaultTokenGroup = document.getElementById('cfgVaultTokenGroup');
+    const cfgVaultLinkBox = document.getElementById('cfgVaultLinkBox');
+    const hubOverviewBox = document.getElementById('hubOverviewBox');
+    const fullOverviewBox = document.getElementById('fullOverviewBox');
+    const btnClearAllCooldowns = document.getElementById('btnClearAllCooldowns');
 
-    if (navModels) navModels.hidden = !caps.runModes;
+    if (navModels) navModels.hidden = false;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
-    if (navActivity) navActivity.hidden = !caps.usageAndTraces;
+    if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
     if (modeSwitchBox) modeSwitchBox.hidden = !caps.runModes;
     if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
-    if (cfgVaultUrlGroup) cfgVaultUrlGroup.hidden = !caps.vaultClient;
-    if (cfgVaultTokenGroup) cfgVaultTokenGroup.hidden = !caps.vaultClient;
+    if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
+    if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
+    if (fullOverviewBox) fullOverviewBox.hidden = isHub;
+    if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.runModes;
 
-    state.activeTab = isHub ? 'providers' : 'models';
+    state.activeTab = 'activity';
     switchTab(state.activeTab);
   }
 
@@ -152,12 +176,16 @@
   }
 
   function applyTheme(theme) {
+    const btn = document.getElementById('themeToggleBtn');
     if (theme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
+      if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('moon');
     } else if (theme === 'light') {
       document.documentElement.setAttribute('data-theme', 'light');
+      if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('sun');
     } else {
       document.documentElement.removeAttribute('data-theme');
+      if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('monitor');
     }
   }
 
@@ -168,13 +196,17 @@
     const isMasked = localStorage.getItem('llmproxy_privacy_mask') === '1';
     if (isMasked) {
       document.body.classList.add('privacy-masked');
-      btn.textContent = '🙈';
+    }
+    if (window.uiIcon) {
+      btn.innerHTML = window.uiIcon(isMasked ? 'eyeOff' : 'eye');
     }
 
     btn.addEventListener('click', () => {
       const active = document.body.classList.toggle('privacy-masked');
       localStorage.setItem('llmproxy_privacy_mask', active ? '1' : '0');
-      btn.textContent = active ? '🙈' : '👁️';
+      if (window.uiIcon) {
+        btn.innerHTML = window.uiIcon(active ? 'eyeOff' : 'eye');
+      }
       toast(active ? '隐私遮罩已开启' : '隐私遮罩已关闭', 'info');
     });
   }
@@ -478,7 +510,120 @@
     return { url, base, protocol, key, model };
   }
 
+  function populatePresetDropdown() {
+    const sel = document.getElementById('newProvPreset');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
+    for (const [key, meta] of Object.entries(PRESETS_META)) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = meta[1];
+      sel.appendChild(opt);
+    }
+  }
+
+  function setupToolbars() {
+    const provSearch = document.getElementById('providerSearchInput');
+    if (provSearch) {
+      provSearch.addEventListener('input', (e) => {
+        state.providerQuery = (e.target.value || '').trim().toLowerCase();
+        renderProvidersList();
+      });
+    }
+
+    const provFilter = document.getElementById('providerFilterSeg');
+    if (provFilter) {
+      provFilter.querySelectorAll('.seg-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const f = btn.getAttribute('data-filter') || 'all';
+          state.providerFilter = f;
+          provFilter.querySelectorAll('.seg-btn').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-filter') === f);
+          });
+          renderProvidersList();
+        });
+      });
+    }
+
+    const modelSearch = document.getElementById('modelSearchInput');
+    if (modelSearch) {
+      modelSearch.addEventListener('input', (e) => {
+        state.modelQuery = (e.target.value || '').trim().toLowerCase();
+        renderModelsList();
+      });
+    }
+
+    const modelSubSeg = document.getElementById('modelPipelineSeg');
+    if (modelSubSeg) {
+      modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const m = btn.getAttribute('data-submode') || 'agent';
+          state.modelSubMode = m;
+          modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-submode') === m);
+          });
+          renderModelsList();
+        });
+      });
+    }
+
+    document.getElementById('btnHubRefreshOverview')?.addEventListener('click', loadData);
+    document.getElementById('btnHubBatchVerifyAll')?.addEventListener('click', verifyAllHubKeys);
+    document.getElementById('btnGoProvidersFromHub')?.addEventListener('click', () => switchTab('providers'));
+    document.getElementById('btnGoNodesFromHub')?.addEventListener('click', () => switchTab('nodes'));
+  }
+
+  function setupConfigBackup() {
+    document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
+      try {
+        const res = await window.HOST.exportConfig();
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `llmproxy_config_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('配置已导出下载', 'ok');
+      } catch (e) {
+        toast(`导出失败: ${e.message}`, 'err');
+      }
+    });
+
+    const importInput = document.getElementById('importConfigFile');
+    document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
+      importInput?.click();
+    });
+
+    if (importInput) {
+      importInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const parsed = JSON.parse(reader.result);
+            const mode = document.getElementById('importConfigMode')?.value || 'merge';
+            const res = await window.HOST.importConfig({ mode, config: parsed });
+            if (res && (res.ok || res._version !== undefined)) {
+              toast('配置恢复导入成功', 'ok');
+              await loadData();
+            } else {
+              toast(res?.error || '导入失败', 'err');
+            }
+          } catch (err) {
+            toast(`解析配置失败: ${err.message}`, 'err');
+          } finally {
+            importInput.value = '';
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+  }
+
   function setupCreationForms() {
+    populatePresetDropdown();
     const pForm = document.getElementById('addProviderForm');
     const mForm = document.getElementById('addModelForm');
     const toggle = (el, show) => {
@@ -492,12 +637,14 @@
 
     // cURL Paste Toggle & Input (M3)
     const btnToggleCurl = document.getElementById('btnToggleCurlPaste');
+    const curlWrap = document.getElementById('curlPasteWrap');
     const curlInput = document.getElementById('curlPasteInput');
     if (btnToggleCurl && curlInput) {
       btnToggleCurl.addEventListener('click', () => {
-        curlInput.hidden = !curlInput.hidden;
-        curlInput.classList.toggle('hidden', curlInput.hidden);
-        if (!curlInput.hidden) curlInput.focus();
+        const target = curlWrap || curlInput;
+        target.hidden = !target.hidden;
+        target.classList.toggle('hidden', target.hidden);
+        if (!target.hidden) curlInput.focus();
       });
 
       curlInput.addEventListener('input', () => {
@@ -645,8 +792,12 @@
       if (v) v.hidden = k !== tab;
     }
 
-    if (tab === 'activity' && window.HOST.capabilities.usageAndTraces) {
-      loadActivityData();
+    if (tab === 'activity') {
+      if (window.HOST.kind === 'hub') {
+        renderHubOverview();
+      } else if (window.HOST.capabilities.usageAndTraces) {
+        loadActivityData();
+      }
     }
   }
 
@@ -659,6 +810,7 @@
         if (state.config && state.config.settings) {
           state.config.settings.run_mode = mode;
         }
+        state.modelSubMode = mode;
         updateRunModeUI(mode);
         renderModelsList();
       } else {
@@ -677,17 +829,24 @@
       btnAgent.classList.toggle('active', isAgent);
       btnKB.classList.toggle('active', !isAgent);
     }
+    const modelSubSeg = document.getElementById('modelPipelineSeg');
+    if (modelSubSeg) {
+      modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-submode') === mode);
+      });
+    }
   }
 
   async function loadData() {
     try {
       const cfgResp = await window.HOST.getConfig();
-      if (cfgResp && cfgResp.ok) {
+      if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
         state.config = cfgResp;
         const verEl = document.getElementById('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
 
         if (state.config.settings && state.config.settings.run_mode) {
+          state.modelSubMode = state.config.settings.run_mode;
           updateRunModeUI(state.config.settings.run_mode);
         }
 
@@ -698,6 +857,12 @@
 
       if (window.HOST.capabilities.nodeManager) {
         await loadNodesData();
+      }
+
+      if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+        renderHubOverview();
+      } else if (window.HOST.capabilities.usageAndTraces && state.activeTab === 'activity') {
+        await loadActivityData();
       }
     } catch (e) {
       toast(`数据加载失败: ${e.message}`, 'err');
@@ -710,9 +875,231 @@
       if (res && res.ok) {
         state.nodes = res.nodes || [];
         renderNodesList();
+        if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+          renderHubOverview();
+        }
       }
     } catch (e) {
       toast(`节点加载失败: ${e.message}`, 'err');
+    }
+  }
+
+  function renderHubOverview() {
+    const kpiGrid = document.getElementById('hubKpiGrid');
+    const provBody = document.getElementById('hubProviderStatsBody');
+    const nodeBody = document.getElementById('hubNodeStatsBody');
+    const summarySub = document.getElementById('hubHealthSummarySub');
+    if (!kpiGrid || !provBody || !nodeBody) return;
+
+    const cfg = state.config || {};
+    const providers = cfg.providers || {};
+    const provEntries = Object.entries(providers).sort(([a], [b]) => a.localeCompare(b));
+    const agentModels = cfg.agent_models || {};
+    const kbModels = cfg.kb_models || {};
+    const nodes = state.nodes || [];
+
+    let enabledProvs = 0;
+    let totalKeys = 0;
+    let enabledKeys = 0;
+    let okKeys = 0;
+    let failKeys = 0;
+    let untestedKeys = 0;
+
+    for (const [, p] of provEntries) {
+      if (p.enabled !== false) enabledProvs++;
+      const keys = p.api_keys || [];
+      for (const k of keys) {
+        totalKeys++;
+        if (k.enabled !== false) enabledKeys++;
+        if (k.last_ok === true) okKeys++;
+        else if (k.last_ok === false) failKeys++;
+        else untestedKeys++;
+      }
+    }
+
+    const agentModelCount = Object.keys(agentModels).length;
+    let agentCandCount = 0;
+    for (const m of Object.values(agentModels)) {
+      agentCandCount += (m?.candidates || []).length;
+    }
+
+    let kbCandCount = 0;
+    for (const list of Object.values(kbModels)) {
+      if (Array.isArray(list)) kbCandCount += list.length;
+    }
+
+    let activeNodes = 0;
+    let totalSyncs = 0;
+    let total304 = 0;
+    for (const n of nodes) {
+      if (n.enabled) activeNodes++;
+      totalSyncs += Number(n.sync_count || 0);
+      total304 += Number(n.hit_304_count || 0);
+    }
+
+    const testedCount = okKeys + failKeys;
+    const healthRate = testedCount > 0 ? `${Math.round((okKeys / testedCount) * 100)}%` : '-';
+
+    const kpis = [
+      { label: '纳管供应商', value: String(provEntries.length), sub: `${enabledProvs} 个已启用` },
+      { label: 'API 密钥总量', value: String(totalKeys), sub: `${enabledKeys} 把已启用` },
+      { label: '密钥探活健康度', value: healthRate, sub: `正常 ${okKeys} · 异常 ${failKeys} · 未测 ${untestedKeys}` },
+      { label: 'Agent 路由模型', value: String(agentModelCount), sub: `${agentCandCount} 个上游候选` },
+      { label: '知识库流水线', value: String(kbCandCount), sub: '4 条 KB 并发通道' },
+      { label: '注册中转节点', value: String(nodes.length), sub: `${activeNodes} 个在线启用` },
+      { label: '节点同步 / 304', value: String(totalSyncs), sub: `304 缓存命中 ${total304} 次` },
+      { label: '当前配置版本', value: `v${cfg._version || 1}`, sub: 'EdgeOne KV CAS' },
+    ];
+
+    kpiGrid.innerHTML = kpis.map((item) => `
+      <div class="kpi-card">
+        <span class="kpi-label">${escapeHtml(item.label)}</span>
+        <span class="kpi-value">${escapeHtml(item.value)}</span>
+        <span class="kpi-sub">${escapeHtml(item.sub)}</span>
+      </div>
+    `).join('');
+
+    if (summarySub) {
+      summarySub.textContent = `共 ${provEntries.length} 个供应商、${totalKeys} 把密钥（已探活正常 ${okKeys}，异常 ${failKeys}，未测 ${untestedKeys}）`;
+    }
+
+    if (provEntries.length === 0) {
+      provBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无供应商配置，点击右上角「管理供应商」添加或导入</td></tr>';
+    } else {
+      provBody.innerHTML = '';
+      for (const [pId, p] of provEntries) {
+        const keys = p.api_keys || [];
+        const pTotal = keys.length;
+        const pEnabled = keys.filter((k) => k.enabled !== false).length;
+        const pOk = keys.filter((k) => k.last_ok === true).length;
+        const pFail = keys.filter((k) => k.last_ok === false).length;
+        const pLat = keys.reduce((acc, k) => (k.last_latency_ms ? Math.min(acc, k.last_latency_ms) : acc), Infinity);
+        const latText = Number.isFinite(pLat) ? `${pLat}ms` : '-';
+        const pct = pTotal > 0 ? Math.round(((pOk > 0 ? pOk : (pFail > 0 ? 0 : pEnabled)) / pTotal) * 100) : 0;
+        const barCls = pFail > 0 && pOk === 0 ? 'health-fill--err' : pOk > 0 ? 'health-fill--ok' : 'health-fill--warn';
+        const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <div class="name">${icoHtml}<span>${escapeHtml(p.name || pId)}</span><span class="pill">${escapeHtml(pId)}</span></div>
+          </td>
+          <td><span class="pill">${escapeHtml(p.api_type || 'openai')}</span></td>
+          <td class="tabular">${pEnabled} / ${pTotal}</td>
+          <td>
+            <div class="health-bar">
+              <svg viewBox="0 0 100 6" width="72" height="6">
+                <rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" opacity="0.12"></rect>
+                <rect x="0" y="0" width="${pct}" height="6" rx="3" class="health-fill ${barCls}"></rect>
+              </svg>
+              <span class="text-xs text-muted">${pOk}正常 / ${pFail}异常</span>
+            </div>
+          </td>
+          <td class="tabular">${latText}</td>
+          <td>
+            <button class="btn btn--sm btn-hub-verify-prov" data-pid="${escapeHtml(pId)}" type="button">探活</button>
+          </td>
+        `;
+        tr.querySelector('.btn-hub-verify-prov').addEventListener('click', () => verifyProviderKeys(pId));
+        provBody.appendChild(tr);
+      }
+    }
+
+    if (nodes.length === 0) {
+      nodeBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无中转节点，可在「中转节点」页签签发 NODE_TOKEN</td></tr>';
+    } else {
+      nodeBody.innerHTML = nodes.map((n) => `
+        <tr>
+          <td><strong>${escapeHtml(n.name || n.id)}</strong></td>
+          <td><span class="pill pill--accent">${escapeHtml(n.role || 'full')}</span></td>
+          <td><span class="pill ${n.enabled ? 'pill--green' : 'pill--red'}">${n.enabled ? '在线启用' : '已吊销'}</span></td>
+          <td class="tabular">${escapeHtml(n.last_ip || '-')}</td>
+          <td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td>
+          <td class="tabular">${n.last_seen ? formatTime(n.last_seen) : '未激活'}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  async function verifyProviderKeys(pId) {
+    const p = state.config?.providers?.[pId];
+    if (!p) return;
+    const keys = p.api_keys || [];
+    if (keys.length === 0) return toast(`${p.name || pId} 暂无密钥可探活`, 'warn');
+    toast(`正在探活 ${p.name || pId} (${keys.length} 把密钥)...`, 'info');
+    let okCount = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const lbl = k.label || k.id || `key-${i}`;
+      try {
+        const r = await window.HOST.verifyKey({
+          provider: pId,
+          api_key: k.key,
+          key: k.key,
+          key_label: lbl,
+          base_url: p.base_url || '',
+          api_type: p.api_type || 'openai-completions',
+        });
+        k.last_ok = !!(r && (r.ok || r.valid));
+        k.last_status = r?.status || (k.last_ok ? 200 : 0);
+        k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
+        k.last_checked_at = new Date().toISOString();
+        if (k.last_ok) okCount++;
+      } catch (_) {
+        k.last_ok = false;
+      }
+    }
+    toast(`${p.name || pId} 探活完成: ${okCount}/${keys.length} 正常`, okCount === keys.length ? 'ok' : 'warn');
+    if (window.HOST.kind === 'hub') renderHubOverview();
+    renderProvidersList();
+  }
+
+  async function verifyAllHubKeys() {
+    if (state.batchVerifying) return;
+    const providers = state.config?.providers || {};
+    const pIds = Object.keys(providers).sort();
+    if (pIds.length === 0) return toast('暂无供应商可探活', 'warn');
+
+    const btn = document.getElementById('btnHubBatchVerifyAll');
+    state.batchVerifying = true;
+    if (btn) btn.disabled = true;
+
+    let total = 0;
+    let ok = 0;
+    try {
+      toast(`开始批量探活 ${pIds.length} 个供应商密钥池...`, 'info');
+      for (const pId of pIds) {
+        const p = providers[pId];
+        const keys = (p?.api_keys || []).filter((k) => k.enabled !== false);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          total++;
+          const lbl = k.label || k.id || `key-${i}`;
+          try {
+            const r = await window.HOST.verifyKey({
+              provider: pId,
+              api_key: k.key,
+              key: k.key,
+              key_label: lbl,
+              base_url: p.base_url || '',
+              api_type: p.api_type || 'openai-completions',
+            });
+            k.last_ok = !!(r && (r.ok || r.valid));
+            k.last_status = r?.status || (k.last_ok ? 200 : 0);
+            k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
+            k.last_checked_at = new Date().toISOString();
+            if (k.last_ok) ok++;
+          } catch (_) {
+            k.last_ok = false;
+          }
+        }
+        renderHubOverview();
+      }
+      toast(`全部密钥探活完成: ${ok}/${total} 正常`, ok === total ? 'ok' : 'warn');
+    } finally {
+      state.batchVerifying = false;
+      if (btn) btn.disabled = false;
+      renderProvidersList();
     }
   }
 
@@ -892,19 +1279,36 @@
     container.innerHTML = '';
 
     const providers = (state.config && state.config.providers) || {};
-    const pKeys = Object.keys(providers).sort();
+    const q = state.providerQuery || '';
+    const f = state.providerFilter || 'all';
+
+    const pKeys = Object.keys(providers).sort().filter((pId) => {
+      const p = providers[pId] || {};
+      const keys = p.api_keys || [];
+      if (q) {
+        const hay = `${pId} ${p.name || ''} ${p.base_url || ''} ${p.preset_id || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (f === 'enabled') return p.enabled !== false && keys.length > 0;
+      if (f === 'healthy') return keys.some((k) => k.last_ok === true);
+      if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
+      return true;
+    });
 
     if (pKeys.length === 0) {
       const emptyRow = document.createElement('div');
-      emptyRow.className = 'row text-muted';
-      emptyRow.textContent = '暂无已配置供应商，请点击上方「＋ 添加供应商」';
+      emptyRow.className = 'row row--static text-muted';
+      emptyRow.textContent = q || f !== 'all' ? '没有符合筛选条件的供应商' : '暂无已配置供应商，请点击上方「添加供应商」';
       container.appendChild(emptyRow);
       return;
     }
 
     for (const pId of pKeys) {
       const p = providers[pId] || {};
-      const keyCount = (p.api_keys || []).length;
+      const keys = p.api_keys || [];
+      const keyCount = keys.length;
+      const okCount = keys.filter((k) => k.last_ok === true).length;
+      const failCount = keys.filter((k) => k.last_ok === false).length;
       const isLocal = p.origin === 'local';
       const isExpanded = state.activeEditorKey === `p_${pId}`;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
@@ -925,7 +1329,12 @@
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
       const dot = document.createElement('span');
-      dot.className = `dot ${p.enabled && keyCount > 0 ? 'dot--ok' : 'dot--err'}`;
+      const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCount === 0)
+        ? 'dot--err'
+        : okCount > 0
+          ? 'dot--ok'
+          : 'dot--warn';
+      dot.className = `dot ${dotCls}`;
 
       const who = document.createElement('div');
       who.className = 'who';
@@ -933,8 +1342,11 @@
         <div class="name">
           ${brandIcon}
           <span>${escapeHtml(p.name || pId)}</span>
+          <span class="pill">${escapeHtml(pId)}</span>
           ${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
-          ${busyCount > 0 ? `<span class="pill pill--busy">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
+          ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
+          ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
+          ${busyCount > 0 ? `<span class="pill pill--accent">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
           ${p._balance ? `<span class="pill pill--green">${escapeHtml(p._balance)}</span>` : ''}
         </div>
         <div class="sub">${escapeHtml(p.base_url || '未配置 Base URL')}</div>
@@ -943,7 +1355,7 @@
       const fields = document.createElement('div');
       fields.className = 'fields';
       fields.innerHTML = `
-        <span class="pill">${keyCount} 把 Key</span>
+        <span class="pill tabular">${keyCount} 把 Key</span>
         <span class="caret">▾</span>
       `;
 
@@ -973,14 +1385,14 @@
     const keys = p.api_keys || [];
 
     wrap.innerHTML = `
-      <div class="editor-grid">
+      <div class="form-grid">
         <div class="form-group">
           <label class="form-label">供应商标识 / 名称</label>
           <input class="input" id="ed_p_name_${pId}" value="${escapeHtml(p.name || pId)}">
         </div>
         <div class="form-group">
-          <div class="section-bar">
-            <label class="form-label">Base URL (OpenAI 协议)</label>
+          <div class="form-label">
+            <span>Base URL (OpenAI 协议)</span>
             <button class="btn btn--sm" id="btn_detect_ed_${pId}" type="button">自动探测协议</button>
           </div>
           <input class="input input--code" id="ed_p_base_${pId}" value="${escapeHtml(p.base_url || '')}">
@@ -995,10 +1407,10 @@
         </div>
       </div>
 
-      <!-- Advanced Settings Toggle (QuotaResetAt, RPMPerKey, AutoInclude, BalanceURL) -->
-      <details class="headers-details mt-2">
-        <summary class="form-label">⚙️ 高级配置 (配额刷新、余额查询与自动纳管)</summary>
-        <div class="editor-grid mt-2">
+      <!-- Advanced Settings Toggle -->
+      <details class="headers-details mt-3">
+        <summary class="form-label">高级配置 (配额刷新、余额查询与自动纳管)</summary>
+        <div class="form-grid mt-2">
           <div class="form-group">
             <label class="form-label">每日重置时间 (quota_reset_at)</label>
             <input class="input" id="ed_p_reset_${pId}" value="${escapeHtml(p.quota_reset_at || '00:00+08:00')}">
@@ -1025,7 +1437,7 @@
         <span class="form-label">API 密钥池 (${keys.length})</span>
         <div class="fields">
           <button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button>
-          <button class="btn btn--sm btn--primary" id="btn_oauth_start_${pId}" type="button">OAuth 扫码登录</button>
+          <button class="btn btn--sm btn--primary" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button>
         </div>
       </div>
 
@@ -1041,22 +1453,26 @@
         </div>
       </div>
 
-      <!-- Per-Key Table (U2) -->
-      <table class="sub-table">
-        <thead>
-          <tr>
-            <th>启用</th>
-            <th>标签</th>
-            <th>Key 密文</th>
-            <th>归属</th>
-            <th>冷却状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="p_keys_tbody_${pId}"></tbody>
-      </table>
+      <!-- Per-Key Table -->
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>启用</th>
+                <th>标签</th>
+                <th>Key 密文</th>
+                <th>归属</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="p_keys_tbody_${pId}"></tbody>
+          </table>
+        </div>
+      </div>
 
-      <div class="editor-grid mt-3">
+      <div class="form-grid mt-3">
         <div class="form-group">
           <input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)">
         </div>
@@ -1064,11 +1480,11 @@
           <input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key">
         </div>
         <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_key_${pId}" type="button">＋ 添加 Key</button>
+          <button class="btn btn--primary" id="btn_add_key_${pId}" type="button">添加 Key</button>
         </div>
       </div>
 
-      <!-- Model Probing & Pills Area (U2) -->
+      <!-- Model Probing & Pills Area -->
       <div class="section-bar mt-4">
         <span class="form-label">模型探测与一键纳管</span>
         <div class="fields">
@@ -1084,7 +1500,7 @@
         <div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div>
       </div>
 
-      <div class="section-bar mt-4 flex-end gap-2">
+      <div class="form-actions">
         <button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>
         <button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button>
       </div>
@@ -1095,18 +1511,24 @@
       const tr = document.createElement('tr');
       const keyTarget = `${pId}:${k.label || k.id || `key-${idx}`}`;
       const isCooldown = state.cooldowns?.[keyTarget] || false;
+      let statusHtml = `<span class="pill ${isCooldown ? 'pill--amber' : 'pill--green'}">${isCooldown ? '冷却中' : '就绪'}</span>`;
+      if (k.last_ok === true) {
+        statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
+      } else if (k.last_ok === false) {
+        statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
+      }
 
       tr.innerHTML = `
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
         <td><strong>${escapeHtml(k.label || k.id || `key-${idx}`)}</strong></td>
         <td><span class="tabular privacy-mask">${escapeHtml(k.key)}</span></td>
         <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
+        <td>${statusHtml}</td>
         <td>
-          <span class="pill ${isCooldown ? 'pill--amber' : 'pill--green'}">${isCooldown ? '冷却中' : '就绪'}</span>
-        </td>
-        <td>
-          <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
-          <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
+          <div class="fields">
+            <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
+            <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
+          </div>
         </td>
       `;
 
@@ -1129,10 +1551,17 @@
           });
           if (res && (res.ok || res.valid || res.latency_ms !== undefined)) {
             const lat = res.latency_ms ?? res.ms ?? 0;
+            k.last_ok = true;
+            k.last_latency_ms = lat;
+            k.last_status = res.status || 200;
             toast(`Key [${keyLabel}] 校验成功: 延迟 ${lat}ms`, 'ok');
           } else {
+            k.last_ok = false;
+            k.last_status = res?.status || 0;
             toast(`Key [${keyLabel}] 校验失败: ${res?.error || '无效凭据'}`, 'err');
           }
+          renderProvidersList();
+          if (window.HOST.kind === 'hub') renderHubOverview();
         } catch (e) {
           toast(`校验异常: ${e.message}`, 'err');
         }
@@ -1423,14 +1852,14 @@
     const isEnabled = node.enabled;
 
     wrap.innerHTML = `
-      <div class="editor-grid">
+      <div class="form-grid">
         <div class="form-group">
           <label class="form-label">节点名称</label>
           <input class="input" id="ed_node_name_${node.id}" value="${escapeHtml(node.name)}">
         </div>
         <div class="form-group">
           <label class="form-label">租约时长 (秒)</label>
-          <input class="input" id="ed_node_ttl_${node.id}" type="number" value="${node.lease_ttl || 86400}">
+          <input class="input tabular" id="ed_node_ttl_${node.id}" type="number" value="${node.lease_ttl || 86400}">
         </div>
         <div class="form-group">
           <label class="form-label">允许供应商 (逗号分隔，* 为全量)</label>
@@ -1442,18 +1871,24 @@
         </div>
       </div>
 
-      <div class="section-bar mt-4 flex-end gap-2">
-        <button class="btn btn--danger" id="btn_toggle_node_${node.id}">${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
-        <button class="btn" id="btn_rotate_node_${node.id}">轮换 Token</button>
-        <button class="btn btn--danger" id="btn_del_node_${node.id}">删除节点</button>
-        <button class="btn btn--primary" id="btn_save_node_${node.id}">保存节点配置</button>
+      <div class="form-actions">
+        <button class="btn btn--danger" id="btn_toggle_node_${node.id}" type="button">${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
+        <button class="btn" id="btn_rotate_node_${node.id}" type="button">轮换 Token</button>
+        <button class="btn btn--danger" id="btn_del_node_${node.id}" type="button">删除节点</button>
+        <button class="btn btn--primary" id="btn_save_node_${node.id}" type="button">保存节点配置</button>
       </div>
 
-      <div class="form-group mt-3" id="node_token_display_box_${node.id}" hidden>
-        <label class="form-label">新生成的 NODE_TOKEN (仅展示一次，请立即复制)</label>
-        <input class="input input--code" readonly id="node_new_token_val_${node.id}">
-        <label class="form-label mt-2">一键启动环境变量</label>
-        <input class="input input--code" readonly id="node_new_env_val_${node.id}">
+      <div class="editor-section" id="node_token_display_box_${node.id}" hidden>
+        <div class="form-grid form-grid--2">
+          <div class="form-group">
+            <label class="form-label">新生成的 NODE_TOKEN (仅展示一次，请立即复制)</label>
+            <input class="input input--code" readonly id="node_new_token_val_${node.id}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">一键启动环境变量</label>
+            <input class="input input--code" readonly id="node_new_env_val_${node.id}">
+          </div>
+        </div>
       </div>
     `;
 
@@ -1558,7 +1993,7 @@
     if (!container) return;
     container.innerHTML = '';
 
-    const isAgent = (state.config?.settings?.run_mode || 'agent') === 'agent';
+    const isAgent = (state.modelSubMode || 'agent') === 'agent';
     const btnAddModel = document.getElementById('btnAddModel');
     if (btnAddModel) {
       btnAddModel.hidden = !isAgent;
@@ -1573,12 +2008,18 @@
 
   function renderAgentModels(container) {
     const models = state.config?.agent_models || {};
-    const mKeys = Object.keys(models).sort();
+    const q = state.modelQuery || '';
+    const mKeys = Object.keys(models).sort().filter((mName) => {
+      if (!q) return true;
+      const m = models[mName] || {};
+      const cands = (m.candidates || []).map((c) => `${c.provider} ${c.target_model}`).join(' ');
+      return `${mName} ${cands}`.toLowerCase().includes(q);
+    });
 
     if (mKeys.length === 0) {
       const emptyRow = document.createElement('div');
-      emptyRow.className = 'row text-muted';
-      emptyRow.textContent = '暂无已配置模型路由，请点击右上角「＋ 添加模型」';
+      emptyRow.className = 'row row--static text-muted';
+      emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
       container.appendChild(emptyRow);
       return;
     }
@@ -1660,7 +2101,7 @@
     const candidates = m.candidates || [];
 
     wrap.innerHTML = `
-      <div class="editor-grid">
+      <div class="form-grid form-grid--2">
         <div class="form-group">
           <label class="form-label">路由策略覆盖</label>
           <select class="select" id="ed_m_strat_${mName}">
@@ -1679,20 +2120,24 @@
         <span class="form-label">候选 Key 列表 (${candidates.length})</span>
       </div>
 
-      <table class="sub-table">
-        <thead>
-          <tr>
-            <th>供应商</th>
-            <th>Key 标签</th>
-            <th>目标模型</th>
-            <th>权重</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="m_cands_tbody_${mName}"></tbody>
-      </table>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>供应商</th>
+                <th>Key 标签</th>
+                <th>目标模型</th>
+                <th>权重</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="m_cands_tbody_${mName}"></tbody>
+          </table>
+        </div>
+      </div>
 
-      <div class="editor-grid mt-3">
+      <div class="form-grid mt-3">
         <div class="form-group">
           <input class="input" id="new_c_prov_${mName}" placeholder="供应商 ID (如 minimax)">
         </div>
@@ -1702,14 +2147,14 @@
         <div class="form-group">
           <input class="input" id="new_c_target_${mName}" placeholder="上游真实模型 (留空同名)">
         </div>
-        <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_cand_${mName}">＋ 添加候选</button>
-        </div>
+      </div>
+      <div class="section-bar mt-2 flex-end">
+        <button class="btn btn--primary" id="btn_add_cand_${mName}" type="button">添加候选</button>
       </div>
 
-      <div class="section-bar mt-4 flex-end gap-2">
-        <button class="btn btn--danger" id="btn_del_model_${mName}">删除此模型</button>
-        <button class="btn btn--primary" id="btn_save_model_${mName}">保存模型配置</button>
+      <div class="form-actions">
+        <button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>
+        <button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button>
       </div>
     `;
 
@@ -1831,21 +2276,25 @@
         <span class="form-label">${pl.name} (${pl.path}) 候选池列表</span>
       </div>
 
-      <table class="sub-table">
-        <thead>
-          <tr>
-            <th>启用</th>
-            <th>供应商</th>
-            <th>Key 标签</th>
-            <th>目标模型 ID</th>
-            <th>并发限制</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="kb_cands_tbody_${cat}"></tbody>
-      </table>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>启用</th>
+                <th>供应商</th>
+                <th>Key 标签</th>
+                <th>目标模型 ID</th>
+                <th>并发限制</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="kb_cands_tbody_${cat}"></tbody>
+          </table>
+        </div>
+      </div>
 
-      <div class="editor-grid mt-3">
+      <div class="form-grid mt-3">
         <div class="form-group">
           <input class="input" id="new_kb_prov_${cat}" placeholder="供应商 ID">
         </div>
@@ -1856,14 +2305,14 @@
           <input class="input" id="new_kb_model_${cat}" placeholder="上游真实模型 ID">
         </div>
         <div class="form-group">
-          <input class="input" id="new_kb_conc_${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
+          <input class="input tabular" id="new_kb_conc_${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
         </div>
         <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_kb_cand_${cat}" type="button">＋ 添加候选</button>
+          <button class="btn btn--primary" id="btn_add_kb_cand_${cat}" type="button">添加候选</button>
         </div>
       </div>
 
-      <div class="section-bar mt-4 flex-end gap-2">
+      <div class="form-actions">
         <button class="btn btn--primary" id="btn_save_kb_${cat}" type="button">保存流水线配置</button>
       </div>
     `;
@@ -2039,7 +2488,7 @@
 
     if (gwBox) gwBox.hidden = !isFull;
     if (modeBox) modeBox.hidden = !isFull;
-    if (backupBox) backupBox.hidden = !isFull;
+    if (backupBox) backupBox.hidden = false;
 
     if (isFull) {
       const baseOrigin = location.origin || 'http://127.0.0.1:3425';
@@ -2058,30 +2507,42 @@
       const snippetCursor = document.getElementById('snippetCursor');
       if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${clientKey}"`;
 
-      document.getElementById('btnGenClientKey')?.addEventListener('click', () => {
-        const rand = `sk-proxy-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
-        if (gwClientKey) gwClientKey.value = rand;
-        if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
-        if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
-      });
+      const btnGen = document.getElementById('btnGenClientKey');
+      if (btnGen) {
+        btnGen.onclick = () => {
+          const rand = `sk-proxy-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+          if (gwClientKey) gwClientKey.value = rand;
+          if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
+          if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
+        };
+      }
 
-      document.getElementById('btnSaveClientKey')?.addEventListener('click', async () => {
-        const k = (gwClientKey?.value || '').trim();
-        s.client_key = k;
-        s.proxy_api_key = k;
-        await window.HOST.updateAccessKey({ client_key: k });
-        await persistConfig('客户端鉴权密钥更新成功');
-      });
+      const btnSaveKey = document.getElementById('btnSaveClientKey');
+      if (btnSaveKey) {
+        btnSaveKey.onclick = async () => {
+          const k = (gwClientKey?.value || '').trim();
+          s.client_key = k;
+          s.proxy_api_key = k;
+          await window.HOST.updateAccessKey({ client_key: k });
+          await persistConfig('客户端鉴权密钥更新成功');
+        };
+      }
 
-      document.getElementById('btnCopyClaudeSnippet')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(snippetClaude?.textContent || '');
-        toast('已复制 Claude Code 配置', 'ok');
-      });
+      const btnCopyClaude = document.getElementById('btnCopyClaudeSnippet');
+      if (btnCopyClaude) {
+        btnCopyClaude.onclick = () => {
+          navigator.clipboard.writeText(snippetClaude?.textContent || '');
+          toast('已复制 Claude Code 配置', 'ok');
+        };
+      }
 
-      document.getElementById('btnCopyCursorSnippet')?.addEventListener('click', () => {
-        navigator.clipboard.writeText(snippetCursor?.textContent || '');
-        toast('已复制 Cursor 配置', 'ok');
-      });
+      const btnCopyCursor = document.getElementById('btnCopyCursorSnippet');
+      if (btnCopyCursor) {
+        btnCopyCursor.onclick = () => {
+          navigator.clipboard.writeText(snippetCursor?.textContent || '');
+          toast('已复制 Cursor 配置', 'ok');
+        };
+      }
 
       // Mode Schedule (U4)
       const schedEnabled = document.getElementById('cfgModeSchedEnabled');
@@ -2092,60 +2553,17 @@
       setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
       setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
-      document.getElementById('btnClearAllCooldowns')?.addEventListener('click', async () => {
-        if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
-        try {
-          const res = await window.HOST.clearCooldowns();
-          if (res && res.ok) toast('已清除所有冷却状态', 'ok');
-        } catch (e) {
-          toast(e.message, 'err');
-        }
-      });
-
-      // Config Export / Import (U4)
-      document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
-        try {
-          const res = await window.HOST.exportConfig();
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `llmproxy_config_${Date.now()}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
-          toast('配置已导出下载', 'ok');
-        } catch (e) {
-          toast(`导出失败: ${e.message}`, 'err');
-        }
-      });
-
-      const importInput = document.getElementById('importConfigFile');
-      document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
-        importInput?.click();
-      });
-
-      if (importInput) {
-        importInput.addEventListener('change', async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = async () => {
-            try {
-              const parsed = JSON.parse(reader.result);
-              const mode = document.getElementById('importConfigMode')?.value || 'merge';
-              const res = await window.HOST.importConfig({ mode, config: parsed });
-              if (res && res.ok) {
-                toast('配置恢复导入成功！', 'ok');
-                await loadData();
-              } else {
-                toast(res?.error || '导入失败', 'err');
-              }
-            } catch (err) {
-              toast(`解析配置失败: ${err.message}`, 'err');
-            }
-          };
-          reader.readAsText(file);
-        });
+      const btnClearCd = document.getElementById('btnClearAllCooldowns');
+      if (btnClearCd) {
+        btnClearCd.onclick = async () => {
+          if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
+          try {
+            const res = await window.HOST.clearCooldowns();
+            if (res && res.ok) toast('已清除所有冷却状态', 'ok');
+          } catch (e) {
+            toast(e.message, 'err');
+          }
+        };
       }
     }
 

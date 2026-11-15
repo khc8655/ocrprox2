@@ -49,6 +49,12 @@
     setVal('statTTFT', avgTtft > 0 ? Math.round(avgTtft) + 'ms' : '-');
     setVal('statTPS', tps > 0 ? tps.toFixed(1) + ' tok/s' : '-');
     setVal('statBandwidth', `${fmtBytes(upBytes)} ↑ / ${fmtBytes(downBytes)} ↓`);
+
+    const modelCount = Array.isArray(usage?.models)
+      ? usage.models.length
+      : Object.keys(usage?.models || {}).length;
+    const provCount = Object.keys(usage?.providers || {}).length;
+    setVal('statActiveScope', `${modelCount} 模型 / ${provCount} 供应商`);
   }
 
   // Pure SVG Dual-Tone Stacked Bar Histogram (M9)
@@ -102,7 +108,8 @@
     axis.setAttribute('class', 'chart-axis');
     svg.appendChild(axis);
 
-    const labelFreq = n <= 12 ? 1 : n <= 24 ? 2 : Math.ceil(n / 7);
+    let lastLabelX = -100;
+    const minLabelGap = 46;
 
     series.forEach((p, idx) => {
       const inp = (p.input_tokens || p.in_tokens || 0) + (p.cache_read_tokens || 0);
@@ -149,10 +156,12 @@
         g.appendChild(outRect);
       }
 
-      // Axis text label
-      if (idx % labelFreq === 0 || idx === n - 1) {
+      // Axis text label with pixel collision guard
+      const centerX = x + barW / 2;
+      const isLast = idx === n - 1;
+      if ((centerX - lastLabelX >= minLabelGap && (!isLast || centerX - lastLabelX >= minLabelGap)) || idx === 0) {
         const text = document.createElementNS(svgNs, 'text');
-        text.setAttribute('x', String(x + barW / 2));
+        text.setAttribute('x', String(centerX));
         text.setAttribute('y', String(baselineY + 16));
         text.setAttribute('text-anchor', 'middle');
         text.setAttribute('class', 'chart-label');
@@ -163,6 +172,7 @@
         }
         text.textContent = shortLabel;
         g.appendChild(text);
+        lastLabelX = centerX;
       }
 
       svg.appendChild(g);
@@ -174,14 +184,23 @@
   // 53-Week Contribution Heatmap (M9)
   function renderHeatmap(usage) {
     const container = document.getElementById('usageHeatmapBox');
+    const wrapper = document.getElementById('usageHeatmapWrapper');
     if (!container) return;
     container.innerHTML = '';
 
     const heatmap = usage?.heatmap;
     if (!heatmap || !heatmap.days || heatmap.days.length === 0) {
+      if (wrapper) {
+        wrapper.classList.add('hidden');
+        wrapper.hidden = true;
+      }
       container.classList.add('hidden');
       container.hidden = true;
       return;
+    }
+    if (wrapper) {
+      wrapper.classList.remove('hidden');
+      wrapper.hidden = false;
     }
     container.classList.remove('hidden');
     container.hidden = false;
