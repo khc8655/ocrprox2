@@ -4,6 +4,23 @@
 
 ---
 
+## [v20261115-05] - 2026-11-15
+
+### Added
+- **Hub 搜索服务与提供商控制面**：新增 `search_providers` / `search_selection` 配置域，包含键名规范校验（`[a-z0-9-]+` 且与键名一致）、密钥掩码下发与提交回写还原；面板新增「搜索服务与提供商」视图（`#viewSearch`）。
+- **Hub 节点 `status_url`**：节点签发/更新支持配置状态查询地址，严格校验仅 `http(s)` 且禁止内嵌凭据；提供节点状态代理入口与对应契约（`nodes_status`）。
+
+### Fixed
+- **`cooldown_auth_error_sec = 0` 不再封禁 24 小时**：此前 0 被当作"未设置"回退默认 `86400`，一次上游 401 即封 Key 一整天；现在 0 明确表示不封禁（schema `minimum` 放开到 0，UI 不再把 0 改写成 86400）。
+- **Key 冷却状态可见**：Key 列表按 `/api/admin/cooldowns` 的 `p:<provider>:k:<label>` 实时显示「冷却中 24h」，不再恒显示「就绪」。
+- **全候选失败不再返回空原因**：错误体携带具体跳过原因（`skipped: k1 (cooling down 1m0s)`）或上游错误摘要。
+- **候选不可用可诊断**：503 文案附带候选明细（`no candidate keys available for model "x": mock_upstream/k1 (key disabled)`）；面板在禁用/删除被路由引用的 Key 时弹窗列出受影响路由并要求确认。
+- **usage `model_list` 失败条目补回 `model`**：失败请求按请求模型归并，均缺失时记为 `unknown`。
+- **UI 新 Key 掩码**：未保存的 Key 在表格中也按 `sk-●●●●●●1234` 显示，避免明文回显。
+- **文档**：`SECURITY_SPEC` 明确 lite 模式管理路由返回 `403 lite_mode_forbidden` 的口径。
+
+---
+
 ## [v20261115-04] - 2026-11-15
 
 ### Fixed

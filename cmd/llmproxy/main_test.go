@@ -686,6 +686,9 @@ func TestFullMode_InitBans_401PersistsAndReloads(t *testing.T) {
 		},
 		Settings: types.RuntimeSettings{
 			RunMode: types.ModeAgent,
+			// 24h key ban on upstream 401 is the schema default; state it explicitly
+			// because 0 now means disabled (see TestFullMode_ZeroAuthCooldownDoesNotBan).
+			CooldownAuthErrorSec: 86400,
 		},
 	})
 	if err != nil {
@@ -778,5 +781,62 @@ func TestFullMode_InitBans_401PersistsAndReloads(t *testing.T) {
 	}
 	if schedLite.Cooldowns().BanFile() != "" {
 		t.Errorf("expected Lite mode banFile to be empty, got %q", schedLite.Cooldowns().BanFile())
+	}
+}
+
+// cooldown_auth_error_sec = 0 must mean "do not ban" rather than "fall back to
+// the 24h default": one upstream 401 previously persisted a full-day key ban.
+func TestFullMode_ZeroAuthCooldownDoesNotBan(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Invalid API key","type":"authentication_error"}}`))
+	}))
+	defer mockUpstream.Close()
+
+	localSrc, err := config.NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("local source error: %v", err)
+	}
+	if _, err := localSrc.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p-auth": {
+				ID:      "p-auth",
+				BaseURL: mockUpstream.URL,
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "k-bad", Label: "k-bad", Key: "sk-invalid", Enabled: true}},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"auth-model": {
+				Enabled:    true,
+				Candidates: []*types.RouteCandidate{{Provider: "p-auth", TargetModel: "m1", KeyLabel: "k-bad", Enabled: true}},
+			},
+		},
+		Settings: types.RuntimeSettings{RunMode: types.ModeAgent, CooldownAuthErrorSec: 0},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
+	defer obsMgr.Close()
+	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
+	if err := sched.InitBans(types.RoleFull, tmpDir); err != nil {
+		t.Fatalf("InitBans error: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"auth-model","messages":[{"role":"user","content":"x"}]}`))
+	_ = sched.Dispatch(context.Background(), "/v1/chat/completions",
+		[]byte(`{"model":"auth-model","messages":[{"role":"user","content":"x"}]}`), "auth-model", false, rec, req)
+
+	if sched.Cooldowns().IsCooledDown("p-auth", "m1", "k-bad") {
+		t.Fatalf("cooldown_auth_error_sec=0 must not cool down the key")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "key_bans.json")); err == nil {
+		t.Fatalf("cooldown_auth_error_sec=0 must not persist key_bans.json")
 	}
 }

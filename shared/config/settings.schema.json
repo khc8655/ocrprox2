@@ -32,10 +32,7 @@
       "hint": "客户端访问代理 API 时的鉴权密钥 (等同 PROXY_API_KEY)",
       "type": "string",
       "default": "",
-      "roles": [
-        "lite",
-        "full"
-      ]
+      "roles": ["lite", "full"]
     },
     "proxy_api_key": {
       "group": "routing",
@@ -43,10 +40,7 @@
       "hint": "1 代兼容客户端鉴权密钥",
       "type": "string",
       "default": "",
-      "roles": [
-        "lite",
-        "full"
-      ]
+      "roles": ["lite", "full"]
     },
     "proxy_keys": {
       "group": "routing",
@@ -57,42 +51,25 @@
         "type": "string"
       },
       "default": [],
-      "roles": [
-        "lite",
-        "full"
-      ]
+      "roles": ["lite", "full"]
     },
     "run_mode": {
       "group": "routing",
       "label": "当前运行模式",
       "hint": "agent 模式提供对话代理服务；kb 模式提供知识库流水线服务",
       "type": "string",
-      "enum": [
-        "agent",
-        "kb"
-      ],
+      "enum": ["agent", "kb"],
       "default": "agent",
-      "roles": [
-        "lite",
-        "full"
-      ]
+      "roles": ["lite", "full"]
     },
     "agent_routing_strategy": {
       "group": "routing",
       "label": "智能体 Key 调度策略",
       "hint": "sticky_failover: 粘性首选，遇故障顺延切换；round_robin: 轮询分摊；manual: 固定首个候选不切换",
       "type": "string",
-      "enum": [
-        "sticky_failover",
-        "round_robin",
-        "manual"
-      ],
+      "enum": ["sticky_failover", "round_robin", "manual"],
       "default": "sticky_failover",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "agent_first_byte_timeout_sec": {
       "group": "timeout",
@@ -103,11 +80,7 @@
       "maximum": 300,
       "default": 120,
       "unit": "s",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "cooldown_rate_limit_sec": {
       "group": "fault",
@@ -118,11 +91,7 @@
       "maximum": 3600,
       "default": 15,
       "unit": "s",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "cooldown_server_error_sec": {
       "group": "fault",
@@ -133,11 +102,7 @@
       "maximum": 3600,
       "default": 30,
       "unit": "s",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "cooldown_network_error_sec": {
       "group": "fault",
@@ -148,26 +113,18 @@
       "maximum": 3600,
       "default": 15,
       "unit": "s",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "cooldown_auth_error_sec": {
       "group": "fault",
       "label": "401/403 鉴权与配额错误冷却秒数",
-      "hint": "上游 Key 失效或欠费封禁时的 Key 级冷却秒数（默认 24h；设为 0 表示不封禁，负数无效）",
+      "hint": "上游 Key 失效或欠费封禁时的 Key 级冷却秒数（默认 24h；设为 0 表示不封禁）",
       "type": "integer",
       "minimum": 0,
       "maximum": 604800,
       "default": 86400,
       "unit": "s",
-      "roles": [
-        "hub",
-        "lite",
-        "full"
-      ]
+      "roles": ["hub", "lite", "full"]
     },
     "ocr_max_inflight": {
       "group": "concurrency",
@@ -177,9 +134,7 @@
       "minimum": 1,
       "maximum": 32,
       "default": 4,
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "kb_global_max_concurrency": {
       "group": "concurrency",
@@ -189,9 +144,7 @@
       "minimum": 1,
       "maximum": 128,
       "default": 16,
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "mode_schedule_enabled": {
       "group": "schedule",
@@ -199,9 +152,7 @@
       "hint": "开启后在指定时间窗口运行 Agent 模式，窗口外切入 KB 模式",
       "type": "boolean",
       "default": false,
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "mode_schedule_agent_window": {
       "group": "schedule",
@@ -209,9 +160,7 @@
       "hint": "格式: 'HH:MM-HH:MM'，如 '08:30-22:30'",
       "type": "string",
       "default": "08:30-22:30",
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "mode_schedule_timezone": {
       "group": "schedule",
@@ -219,9 +168,7 @@
       "hint": "IANA 时区名称，默认 'Asia/Shanghai'",
       "type": "string",
       "default": "Asia/Shanghai",
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "mode_schedule_webhook_url": {
       "group": "schedule",
@@ -229,9 +176,7 @@
       "hint": "模式自动切换时向该 URL 发送 POST 事件通知",
       "type": "string",
       "default": "",
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     },
     "mode_schedule_webhook_secret": {
       "group": "schedule",
@@ -239,9 +184,7 @@
       "hint": "若提供则在请求头 X-Signature 中携带 HMAC 签名",
       "type": "string",
       "default": "",
-      "roles": [
-        "full"
-      ]
+      "roles": ["full"]
     }
   },
   "required": [
