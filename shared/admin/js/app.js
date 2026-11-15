@@ -1391,11 +1391,11 @@
           <input class="input" id="ed_p_name_${pId}" value="${escapeHtml(p.name || pId)}">
         </div>
         <div class="form-group">
-          <div class="form-label">
-            <span>Base URL (OpenAI 协议)</span>
-            <button class="btn btn--sm" id="btn_detect_ed_${pId}" type="button">自动探测协议</button>
+          <label class="form-label">Base URL (OpenAI 协议)</label>
+          <div class="input-row">
+            <input class="input input--code" id="ed_p_base_${pId}" value="${escapeHtml(p.base_url || '')}">
+            <button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button>
           </div>
-          <input class="input input--code" id="ed_p_base_${pId}" value="${escapeHtml(p.base_url || '')}">
         </div>
         <div class="form-group">
           <label class="form-label">Anthropic Base URL (可选)</label>
@@ -1480,7 +1480,7 @@
           <input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key">
         </div>
         <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_key_${pId}" type="button">添加 Key</button>
+          <button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button>
         </div>
       </div>
 
@@ -1489,7 +1489,7 @@
         <span class="form-label">模型探测与一键纳管</span>
         <div class="fields">
           <button class="btn btn--sm" id="btn_check_balance_${pId}" type="button">查询余额</button>
-          <button class="btn btn--sm btn--primary" id="btn_probe_prov_${pId}" type="button">探测模型</button>
+          <button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button>
         </div>
       </div>
       <div id="probe_pills_container_${pId}" class="hidden" hidden>
@@ -1500,9 +1500,13 @@
         <div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div>
       </div>
 
-      <div class="form-actions">
-        <button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>
-        <button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button>
+      <div class="form-actions form-actions--split">
+        <div class="form-actions-group">
+          <button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>
+        </div>
+        <div class="form-actions-group">
+          <button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button>
+        </div>
       </div>
     `;
 
@@ -1871,11 +1875,15 @@
         </div>
       </div>
 
-      <div class="form-actions">
-        <button class="btn btn--danger" id="btn_toggle_node_${node.id}" type="button">${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
-        <button class="btn" id="btn_rotate_node_${node.id}" type="button">轮换 Token</button>
-        <button class="btn btn--danger" id="btn_del_node_${node.id}" type="button">删除节点</button>
-        <button class="btn btn--primary" id="btn_save_node_${node.id}" type="button">保存节点配置</button>
+      <div class="form-actions form-actions--split">
+        <div class="form-actions-group">
+          <button class="btn btn--danger" id="btn_del_node_${node.id}" type="button">删除节点</button>
+          <button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${node.id}" type="button">${isEnabled ? '吊销/停用此节点' : '恢复启用'}</button>
+          <button class="btn" id="btn_rotate_node_${node.id}" type="button">轮换 Token</button>
+        </div>
+        <div class="form-actions-group">
+          <button class="btn btn--primary" id="btn_save_node_${node.id}" type="button">保存节点配置</button>
+        </div>
       </div>
 
       <div class="editor-section" id="node_token_display_box_${node.id}" hidden>
@@ -2149,12 +2157,16 @@
         </div>
       </div>
       <div class="section-bar mt-2 flex-end">
-        <button class="btn btn--primary" id="btn_add_cand_${mName}" type="button">添加候选</button>
+        <button class="btn" id="btn_add_cand_${mName}" type="button">添加候选</button>
       </div>
 
-      <div class="form-actions">
-        <button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>
-        <button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button>
+      <div class="form-actions form-actions--split">
+        <div class="form-actions-group">
+          <button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>
+        </div>
+        <div class="form-actions-group">
+          <button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button>
+        </div>
       </div>
     `;
 
@@ -2168,7 +2180,7 @@
         <td><span class="tabular">${escapeHtml(c.target_model || '原名')}</span></td>
         <td><span class="tabular">${c.weight || 1}</span></td>
         <td>
-          <button class="btn btn--sm btn_del_cand" data-idx="${idx}">移除</button>
+          <button class="btn btn--sm btn--danger btn_del_cand" data-idx="${idx}" type="button">移除</button>
         </td>
       `;
       tr.querySelector('.btn_del_cand').addEventListener('click', () => {
@@ -2308,7 +2320,7 @@
           <input class="input tabular" id="new_kb_conc_${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
         </div>
         <div class="form-group flex-end">
-          <button class="btn btn--primary" id="btn_add_kb_cand_${cat}" type="button">添加候选</button>
+          <button class="btn" id="btn_add_kb_cand_${cat}" type="button">添加候选</button>
         </div>
       </div>
 

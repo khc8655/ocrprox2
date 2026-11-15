@@ -233,11 +233,11 @@
             <input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">
           </div>
           <div class="form-group form-group--span2">
-            <div class="form-label">
-              <span>Base URL</span>
-              <button class="btn btn--sm" id="btnDetectProvider" type="button">探测协议</button>
+            <label class="form-label">Base URL</label>
+            <div class="input-row">
+              <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
+              <button class="btn" id="btnDetectProvider" type="button">探测协议</button>
             </div>
-            <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
           </div>
           <div class="form-group">
             <label class="form-label">上游协议类型</label>
@@ -402,14 +402,12 @@
             <input class="input input--code" id="gwBaseUrl" readonly>
           </div>
           <div class="form-group">
-            <div class="form-label">
-              <span>客户端鉴权密钥</span>
-              <div class="fields">
-                <button class="btn btn--sm" id="btnGenClientKey" type="button">随机生成</button>
-                <button class="btn btn--sm btn--primary" id="btnSaveClientKey" type="button">保存密钥</button>
-              </div>
+            <label class="form-label">客户端鉴权密钥</label>
+            <div class="input-row">
+              <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
+              <button class="btn" id="btnGenClientKey" type="button">随机生成</button>
+              <button class="btn" id="btnSaveClientKey" type="button">保存密钥</button>
             </div>
-            <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
           </div>
         </div>
         <div class="form-grid form-grid--2 mt-3">
@@ -532,13 +530,13 @@
           </div>
           <div class="form-group">
             <label class="form-label">导入 v1 / v2 配置文件</label>
-            <div class="fields">
+            <div class="input-row">
               <select class="select" id="importConfigMode">
                 <option value="merge">增量合并 (保留现有)</option>
                 <option value="overwrite">全量覆盖</option>
               </select>
               <input type="file" id="importConfigFile" accept=".json,application/json" hidden>
-              <button class="btn btn--primary" id="btnTriggerImport" type="button">选择文件导入</button>
+              <button class="btn" id="btnTriggerImport" type="button">选择文件导入</button>
             </div>
           </div>
         </div>
