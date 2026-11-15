@@ -4,6 +4,16 @@
 
 ---
 
+## [v20261115-02] - 2026-11-15
+
+### Fixed
+- **上游 URL `/v1/v1` 双拼修复**：`internal/upstream/url.go` 中 `JoinUpstream` 自动剥离 `path` 前导 `v1/`，修复调度器传入 `/v1/chat/completions` 与 `/v1` 结尾的供应商 `base_url` 拼出 `/v1/v1/chat/completions` 导致 404 的问题。
+
+### Added
+- **1 代配置原生导入兼容**：`internal/admin/import_v1.go` 新增 `normalizeImportedConfig`，支持 `POST /api/admin/config/import` 直接导入 1 代 `ocrproxy_config_*.json`（自动转换 `providers.*.keys`、`agent_models.*.keys`、`candidates` → `kb_models` 与顶层设置字段，并处理 Vertex `{project_id}` 占位符）。
+
+---
+
 ## [v20261115-01] - 2026-11-15
 
 ### Fixed

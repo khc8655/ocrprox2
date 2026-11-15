@@ -37,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261115-01"
+	version    = "v20261115-02"
 	commit     = "dev"
-	AppVersion = "2.1.1"
+	AppVersion = "2.1.2"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
