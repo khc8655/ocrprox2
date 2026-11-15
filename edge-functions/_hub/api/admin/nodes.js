@@ -5,7 +5,6 @@ issueNode,
 patchNode,
 rotateNodeToken,
 deleteNode,
-fetchNodeStatus,
 } from '../../lib/nodes.js';
 export async function handleNodesRequest(request, env, kv, params) {
 const authErr = checkAdminAuth(request, env);
@@ -20,25 +19,7 @@ const isRotate =
 (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'rotate') ||
 (params && params.action === 'rotate') ||
 url.pathname.endsWith('/rotate');
-const isStatus =
-(nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'status') ||
-(params && params.action === 'status') ||
-url.pathname.endsWith('/status');
 const hubUrl = `${url.protocol}//${url.host}`;
-if (method === 'GET' && targetId && isStatus) {
-const refresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
-const res = await fetchNodeStatus(targetId, kv, env, { refresh });
-if (!res) {
-return new Response(
-JSON.stringify({ ok: false, error: 'node_not_found' }),
-{ status: 404, headers: { 'content-type': 'application/json' } }
-);
-}
-return new Response(
-JSON.stringify(res),
-{ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
-);
-}
 if (method === 'GET' && !targetId) {
 const nodes = await listNodes(kv);
 return new Response(
@@ -51,8 +32,7 @@ let body = {};
 try {
 body = await request.json();
 } catch (_) {}
-try {
-const res = await issueNode(body, kv, hubUrl, env);
+const res = await issueNode(body, kv, hubUrl);
 return new Response(
 JSON.stringify({
 ok: true,
@@ -62,18 +42,9 @@ bootstrap_env: res.bootstrap_env,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );
-} catch (err) {
-if (err?.status === 400) {
-return new Response(
-JSON.stringify({ ok: false, error: err.message }),
-{ status: 400, headers: { 'content-type': 'application/json' } }
-);
-}
-throw err;
-}
 }
 if (method === 'POST' && targetId && isRotate) {
-const res = await rotateNodeToken(targetId, kv, hubUrl, env);
+const res = await rotateNodeToken(targetId, kv, hubUrl);
 if (!res) {
 return new Response(
 JSON.stringify({ ok: false, error: 'node_not_found' }),

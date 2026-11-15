@@ -5,7 +5,6 @@ import {
   patchNode,
   rotateNodeToken,
   deleteNode,
-  fetchNodeStatus,
 } from '../../lib/nodes.js';
 
 export async function handleNodesRequest(request, env, kv, params) {
@@ -27,32 +26,10 @@ export async function handleNodesRequest(request, env, kv, params) {
     (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'rotate') ||
     (params && params.action === 'rotate') ||
     url.pathname.endsWith('/rotate');
-  const isStatus =
-    (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'status') ||
-    (params && params.action === 'status') ||
-    url.pathname.endsWith('/status');
 
   const hubUrl = `${url.protocol}//${url.host}`;
 
-  // 1. GET /api/admin/nodes/:id/status
-  if (method === 'GET' && targetId && isStatus) {
-    const refresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
-    const res = await fetchNodeStatus(targetId, kv, env, { refresh });
-    if (!res) {
-      return new Response(
-        JSON.stringify({ ok: false, error: 'node_not_found' }),
-        { status: 404, headers: { 'content-type': 'application/json' } }
-      );
-    }
-    // Return HTTP 200 with structured node state even if the downstream node is revoked or offline,
-    // so the admin UI does not mistake a downstream 401 for an invalid ADMIN_PASSWORD session.
-    return new Response(
-      JSON.stringify(res),
-      { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
-    );
-  }
-
-  // 2. GET /api/admin/nodes
+  // 1. GET /api/admin/nodes
   if (method === 'GET' && !targetId) {
     const nodes = await listNodes(kv);
     return new Response(
@@ -61,38 +38,28 @@ export async function handleNodesRequest(request, env, kv, params) {
     );
   }
 
-  // 3. POST /api/admin/nodes (Issue)
+  // 2. POST /api/admin/nodes (Issue)
   if (method === 'POST' && !targetId) {
     let body = {};
     try {
       body = await request.json();
     } catch (_) {}
 
-    try {
-      const res = await issueNode(body, kv, hubUrl, env);
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          node: res.node,
-          node_token: res.node_token,
-          bootstrap_env: res.bootstrap_env,
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
-    } catch (err) {
-      if (err?.status === 400) {
-        return new Response(
-          JSON.stringify({ ok: false, error: err.message }),
-          { status: 400, headers: { 'content-type': 'application/json' } }
-        );
-      }
-      throw err;
-    }
+    const res = await issueNode(body, kv, hubUrl);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        node: res.node,
+        node_token: res.node_token,
+        bootstrap_env: res.bootstrap_env,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
   }
 
-  // 4. POST /api/admin/nodes/:id/rotate
+  // 3. POST /api/admin/nodes/:id/rotate
   if (method === 'POST' && targetId && isRotate) {
-    const res = await rotateNodeToken(targetId, kv, hubUrl, env);
+    const res = await rotateNodeToken(targetId, kv, hubUrl);
     if (!res) {
       return new Response(
         JSON.stringify({ ok: false, error: 'node_not_found' }),

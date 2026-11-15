@@ -474,7 +474,7 @@ export function resolveEnv(contextOrEnv) {
     Object.assign(merged, process.env);
   }
   if (typeof globalThis !== 'undefined') {
-    for (const key of ['ADMIN_PASSWORD', 'NODE_ENV', 'HUB_URL', 'HUB_ENCRYPT_KEY']) {
+    for (const key of ['ADMIN_PASSWORD', 'NODE_ENV', 'HUB_URL']) {
       if (typeof globalThis[key] === 'string') {
         merged[key] = globalThis[key];
       }
@@ -551,4 +551,71 @@ export function checkAdminAuth(request, envOrContext) {
     JSON.stringify({ ok: false, error: 'Unauthorized: Invalid admin credentials' }),
     { status: 401, headers: { 'content-type': 'application/json' } }
   );
+}
+
+/**
+ * Shared unmasked key lookup for both LLM providers and search_providers.
+ */
+export function findUnmaskedKey(prov, keyLabel) {
+  if (!prov) return null;
+  if (prov.keys && typeof prov.keys === 'object' && !Array.isArray(prov.keys)) {
+    if (keyLabel && typeof prov.keys[keyLabel] === 'string' && !isMaskedSecret(prov.keys[keyLabel])) {
+      return prov.keys[keyLabel];
+    }
+    for (const v of Object.values(prov.keys)) {
+      if (typeof v === 'string' && v && !isMaskedSecret(v)) return v;
+      if (v && typeof v === 'object' && v.key && !isMaskedSecret(v.key)) return v.key;
+    }
+  }
+  if (Array.isArray(prov.keys)) {
+    if (keyLabel) {
+      const match = prov.keys.find(k => k && typeof k === 'object' && (k.label === keyLabel || k.id === keyLabel));
+      if (match?.key && !isMaskedSecret(match.key)) return match.key;
+    }
+    for (const item of prov.keys) {
+      if (typeof item === 'string' && item && !isMaskedSecret(item)) return item;
+      if (item && typeof item === 'object' && item.key && !isMaskedSecret(item.key)) return item.key;
+    }
+  }
+  if (Array.isArray(prov.api_keys)) {
+    if (keyLabel) {
+      const match = prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel));
+      if (match?.key && !isMaskedSecret(match.key)) return match.key;
+    }
+    for (const item of prov.api_keys) {
+      if (item?.key && !isMaskedSecret(item.key)) return item.key;
+    }
+  }
+  return null;
+}
+
+/**
+ * Persists key verification health metadata into KV config (providers or search_providers).
+ */
+export async function persistProviderKeyHealth(env, mapName, providerId, keyLabel, result) {
+  if (!providerId) return;
+  try {
+    const kv = resolveKvBinding(env);
+    if (!kv) return;
+    const config = await loadConfig(kv);
+    const prov = config?.[mapName]?.[providerId];
+    if (!prov || !Array.isArray(prov.api_keys)) return;
+    const match = keyLabel
+      ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
+      : prov.api_keys[0];
+    if (!match) return;
+    match.last_ok = Boolean(result.valid);
+    match.last_status = Number(result.status) || 0;
+    match.last_latency_ms = Number(result.latency_ms) || 0;
+    if (result.models_count !== undefined) {
+      match.last_models_count = Number(result.models_count) || 0;
+    }
+    match.last_checked_at = new Date().toISOString();
+    const serialized = JSON.stringify(config);
+    if (typeof kv.put === 'function') {
+      await kv.put(CONFIG_KV_KEY, serialized);
+    } else if (typeof kv.setItem === 'function') {
+      await kv.setItem(CONFIG_KV_KEY, serialized);
+    }
+  } catch (_) {}
 }

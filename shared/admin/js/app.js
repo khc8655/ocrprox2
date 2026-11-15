@@ -20,7 +20,6 @@
     modelQuery: '',
     filterOnlyRetried: false,
     currentPeriod: 'today',
-    nodeStatuses: {},
     lanesTimer: null,
     batchVerifying: false,
   };
@@ -616,10 +615,6 @@
       });
     }
 
-    document.getElementById('btnRefreshSearchNodeStatuses')?.addEventListener('click', () => {
-      refreshAllSearchNodeStatuses(true);
-    });
-
     const modelSubSeg = document.getElementById('modelPipelineSeg');
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -1211,100 +1206,48 @@
       `).join('');
     }
 
-    renderHubSearchNodeStatuses(true);
+    renderHubMcpTelemetry();
   }
 
-  const fetchingStatusIds = new Set();
-
-  async function pullSingleNodeStatus(nodeId, forceRefresh = false) {
-    if (!nodeId || fetchingStatusIds.has(nodeId)) return;
-    fetchingStatusIds.add(nodeId);
-    renderHubSearchNodeStatuses(false);
-    try {
-      const res = await window.HOST.getNodeStatus(nodeId, forceRefresh);
-      state.nodeStatuses[nodeId] = res;
-    } catch (e) {
-      state.nodeStatuses[nodeId] = { ok: false, status: 'offline', error: e.message || '拉取失败' };
-    } finally {
-      fetchingStatusIds.delete(nodeId);
-      renderHubSearchNodeStatuses(false);
-    }
-  }
-
-  async function refreshAllSearchNodeStatuses(forceRefresh = false) {
-    const targets = (state.nodes || []).filter((n) => Boolean(n.status_url));
-    if (targets.length === 0) {
-      if (forceRefresh) toast('暂无配置状态回调地址 (status_url) 的节点', 'warn');
-      renderHubSearchNodeStatuses(false);
-      return;
-    }
-    await Promise.allSettled(targets.map((n) => pullSingleNodeStatus(n.id, forceRefresh)));
-    if (forceRefresh) toast('节点实时状态已刷新', 'ok');
-  }
-
-  function renderHubSearchNodeStatuses(autoFetchIfMissing = false) {
-    const statusBody = document.getElementById('hubSearchNodeStatusBody');
-    if (!statusBody) return;
-    const targets = (state.nodes || []).filter((n) => Boolean(n.status_url));
+  function renderHubMcpTelemetry() {
+    const tbody = document.getElementById('hubMcpTelemetryBody');
+    if (!tbody) return;
+    const targets = (state.nodes || []).filter(
+      (n) => Boolean(n.telemetry) || (Array.isArray(n.scope?.providers) && n.scope.providers.length === 0)
+    );
 
     if (targets.length === 0) {
-      statusBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无配置状态回调地址 (status_url) 的节点，可在「中转节点」页签编辑配置</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无 MCP 节点遥测快照，节点按需同步 /api/node/config 时将自动上报</td></tr>';
       return;
     }
 
-    if (autoFetchIfMissing) {
-      for (const n of targets) {
-        if (!state.nodeStatuses[n.id] && !fetchingStatusIds.has(n.id)) {
-          pullSingleNodeStatus(n.id, false);
-        }
-      }
-    }
-
-    statusBody.innerHTML = '';
-    for (const n of targets) {
-      const entry = state.nodeStatuses[n.id];
-      const isFetching = fetchingStatusIds.has(n.id);
-      const st = entry?.state || (entry ? (entry.ok ? 'online' : entry.cached_status ? 'stale' : 'offline') : '');
-      const runtime = entry?.status || entry?.cached_status || entry?.data || null;
-
-      let pillCls = 'pill';
-      let stText = isFetching ? '拉取中...' : '待拉取';
-      if (st === 'online') {
-        pillCls = 'pill pill--green';
-        stText = entry.cached ? '缓存在线' : '在线';
-      } else if (st === 'stale') {
-        pillCls = 'pill pill--amber';
-        stText = '缓存降级';
-      } else if (st === 'offline' || (entry && entry.ok === false)) {
-        pillCls = 'pill pill--red';
-        stText = '离线';
-      } else if (!n.enabled) {
-        pillCls = 'pill pill--red';
-        stText = '已吊销';
-      }
-
-      const ver = runtime?.version || '-';
-      const uptime = Number.isFinite(Number(runtime?.uptime_sec)) ? `${Math.floor(Number(runtime.uptime_sec) / 60)}m` : '-';
-      const counts = runtime
-        ? `${runtime.search_count ?? runtime.requests_search ?? 0} / ${runtime.crawl_count ?? runtime.requests_fetch ?? 0}`
+    tbody.innerHTML = targets.map((n) => {
+      const t = n.telemetry || null;
+      const ver = t?.version || '-';
+      const uptime = Number.isFinite(Number(t?.uptime_sec)) ? `${Math.floor(Number(t.uptime_sec) / 60)}m` : '-';
+      let pwPill = '<span class="pill">-</span>';
+      if (t?.playwright_ready === true) pwPill = '<span class="pill pill--green">就绪</span>';
+      else if (t?.playwright_ready === false) pwPill = '<span class="pill pill--red">未就绪</span>';
+      const counts = t ? `${t.search_count ?? t.requests ?? 0} / ${t.crawl_count ?? 0}` : '-';
+      const resting = t
+        ? (Array.isArray(t.resting_keys) && t.resting_keys.length > 0
+            ? t.resting_keys.join(', ')
+            : `${t.resting_keys_count ?? 0} 休眠`)
         : '-';
-      const resting = Array.isArray(runtime?.resting_keys) ? runtime.resting_keys.length : (runtime?.resting_keys_count ?? 0);
-      const errMsg = entry?.error || runtime?.last_error || '-';
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><strong>${escapeHtml(n.name || n.id)}</strong></td>
-        <td><span class="${pillCls}">${escapeHtml(stText)}</span></td>
-        <td class="tabular">${escapeHtml(ver)} / ${escapeHtml(uptime)}</td>
-        <td class="tabular">${escapeHtml(counts)}</td>
-        <td><span class="tabular">${resting} 休眠</span> · <span class="text-xs text-muted">${escapeHtml(errMsg)}</span></td>
-        <td><button class="btn btn--sm btn-pull-node-st" type="button">${isFetching ? '拉取中' : '刷新'}</button></td>
+      const errMsg = t?.last_error || '-';
+      const syncTime = t?.updated_at ? formatTime(t.updated_at) : (n.last_seen ? formatTime(n.last_seen) : '等待首次同步');
+      const statusBadge = n.enabled === false ? '<span class="pill pill--red">已吊销</span>' : '';
+      return `
+        <tr>
+          <td><strong>${escapeHtml(n.name || n.id)}</strong> ${statusBadge}</td>
+          <td class="tabular">${escapeHtml(ver)} / ${escapeHtml(uptime)}</td>
+          <td>${pwPill}</td>
+          <td class="tabular">${escapeHtml(counts)}</td>
+          <td><span class="tabular">${escapeHtml(resting)}</span> · <span class="text-xs text-muted">${escapeHtml(errMsg)}</span></td>
+          <td class="tabular">${escapeHtml(syncTime)}</td>
+        </tr>
       `;
-      const btn = tr.querySelector('.btn-pull-node-st');
-      btn.disabled = isFetching;
-      btn.addEventListener('click', () => pullSingleNodeStatus(n.id, true));
-      statusBody.appendChild(tr);
-    }
+    }).join('');
   }
 
   async function verifyProviderKeys(pId) {
@@ -2305,7 +2248,10 @@
 
       <div class="section-bar mt-4">
         <span class="form-label">API 密钥池管理 (${keys.length} 把 Key)</span>
-        <button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button>
+        <div class="fields">
+          <button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button>
+          <button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button>
+        </div>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -2315,6 +2261,7 @@
               <th>标签</th>
               <th>密钥 (脱敏)</th>
               <th>来源</th>
+              <th>状态</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -2333,8 +2280,6 @@
         </div>
       </div>
 
-      <p class="text-xs text-muted mt-3">配置连接测试入口由数据平面节点提供：/admin/providers/${escapeHtml(spId)}/test</p>
-
       <div class="form-actions form-actions--split">
         <div class="form-actions-group">
           <button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button>
@@ -2345,21 +2290,72 @@
       </div>
     `;
 
+    function buildSearchVerifyPayload(k, idx) {
+      const adapterVal = wrap.querySelector(`#ed_sp_adapter_${spId}`)?.value.trim() || sp.adapter || '';
+      const baseVal = wrap.querySelector(`#ed_sp_base_${spId}`)?.value.trim() || sp.base_url || '';
+      const payload = {
+        provider: spId,
+        key_label: k.label || k.id || `key-${idx}`,
+        api_key: k.key,
+        adapter: adapterVal,
+        base_url: baseVal,
+      };
+      try {
+        const reqDraft = parseOptionalJsonField(wrap.querySelector(`#ed_sp_req_${spId}`)?.value, 'request');
+        if (reqDraft) payload.request = reqDraft;
+        const fetchDraft = parseOptionalJsonField(wrap.querySelector(`#ed_sp_fetch_${spId}`)?.value, 'fetch');
+        if (fetchDraft) payload.fetch = fetchDraft;
+      } catch (_) {}
+      return payload;
+    }
+
     const tbody = wrap.querySelector(`#sp_keys_tbody_${spId}`);
     if (keys.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
     } else {
       keys.forEach((k, idx) => {
+        const keyLabel = k.label || k.id || `key-${idx}`;
+        let stHtml = '<span class="pill">待校验</span>';
+        if (k.last_ok === true) {
+          stHtml = `<span class="pill pill--green">正常 ${k.last_latency_ms || 0}ms</span>`;
+        } else if (k.last_ok === false) {
+          stHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
+        }
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td>
-          <td><strong>${escapeHtml(k.label || k.id || `key-${idx}`)}</strong></td>
-          <td><span class="tabular privacy-mask">${escapeHtml(k.key)}</span></td>
+          <td><strong>${escapeHtml(keyLabel)}</strong></td>
+          <td><span class="tabular privacy-mask">${escapeHtml(maskKeyForDisplay(k.key))}</span></td>
           <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
-          <td><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></td>
+          <td>${stHtml}</td>
+          <td>
+            <div class="fields">
+              <button class="btn btn--sm sp_btn_verify_k" type="button">校验</button>
+              <button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button>
+            </div>
+          </td>
         `;
         tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => {
           k.enabled = e.target.checked;
+        });
+        tr.querySelector('.sp_btn_verify_k').addEventListener('click', async () => {
+          toast(`正在校验搜索 Key [${keyLabel}]...`, 'info');
+          try {
+            const res = await window.HOST.verifySearchKey(buildSearchVerifyPayload(k, idx));
+            if (res && res.valid === true) {
+              k.last_ok = true;
+              k.last_latency_ms = res.latency_ms || 0;
+              k.last_status = res.status || 200;
+              toast(`搜索 Key [${keyLabel}] 校验成功: 延迟 ${k.last_latency_ms}ms`, 'ok');
+            } else {
+              k.last_ok = false;
+              k.last_status = res?.status || 0;
+              toast(`搜索 Key [${keyLabel}] 校验失败: ${res?.error || '无效凭据'}`, 'err');
+            }
+            renderSearchProvidersList();
+          } catch (e) {
+            toast(`校验异常: ${e.message}`, 'err');
+          }
         });
         tr.querySelector('.sp_btn_del_k').addEventListener('click', () => {
           sp.api_keys.splice(idx, 1);
@@ -2368,6 +2364,31 @@
         tbody.appendChild(tr);
       });
     }
+
+    wrap.querySelector(`#btn_verify_all_sp_keys_${spId}`)?.addEventListener('click', async () => {
+      if (keys.length === 0) return toast('暂无密钥可校验', 'warn');
+      toast(`正在一键校验 ${keys.length} 把搜索 Key...`, 'info');
+      let succ = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        try {
+          const r = await window.HOST.verifySearchKey(buildSearchVerifyPayload(k, i));
+          if (r && r.valid === true) {
+            k.last_ok = true;
+            k.last_latency_ms = r.latency_ms || 0;
+            k.last_status = r.status || 200;
+            succ++;
+          } else {
+            k.last_ok = false;
+            k.last_status = r?.status || 0;
+          }
+        } catch (_) {
+          k.last_ok = false;
+        }
+      }
+      renderSearchProvidersList();
+      toast(`一键校验完成: ${succ}/${keys.length} 把搜索 Key 正常可用`, succ === keys.length ? 'ok' : 'warn');
+    });
 
     wrap.querySelector(`#btn_add_sp_key_${spId}`).addEventListener('click', () => {
       const lbl = wrap.querySelector(`#new_sp_key_lbl_${spId}`).value.trim();
@@ -2539,10 +2560,6 @@
           <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
           <input class="input input--code" id="ed_node_search_provs_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.search_providers))}">
         </div>
-        <div class="form-group form-group--span2">
-          <label class="form-label">状态回调地址 status_url (可选)</label>
-          <input class="input input--code" id="ed_node_status_url_${node.id}" value="${escapeHtml(node.status_url || '')}" placeholder="例如 https://search-mcp.example.com/admin/status">
-        </div>
       </div>
 
       <div class="form-actions form-actions--split">
@@ -2576,7 +2593,6 @@
       const provsStr = wrap.querySelector(`#ed_node_provs_${node.id}`).value;
       const modelsStr = wrap.querySelector(`#ed_node_models_${node.id}`).value;
       const searchProvsStr = wrap.querySelector(`#ed_node_search_provs_${node.id}`).value;
-      const statusUrl = wrap.querySelector(`#ed_node_status_url_${node.id}`).value.trim();
 
       const scope = {
         providers: parseScopeInput(provsStr),
@@ -2585,7 +2601,7 @@
       };
 
       try {
-        const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope, status_url: statusUrl });
+        const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope });
         if (res && res.ok) {
           toast('节点配置更新成功', 'ok');
           await loadNodesData();
@@ -2649,7 +2665,6 @@
     const provsRaw = document.getElementById('issueNodeProvs')?.value;
     const modelsRaw = document.getElementById('issueNodeModels')?.value;
     const searchProvsRaw = document.getElementById('issueNodeSearchProvs')?.value;
-    const statusUrl = (document.getElementById('issueNodeStatusUrl')?.value || '').trim();
 
     if (!name) return toast('请输入节点名称', 'warn');
 
@@ -2661,7 +2676,6 @@
 
     try {
       const payload = { name, role, lease_ttl: leaseTtl, scope };
-      if (statusUrl) payload.status_url = statusUrl;
       const res = await window.HOST.issueNode(payload);
       if (res && res.ok) {
         toast('节点签发成功！', 'ok');

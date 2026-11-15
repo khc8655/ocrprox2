@@ -32,9 +32,34 @@ export function scrubSecrets(text, extraSecrets = []) {
     }
   }
   scrubbed = scrubbed.replace(/(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [REDACTED]');
+  scrubbed = scrubbed.replace(/\b(stk_node_[a-f0-9]{16,})/gi, '[REDACTED]');
   scrubbed = scrubbed.replace(/\b(sk-(?:ant-|proj-)?[A-Za-z0-9_-]{8,})/gi, '[REDACTED]');
+  scrubbed = scrubbed.replace(/\b((?:BSA|tvly-|fc-|jina_)[A-Za-z0-9_-]{8,})/gi, '[REDACTED]');
   scrubbed = scrubbed.replace(/\b(AIza[0-9A-Za-z_-]{16,})/gi, '[REDACTED]');
+  scrubbed = scrubbed.replace(/([?&](?:api_)?key=)[^&\s]+/gi, '$1[REDACTED]');
   return scrubbed;
+}
+
+/**
+ * Basic SSRF guard for Hub outbound admin key verification URLs.
+ */
+export function isSafePublicHttpUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch (_) {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (u.username || u.password) return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host.endsWith('.local') || host === '::1') return false;
+  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host)) {
+    return false;
+  }
+  if (/^(fc|fd|fe80)/i.test(host)) return false;
+  return true;
 }
 
 /**

@@ -10,6 +10,7 @@ import { handleNodeConfigRequest } from '../api/node/config.js';
 import { handleVaultManifestRequest } from '../api/vault/manifest.js';
 import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
+import { handleVerifySearchKey } from '../api/admin/verify-search-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
@@ -51,7 +52,7 @@ function makeAdminReq(method, path, body = null) {
   return new Request(`https://hub.example.com${path}`, init);
 }
 
-function makeNodeReq(method, path, token, ifNoneMatch = null) {
+function makeNodeReq(method, path, token, ifNoneMatch = null, body = null) {
   const headers = {
     'authorization': `Bearer ${token}`,
     'content-type': 'application/json',
@@ -59,10 +60,14 @@ function makeNodeReq(method, path, token, ifNoneMatch = null) {
   if (ifNoneMatch) {
     headers['if-none-match'] = ifNoneMatch;
   }
-  return new Request(`https://hub.example.com${path}`, {
+  const init = {
     method,
     headers,
-  });
+  };
+  if (body) {
+    init.body = JSON.stringify(body);
+  }
+  return new Request(`https://hub.example.com${path}`, init);
 }
 
 describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
@@ -1113,7 +1118,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
     });
   });
 
-  describe('11. Search Node Projection, Encrypted Status Token & On-Demand Pull (§8.2/§8.3)', () => {
+  describe('11. Search Node One-Way Projection, Telemetry & Key Verification (§8.2/§8.3)', () => {
     let mockKv;
 
     beforeEach(() => {
@@ -1158,29 +1163,38 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
         search_selection: { search: ['brave', 'jina'], fetch: 'jina' },
       }), TEST_ENV, mockKv);
 
-      // 2. Issue Search MCP lite node with HUB_ENCRYPT_KEY + status_url
-      const envWithEnc = { ...TEST_ENV, HUB_ENCRYPT_KEY: 'hub-aes-secret-phrase-for-test' };
+      // 2. Issue Search MCP lite node (Option A: strictly one-way, no status_url or node_token_enc)
       const issueRes = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
         name: 'khcsearch-mcp-01',
         role: 'lite',
         lease_ttl: 3600,
         scope: { providers: [], models: [], search_providers: ['brave', 'jina'] },
-        status_url: 'https://mcp.example.com/admin/status',
-      }), envWithEnc, mockKv);
+      }), TEST_ENV, mockKv);
       assert.strictEqual(issueRes.status, 200);
       const issued = await issueRes.json();
       const nodeId = issued.node.id;
       const token1 = issued.node_token;
 
-      // Browser list must NEVER see node_token_enc or token_sha256
-      const listRes = await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), envWithEnc, mockKv);
+      // Browser list must NEVER see token_sha256, node_token_enc, or status_url
+      const listRes = await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, mockKv);
       const listData = await listRes.json();
       assert.strictEqual(listData.nodes[0].node_token_enc, undefined);
       assert.strictEqual(listData.nodes[0].token_sha256, undefined);
-      assert.strictEqual(listData.nodes[0].status_url, 'https://mcp.example.com/admin/status');
+      assert.strictEqual(listData.nodes[0].status_url, undefined);
 
-      // 3. Initial pull returns 200 with search_providers (no local keys, no LLM providers)
-      const pull1 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1), envWithEnc, mockKv);
+      // 3. Initial pull returns 200 with search_providers AND persists scrubbed on-demand telemetry
+      const pull1 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, null, {
+        telemetry: {
+          version: 'mcp-1.2.0',
+          uptime_sec: 1800,
+          playwright_ready: true,
+          search_count: 42,
+          crawl_count: 7,
+          resting_keys: ['tavily:k2', 'Bearer stk_node_0123456789abcdef0123456789abcdef'],
+          resting_keys_count: 2,
+          last_error: 'timeout using BSA-node-secret-v1 and jina_secret_99999999',
+        },
+      }), TEST_ENV, mockKv);
       assert.strictEqual(pull1.status, 200);
       const etag1 = pull1.headers.get('ETag');
       const pData1 = await pull1.json();
@@ -1189,100 +1203,129 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(pData1.payload.search_providers.brave.api_keys[0].key, 'BSA-node-secret-v1');
       assert.deepStrictEqual(pData1.payload.search_selection, { search: ['brave', 'jina'], fetch: 'jina' });
 
+      const listWithTel = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, mockKv)).json();
+      const nodeTel = listWithTel.nodes[0].telemetry;
+      assert.strictEqual(nodeTel.version, 'mcp-1.2.0');
+      assert.strictEqual(nodeTel.uptime_sec, 1800);
+      assert.strictEqual(nodeTel.playwright_ready, true);
+      assert.strictEqual(nodeTel.search_count, 42);
+      assert.strictEqual(nodeTel.crawl_count, 7);
+      assert.strictEqual(nodeTel.resting_keys_count, 2);
+      assert.ok(!JSON.stringify(nodeTel).includes('BSA-node-secret-v1'), 'Telemetry must scrub BSA key');
+      assert.ok(!JSON.stringify(nodeTel).includes('jina_secret_99999999'), 'Telemetry must scrub jina key');
+      assert.ok(!JSON.stringify(nodeTel).includes('stk_node_0123456789abcdef'), 'Telemetry must scrub node token');
+
       // 4. Conditional pull with ETag -> 304 zero bytes
-      const pull304 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), envWithEnc, mockKv);
+      const pull304 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), TEST_ENV, mockKv);
       assert.strictEqual(pull304.status, 304);
       assert.strictEqual((await pull304.text()).length, 0);
 
       // 5. Update Brave API key -> next pull with old ETag returns 200 + updated key
-      const curCfg = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), envWithEnc, mockKv)).json();
+      const curCfg = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, mockKv)).json();
       curCfg.search_providers.brave.api_keys[0].key = 'BSA-node-secret-v2';
-      await handleConfigRequest(makeAdminReq('POST', '/api/config', curCfg), envWithEnc, mockKv);
+      await handleConfigRequest(makeAdminReq('POST', '/api/config', curCfg), TEST_ENV, mockKv);
 
-      const pull2 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), envWithEnc, mockKv);
+      const pull2 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), TEST_ENV, mockKv);
       assert.strictEqual(pull2.status, 200);
       assert.notStrictEqual(pull2.headers.get('ETag'), etag1);
       const pData2 = await pull2.json();
       assert.strictEqual(pData2.payload.search_providers.brave.api_keys[0].key, 'BSA-node-secret-v2');
 
-      // 6. On-demand status pull via EdgeOne dynamic route /api/admin/nodes/[id]/status.js
-      const edgeStatusModule = await import('../../edge-functions/api/admin/nodes/[id]/status.js');
-      const origFetch = globalThis.fetch;
-      let fetchCalls = 0;
-      let seenAuthHeader = '';
-      try {
-        globalThis.fetch = async (url, init) => {
-          fetchCalls++;
-          seenAuthHeader = init?.headers?.Authorization || init?.headers?.authorization || '';
-          return new Response(JSON.stringify({
-            version: 'mcp-1.0.0',
-            uptime_sec: 1200,
-            search_count: 42,
-            crawl_count: 7,
-            resting_keys: [],
-          }), { status: 200, headers: { 'content-type': 'application/json' } });
-        };
+      // 6. Rotate token -> old token immediately rejected with 401; disable node -> 401
+      const rotRes = await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/${nodeId}/rotate`), TEST_ENV, mockKv);
+      const token2 = (await rotRes.json()).node_token;
+      const oldPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1), TEST_ENV, mockKv);
+      assert.strictEqual(oldPull.status, 401);
 
-        const stRes1 = await edgeStatusModule.onRequestGet({
-          request: makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status`),
-          env: envWithEnc,
-          agent_kv: mockKv,
-          params: { id: nodeId },
-        });
-        assert.strictEqual(stRes1.status, 200);
-        const stBody1 = await stRes1.json();
-        assert.strictEqual(stBody1.ok, true);
-        assert.strictEqual(stBody1.state, 'online');
-        assert.strictEqual(stBody1.cached, false);
-        assert.strictEqual(stBody1.status.search_count, 42);
-        assert.strictEqual(seenAuthHeader, `Bearer ${token1}`);
-        assert.strictEqual(fetchCalls, 1);
+      await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, { enabled: false }), TEST_ENV, mockKv);
+      const revokedPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token2), TEST_ENV, mockKv);
+      assert.strictEqual(revokedPull.status, 401);
+    });
 
-        // Cached within 15s -> no upstream fetch
-        const stRes2 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status`), envWithEnc, mockKv);
-        const stBody2 = await stRes2.json();
-        assert.strictEqual(stBody2.cached, true);
-        assert.strictEqual(fetchCalls, 1);
+    test('Hub POST /api/admin/verify-search-key validates adapters, declarative specs, SSRF guard, masked KV lookup, and persists health', async () => {
+      const mockKv = new MockKV();
+      const env = { ...TEST_ENV, agent_kv: mockKv };
 
-        // ?refresh=1 forces live pull
-        const stRes3 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
-        const stBody3 = await stRes3.json();
-        assert.strictEqual(stBody3.cached, false);
-        assert.strictEqual(fetchCalls, 2);
+      const cfgRes = await handleConfigRequest(makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {},
+        search_providers: {
+          brave: {
+            id: 'brave',
+            name: 'Brave',
+            enabled: true,
+            origin: 'vault',
+            capabilities: ['search'],
+            adapter: 'brave',
+            base_url: 'https://api.search.brave.com',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'BSA-real-stored-key-1234', enabled: true, origin: 'vault' }],
+          },
+        },
+      }), env, mockKv);
+      assert.strictEqual(cfgRes.status, 200);
 
-        // Rotate token -> status pull must authenticate with rotated token, old token gets 401
-        const rotRes = await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/${nodeId}/rotate`), envWithEnc, mockKv);
-        const rotData = await rotRes.json();
-        const token2 = rotData.node_token;
+      // 1. Unauthorized check
+      const unauth = await handleVerifySearchKey(new Request('https://hub.example.com/api/admin/verify-search-key', {
+        method: 'POST',
+        body: JSON.stringify({ provider: 'brave', api_key: 'BSA-test-12345678' }),
+      }), env);
+      assert.strictEqual(unauth.status, 401);
 
-        const oldPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1), envWithEnc, mockKv);
-        assert.strictEqual(oldPull.status, 401);
+      // 2. SSRF private IP rejection
+      const ssrfRes = await handleVerifySearchKey(makeAdminReq('POST', '/api/admin/verify-search-key', {
+        provider: 'custom-ssrf',
+        adapter: 'tavily',
+        base_url: 'http://169.254.169.254/latest',
+        api_key: 'tvly-secret-1234567890',
+      }), env);
+      assert.strictEqual(ssrfRes.status, 400);
+      assert.strictEqual((await ssrfRes.json()).error, 'unsafe_or_invalid_url');
 
-        const stRes4 = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
-        assert.strictEqual(stRes4.status, 200);
-        assert.strictEqual(seenAuthHeader, `Bearer ${token2}`);
+      // 3. Brave masked key resolution from KV + upstream probe + health persistence
+      let capturedUrl = '';
+      let capturedToken = '';
+      const okFetch = async (url, init) => {
+        capturedUrl = url;
+        capturedToken = init?.headers?.['X-Subscription-Token'] || '';
+        return new Response(JSON.stringify({ web: { results: [] } }), { status: 200 });
+      };
+      const braveRes = await handleVerifySearchKey(makeAdminReq('POST', '/api/admin/verify-search-key', {
+        provider: 'brave',
+        key_label: 'k1',
+        api_key: 'BSA●●●●●●1234',
+      }), env, okFetch);
+      assert.strictEqual(braveRes.status, 200);
+      const braveBody = await braveRes.json();
+      assert.strictEqual(braveBody.valid, true);
+      assert.ok(capturedUrl.startsWith('https://api.search.brave.com/res/v1/web/search'));
+      assert.strictEqual(capturedToken, 'BSA-real-stored-key-1234');
 
-        // Upstream outage -> stale fallback from cache
-        globalThis.fetch = async () => {
-          throw new Error('ECONNREFUSED');
-        };
-        const stStale = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
-        const stStaleBody = await stStale.json();
-        assert.strictEqual(stStaleBody.state, 'stale');
-        assert.strictEqual(stStaleBody.stale, true);
+      const storedAfter = JSON.parse(await mockKv.get(CONFIG_KV_KEY));
+      assert.strictEqual(storedAfter.search_providers.brave.api_keys[0].last_ok, true);
+      assert.strictEqual(storedAfter.search_providers.brave.api_keys[0].last_status, 200);
 
-        // Disable node -> 401 on config pull + offline status without calling upstream
-        await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, { enabled: false }), envWithEnc, mockKv);
-        const revokedPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token2), envWithEnc, mockKv);
-        assert.strictEqual(revokedPull.status, 401);
-        const stRevoked = await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${nodeId}/status?refresh=1`), envWithEnc, mockKv);
-        assert.strictEqual(stRevoked.status, 200, 'Admin status proxy must return 200 JSON (not 401) when downstream node is disabled');
-        const stRevokedBody = await stRevoked.json();
-        assert.strictEqual(stRevokedBody.state, 'offline');
-        assert.strictEqual(stRevokedBody.http_status, 401);
-      } finally {
-        globalThis.fetch = origFetch;
-      }
+      // 4. Declarative custom spec + upstream 401 secret scrubbing
+      const failFetch = async (url, init) => {
+        assert.ok(url.includes('https://api.customsearch.example.com/v2/find'));
+        assert.strictEqual(init.headers['X-Custom-Key'], 'custom-raw-secret-9999');
+        return new Response(JSON.stringify({ error: { message: 'Invalid key custom-raw-secret-9999 Bearer stk_node_abcdef0123456789' } }), { status: 401 });
+      };
+      const customRes = await handleVerifySearchKey(makeAdminReq('POST', '/api/admin/verify-search-key', {
+        provider: 'custom-search',
+        api_key: 'custom-raw-secret-9999',
+        request: {
+          method: 'POST',
+          url: 'https://api.customsearch.example.com/v2/find',
+          headers: { 'X-Custom-Key': '{{api_key}}' },
+          body: { q: '{{query}}' },
+        },
+      }), env, failFetch);
+      assert.strictEqual(customRes.status, 200);
+      const customBody = await customRes.json();
+      assert.strictEqual(customBody.valid, false);
+      assert.strictEqual(customBody.status, 401);
+      assert.ok(!customBody.error.includes('custom-raw-secret-9999'), 'Raw secret must be scrubbed from error');
+      assert.ok(!customBody.error.includes('stk_node_abcdef0123456789'), 'Node token must be scrubbed from error');
     });
   });
 });

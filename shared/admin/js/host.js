@@ -277,12 +277,6 @@
       return res.json();
     },
 
-    async getNodeStatus(id, refresh = false) {
-      const qs = refresh ? '?refresh=1' : '';
-      const res = await HOST.request(`/api/admin/nodes/${encodeURIComponent(id)}/status${qs}`);
-      return res.json();
-    },
-
     async getUsage(period = 'today', tz = 'Asia/Shanghai') {
       const res = await HOST.request(`/api/admin/usage?period=${period}&tz=${encodeURIComponent(tz)}`);
       return res.json();
@@ -336,6 +330,18 @@
 
     async verifyKey(data) {
       const res = await HOST.request('/api/admin/verify-key', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async verifySearchKey(data) {
+      const res = await HOST.request('/api/admin/verify-search-key', {
         method: 'POST',
         body: JSON.stringify(data),
       });

@@ -1,72 +1,16 @@
-import { checkAdminAuth, isMaskedSecret, resolveKvBinding, resolveEnv, loadConfig, CONFIG_KV_KEY } from '../../lib/config.js';
+import {
+  checkAdminAuth,
+  isMaskedSecret,
+  resolveKvBinding,
+  resolveEnv,
+  loadConfig,
+  findUnmaskedKey,
+  persistProviderKeyHealth,
+} from '../../lib/config.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { resolveModelsUrl, scrubSecrets, extractModelIds } from '../../lib/models.js';
 
 const isMaskedKey = isMaskedSecret;
-
-async function persistKeyHealth(env, provider, keyLabel, result) {
-  if (!provider) return;
-  try {
-    const kv = resolveKvBinding(env);
-    if (!kv) return;
-    const config = await loadConfig(kv);
-    const prov = config?.providers?.[provider];
-    if (!prov || !Array.isArray(prov.api_keys)) return;
-    const match = keyLabel
-      ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
-      : prov.api_keys[0];
-    if (!match) return;
-    match.last_ok = Boolean(result.valid);
-    match.last_status = Number(result.status) || 0;
-    match.last_latency_ms = Number(result.latency_ms) || 0;
-    if (result.models_count !== undefined) {
-      match.last_models_count = Number(result.models_count) || 0;
-    }
-    match.last_checked_at = new Date().toISOString();
-    const serialized = JSON.stringify(config);
-    if (typeof kv.put === 'function') {
-      await kv.put(CONFIG_KV_KEY, serialized);
-    } else if (typeof kv.setItem === 'function') {
-      await kv.setItem(CONFIG_KV_KEY, serialized);
-    }
-  } catch (_) {}
-}
-
-function findUnmaskedKey(prov, keyLabel) {
-  if (!prov) return null;
-  // 1. prov.keys map: { [key_label]: "key" }
-  if (prov.keys && typeof prov.keys === 'object' && !Array.isArray(prov.keys)) {
-    if (keyLabel && typeof prov.keys[keyLabel] === 'string' && !isMaskedKey(prov.keys[keyLabel])) {
-      return prov.keys[keyLabel];
-    }
-    for (const v of Object.values(prov.keys)) {
-      if (typeof v === 'string' && v && !isMaskedKey(v)) return v;
-      if (v && typeof v === 'object' && v.key && !isMaskedKey(v.key)) return v.key;
-    }
-  }
-  // 2. prov.keys array
-  if (Array.isArray(prov.keys)) {
-    if (keyLabel) {
-      const match = prov.keys.find(k => k && typeof k === 'object' && (k.label === keyLabel || k.id === keyLabel));
-      if (match?.key && !isMaskedKey(match.key)) return match.key;
-    }
-    for (const item of prov.keys) {
-      if (typeof item === 'string' && item && !isMaskedKey(item)) return item;
-      if (item && typeof item === 'object' && item.key && !isMaskedKey(item.key)) return item.key;
-    }
-  }
-  // 3. prov.api_keys array (standard schema)
-  if (Array.isArray(prov.api_keys)) {
-    if (keyLabel) {
-      const match = prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel));
-      if (match?.key && !isMaskedKey(match.key)) return match.key;
-    }
-    for (const item of prov.api_keys) {
-      if (item?.key && !isMaskedKey(item.key)) return item.key;
-    }
-  }
-  return null;
-}
 
 export async function handleVerifyKey(request, env, fetchImplOrOpts) {
   const authErr = checkAdminAuth(request, env);
@@ -193,7 +137,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       modelsCount = models.length;
     } catch (_) {}
 
-    await persistKeyHealth(env, provider, keyLabel, {
+    await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
       valid: true,
       status: resp.status,
       latency_ms,
@@ -232,7 +176,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
     } catch (_) {}
   }
 
-  await persistKeyHealth(env, provider, keyLabel, {
+  await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
     valid: false,
     status: resp.status,
     latency_ms,

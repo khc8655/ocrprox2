@@ -110,24 +110,23 @@
         <div class="card">
           <div class="card-header">
             <div>
-              <h2 class="card-title">搜索节点实时状态</h2>
-              <div class="card-sub">按需拉取配置了状态回调地址 (status_url) 的节点快照（15 秒缓存）</div>
+              <h2 class="card-title">MCP 节点同步快照 (Telemetry)</h2>
+              <div class="card-sub">随 POST /api/node/config 按需捎带的运行遥测快照（零心跳，节点仅在拉取/续租时上报）</div>
             </div>
-            <button class="btn btn--sm" id="btnRefreshSearchNodeStatuses" type="button">刷新全部状态</button>
           </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
                   <th>节点名称</th>
-                  <th>运行状态</th>
                   <th>版本 / 运行时长</th>
+                  <th>Playwright</th>
                   <th>Search / Crawl</th>
                   <th>休眠 Key / 最近错误</th>
-                  <th>操作</th>
+                  <th>最近同步</th>
                 </tr>
               </thead>
-              <tbody id="hubSearchNodeStatusBody"></tbody>
+              <tbody id="hubMcpTelemetryBody"></tbody>
             </table>
           </div>
         </div>
@@ -395,10 +394,6 @@
             <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
             <input class="input input--code" id="issueNodeSearchProvs" value="*" placeholder="* 或 brave,tavily">
           </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">状态回调地址 status_url (可选，仅 https/http)</label>
-            <input class="input input--code" id="issueNodeStatusUrl" placeholder="例如 https://search-mcp.example.com/admin/status">
-          </div>
         </div>
         <div class="form-actions">
           <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
@@ -528,7 +523,7 @@
             <div class="check-group" id="searchSelectionFetchGroup"></div>
           </div>
         </div>
-        <p class="text-xs text-muted mt-2">控制平面仅集中下发密钥与策略；连接测试与请求执行请在各数据平面节点（如 /admin/providers/:id/test）进行。</p>
+        <p class="text-xs text-muted mt-2">控制平面可在下方提供商编辑器直接发起最小密钥校验探测；实际 Search / Playwright 抓取由下游 MCP 节点单向拉取配置后在本地执行。</p>
       </div>
 
       <div class="toolbar">

@@ -87,7 +87,7 @@
       ],
       "response": {
         "ok": true,
-        "nodes": "array of node objects"
+        "nodes": "array of node objects (includes optional sanitized telemetry snapshot)"
       }
     },
     "nodes_issue": {
@@ -106,8 +106,7 @@
           "models": "array of strings",
           "providers": "array of strings",
           "search_providers": "array of strings (optional, default ['*'])"
-        },
-        "status_url": "string (optional https/http URL)"
+        }
       },
       "response": {
         "ok": true,
@@ -145,25 +144,6 @@
         "hub"
       ]
     },
-    "nodes_status": {
-      "method": "GET",
-      "path": "/api/admin/nodes/:id/status",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
-        "hub"
-      ],
-      "params": {
-        "refresh": "1 | true (optional, bypass 15s cache)"
-      },
-      "response": {
-        "ok": "boolean",
-        "state": "online | stale | offline",
-        "cached": "boolean",
-        "stale": "boolean",
-        "status": "object (optional node runtime status payload)",
-        "cached_status": "object (optional stale fallback payload)"
-      }
-    },
     "node_config": {
       "method": "POST",
       "path": "/api/node/config",
@@ -174,6 +154,9 @@
       "headers": {
         "Authorization": "Bearer stk_node_<48hex>",
         "If-None-Match": "optional etag"
+      },
+      "request": {
+        "telemetry": "optional runtime snapshot object piggybacked on demand (version, uptime_sec, playwright_ready, search_count, crawl_count, resting_keys, resting_keys_count, last_error)"
       }
     },
     "usage": {
@@ -252,6 +235,30 @@
         "status": "integer",
         "latency_ms": "integer (optional)",
         "models_count": "integer (optional)",
+        "error": "string (optional)"
+      }
+    },
+    "verify_search_key": {
+      "method": "POST",
+      "path": "/api/admin/verify-search-key",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "request": {
+        "provider": "string",
+        "key_label": "string (optional)",
+        "api_key": "string (optional if stored in KV)",
+        "adapter": "string (optional)",
+        "base_url": "string (optional)",
+        "request": "object (optional declarative HTTP probe spec)",
+        "fetch": "object (optional declarative HTTP fetch fallback spec)"
+      },
+      "response": {
+        "ok": true,
+        "valid": "boolean",
+        "status": "integer",
+        "latency_ms": "integer (optional)",
         "error": "string (optional)"
       }
     },

@@ -61,8 +61,9 @@
    - 在 Go Full 节点，凡从中枢同步下来的 `origin === "vault"` 供应商，其连接核心字段（`base_url`、`anthropic_base_url`）在本地 UI 锁定只读，但允许管理员追加本地私有 Key（标记为 `origin: "local"`）。
 2. **Kernel Guard（防掩码覆盖内核守卫）**：
    - 在 EdgeOne `api/config`（含 `providers` 与 `search_providers`）与 Go Full `internal/config/local_source.go` 的保存路径中，强制检测所有传入的密钥字符串：若包含掩码字符 `●`、全星号 `***` 或与脱敏预览格式匹配，**强制回退保留原存储中的真实明文 Key**，从内核层杜绝前端误把脱敏占位符写回磁盘。
-3. **节点按需状态拉取密文封装（`node_token_enc`）**：
-   - 仅当 Hub 执行 `GET /api/admin/nodes/:id/status` 时，使用 `HUB_ENCRYPT_KEY`（未配置时回退至 `ADMIN_PASSWORD` 派生的 SHA-256 AES-256-GCM 密钥）在服务端解密 `node_token_enc` 向目标 `status_url` 发起 `Bearer` 认证请求；`node_token_enc` 与 `token_sha256` 永不返回浏览器端。
+3. **严格单向拉取与 KV 摘要隔离（无明文/密文 `node_token` 持久化）**：
+   - EdgeOne Hub 仅保存 `NODE_TOKEN` 的单向 SHA-256 摘要（`token_sha256`），**不存储可逆密文且不发起任何 Hub → 节点反向状态回调请求**；MCP/VM 节点按需请求 `POST /api/node/config` 时顺带上报的 `telemetry` 经 `scrubSecrets` 清洗后写入 KV。
+   - Hub 侧新增 `POST /api/admin/verify-search-key` 使用 `isSafePublicHttpUrl` 校验出站探测地址并脱敏上游报错。
 4. **Vault URL 变更防凭据泄露守卫**：
    - 当管理员在 Full 节点修改 `vault.url`（指向新的中枢域名）时，若请求未同时提交新的明文 `vault.token`，后端强制清空旧 Token，防止旧中枢的 `NODE_TOKEN` 被发送到恶意第三方地址。
 

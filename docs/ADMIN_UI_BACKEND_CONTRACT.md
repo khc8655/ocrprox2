@@ -43,7 +43,17 @@
         "providers": ["minimax", "deepseek", "openrouter"],
         "search_providers": ["brave", "tavily"]
       },
-      "status_url": "https://search-mcp.example.com/admin/status",
+      "telemetry": {
+        "version": "1.2.0",
+        "uptime_sec": 3600,
+        "playwright_ready": true,
+        "search_count": 42,
+        "crawl_count": 7,
+        "resting_keys": [],
+        "resting_keys_count": 0,
+        "last_error": "",
+        "updated_at": "2026-11-15T12:00:00Z"
+      },
       "created_at": "2026-11-08T08:00:00Z",
       "last_seen": "2026-11-08T08:30:12Z",
       "last_config_version": 137,
@@ -78,16 +88,16 @@
 ```
 
 ### 2.3 注销/吊销、恢复、轮换与删除节点
-- **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600, "status_url": "..." }`
+- **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
 - **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`，旧 Token 立即失效。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
-- **按需拉取节点状态**：`GET /api/admin/nodes/:id/status[?refresh=1]` → Hub 使用内部解密的 `node_token` 向节点 `status_url` 拉取运行时状态（15 秒 KV 缓存、4.5 秒超时，不向浏览器暴露 `node_token` / `token_sha256`）。
+- **Hub 侧搜索 Key 校验**：`POST /api/admin/verify-search-key` → 校验 Brave / Tavily / Jina / Serper / Firecrawl / Exa 或声明式 HTTP 搜索 Key 连通性（带 `isSafePublicHttpUrl` SSRF 防护与结果写回 KV）。
 
 ---
 
 ## 三、 节点按需配置投影契约（`POST /api/node/config`）
 
-受 `NODE_TOKEN`（`Authorization: Bearer <NODE_TOKEN>`）保护，遵循零轮询、被动响应原则：
+受 `NODE_TOKEN`（`Authorization: Bearer <NODE_TOKEN>`）保护，遵循零轮询、零心跳、严格单向被动响应原则（可选请求体 `{ "telemetry": { ... } }` 在拉取/续租时顺带上报运行快照）：
 
 | 场景 | 请求头 / 参数 | HTTP 状态码 | 响应头 | 响应体 | 节点侧标准动作 |
 |---|---|---:|---|---|---|

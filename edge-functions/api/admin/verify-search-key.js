@@ -1,4 +1,4 @@
-import { onRequest as _onRequest } from '../../../../_hub/api/admin/nodes.js';
+import { onRequest as _onRequest } from '../../_hub/api/admin/verify-search-key.js';
 
 export async function onRequest(context) { return _onRequest(context); }
 export async function onRequestGet(context) { return _onRequest(context); }
