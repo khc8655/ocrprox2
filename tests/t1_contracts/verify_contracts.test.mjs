@@ -254,6 +254,63 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         false,
         'stale edge-functions/api/admin/nodes/[id]/status.js must be removed'
       );
+
+      // Verify actual POST /api/node/config 200 / 304 / 401 envelopes match mcp-node-contract.json
+      const store = new Map();
+      const memKv = {
+        get: async (k) => store.get(k) || null,
+        put: async (k, v) => store.set(k, v),
+      };
+      await memKv.put('config', JSON.stringify({
+        _version: 3,
+        providers: {},
+        agent_models: {},
+        settings: {},
+        search_providers: mcpContract.sample_200_response.payload.search_providers,
+        search_selection: mcpContract.sample_200_response.payload.search_selection,
+      }));
+      const { issueNode } = await import('../../edgeone-hub/lib/nodes.js');
+      const { handleNodeConfigRequest } = await import('../../edgeone-hub/api/node/config.js');
+      const issued = await issueNode({
+        name: 't1-contract-check',
+        role: 'lite',
+        lease_ttl: 600,
+        grace_ttl: 3600,
+        scope: { providers: [], models: [], search_providers: ['brave', 'jina'] },
+      }, memKv);
+
+      const res200 = await handleNodeConfigRequest(new Request('https://hub.example.com/api/node/config', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${issued.node_token}`, 'content-type': 'application/json' },
+      }), {}, memKv);
+      assert.strictEqual(res200.status, 200);
+      for (const h of mcpContract.response_200.headers) {
+        assert.ok(res200.headers.get(h), `200 response missing contract header '${h}'`);
+      }
+      const body200 = await res200.json();
+      for (const field of mcpContract.response_200.required_fields) {
+        assert.ok(Object.prototype.hasOwnProperty.call(body200, field), `200 response missing required field '${field}'`);
+      }
+
+      const res304 = await handleNodeConfigRequest(new Request('https://hub.example.com/api/node/config', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${issued.node_token}`,
+          'if-none-match': body200.etag,
+        },
+      }), {}, memKv);
+      assert.strictEqual(res304.status, 304);
+      for (const h of mcpContract.response_304.headers) {
+        assert.ok(res304.headers.get(h), `304 response missing contract header '${h}'`);
+      }
+      assert.strictEqual((await res304.text()).length, 0);
+
+      const res401 = await handleNodeConfigRequest(new Request('https://hub.example.com/api/node/config', {
+        method: 'POST',
+        headers: { authorization: 'Bearer stk_node_000000000000000000000000000000000000000000000000' },
+      }), {}, memKv);
+      assert.strictEqual(res401.status, mcpContract.response_401.status);
+      assert.deepStrictEqual(await res401.json(), mcpContract.response_401.body);
     });
   });
 

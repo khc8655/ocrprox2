@@ -1197,7 +1197,19 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       }), TEST_ENV, mockKv);
       assert.strictEqual(pull1.status, 200);
       const etag1 = pull1.headers.get('ETag');
+      assert.ok(pull1.headers.get('x-config-version'), '200 must include X-Config-Version');
+      assert.strictEqual(Number(pull1.headers.get('x-lease-ttl')), 3600);
+      assert.strictEqual(Number(pull1.headers.get('x-grace-ttl')), 3600);
+      assert.ok(pull1.headers.get('x-lease-until'), '200 must keep X-Lease-Until alias');
+      assert.ok(pull1.headers.get('x-grace-until'), '200 must keep X-Grace-Until alias');
       const pData1 = await pull1.json();
+      assert.strictEqual(typeof pData1._version, 'number');
+      assert.strictEqual(pData1.config_version, pData1._version);
+      assert.strictEqual(pData1.etag, etag1);
+      assert.ok(!Number.isNaN(Date.parse(pData1.issued_at)), '200 must include ISO issued_at');
+      assert.strictEqual(pData1.lease_ttl, 3600);
+      assert.strictEqual(pData1.grace_ttl, 3600);
+      assert.strictEqual(typeof pData1.lease_until, 'number');
       assert.deepStrictEqual(Object.keys(pData1.payload.providers), []);
       assert.strictEqual(pData1.payload.search_providers.brave.api_keys.length, 1);
       assert.strictEqual(pData1.payload.search_providers.brave.api_keys[0].key, 'BSA-node-secret-v1');
@@ -1215,9 +1227,13 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.ok(!JSON.stringify(nodeTel).includes('jina_secret_99999999'), 'Telemetry must scrub jina key');
       assert.ok(!JSON.stringify(nodeTel).includes('stk_node_0123456789abcdef'), 'Telemetry must scrub node token');
 
-      // 4. Conditional pull with ETag -> 304 zero bytes
+      // 4. Conditional pull with ETag -> 304 zero bytes + both canonical and deprecated lease headers
       const pull304 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token1, etag1), TEST_ENV, mockKv);
       assert.strictEqual(pull304.status, 304);
+      assert.strictEqual(Number(pull304.headers.get('x-lease-ttl')) > 0, true, '304 must include X-Lease-Ttl > 0');
+      assert.strictEqual(Number(pull304.headers.get('x-grace-ttl')) > 0, true, '304 must include X-Grace-Ttl > 0');
+      assert.ok(pull304.headers.get('x-lease-until'), '304 must keep X-Lease-Until alias');
+      assert.ok(pull304.headers.get('x-grace-until'), '304 must keep X-Grace-Until alias');
       assert.strictEqual((await pull304.text()).length, 0);
 
       // 5. Update Brave API key -> next pull with old ETag returns 200 + updated key
@@ -1240,6 +1256,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${nodeId}`, { enabled: false }), TEST_ENV, mockKv);
       const revokedPull = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', token2), TEST_ENV, mockKv);
       assert.strictEqual(revokedPull.status, 401);
+      assert.deepStrictEqual(await revokedPull.json(), { ok: false, error: 'node_revoked_or_invalid' });
     });
 
     test('Hub POST /api/admin/verify-search-key validates adapters, declarative specs, SSRF guard, masked KV lookup, and persists health', async () => {

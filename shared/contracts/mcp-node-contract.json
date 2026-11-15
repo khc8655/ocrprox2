@@ -29,8 +29,10 @@
   },
   "response_200": {
     "status": 200,
-    "headers": ["etag", "x-config-version", "cache-control"],
+    "headers": ["etag", "x-config-version", "x-lease-ttl", "x-grace-ttl", "cache-control"],
+    "deprecated_header_aliases": ["x-lease-until", "x-grace-until"],
     "required_fields": ["ok", "_version", "etag", "lease_ttl", "grace_ttl", "issued_at", "payload"],
+    "deprecated_aliases": ["config_version", "lease_until"],
     "payload_fields": ["providers", "agent_models", "settings", "adapter_rules", "search_providers", "search_selection"],
     "search_provider_fields": ["id", "name", "enabled", "origin", "base_url", "capabilities", "timeout_ms", "api_keys"],
     "search_provider_optional_fields": ["adapter", "quirks", "request", "response", "fetch"],
@@ -39,8 +41,16 @@
   },
   "response_304": {
     "status": 304,
-    "headers": ["etag", "x-config-version", "x-lease-ttl", "x-grace-ttl"],
+    "headers": ["etag", "x-config-version", "x-lease-ttl", "x-grace-ttl", "cache-control"],
+    "deprecated_header_aliases": ["x-lease-until", "x-grace-until"],
     "body": null
+  },
+  "response_401": {
+    "status": 401,
+    "body": {
+      "ok": false,
+      "error": "node_revoked_or_invalid"
+    }
   },
   "sample_request": {
     "telemetry": {

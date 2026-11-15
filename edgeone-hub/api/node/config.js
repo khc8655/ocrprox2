@@ -78,7 +78,10 @@ export async function handleNodeConfigRequest(request, env, kv) {
 
   const responseHeaders = {
     'ETag': etag,
+    'Cache-Control': 'no-store',
     'X-Config-Version': String(config._version || 1),
+    'X-Lease-Ttl': String(leaseTtl),
+    'X-Grace-Ttl': String(graceTtl),
     'X-Lease-Until': String(leaseUntil),
     'X-Grace-Until': String(graceUntil),
   };
@@ -92,12 +95,16 @@ export async function handleNodeConfigRequest(request, env, kv) {
   }
 
   // 6. 200 OK Response
+  const issuedAt = new Date().toISOString();
   const respBody = {
     ok: true,
+    _version: config._version || 1,
     config_version: config._version || 1,
+    etag,
     lease_ttl: leaseTtl,
     grace_ttl: graceTtl,
     lease_until: leaseUntil,
+    issued_at: issuedAt,
     payload,
   };
 

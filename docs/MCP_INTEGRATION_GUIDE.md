@@ -33,6 +33,7 @@
 1. 登录 `llmproxy2` Hub 管理控制台，进入 **「中转节点」** → **「+ 签发新节点」**。
 2. 建议配置如下：
    - **节点角色**：选择 `lite`（极简无盘运行语义，名称可设为 `khcsearch-hf-01`）。
+   - **租约时长（`lease_ttl`）**：搜索 MCP 节点建议设为 `300`~`900` 秒（仍只在真实请求触发时按需续租、无后台心跳，可兼顾 telemetry 快照时效与 `304` 低开销）。
    - **允许 LLM 供应商 / 允许 LLM 模型**：若该 MCP 不使用大模型 Key，填入 `[]`（表示不投影 `providers` 与 `agent_models`）。
    - **允许搜索提供商**（`scope.search_providers`）：填入 `*`（全量共享）或白名单 ID（如 `brave,tavily,jina`）。
    - **无 `status_url`**：单向架构下无需填写或暴露节点回调 URL。
@@ -81,8 +82,8 @@ MCP 端 **禁止启动 `setInterval` / 后台轮询心跳**，仅在以下 3 类
 
 | HTTP 状态码 | 含义 | 响应头 / 响应体 | MCP 节点必须执行的动作 |
 |:---:|---|---|---|
-| **`200 OK`** | 首次激活或配置/作用域已变化 | 响应头：`ETag`、`X-Config-Version`、`Cache-Control`；响应体含 `payload` | 原子替换内存配置快照，记录新 `ETag` 与租约截止时间 |
-| **`304 Not Modified`** | 配置无变化（零载荷） | 响应头含最新 `ETag`、`X-Config-Version`、`X-Lease-Ttl`、`X-Grace-Ttl` | 保持当前内存快照，仅延长本地 `lease_until`；所带 `telemetry` 若距上次写入间隔允许将被记录 |
+| **`200 OK`** | 首次激活或配置/作用域已变化 | 响应头：`ETag`、`X-Config-Version`、`X-Lease-Ttl`、`X-Grace-Ttl`、`Cache-Control`（兼容保留 `X-Lease-Until`、`X-Grace-Until`）；响应体含 `_version`、`etag`、`lease_ttl`、`grace_ttl`、`issued_at`、`payload`（兼容保留 `config_version`、`lease_until`） | 原子替换内存配置快照，记录 `etag` 与 `lease_ttl` |
+| **`304 Not Modified`** | 配置无变化（零载荷） | 响应头含 `ETag`、`X-Config-Version`、`X-Lease-Ttl`、`X-Grace-Ttl`、`Cache-Control`（兼容保留 `X-Lease-Until`、`X-Grace-Until`）；响应体 0 字节 | 保持当前内存快照，仅依据 `X-Lease-Ttl`（或回退 `X-Lease-Until`）延长租约；所带 `telemetry` 若满足间隔将被记录 |
 | **`401 Unauthorized`** | 节点已被吊销/停用，或 Token 已轮换 | `{ "ok": false, "error": "node_revoked_or_invalid" }` | **立即清空内存中的所有上游 Key 并拒绝后续工具调用** |
 
 ### 3.4 `200 OK` 响应体结构示例
@@ -91,9 +92,11 @@ MCP 端 **禁止启动 `setInterval` / 后台轮询心跳**，仅在以下 3 类
 {
   "ok": true,
   "_version": 12,
+  "config_version": 12,
   "etag": "\"abc123def456\"",
-  "lease_ttl": 86400,
+  "lease_ttl": 600,
   "grace_ttl": 3600,
+  "lease_until": 1763294400,
   "issued_at": "2026-11-15T12:00:00.000Z",
   "payload": {
     "providers": {},
@@ -141,7 +144,7 @@ MCP 端 **禁止启动 `setInterval` / 后台轮询心跳**，仅在以下 3 类
 纯 HTTP 搜索服务（Brave / Tavily / Jina / Serper / Firecrawl / Exa 及自定义 `request`/`fetch` 声明式配置）的 Key 连通性校验**直接由 Hub 管理后台完成**，MCP 端无需暴露任何 `/admin/providers/:id/test` 接口：
 
 - **鉴权**：仅接受管理员 `ADMIN_PASSWORD`，严禁节点 Token 调用；
-- **SSRF 防护与最小探活**：强制经 `isSafePublicHttpUrl` 拦截私有网段、环回地址、链路本地与云厂商元数据 IP 后，仅发固定极小探测请求（如 `q=ping&count=1`），超时 `5000ms`；
+- **SSRF 防护与最小探活**：内置适配器及自定义声明式 `request`/`fetch`（支持 `{{api_key}}` 与别名 `{{key}}`、`{{query}}`、`{{max_results}}`、`{{url}}` 模板插值）均强制经 `isSafePublicHttpUrl` 拦截私有网段、环回地址、链路本地与云厂商元数据 IP 后，仅发固定极小探测请求（如 `q=ping&count=1`），超时 `5000ms`；
 - **脱敏与健康落库**：响应错误文本经 `scrubSecrets` 清洗，测试结果 (`valid`, `status`, `latency_ms`) 同步回写 KV `search_providers.<id>.api_keys`。
 
 ---
