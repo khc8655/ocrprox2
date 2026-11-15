@@ -18,6 +18,10 @@ func TestJoinUpstream(t *testing.T) {
 		{"https://api.openai.com/v1/", "/chat/completions", "https://api.openai.com/v1/chat/completions"},
 		{"https://custom.endpoint.com/endpoints/openapi", "models", "https://custom.endpoint.com/endpoints/openapi/models"},
 		{"https://generativelanguage.googleapis.com/v1beta/openai", "chat/completions", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
+		{"https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"https://api.stepfun.com/step_plan/v1", "/v1/chat/completions", "https://api.stepfun.com/step_plan/v1/chat/completions"},
+		{"https://generativelanguage.googleapis.com/v1beta/openai", "/v1/chat/completions", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"},
+		{"https://api.openai.com", "/v1/responses", "https://api.openai.com/v1/responses"},
 	}
 
 	for _, tc := range tests {

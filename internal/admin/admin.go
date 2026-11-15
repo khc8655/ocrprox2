@@ -415,6 +415,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 	if subCfg, ok := rawBody["config"].(map[string]any); ok && subCfg != nil {
 		configRaw = subCfg
 	}
+	normalizeImportedConfig(configRaw)
 
 	cfgBytes, err := json.Marshal(configRaw)
 	if err != nil {

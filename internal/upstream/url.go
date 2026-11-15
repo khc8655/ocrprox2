@@ -14,6 +14,7 @@ var apiVersionRegex = regexp.MustCompile(`/v\d+[^/]*/|/v\d+(\.[^/]+)?(/.*)?$`)
 func JoinUpstream(baseURL, path string) string {
 	base := strings.TrimRight(baseURL, "/")
 	cleanPath := strings.TrimLeft(path, "/")
+	cleanPath = strings.TrimPrefix(cleanPath, "v1/")
 
 	if strings.HasSuffix(base, "/"+cleanPath) {
 		return base
