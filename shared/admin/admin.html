@@ -95,7 +95,7 @@
               <thead>
                 <tr>
                   <th>节点名称</th>
-                  <th>角色</th>
+                  <th>类型</th>
                   <th>同步快照状态</th>
                   <th>最近 IP / Config</th>
                   <th>同步 / 304 命中</th>
@@ -366,36 +366,47 @@
       </div>
 
       <div class="card card-pad" id="issueNodeForm" hidden>
-        <h2 class="card-title mb-3">签发新中转节点凭证</h2>
+        <h2 class="card-title mb-3">签发新节点凭证</h2>
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label">节点名称</label>
-            <input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
-          </div>
-          <div class="form-group">
-            <label class="form-label">节点角色</label>
-            <select class="select" id="issueNodeRole">
-              <option value="full">Full (全功能代理网关)</option>
-              <option value="lite">Lite (轻量本地代理)</option>
+            <label class="form-label">节点类型</label>
+            <select class="select" id="issueNodeKind">
+              <option value="llm">LLM 代理网关 (llm)</option>
+              <option value="mcp">MCP 扩展服务 (mcp)</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">租约时长 (秒)</label>
-            <input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
+            <label class="form-label">节点名称</label>
+            <input class="input" id="issueNodeName" placeholder="hk-edge-01 / hf-search">
+          </div>
+          <div class="form-group" id="issueNodeRoleGroup">
+            <label class="form-label">节点角色</label>
+            <select class="select" id="issueNodeRole">
+              <option value="full">Full (全功能)</option>
+              <option value="lite">Lite (轻量)</option>
+            </select>
+          </div>
+          <div class="form-group" id="issueNodeServiceTypeGroup" hidden>
+            <label class="form-label">服务类型 (service_type)</label>
+            <input class="input input--code" id="issueNodeServiceType" value="khc-search" placeholder="khc-search">
           </div>
           <div class="form-group">
-            <label class="form-label">允许 LLM 供应商 (逗号分隔，* 全量，[] 无)</label>
+            <label class="form-label">租约时长 (秒)</label>
+            <input class="input tabular" id="issueNodeTTL" type="number" value="86400" placeholder="86400">
+          </div>
+          <div class="form-group" id="issueNodeProvsGroup">
+            <label class="form-label">LLM 供应商 (* 全量, [] 无)</label>
             <input class="input input--code" id="issueNodeProvs" value="*" placeholder="* 或 []">
           </div>
-          <div class="form-group">
-            <label class="form-label">允许 LLM 模型 (逗号分隔，* 全量，[] 无)</label>
+          <div class="form-group" id="issueNodeModelsGroup">
+            <label class="form-label">LLM 模型 (* 全量, [] 无)</label>
             <input class="input input--code" id="issueNodeModels" value="*" placeholder="* 或 []">
           </div>
-          <div class="form-group">
-            <label class="form-label">允许搜索提供商 (逗号分隔，* 全量，[] 无)</label>
-            <input class="input input--code" id="issueNodeSearchProvs" value="*" placeholder="* 或 brave,tavily">
+          <div class="form-group" id="issueNodeSearchProvsGroup" hidden>
+            <label class="form-label">搜索提供商 (* 全量, [] 无)</label>
+            <input class="input input--code" id="issueNodeSearchProvs" value="[]" placeholder="* 或 brave,tavily">
           </div>
-          <div class="form-group form-group--span2">
+          <div class="form-group form-group--span2" id="issueNodeMcpUrlGroup" hidden>
             <label class="form-label">MCP 接入地址 mcp_url (可选)</label>
             <input class="input input--code" id="issueNodeMcpUrl" placeholder="https://your-space.hf.space/mcp">
           </div>
@@ -407,18 +418,31 @@
         <div class="editor-section" id="issuedTokenDisplay" hidden>
           <div class="form-grid form-grid--2">
             <div class="form-group">
-              <label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
+              <label class="form-label">签发凭据 (仅显示一次)</label>
               <input class="input input--code" id="issuedTokenVal" readonly>
             </div>
             <div class="form-group">
-              <label class="form-label">节点启动环境变量</label>
+              <label class="form-label">启动环境变量</label>
               <input class="input input--code" id="issuedEnvVal" readonly>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="card" id="nodesList"></div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">已签发节点</h2>
+            <div class="card-sub">LLM 节点同步模型密钥；MCP 节点仅同步扩展服务密钥</div>
+          </div>
+          <div class="seg" id="nodeKindSeg">
+            <button class="seg-btn active" data-kind="all" type="button">全部</button>
+            <button class="seg-btn" data-kind="llm" type="button">LLM 代理</button>
+            <button class="seg-btn" data-kind="mcp" type="button">MCP 服务</button>
+          </div>
+        </div>
+        <div id="nodesList"></div>
+      </div>
     </section>
 
     <!-- 4b. 扩展服务 (Hub) -->

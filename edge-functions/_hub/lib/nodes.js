@@ -24,6 +24,36 @@ throw err;
 }
 return trimmed.replace(/\/+$/, '');
 }
+function sanitizeNodeKind(rawKind) {
+if (rawKind === undefined || rawKind === null || rawKind === '') return null;
+const k = String(rawKind).trim().toLowerCase();
+if (k !== 'llm' && k !== 'mcp') {
+const err = new Error('Invalid kind: must be llm or mcp');
+err.status = 400;
+throw err;
+}
+return k;
+}
+function sanitizeServiceType(rawType) {
+if (rawType === undefined || rawType === null) return '';
+const t = String(rawType).trim().toLowerCase();
+if (!t) return '';
+if (t.length > 48 || !/^[a-z0-9-]+$/.test(t)) {
+const err = new Error('Invalid service_type: lowercase letters, digits and hyphens only');
+err.status = 400;
+throw err;
+}
+return t;
+}
+function inferNodeKind(n) {
+if (n?.kind === 'llm' || n?.kind === 'mcp') return n.kind;
+const provs = n?.scope?.providers;
+const sp = n?.scope?.search_providers;
+if (n?.mcp_url || n?.telemetry || (Array.isArray(provs) && provs.length === 0 && (!Array.isArray(sp) || sp.length > 0))) {
+return 'mcp';
+}
+return 'llm';
+}
 function sanitizeNode(n) {
 const copy = { ...n };
 delete copy.token_sha256;
@@ -37,12 +67,14 @@ models: Array.isArray(scope.models) ? scope.models : ['*'],
 providers: Array.isArray(scope.providers) ? scope.providers : ['*'],
 search_providers: Array.isArray(scope.search_providers) ? scope.search_providers : ['*'],
 };
+copy.kind = inferNodeKind(copy);
+copy.service_type = typeof n.service_type === 'string'
+? n.service_type
+: (copy.kind === 'mcp' ? 'khc-search' : '');
 return copy;
 }
 function buildBootstrapEnv(node, rawToken, hubUrl) {
-const providers = Array.isArray(node.scope?.providers) ? node.scope.providers : ['*'];
-const searchProviders = Array.isArray(node.scope?.search_providers) ? node.scope.search_providers : ['*'];
-if (providers.length === 0 && searchProviders.length > 0) {
+if (inferNodeKind(node) === 'mcp') {
 return `HUB_URL=${hubUrl} NODE_TOKEN=${rawToken}`;
 }
 return `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
@@ -130,23 +162,30 @@ const tokenSha = hashToken(rawToken);
 const tokenPrefix = rawToken.slice(0, 17) + '...';
 const nodeId = `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 const nowIso = new Date().toISOString();
+const explicitKind = sanitizeNodeKind(params.kind);
 const mcpUrl = sanitizeMcpUrl(params.mcp_url);
+const kind = explicitKind || inferNodeKind({ mcp_url: mcpUrl, scope: params.scope });
+const serviceType = sanitizeServiceType(params.service_type) || (kind === 'mcp' ? 'khc-search' : '');
+const defaultSearchScope = kind === 'mcp' ? ['*'] : (explicitKind === 'llm' ? [] : ['*']);
+const defaultLlmScope = kind === 'mcp' ? [] : ['*'];
 const node = {
 id: nodeId,
 name: params.name || 'Unnamed Node',
-role: params.role === 'full' ? 'full' : 'lite',
+kind,
+service_type: serviceType,
+role: kind === 'mcp' ? 'lite' : (params.role === 'full' ? 'full' : 'lite'),
 enabled: true,
 token_prefix: tokenPrefix,
 token_sha256: tokenSha,
 mcp_url: mcpUrl,
-lease_ttl: Number(params.lease_ttl) || 86400,
+lease_ttl: Number(params.lease_ttl) || (kind === 'mcp' ? 600 : 86400),
 grace_ttl: Number(params.grace_ttl) || 3600,
 scope: {
-models: Array.isArray(params.scope?.models) ? params.scope.models : ['*'],
-providers: Array.isArray(params.scope?.providers) ? params.scope.providers : ['*'],
+models: Array.isArray(params.scope?.models) ? params.scope.models : defaultLlmScope,
+providers: Array.isArray(params.scope?.providers) ? params.scope.providers : defaultLlmScope,
 search_providers: Array.isArray(params.scope?.search_providers)
 ? params.scope.search_providers
-: ['*'],
+: defaultSearchScope,
 },
 created_at: nowIso,
 last_seen: null,
@@ -171,6 +210,18 @@ const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
 const node = nodes[idx];
 if (patch.name !== undefined) node.name = String(patch.name);
+if (patch.kind !== undefined) {
+const nextKind = sanitizeNodeKind(patch.kind);
+if (!nextKind) {
+const err = new Error('Invalid kind: must be llm or mcp');
+err.status = 400;
+throw err;
+}
+node.kind = nextKind;
+}
+if (patch.service_type !== undefined) {
+node.service_type = sanitizeServiceType(patch.service_type);
+}
 if (patch.enabled !== undefined) {
 node.enabled = Boolean(patch.enabled);
 }

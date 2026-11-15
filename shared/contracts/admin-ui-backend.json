@@ -98,15 +98,17 @@
         "hub"
       ],
       "request": {
+        "kind": "string (optional: llm | mcp; default llm unless inferred from legacy fields)",
+        "service_type": "string (optional lowercase slug ^[a-z0-9-]+$; default khc-search when kind=mcp)",
         "name": "string",
-        "role": "string (lite | full)",
-        "lease_ttl": "integer",
+        "role": "string (lite | full; forced to lite when kind=mcp)",
+        "lease_ttl": "integer (default 86400 for llm, 600 for mcp)",
         "grace_ttl": "integer",
         "mcp_url": "string (optional http/https URL without credentials)",
         "scope": {
-          "models": "array of strings",
-          "providers": "array of strings",
-          "search_providers": "array of strings (optional, default ['*'])"
+          "models": "array of strings (default ['*'] for llm, [] for mcp)",
+          "providers": "array of strings (default ['*'] for llm, [] for mcp)",
+          "search_providers": "array of strings (default [] when kind=llm, ['*'] when kind=mcp)"
         }
       },
       "response": {
@@ -122,7 +124,17 @@
       "auth": "ADMIN_PASSWORD",
       "roles": [
         "hub"
-      ]
+      ],
+      "request": {
+        "kind": "string (optional: llm | mcp)",
+        "service_type": "string (optional lowercase slug ^[a-z0-9-]+$)",
+        "name": "string (optional)",
+        "enabled": "boolean (optional)",
+        "lease_ttl": "integer (optional)",
+        "grace_ttl": "integer (optional)",
+        "mcp_url": "string (optional http/https URL without credentials, empty clears)",
+        "scope": "object (optional models/providers/search_providers arrays)"
+      }
     },
     "nodes_rotate": {
       "method": "POST",

@@ -4,6 +4,10 @@
  */
 
 (function () {
+  const $ = (id) => document.getElementById(id);
+  const ce = (t) => document.createElement(t);
+  const clk = (el, fn) => el && el.addEventListener('click', fn);
+  const fg = (lbl, ctrl, id = '', cls = '') => `<div class="form-group${cls ? ' ' + cls : ''}"${id ? ` id="${id}"` : ''}><label class="form-label">${lbl}</label>${ctrl}</div>`;
   const state = {
     config: null,
     nodes: [],
@@ -24,16 +28,17 @@
     batchVerifying: false,
     extServiceProto: 'all',
     selectedMcpNodeId: '',
+    nodeKindFilter: 'all',
   };
 
   function toast(msg, type = 'info') {
-    const box = document.getElementById('toastBox');
+    const box = $('toastBox');
     if (!box) return;
-    const el = document.createElement('div');
+    const el = ce('div');
     el.className = 'toast';
-    const dot = document.createElement('span');
+    const dot = ce('span');
     dot.className = `dot dot--${type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'ok'}`;
-    const txt = document.createElement('span');
+    const txt = ce('span');
     txt.textContent = msg;
     el.appendChild(dot);
     el.appendChild(txt);
@@ -62,8 +67,13 @@
     try { const u = new URL(t); return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password; } catch (_) { return false; }
   }
 
+  function getNodeKind(n) {
+    if (n?.kind === 'mcp' || n?.kind === 'llm') return n.kind;
+    return (n && (n.mcp_url || n.telemetry || (Array.isArray(n.scope?.providers) && !n.scope.providers.length))) ? 'mcp' : 'llm';
+  }
+
   function getMcpNodes() {
-    return (state.nodes || []).filter((n) => n && (n.mcp_url || n.telemetry || (Array.isArray(n.scope?.providers) && !n.scope.providers.length)));
+    return (state.nodes || []).filter((n) => n && getNodeKind(n) === 'mcp');
   }
 
   function getNodeSyncSnapshotStatus(n) {
@@ -154,6 +164,7 @@
     return refs;
   }
 
+  const eh = escapeHtml;
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -165,7 +176,7 @@
 
   function setupStaticIcons() {
     const setIcon = (id, name) => {
-      const el = document.getElementById(id);
+      const el = $(id);
       if (el && window.uiIcon) el.innerHTML = window.uiIcon(name);
     };
     setIcon('brandMark', 'server');
@@ -199,10 +210,10 @@
 
   // --- 1. In-Page Magpie Login Overlay (M14) ---
   function setupLoginScreen() {
-    const loginForm = document.getElementById('loginForm');
-    const pwdInput = document.getElementById('loginPassword');
-    const errEl = document.getElementById('loginError');
-    const badge = document.getElementById('loginHostBadge');
+    const loginForm = $('loginForm');
+    const pwdInput = $('loginPassword');
+    const errEl = $('loginError');
+    const badge = $('loginHostBadge');
 
     if (badge) {
       badge.textContent = window.HOST.kind === 'hub' ? 'Hub' : 'Full';
@@ -249,20 +260,20 @@
     const caps = window.HOST.capabilities;
     const isHub = window.HOST.kind === 'hub';
 
-    const brandRole = document.getElementById('brandRole');
+    const brandRole = $('brandRole');
     if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
 
-    const navModels = document.getElementById('navModels');
-    const navSearch = document.getElementById('navSearch');
-    const navNodes = document.getElementById('navNodes');
-    const navActivity = document.getElementById('navActivity');
-    const topVersionBox = document.getElementById('topVersionBox');
-    const modeSwitchBox = document.getElementById('modeSwitchBox');
-    const vaultSyncBar = document.getElementById('vaultSyncBar');
-    const cfgVaultLinkBox = document.getElementById('cfgVaultLinkBox');
-    const hubOverviewBox = document.getElementById('hubOverviewBox');
-    const fullOverviewBox = document.getElementById('fullOverviewBox');
-    const btnClearAllCooldowns = document.getElementById('btnClearAllCooldowns');
+    const navModels = $('navModels');
+    const navSearch = $('navSearch');
+    const navNodes = $('navNodes');
+    const navActivity = $('navActivity');
+    const topVersionBox = $('topVersionBox');
+    const modeSwitchBox = $('modeSwitchBox');
+    const vaultSyncBar = $('vaultSyncBar');
+    const cfgVaultLinkBox = $('cfgVaultLinkBox');
+    const hubOverviewBox = $('hubOverviewBox');
+    const fullOverviewBox = $('fullOverviewBox');
+    const btnClearAllCooldowns = $('btnClearAllCooldowns');
 
     if (navModels) navModels.hidden = false;
     if (navSearch) navSearch.hidden = !caps.vaultHub;
@@ -281,12 +292,12 @@
   }
 
   function setupTheme() {
-    const btn = document.getElementById('themeToggleBtn');
+    const btn = $('themeToggleBtn');
     if (!btn) return;
     const saved = localStorage.getItem('llmproxy_theme') || 'auto';
     applyTheme(saved);
 
-    btn.addEventListener('click', () => {
+    clk(btn, () => {
       const cur = document.documentElement.getAttribute('data-theme') || 'auto';
       const next = cur === 'dark' ? 'light' : cur === 'light' ? 'auto' : 'dark';
       applyTheme(next);
@@ -295,7 +306,7 @@
   }
 
   function applyTheme(theme) {
-    const btn = document.getElementById('themeToggleBtn');
+    const btn = $('themeToggleBtn');
     if (theme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
       if (btn && window.uiIcon) btn.innerHTML = window.uiIcon('moon');
@@ -310,7 +321,7 @@
 
   // --- 2. Privacy Masking & Keyboard Shortcuts (M15) ---
   function setupPrivacyMask() {
-    const btn = document.getElementById('btnPrivacyMask');
+    const btn = $('btnPrivacyMask');
     if (!btn) return;
     const isMasked = localStorage.getItem('llmproxy_privacy_mask') === '1';
     if (isMasked) {
@@ -320,7 +331,7 @@
       btn.innerHTML = window.uiIcon(isMasked ? 'eyeOff' : 'eye');
     }
 
-    btn.addEventListener('click', () => {
+    clk(btn, () => {
       const active = document.body.classList.toggle('privacy-masked');
       localStorage.setItem('llmproxy_privacy_mask', active ? '1' : '0');
       if (window.uiIcon) {
@@ -333,10 +344,10 @@
   function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        const pForm = document.getElementById('addProviderForm');
-        const spForm = document.getElementById('addSearchProviderForm');
-        const mForm = document.getElementById('addModelForm');
-        const nForm = document.getElementById('issueNodeForm');
+        const pForm = $('addProviderForm');
+        const spForm = $('addSearchProviderForm');
+        const mForm = $('addModelForm');
+        const nForm = $('issueNodeForm');
         let closedSomething = false;
         if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
         if (spForm && !spForm.hidden) { spForm.hidden = true; spForm.classList.add('hidden'); closedSomething = true; }
@@ -398,24 +409,24 @@
   }
 
   function setupNavigation() {
-    const seg = document.getElementById('navSeg');
+    const seg = $('navSeg');
     if (!seg) return;
     seg.querySelectorAll('.seg-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      clk(btn, () => {
         const tab = btn.getAttribute('data-tab');
         if (tab) switchTab(tab);
       });
     });
 
     // Provider detail panel "自动探测协议" button (rendered per-row inside .editor).
-    document.addEventListener('click', async (e) => {
+    clk(document, async (e) => {
       const target = e.target instanceof Element ? e.target.closest('button[id^="btn_detect_ed_"]') : null;
       if (!target) return;
       const pId = target.id.slice('btn_detect_ed_'.length);
       if (!pId || target.disabled) return;
       target.disabled = true;
       try {
-        const baseEl = document.getElementById(`ed_p_base_${pId}`);
+        const baseEl = $(`ed_p_base_${pId}`);
         const res = await window.HOST.detectProvider({
           provider: pId,
           base_url: baseEl ? baseEl.value.trim() : '',
@@ -434,49 +445,54 @@
       }
     });
 
-    const logoutBtn = document.getElementById('logoutBtn');
+    const logoutBtn = $('logoutBtn');
     if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
+      clk(logoutBtn, () => {
         window.HOST.setToken('');
         window.HOST.showLogin();
       });
     }
 
-    const modeBtnAgent = document.getElementById('modeBtnAgent');
-    const modeBtnKB = document.getElementById('modeBtnKB');
+    const modeBtnAgent = $('modeBtnAgent');
+    const modeBtnKB = $('modeBtnKB');
     if (modeBtnAgent && modeBtnKB) {
-      modeBtnAgent.addEventListener('click', () => switchRunMode('agent'));
-      modeBtnKB.addEventListener('click', () => switchRunMode('kb'));
+      clk(modeBtnAgent, () => switchRunMode('agent'));
+      clk(modeBtnKB, () => switchRunMode('kb'));
     }
 
-    const btnIssueNode = document.getElementById('btnIssueNode');
+    const btnIssueNode = $('btnIssueNode');
     if (btnIssueNode) {
-      btnIssueNode.addEventListener('click', () => {
-        const form = document.getElementById('issueNodeForm');
-        if (form) form.hidden = !form.hidden;
+      clk(btnIssueNode, () => {
+        const form = $('issueNodeForm');
+        if (form) {
+          form.hidden = !form.hidden;
+          if (!form.hidden) applyIssueNodeKindUI(false);
+        }
       });
     }
 
-    const btnDoIssue = document.getElementById('btnDoIssue');
+    $('issueNodeKind')?.addEventListener('change', () => applyIssueNodeKindUI(true));
+
+    const btnDoIssue = $('btnDoIssue');
     if (btnDoIssue) {
-      btnDoIssue.addEventListener('click', handleIssueNode);
+      clk(btnDoIssue, handleIssueNode);
     }
 
-    const btnSyncManifest = document.getElementById('btnSyncManifest');
+    const btnSyncManifest = $('btnSyncManifest');
     if (btnSyncManifest) {
-      btnSyncManifest.addEventListener('click', handleSyncManifest);
+      clk(btnSyncManifest, handleSyncManifest);
     }
 
-    const btnSyncKeys = document.getElementById('btnSyncKeys');
+    const btnSyncKeys = $('btnSyncKeys');
     if (btnSyncKeys) {
-      btnSyncKeys.addEventListener('click', handleSyncFromVault);
+      clk(btnSyncKeys, handleSyncFromVault);
     }
 
     // Analytics Period Selector
-    const periodSeg = document.getElementById('activityPeriodSeg');
+    const periodSeg = $('activityPeriodSeg');
     if (periodSeg) {
       periodSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        btn.addEventListener('click', async () => {
+        clk(btn, async () => {
           const p = btn.getAttribute('data-period');
           if (!p || p === state.currentPeriod) return;
           state.currentPeriod = p;
@@ -490,10 +506,10 @@
     }
 
     // Analytics 3-Dimension Breakdown Sub-Tabs (M10)
-    const dimSeg = document.getElementById('usageDimensionSeg');
+    const dimSeg = $('usageDimensionSeg');
     if (dimSeg) {
       dimSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        clk(btn, () => {
           const dim = btn.getAttribute('data-dim');
           if (!dim) return;
           window.USAGE.state.subTab = dim;
@@ -506,9 +522,9 @@
       });
     }
 
-    const btnClearTraces = document.getElementById('btnClearTraces');
+    const btnClearTraces = $('btnClearTraces');
     if (btnClearTraces) {
-      btnClearTraces.addEventListener('click', async () => {
+      clk(btnClearTraces, async () => {
         if (!confirm('确定清空所有请求轨迹与监控日志吗？')) return;
         try {
           const res = await window.HOST.clearTraces();
@@ -522,9 +538,9 @@
       });
     }
 
-    const btnFilterRetried = document.getElementById('btnFilterRetried');
+    const btnFilterRetried = $('btnFilterRetried');
     if (btnFilterRetried) {
-      btnFilterRetried.addEventListener('click', () => {
+      clk(btnFilterRetried, () => {
         state.filterOnlyRetried = !state.filterOnlyRetried;
         btnFilterRetried.classList.toggle('active', state.filterOnlyRetried);
         renderTracesList();
@@ -640,11 +656,11 @@
   }
 
   function populatePresetDropdown() {
-    const sel = document.getElementById('newProvPreset');
+    const sel = $('newProvPreset');
     if (!sel) return;
     sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
     for (const [key, meta] of Object.entries(PRESETS_META)) {
-      const opt = document.createElement('option');
+      const opt = ce('option');
       opt.value = key;
       opt.textContent = meta[1];
       sel.appendChild(opt);
@@ -652,7 +668,7 @@
   }
 
   function setupToolbars() {
-    const provSearch = document.getElementById('providerSearchInput');
+    const provSearch = $('providerSearchInput');
     if (provSearch) {
       provSearch.addEventListener('input', (e) => {
         state.providerQuery = (e.target.value || '').trim().toLowerCase();
@@ -660,10 +676,10 @@
       });
     }
 
-    const provFilter = document.getElementById('providerFilterSeg');
+    const provFilter = $('providerFilterSeg');
     if (provFilter) {
       provFilter.querySelectorAll('.seg-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        clk(btn, () => {
           const f = btn.getAttribute('data-filter') || 'all';
           state.providerFilter = f;
           provFilter.querySelectorAll('.seg-btn').forEach((b) => {
@@ -674,7 +690,7 @@
       });
     }
 
-    const modelSearch = document.getElementById('modelSearchInput');
+    const modelSearch = $('modelSearchInput');
     if (modelSearch) {
       modelSearch.addEventListener('input', (e) => {
         state.modelQuery = (e.target.value || '').trim().toLowerCase();
@@ -682,7 +698,7 @@
       });
     }
 
-    const searchProvSearch = document.getElementById('searchProvSearchInput');
+    const searchProvSearch = $('searchProvSearchInput');
     if (searchProvSearch) {
       searchProvSearch.addEventListener('input', (e) => {
         state.searchQuery = (e.target.value || '').trim().toLowerCase();
@@ -690,10 +706,10 @@
       });
     }
 
-    const modelSubSeg = document.getElementById('modelPipelineSeg');
+    const modelSubSeg = $('modelPipelineSeg');
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        clk(btn, () => {
           const m = btn.getAttribute('data-submode') || 'agent';
           state.modelSubMode = m;
           modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
@@ -704,16 +720,16 @@
       });
     }
 
-    document.getElementById('btnHubRefreshOverview')?.addEventListener('click', loadData);
-    document.getElementById('btnHubBatchVerifyAll')?.addEventListener('click', verifyAllHubKeys);
-    document.getElementById('btnGoProvidersFromHub')?.addEventListener('click', () => switchTab('providers'));
-    document.getElementById('btnGoNodesFromHub')?.addEventListener('click', () => switchTab('nodes'));
-    document.getElementById('btnGoSearchFromHub')?.addEventListener('click', () => switchTab('search'));
+    clk($('btnHubRefreshOverview'), loadData);
+    clk($('btnHubBatchVerifyAll'), verifyAllHubKeys);
+    clk($('btnGoProvidersFromHub'), () => switchTab('providers'));
+    clk($('btnGoNodesFromHub'), () => switchTab('nodes'));
+    clk($('btnGoSearchFromHub'), () => switchTab('search'));
 
-    const extSeg = document.getElementById('extServiceProtoSeg');
+    const extSeg = $('extServiceProtoSeg');
     if (extSeg) {
       extSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        clk(btn, () => {
           const proto = btn.getAttribute('data-proto') || 'all';
           state.extServiceProto = proto;
           extSeg.querySelectorAll('.seg-btn').forEach((b) => {
@@ -723,15 +739,27 @@
         });
       });
     }
+
+    const nodeSeg = $('nodeKindSeg');
+    if (nodeSeg) {
+      nodeSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+        clk(btn, () => {
+          const kind = btn.getAttribute('data-kind') || 'all';
+          state.nodeKindFilter = kind;
+          nodeSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-kind') === kind));
+          renderNodesList();
+        });
+      });
+    }
   }
 
   function setupConfigBackup() {
-    document.getElementById('btnExportConfig')?.addEventListener('click', async () => {
+    clk($('btnExportConfig'), async () => {
       try {
         const res = await window.HOST.exportConfig();
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
+        const a = ce('a');
         a.href = url;
         a.download = `llmproxy_config_${Date.now()}.json`;
         a.click();
@@ -742,8 +770,8 @@
       }
     });
 
-    const importInput = document.getElementById('importConfigFile');
-    document.getElementById('btnTriggerImport')?.addEventListener('click', () => {
+    const importInput = $('importConfigFile');
+    clk($('btnTriggerImport'), () => {
       importInput?.click();
     });
 
@@ -755,7 +783,7 @@
         reader.onload = async () => {
           try {
             const parsed = JSON.parse(reader.result);
-            const mode = document.getElementById('importConfigMode')?.value || 'merge';
+            const mode = $('importConfigMode')?.value || 'merge';
             const res = await window.HOST.importConfig({ mode, config: parsed });
             if (res && (res.ok || res._version !== undefined)) {
               toast('配置恢复导入成功', 'ok');
@@ -776,23 +804,23 @@
 
   function setupCreationForms() {
     populatePresetDropdown();
-    const pForm = document.getElementById('addProviderForm');
-    const mForm = document.getElementById('addModelForm');
+    const pForm = $('addProviderForm');
+    const mForm = $('addModelForm');
     const toggle = (el, show) => {
       if (!el) return;
       el.hidden = show !== undefined ? !show : !el.hidden;
       el.classList.toggle('hidden', el.hidden);
     };
 
-    document.getElementById('btnAddProvider')?.addEventListener('click', () => toggle(pForm));
-    document.getElementById('btnCancelAddProvider')?.addEventListener('click', () => toggle(pForm, false));
+    clk($('btnAddProvider'), () => toggle(pForm));
+    clk($('btnCancelAddProvider'), () => toggle(pForm, false));
 
     // cURL Paste Toggle & Input (M3)
-    const btnToggleCurl = document.getElementById('btnToggleCurlPaste');
-    const curlWrap = document.getElementById('curlPasteWrap');
-    const curlInput = document.getElementById('curlPasteInput');
+    const btnToggleCurl = $('btnToggleCurlPaste');
+    const curlWrap = $('curlPasteWrap');
+    const curlInput = $('curlPasteInput');
     if (btnToggleCurl && curlInput) {
-      btnToggleCurl.addEventListener('click', () => {
+      clk(btnToggleCurl, () => {
         const target = curlWrap || curlInput;
         target.hidden = !target.hidden;
         target.classList.toggle('hidden', target.hidden);
@@ -802,11 +830,11 @@
       curlInput.addEventListener('input', () => {
         const parsed = parseCurl(curlInput.value);
         if (parsed) {
-          if (parsed.base) document.getElementById('newProvBaseUrl').value = parsed.base;
-          if (parsed.key) document.getElementById('newProvApiKey').value = parsed.key;
-          if (parsed.protocol) document.getElementById('newProvApiType').value = parsed.protocol;
+          if (parsed.base) $('newProvBaseUrl').value = parsed.base;
+          if (parsed.key) $('newProvApiKey').value = parsed.key;
+          if (parsed.protocol) $('newProvApiType').value = parsed.protocol;
           if (parsed.model) {
-            const mId = document.getElementById('newProvId');
+            const mId = $('newProvId');
             if (mId && !mId.value) mId.value = parsed.model.split('/')[0].split('-')[0];
           }
           toast('已从 cURL 自动解析填充 Base URL 与密钥！', 'ok');
@@ -815,19 +843,19 @@
     }
 
     // Auto-detect protocols button in Add Provider (M1)
-    const btnDetect = document.getElementById('btnDetectProvider');
+    const btnDetect = $('btnDetectProvider');
     if (btnDetect) {
-      btnDetect.addEventListener('click', async () => {
-        const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
-        const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+      clk(btnDetect, async () => {
+        const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
+        const apiKey = ($('newProvApiKey')?.value || '').trim();
         if (!baseUrl) return toast('请先输入 Base URL', 'warn');
         toast('正在探测上游支持协议与延迟...', 'info');
         try {
           const res = await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
           if (res && res.ok) {
             toast(`探测成功！已发现协议支持 (延迟: ${res.latency_ms || 0}ms)`, 'ok');
-            if (res.base_url) document.getElementById('newProvBaseUrl').value = res.base_url;
-            if (res.protocol) document.getElementById('newProvApiType').value = res.protocol;
+            if (res.base_url) $('newProvBaseUrl').value = res.base_url;
+            if (res.protocol) $('newProvApiType').value = res.protocol;
           } else {
             // Fallback probe
             const probe = await window.HOST.probeModels({ base_url: baseUrl, api_key: apiKey });
@@ -843,23 +871,23 @@
       });
     }
 
-    document.getElementById('newProvPreset')?.addEventListener('change', (e) => {
+    $('newProvPreset')?.addEventListener('change', (e) => {
       const m = PRESETS_META[e.target.value];
       if (m) {
-        document.getElementById('newProvId').value = m[0];
-        document.getElementById('newProvName').value = m[1];
-        document.getElementById('newProvBaseUrl').value = m[2];
-        document.getElementById('newProvApiType').value = m[3];
+        $('newProvId').value = m[0];
+        $('newProvName').value = m[1];
+        $('newProvBaseUrl').value = m[2];
+        $('newProvApiType').value = m[3];
       }
     });
 
-    document.getElementById('btnConfirmAddProvider')?.addEventListener('click', async () => {
-      const id = (document.getElementById('newProvId')?.value || '').trim();
-      const name = (document.getElementById('newProvName')?.value || '').trim() || id;
-      const baseUrl = (document.getElementById('newProvBaseUrl')?.value || '').trim();
-      const apiType = document.getElementById('newProvApiType')?.value || 'openai-completions';
-      const keyAlias = (document.getElementById('newProvKeyAlias')?.value || '').trim() || 'k1';
-      const apiKey = (document.getElementById('newProvApiKey')?.value || '').trim();
+    clk($('btnConfirmAddProvider'), async () => {
+      const id = ($('newProvId')?.value || '').trim();
+      const name = ($('newProvName')?.value || '').trim() || id;
+      const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
+      const apiType = $('newProvApiType')?.value || 'openai-completions';
+      const keyAlias = ($('newProvKeyAlias')?.value || '').trim() || 'k1';
+      const apiKey = ($('newProvApiKey')?.value || '').trim();
 
       if (!id) return toast('请输入供应商标识 ID', 'warn');
       if (!baseUrl) return toast('请输入 Base URL', 'warn');
@@ -875,16 +903,16 @@
       await persistConfig('供应商创建成功');
     });
 
-    document.getElementById('btnAddModel')?.addEventListener('click', () => {
+    clk($('btnAddModel'), () => {
       toggle(mForm);
       if (mForm && !mForm.hidden) populateModelProvidersDropdown();
     });
-    document.getElementById('btnCancelAddModel')?.addEventListener('click', () => toggle(mForm, false));
+    clk($('btnCancelAddModel'), () => toggle(mForm, false));
 
-    document.getElementById('btnConfirmAddModel')?.addEventListener('click', async () => {
-      const mName = (document.getElementById('newModelName')?.value || '').trim();
-      const prov = (document.getElementById('newModelProvider')?.value || '').trim();
-      const target = (document.getElementById('newModelTarget')?.value || '').trim() || mName;
+    clk($('btnConfirmAddModel'), async () => {
+      const mName = ($('newModelName')?.value || '').trim();
+      const prov = ($('newModelProvider')?.value || '').trim();
+      const target = ($('newModelTarget')?.value || '').trim() || mName;
 
       if (!mName) return toast('请输入逻辑模型名称', 'warn');
 
@@ -927,11 +955,11 @@
   }
 
   function setupSearchCreationForm(toggle) {
-    const presetSel = document.getElementById('newSearchPreset');
+    const presetSel = $('newSearchPreset');
     if (presetSel) {
       presetSel.innerHTML = '<option value="">-- 自定义搜索提供商 --</option>';
       Object.entries(SEARCH_PRESETS_META).forEach(([k, meta]) => {
-        const opt = document.createElement('option');
+        const opt = ce('option');
         opt.value = k;
         opt.textContent = meta.name;
         presetSel.appendChild(opt);
@@ -939,32 +967,32 @@
       presetSel.addEventListener('change', (e) => {
         const meta = SEARCH_PRESETS_META[e.target.value];
         if (!meta) return;
-        document.getElementById('newSearchId').value = meta.id;
-        document.getElementById('newSearchName').value = meta.name;
-        document.getElementById('newSearchAdapter').value = meta.adapter;
-        document.getElementById('newSearchBaseUrl').value = meta.base_url;
-        document.getElementById('newSearchCapSearch').checked = meta.capabilities.includes('search');
-        document.getElementById('newSearchCapFetch').checked = meta.capabilities.includes('fetch');
+        $('newSearchId').value = meta.id;
+        $('newSearchName').value = meta.name;
+        $('newSearchAdapter').value = meta.adapter;
+        $('newSearchBaseUrl').value = meta.base_url;
+        $('newSearchCapSearch').checked = meta.capabilities.includes('search');
+        $('newSearchCapFetch').checked = meta.capabilities.includes('fetch');
       });
     }
 
-    const spForm = document.getElementById('addSearchProviderForm');
-    document.getElementById('btnAddSearchProvider')?.addEventListener('click', () => toggle(spForm));
-    document.getElementById('btnCancelAddSearchProvider')?.addEventListener('click', () => toggle(spForm, false));
+    const spForm = $('addSearchProviderForm');
+    clk($('btnAddSearchProvider'), () => toggle(spForm));
+    clk($('btnCancelAddSearchProvider'), () => toggle(spForm, false));
 
-    document.getElementById('btnConfirmAddSearchProvider')?.addEventListener('click', async () => {
-      const id = (document.getElementById('newSearchId')?.value || '').trim().toLowerCase();
-      const name = (document.getElementById('newSearchName')?.value || '').trim();
-      const origin = document.getElementById('newSearchOrigin')?.value || 'vault';
-      const adapter = (document.getElementById('newSearchAdapter')?.value || '').trim();
-      const baseUrl = (document.getElementById('newSearchBaseUrl')?.value || '').trim();
-      const timeoutRaw = document.getElementById('newSearchTimeoutMs')?.value;
-      const keyAlias = (document.getElementById('newSearchKeyAlias')?.value || '').trim() || 'k1';
-      const apiKey = (document.getElementById('newSearchApiKey')?.value || '').trim();
+    clk($('btnConfirmAddSearchProvider'), async () => {
+      const id = ($('newSearchId')?.value || '').trim().toLowerCase();
+      const name = ($('newSearchName')?.value || '').trim();
+      const origin = $('newSearchOrigin')?.value || 'vault';
+      const adapter = ($('newSearchAdapter')?.value || '').trim();
+      const baseUrl = ($('newSearchBaseUrl')?.value || '').trim();
+      const timeoutRaw = $('newSearchTimeoutMs')?.value;
+      const keyAlias = ($('newSearchKeyAlias')?.value || '').trim() || 'k1';
+      const apiKey = ($('newSearchApiKey')?.value || '').trim();
 
       const caps = [];
-      if (document.getElementById('newSearchCapSearch')?.checked) caps.push('search');
-      if (document.getElementById('newSearchCapFetch')?.checked) caps.push('fetch');
+      if ($('newSearchCapSearch')?.checked) caps.push('search');
+      if ($('newSearchCapFetch')?.checked) caps.push('fetch');
 
       if (!/^[a-z0-9-]+$/.test(id)) return toast('提供商 ID 仅支持小写字母、数字和连字符', 'warn');
       const v = validateSearchSpec({
@@ -973,9 +1001,9 @@
         timeoutRaw,
         caps,
         adapter,
-        reqRaw: document.getElementById('newSearchRequestJson')?.value,
-        respRaw: document.getElementById('newSearchResponseJson')?.value,
-        fetchRaw: document.getElementById('newSearchFetchJson')?.value,
+        reqRaw: $('newSearchRequestJson')?.value,
+        respRaw: $('newSearchResponseJson')?.value,
+        fetchRaw: $('newSearchFetchJson')?.value,
         secrets: [apiKey],
       });
       if (v.error) return toast(v.error, 'warn');
@@ -1002,14 +1030,14 @@
       state.config.search_providers[id] = entry;
       state.activeEditorKey = `sp_${id}`;
       ['newSearchId', 'newSearchName', 'newSearchAdapter', 'newSearchBaseUrl', 'newSearchKeyAlias', 'newSearchApiKey', 'newSearchRequestJson', 'newSearchResponseJson', 'newSearchFetchJson'].forEach((fid) => {
-        const el = document.getElementById(fid);
+        const el = $(fid);
         if (el) el.value = '';
       });
       toggle(spForm, false);
       await persistConfig('搜索提供商创建成功');
     });
 
-    document.getElementById('btnSaveSearchSelection')?.addEventListener('click', async () => {
+    clk($('btnSaveSearchSelection'), async () => {
       const spMap = state.config?.search_providers || {};
       const searchIds = Array.from(document.querySelectorAll('#searchSelectionSearchGroup input[type="checkbox"]:checked'))
         .map((cb) => cb.value)
@@ -1027,7 +1055,7 @@
   }
 
   function populateModelProvidersDropdown() {
-    const sel = document.getElementById('newModelProvider');
+    const sel = $('newModelProvider');
     if (!sel) return;
     sel.innerHTML = '';
     const provs = Object.keys(state.config?.providers || {}).sort();
@@ -1036,7 +1064,7 @@
     } else {
       provs.forEach((pId) => {
         const pName = state.config.providers[pId]?.name || pId;
-        const opt = document.createElement('option');
+        const opt = ce('option');
         opt.value = pId;
         opt.textContent = `${pName} (${pId})`;
         sel.appendChild(opt);
@@ -1057,12 +1085,12 @@
     });
 
     const views = {
-      models: document.getElementById('viewModels'),
-      providers: document.getElementById('viewProviders'),
-      search: document.getElementById('viewSearch'),
-      nodes: document.getElementById('viewNodes'),
-      activity: document.getElementById('viewActivity'),
-      settings: document.getElementById('viewSettings'),
+      models: $('viewModels'),
+      providers: $('viewProviders'),
+      search: $('viewSearch'),
+      nodes: $('viewNodes'),
+      activity: $('viewActivity'),
+      settings: $('viewSettings'),
     };
 
     for (const [k, v] of Object.entries(views)) {
@@ -1102,13 +1130,13 @@
 
   function updateRunModeUI(mode) {
     const isAgent = mode === 'agent';
-    const btnAgent = document.getElementById('modeBtnAgent');
-    const btnKB = document.getElementById('modeBtnKB');
+    const btnAgent = $('modeBtnAgent');
+    const btnKB = $('modeBtnKB');
     if (btnAgent && btnKB) {
       btnAgent.classList.toggle('active', isAgent);
       btnKB.classList.toggle('active', !isAgent);
     }
-    const modelSubSeg = document.getElementById('modelPipelineSeg');
+    const modelSubSeg = $('modelPipelineSeg');
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
         b.classList.toggle('active', b.getAttribute('data-submode') === mode);
@@ -1121,7 +1149,7 @@
       const cfgResp = await window.HOST.getConfig();
       if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
         state.config = cfgResp;
-        const verEl = document.getElementById('configVersionDisplay');
+        const verEl = $('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
 
         if (state.config.settings && state.config.settings.run_mode) {
@@ -1166,10 +1194,10 @@
   }
 
   function renderHubOverview() {
-    const kpiGrid = document.getElementById('hubKpiGrid');
-    const provBody = document.getElementById('hubProviderStatsBody');
-    const nodeBody = document.getElementById('hubNodeStatsBody');
-    const summarySub = document.getElementById('hubHealthSummarySub');
+    const kpiGrid = $('hubKpiGrid');
+    const provBody = $('hubProviderStatsBody');
+    const nodeBody = $('hubNodeStatsBody');
+    const summarySub = $('hubHealthSummarySub');
     if (!kpiGrid || !provBody || !nodeBody) return;
 
     const cfg = state.config || {};
@@ -1234,9 +1262,9 @@
 
     kpiGrid.innerHTML = kpis.map((item) => `
       <div class="kpi-card">
-        <span class="kpi-label">${escapeHtml(item.label)}</span>
-        <span class="kpi-value">${escapeHtml(item.value)}</span>
-        <span class="kpi-sub">${escapeHtml(item.sub)}</span>
+        <span class="kpi-label">${eh(item.label)}</span>
+        <span class="kpi-value">${eh(item.value)}</span>
+        <span class="kpi-sub">${eh(item.sub)}</span>
       </div>
     `).join('');
 
@@ -1260,12 +1288,12 @@
         const barCls = pFail > 0 && pOk === 0 ? 'health-fill--err' : pOk > 0 ? 'health-fill--ok' : 'health-fill--warn';
         const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
 
-        const tr = document.createElement('tr');
+        const tr = ce('tr');
         tr.innerHTML = `
           <td>
-            <div class="name">${icoHtml}<span>${escapeHtml(p.name || pId)}</span><span class="pill">${escapeHtml(pId)}</span></div>
+            <div class="name">${icoHtml}<span>${eh(p.name || pId)}</span><span class="pill">${eh(pId)}</span></div>
           </td>
-          <td><span class="pill">${escapeHtml(p.api_type || 'openai')}</span></td>
+          <td><span class="pill">${eh(p.api_type || 'openai')}</span></td>
           <td class="tabular">${pEnabled} / ${pTotal}</td>
           <td>
             <div class="health-bar">
@@ -1278,10 +1306,10 @@
           </td>
           <td class="tabular">${latText}</td>
           <td>
-            <button class="btn btn--sm btn-hub-verify-prov" data-pid="${escapeHtml(pId)}" type="button">探活</button>
+            <button class="btn btn--sm btn-hub-verify-prov" data-pid="${eh(pId)}" type="button">探活</button>
           </td>
         `;
-        tr.querySelector('.btn-hub-verify-prov').addEventListener('click', () => verifyProviderKeys(pId));
+        clk(tr.querySelector('.btn-hub-verify-prov'), () => verifyProviderKeys(pId));
         provBody.appendChild(tr);
       }
     }
@@ -1289,7 +1317,9 @@
     nodeBody.innerHTML = nodes.length
       ? nodes.map((n) => {
           const snap = getNodeSyncSnapshotStatus(n);
-          return `<tr><td><strong>${escapeHtml(n.name || n.id)}</strong></td><td><span class="pill pill--accent">${escapeHtml(n.role || 'full')}</span></td><td><span class="pill ${snap.pillCls}">${escapeHtml(snap.label)}</span> <span class="text-xs text-muted">${escapeHtml(snap.leaseText)}</span></td><td class="tabular">${escapeHtml(`${n.last_ip || '-'} · ${n.last_config_version ? `v${n.last_config_version}` : '-'}`)}</td><td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td><td class="tabular">${escapeHtml(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
+          const kind = getNodeKind(n);
+          const badge = kind === 'mcp' ? `MCP · ${n.service_type || 'khc-search'}` : `LLM · ${n.role || 'full'}`;
+          return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill ${kind === 'mcp' ? 'pill--green' : 'pill--accent'}">${eh(badge)}</span></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(`${n.last_ip || '-'} · ${n.last_config_version ? `v${n.last_config_version}` : '-'}`)}</td><td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
         }).join('')
       : '<tr><td colspan="6" class="text-muted">暂无中转节点</td></tr>';
 
@@ -1297,7 +1327,7 @@
   }
 
   function renderHubMcpTelemetry() {
-    const tbody = document.getElementById('hubMcpTelemetryBody');
+    const tbody = $('hubMcpTelemetryBody');
     if (!tbody) return;
     const targets = getMcpNodes();
     if (!targets.length) {
@@ -1309,7 +1339,7 @@
       const pwPill = t?.playwright_ready === true ? '<span class="pill pill--green">就绪</span>' : (t?.playwright_ready === false ? '<span class="pill pill--red">未就绪</span>' : '<span class="pill">-</span>');
       const counts = t ? `${t.search_count ?? t.requests ?? 0} / ${t.crawl_count ?? 0}` : '-';
       const resting = t ? (t.resting_keys?.length ? t.resting_keys.join(', ') : `${t.resting_keys_count ?? 0} 休眠`) : '未上报';
-      return `<tr><td><strong>${escapeHtml(n.name || n.id)}</strong></td><td><span class="pill ${snap.pillCls}">${escapeHtml(snap.label)}</span> <span class="text-xs text-muted">${escapeHtml(snap.leaseText)}</span></td><td class="tabular">${escapeHtml(t?.version || '-')} · ${pwPill}</td><td class="tabular">${escapeHtml(counts)}</td><td><span class="tabular">${escapeHtml(resting)}</span> · <span class="text-xs text-muted">${escapeHtml(t?.last_error ? scrubUiText(t.last_error) : '-')}</span></td><td class="tabular">${escapeHtml(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
+      return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(t?.version || '-')} · ${pwPill}</td><td class="tabular">${eh(counts)}</td><td><span class="tabular">${eh(resting)}</span> · <span class="text-xs text-muted">${eh(t?.last_error ? scrubUiText(t.last_error) : '-')}</span></td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
     }).join('');
   }
 
@@ -1352,7 +1382,7 @@
     const pIds = Object.keys(providers).sort();
     if (pIds.length === 0) return toast('暂无供应商可探活', 'warn');
 
-    const btn = document.getElementById('btnHubBatchVerifyAll');
+    const btn = $('btnHubBatchVerifyAll');
     state.batchVerifying = true;
     if (btn) btn.disabled = true;
 
@@ -1566,7 +1596,7 @@
 
   // --- View: Providers (M1~M6, U2, U4) ---
   function renderProvidersList() {
-    const container = document.getElementById('providersList');
+    const container = $('providersList');
     if (!container) return;
     container.innerHTML = '';
 
@@ -1588,7 +1618,7 @@
     });
 
     if (pKeys.length === 0) {
-      const emptyRow = document.createElement('div');
+      const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
       emptyRow.textContent = q || f !== 'all' ? '没有符合筛选条件的供应商' : '暂无已配置供应商，请点击上方「添加供应商」';
       container.appendChild(emptyRow);
@@ -1617,10 +1647,10 @@
         }
       }
 
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = document.createElement('span');
+      const dot = ce('span');
       const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCount === 0)
         ? 'dot--err'
         : okCount > 0
@@ -1628,23 +1658,23 @@
           : 'dot--warn';
       dot.className = `dot ${dotCls}`;
 
-      const who = document.createElement('div');
+      const who = ce('div');
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
-          <span>${escapeHtml(p.name || pId)}</span>
-          <span class="pill">${escapeHtml(pId)}</span>
+          <span>${eh(p.name || pId)}</span>
+          <span class="pill">${eh(pId)}</span>
           ${isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>'}
           ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
           ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
           ${busyCount > 0 ? `<span class="pill pill--accent">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
-          ${p._balance ? `<span class="pill pill--green">${escapeHtml(p._balance)}</span>` : ''}
+          ${p._balance ? `<span class="pill pill--green">${eh(p._balance)}</span>` : ''}
         </div>
-        <div class="sub">${escapeHtml(p.base_url || '未配置 Base URL')}</div>
+        <div class="sub">${eh(p.base_url || '未配置 Base URL')}</div>
       `;
 
-      const fields = document.createElement('div');
+      const fields = ce('div');
       fields.className = 'fields';
       fields.innerHTML = `
         <span class="pill tabular">${keyCount} 把 Key</span>
@@ -1655,7 +1685,7 @@
       row.appendChild(who);
       row.appendChild(fields);
 
-      row.addEventListener('click', (ev) => {
+      clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `p_${pId}`;
         renderProvidersList();
@@ -1664,7 +1694,7 @@
       container.appendChild(row);
 
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildProviderEditor(pId, p));
         container.appendChild(editor);
@@ -1673,29 +1703,29 @@
   }
 
   function buildProviderEditor(pId, p) {
-    const wrap = document.createElement('div');
+    const wrap = ce('div');
     const keys = p.api_keys || [];
 
     wrap.innerHTML = `
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">供应商标识 / 名称</label>
-          <input class="input" id="ed_p_name_${pId}" value="${escapeHtml(p.name || pId)}">
+          <input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">
         </div>
         <div class="form-group">
           <label class="form-label">Base URL (OpenAI 协议)</label>
           <div class="input-row">
-            <input class="input input--code" id="ed_p_base_${pId}" value="${escapeHtml(p.base_url || '')}">
+            <input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}">
             <button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button>
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">Anthropic Base URL (可选)</label>
-          <input class="input input--code" id="ed_p_ant_${pId}" value="${escapeHtml(p.anthropic_base_url || '')}">
+          <input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">
         </div>
         <div class="form-group">
           <label class="form-label">预设规则绑定</label>
-          <input class="input input--code" id="ed_p_preset_${pId}" value="${escapeHtml(p.preset_id || '')}" placeholder="如 minimax, deepseek">
+          <input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">
         </div>
       </div>
 
@@ -1705,7 +1735,7 @@
         <div class="form-grid mt-2">
           <div class="form-group">
             <label class="form-label">每日重置时间 (quota_reset_at)</label>
-            <input class="input" id="ed_p_reset_${pId}" value="${escapeHtml(p.quota_reset_at || '00:00+08:00')}">
+            <input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">
           </div>
           <div class="form-group">
             <label class="form-label">单 Key RPM 限制 (rpm_per_key)</label>
@@ -1713,11 +1743,11 @@
           </div>
           <div class="form-group">
             <label class="form-label">自定义余额查询 URL (balance_url)</label>
-            <input class="input input--code" id="ed_p_bal_url_${pId}" value="${escapeHtml(p.balance_url || '')}" placeholder="https://api.../user/balance">
+            <input class="input input--code" id="ed_p_bal_url_${pId}" value="${eh(p.balance_url || '')}" placeholder="https://api.../user/balance">
           </div>
           <div class="form-group">
             <label class="form-label">余额提取 JSONPath (balance_path)</label>
-            <input class="input input--code" id="ed_p_bal_path_${pId}" value="${escapeHtml(p.balance_path || '')}" placeholder="$.balance">
+            <input class="input input--code" id="ed_p_bal_path_${pId}" value="${eh(p.balance_path || '')}" placeholder="$.balance">
           </div>
         </div>
         <div class="section-bar mt-2 flex-end">
@@ -1804,7 +1834,7 @@
 
     const tbody = wrap.querySelector(`#p_keys_tbody_${pId}`);
     keys.forEach((k, idx) => {
-      const tr = document.createElement('tr');
+      const tr = ce('tr');
       const keyLabel = k.label || k.id || `key-${idx}`;
       const cooldownSec = state.cooldowns?.[`p:${pId}:k:${keyLabel}`] || 0;
       let statusHtml = cooldownSec > 0
@@ -1818,8 +1848,8 @@
 
       tr.innerHTML = `
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
-        <td><strong>${escapeHtml(keyLabel)}</strong></td>
-        <td><span class="tabular privacy-mask">${escapeHtml(maskKeyForDisplay(k.key))}</span></td>
+        <td><strong>${eh(keyLabel)}</strong></td>
+        <td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td>
         <td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>
         <td>${statusHtml}</td>
         <td>
@@ -1846,7 +1876,7 @@
         k.enabled = e.target.checked;
       });
 
-      tr.querySelector('.btn_verify_k').addEventListener('click', async () => {
+      clk(tr.querySelector('.btn_verify_k'), async () => {
         const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
         const keyLabel = k.label || k.id || `key-${idx}`;
         toast(`正在校验 Key [${keyLabel}]...`, 'info');
@@ -1877,7 +1907,7 @@
         }
       });
 
-      tr.querySelector('.btn_del_k').addEventListener('click', () => {
+      clk(tr.querySelector('.btn_del_k'), () => {
         const refs = routesUsingKey(pId, keyLabel);
         if (refs.length > 0) {
           const ok = window.confirm(
@@ -1893,7 +1923,7 @@
     });
 
     // Check Balance (M2)
-    wrap.querySelector(`#btn_check_balance_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_check_balance_${pId}`), async () => {
       const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
       const balUrl = wrap.querySelector(`#ed_p_bal_url_${pId}`)?.value.trim() || p.balance_url || '';
@@ -1922,7 +1952,7 @@
     });
 
     // Batch Test All Keys (U2)
-    wrap.querySelector(`#btn_batch_test_keys_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_batch_test_keys_${pId}`), async () => {
       toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
       let succ = 0;
       const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
@@ -1941,7 +1971,7 @@
     });
 
     // OAuth Device Flow (U4)
-    wrap.querySelector(`#btn_oauth_start_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_oauth_start_${pId}`), async () => {
       toast('正在发起 OAuth 设备登录请求...', 'info');
       try {
         const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
@@ -1987,7 +2017,7 @@
     });
 
     // Probe Models and Clickable Pills (U2)
-    wrap.querySelector(`#btn_probe_prov_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_probe_prov_${pId}`), async () => {
       const baseUrl = wrap.querySelector(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
       toast(`正在探测供应商 ${pId} 模型...`, 'info');
@@ -2012,11 +2042,11 @@
             list.innerHTML = '';
             const filtered = models.filter((m) => m.toLowerCase().includes(filter.toLowerCase())).slice(0, 48);
             filtered.forEach((modelName) => {
-              const pill = document.createElement('span');
+              const pill = ce('span');
               pill.className = 'probe-pill';
               pill.textContent = modelName;
               pill.title = `点击一键纳管 ${modelName} 到 Agent 路由`;
-              pill.addEventListener('click', async () => {
+              clk(pill, async () => {
                 state.config.agent_models = state.config.agent_models || {};
                 const firstKeyLabel = p.api_keys?.[0]?.label || 'k1';
                 state.config.agent_models[modelName] = {
@@ -2046,7 +2076,7 @@
     });
 
     // AutoList Sync
-    wrap.querySelector(`#btn_autolist_sync_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_autolist_sync_${pId}`), async () => {
       toast('正在同步模型列表并纳管...', 'info');
       try {
         const res = await window.HOST.syncAutoList({ provider: pId });
@@ -2061,7 +2091,7 @@
       }
     });
 
-    wrap.querySelector(`#btn_add_key_${pId}`).addEventListener('click', () => {
+    clk(wrap.querySelector(`#btn_add_key_${pId}`), () => {
       const lbl = wrap.querySelector(`#new_key_lbl_${pId}`).value.trim();
       const val = wrap.querySelector(`#new_key_val_${pId}`).value.trim();
       if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
@@ -2076,7 +2106,7 @@
       renderProvidersList();
     });
 
-    wrap.querySelector(`#btn_save_prov_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_save_prov_${pId}`), async () => {
       p.name = wrap.querySelector(`#ed_p_name_${pId}`).value.trim();
       p.base_url = wrap.querySelector(`#ed_p_base_${pId}`).value.trim();
       p.anthropic_base_url = wrap.querySelector(`#ed_p_ant_${pId}`).value.trim();
@@ -2090,7 +2120,7 @@
       await persistConfig('供应商保存成功');
     });
 
-    wrap.querySelector(`#btn_del_prov_${pId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_del_prov_${pId}`), async () => {
       if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
       delete state.config.providers[pId];
       state.activeEditorKey = null;
@@ -2126,8 +2156,14 @@
     renderSearchProvidersList();
   }
 
+  function goToNodesWithKind(kind) {
+    state.nodeKindFilter = kind;
+    document.querySelectorAll('#nodeKindSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-kind') === kind));
+    switchTab('nodes');
+  }
+
   function renderExtensionServices() {
-    const el = document.getElementById('extServicesList');
+    const el = $('extServicesList');
     if (!el) return;
     if (state.extServiceProto && state.extServiceProto !== 'all' && state.extServiceProto !== 'mcp') {
       el.innerHTML = '<div class="row row--static text-muted">暂无该协议服务</div>';
@@ -2138,14 +2174,21 @@
     const fetchCnt = spEntries.filter(([, sp]) => sp?.capabilities?.includes('fetch')).length;
     const usable = spEntries.filter(([, sp]) => isUsableSharedSearchProvider(sp)).length;
     const mcpNodes = getMcpNodes();
-    const activeCnt = mcpNodes.filter((n) => n.enabled !== false).length;
+    const khcNodes = mcpNodes.filter((n) => (n.service_type || 'khc-search') === 'khc-search');
+    const khcActive = khcNodes.filter((n) => n.enabled !== false).length;
+    const extraTypes = [...new Set(mcpNodes.map((n) => n.service_type).filter((t) => t && t !== 'khc-search'))];
 
-    el.innerHTML = `<div class="row row--static"><span class="dot ${usable > 0 ? 'dot--ok' : 'dot--warn'}"></span><div class="who"><div class="name"><span>网络搜索 (khc-search)</span><span class="pill pill--accent">MCP</span><span class="pill ${usable > 0 ? 'pill--green' : 'pill--amber'}">${usable > 0 ? `${usable} 共享就绪` : '待配上游'}</span><span class="pill tabular">v${state.config?._version || 1}</span><span class="pill">${activeCnt} 节点${mcpNodes.some((n) => n.mcp_url) ? '' : ' · 未填地址'}</span></div><div class="sub">集中配置搜索/抓取上游与策略；MCP 节点单向拉取并在本地运行（支持 Playwright 兜底）。</div></div><div class="fields"><span class="pill tabular">Search ${searchCnt} · Fetch ${fetchCnt}</span><button class="btn btn--sm" id="btnExtGoNodes" type="button">节点地址</button></div></div>`;
-    el.querySelector('#btnExtGoNodes')?.addEventListener('click', () => switchTab('nodes'));
+    el.innerHTML = `<div class="row row--static"><span class="dot ${usable > 0 ? 'dot--ok' : 'dot--warn'}"></span><div class="who"><div class="name"><span>网络搜索 (khc-search)</span><span class="pill pill--accent">MCP</span><span class="pill ${usable > 0 ? 'pill--green' : 'pill--amber'}">${usable > 0 ? `${usable} 共享就绪` : '待配上游'}</span><span class="pill tabular">v${state.config?._version || 1}</span><span class="pill">${khcActive} 节点${khcNodes.some((n) => n.mcp_url) ? '' : ' · 未填地址'}</span></div><div class="sub">集中配置搜索/抓取上游与策略；MCP 节点单向拉取并在本地运行（支持 Playwright 兜底）。</div></div><div class="fields"><span class="pill tabular">Search ${searchCnt} · Fetch ${fetchCnt}</span><button class="btn btn--sm btn-ext-nodes" type="button">节点地址</button></div></div>`
+      + extraTypes.map((st) => {
+        const list = mcpNodes.filter((n) => n.service_type === st);
+        const on = list.filter((n) => n.enabled !== false).length;
+        return `<div class="row row--static"><span class="dot ${on > 0 ? 'dot--ok' : 'dot--warn'}"></span><div class="who"><div class="name"><span>${eh(st)}</span><span class="pill pill--accent">MCP</span><span class="pill">${on} / ${list.length} 节点</span></div><div class="sub">自定义 service_type 扩展服务节点</div></div><div class="fields"><button class="btn btn--sm btn-ext-nodes" type="button">节点管理</button></div></div>`;
+      }).join('');
+    el.querySelectorAll('.btn-ext-nodes').forEach((b) => b.addEventListener('click', () => goToNodesWithKind('mcp')));
   }
 
   function renderMcpAccessCard() {
-    const card = document.getElementById('mcpAccessCard');
+    const card = $('mcpAccessCard');
     if (!card) return;
     const mcpNodes = getMcpNodes();
     if (!state.selectedMcpNodeId || !mcpNodes.some((n) => n.id === state.selectedMcpNodeId)) {
@@ -2157,27 +2200,27 @@
     const snap = node ? getNodeSyncSnapshotStatus(node) : null;
     const snippet = JSON.stringify({ mcpServers: { 'khc-search': { type: 'http', url: mcpUrl || 'https://<your-space>.hf.space/mcp', headers: { Authorization: 'Bearer <MCP_BEARER_TOKEN>' } } } }, null, 2);
     const opts = mcpNodes.length
-      ? mcpNodes.map((n) => `<option value="${escapeHtml(n.id)}" ${n.id === state.selectedMcpNodeId ? 'selected' : ''}>${escapeHtml(n.name || n.id)}${n.mcp_url ? ` (${escapeHtml(n.mcp_url)})` : ' (未设地址)'}</option>`).join('')
+      ? mcpNodes.map((n) => `<option value="${eh(n.id)}" ${n.id === state.selectedMcpNodeId ? 'selected' : ''}>${eh(n.name || n.id)}${n.mcp_url ? ` (${eh(n.mcp_url)})` : ' (未设地址)'}</option>`).join('')
       : '<option value="">暂无 MCP 节点</option>';
     const notice = !node
       ? '<div class="notice-strip notice-strip--warn mb-3"><span>未检测到 MCP 节点，请先在「中转节点」签发节点。</span><button class="btn btn--sm" id="btnMcpAccessGoNodes" type="button">前往中转节点</button></div>'
       : !mcpUrl
-        ? `<div class="notice-strip notice-strip--warn mb-3"><span>节点 <strong>${escapeHtml(node.name || node.id)}</strong> 未配置服务地址，请在中转节点填写 <code>mcp_url</code>。</span><button class="btn btn--sm" id="btnMcpAccessGoNodes" type="button">去配置</button></div>`
-        : `<div class="notice-strip notice-strip--ok mb-3"><span>${escapeHtml(node.name || node.id)} · 快照：${escapeHtml(snap.label)}（${escapeHtml(snap.leaseText)}）</span></div>`;
+        ? `<div class="notice-strip notice-strip--warn mb-3"><span>节点 <strong>${eh(node.name || node.id)}</strong> 未配置服务地址，请在中转节点填写 <code>mcp_url</code>。</span><button class="btn btn--sm" id="btnMcpAccessGoNodes" type="button">去配置</button></div>`
+        : `<div class="notice-strip notice-strip--ok mb-3"><span>${eh(node.name || node.id)} · 快照：${eh(snap.label)}（${eh(snap.leaseText)}）</span></div>`;
 
-    card.innerHTML = `<div class="card-header"><div><h2 class="card-title">MCP 接入信息</h2><div class="card-sub">客户端 Bearer 令牌与 NODE_TOKEN 独立</div></div><div class="fields"><select class="select" id="mcpAccessNodeSelect">${opts}</select></div></div>${notice}<div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">服务地址 (mcp_url)</label><div class="input-row"><input class="input input--code" readonly value="${escapeHtml(mcpUrl || '未配置服务地址')}"><button class="btn" id="btnCopyMcpUrl" type="button">复制</button></div></div><div class="form-group"><label class="form-label">暴露的工具</label><div class="check-group mt-1">${['khc_research', 'khc_search', 'khc_fetch', 'khc_crawl_site'].map((t) => `<span class="pill pill--accent">${t}</span>`).join('')}</div></div></div><div class="snippet-card mt-3"><div class="code-snippet-head"><label class="form-label">客户端配置示例 (mcpServers)</label><button class="btn btn--sm" id="btnCopyMcpSnippet" type="button">复制</button></div><pre class="code-pre">${escapeHtml(snippet)}</pre></div>`;
+    card.innerHTML = `<div class="card-header"><div><h2 class="card-title">MCP 接入信息</h2><div class="card-sub">客户端 Bearer 令牌与 NODE_TOKEN 独立</div></div><div class="fields"><select class="select" id="mcpAccessNodeSelect">${opts}</select></div></div>${notice}<div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">服务地址 (mcp_url)</label><div class="input-row"><input class="input input--code" readonly value="${eh(mcpUrl || '未配置服务地址')}"><button class="btn" id="btnCopyMcpUrl" type="button">复制</button></div></div><div class="form-group"><label class="form-label">暴露的工具</label><div class="check-group mt-1">${['khc_research', 'khc_search', 'khc_fetch', 'khc_crawl_site'].map((t) => `<span class="pill pill--accent">${t}</span>`).join('')}</div></div></div><div class="snippet-card mt-3"><div class="code-snippet-head"><label class="form-label">客户端配置示例 (mcpServers)</label><button class="btn btn--sm" id="btnCopyMcpSnippet" type="button">复制</button></div><pre class="code-pre">${eh(snippet)}</pre></div>`;
 
     card.querySelector('#mcpAccessNodeSelect')?.addEventListener('change', (e) => { state.selectedMcpNodeId = e.target.value; renderMcpAccessCard(); });
-    card.querySelector('#btnMcpAccessGoNodes')?.addEventListener('click', () => switchTab('nodes'));
-    card.querySelector('#btnCopyMcpUrl')?.addEventListener('click', () => (mcpUrl ? copyToClipboard(mcpUrl, 'MCP 地址已复制') : toast('尚未配置 mcp_url', 'warn')));
-    card.querySelector('#btnCopyMcpSnippet')?.addEventListener('click', () => copyToClipboard(snippet, 'MCP 配置已复制'));
+    clk(card.querySelector('#btnMcpAccessGoNodes'), () => goToNodesWithKind('mcp'));
+    clk(card.querySelector('#btnCopyMcpUrl'), () => (mcpUrl ? copyToClipboard(mcpUrl, 'MCP 地址已复制') : toast('尚未配置 mcp_url', 'warn')));
+    clk(card.querySelector('#btnCopyMcpSnippet'), () => copyToClipboard(snippet, 'MCP 配置已复制'));
   }
 
   function renderSearchSelectionCard() {
-    const searchGroup = document.getElementById('searchSelectionSearchGroup');
-    const fetchGroup = document.getElementById('searchSelectionFetchGroup');
-    const summaryEl = document.getElementById('searchSelectionSummary');
-    const alertsEl = document.getElementById('searchSelectionAlerts');
+    const searchGroup = $('searchSelectionSearchGroup');
+    const fetchGroup = $('searchSelectionFetchGroup');
+    const summaryEl = $('searchSelectionSummary');
+    const alertsEl = $('searchSelectionAlerts');
     if (!searchGroup || !fetchGroup) return;
 
     const spMap = state.config?.search_providers || {}, sel = state.config?.search_selection || { search: [], fetch: '' };
@@ -2195,23 +2238,23 @@
     searchGroup.innerHTML = '';
     if (!searchCap.length) searchGroup.innerHTML = '<span class="text-xs text-muted">暂无 search 提供商</span>';
     else for (const [spId, sp] of searchCap) {
-      const lbl = document.createElement('label');
+      const lbl = ce('label');
       lbl.className = 'check-chip';
-      lbl.innerHTML = `<input type="checkbox" value="${escapeHtml(spId)}" ${selectedSearch.has(spId) ? 'checked' : ''}><span>${escapeHtml((sp.name || spId) + suffixOf(sp))}</span>`;
+      lbl.innerHTML = `<input type="checkbox" value="${eh(spId)}" ${selectedSearch.has(spId) ? 'checked' : ''}><span>${eh((sp.name || spId) + suffixOf(sp))}</span>`;
       searchGroup.appendChild(lbl);
     }
 
     fetchGroup.innerHTML = `<label class="check-chip"><input type="radio" name="searchSelectionFetch" value="" ${!selectedFetch ? 'checked' : ''}><span>不启用（本地兜底）</span></label>`;
     for (const [spId, sp] of fetchCap) {
-      const lbl = document.createElement('label');
+      const lbl = ce('label');
       lbl.className = 'check-chip';
-      lbl.innerHTML = `<input type="radio" name="searchSelectionFetch" value="${escapeHtml(spId)}" ${selectedFetch === spId ? 'checked' : ''}><span>${escapeHtml((sp.name || spId) + suffixOf(sp))}</span>`;
+      lbl.innerHTML = `<input type="radio" name="searchSelectionFetch" value="${eh(spId)}" ${selectedFetch === spId ? 'checked' : ''}><span>${eh((sp.name || spId) + suffixOf(sp))}</span>`;
       fetchGroup.appendChild(lbl);
     }
 
     if (alertsEl) {
       const notices = [usableSel.length
-        ? `<div class="notice-strip notice-strip--ok"><span>网页搜索就绪：${escapeHtml(usableSel.join(', '))}</span></div>`
+        ? `<div class="notice-strip notice-strip--ok"><span>网页搜索就绪：${eh(usableSel.join(', '))}</span></div>`
         : '<div class="notice-strip notice-strip--warn"><span>无可用共享 Search 提供商，khc_search 将无可用上游。</span></div>'];
       if (!fetchUsable) notices.push('<div class="notice-strip notice-strip--warn mt-2"><span>未选择抓取提供商，khc_fetch 将走节点本地兜底。</span></div>');
       alertsEl.innerHTML = notices.join('');
@@ -2219,7 +2262,7 @@
   }
 
   function renderSearchProvidersList() {
-    const container = document.getElementById('searchProvidersList');
+    const container = $('searchProvidersList');
     if (!container) return;
     container.innerHTML = '';
 
@@ -2228,7 +2271,7 @@
     const ids = Object.keys(spMap).sort().filter((spId) => !q || `${spId} ${spMap[spId]?.name || ''} ${spMap[spId]?.adapter || ''} ${spMap[spId]?.base_url || ''}`.toLowerCase().includes(q));
 
     if (!ids.length) {
-      const emptyRow = document.createElement('div');
+      const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
       emptyRow.textContent = q ? '没有匹配的搜索提供商' : '暂无搜索提供商，请点击右上角「添加搜索提供商」';
       container.appendChild(emptyRow);
@@ -2237,10 +2280,10 @@
 
     for (const spId of ids) {
       const sp = spMap[spId] || {}, health = computeSearchProviderHealth(sp), isLocal = sp.origin === 'local', isExpanded = state.activeEditorKey === `sp_${spId}`, caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
-      row.innerHTML = `<span class="dot ${health.dotCls}"></span><div class="who"><div class="name"><span>${escapeHtml(sp.name || spId)}</span><span class="pill">${escapeHtml(spId)}</span><span class="${health.pillCls}">${escapeHtml(health.statusText)}</span><span class="pill ${isLocal ? 'pill--amber' : 'pill--green'}">${isLocal ? '本地私有，不下发节点' : '共享下发'}</span>${caps.map((c) => `<span class="pill pill--accent">${escapeHtml(c)}</span>`).join('')}${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}</div><div class="sub">${escapeHtml(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${escapeHtml(sp.base_url || '未设 Base URL')} · ${sp.timeout_ms || 15000}ms</div></div><div class="fields">${health.totalCount ? `<span class="pill tabular">启用 ${health.enabledCount} / 总 ${health.totalCount} 把 Key</span>` : '<span class="pill">未配置密钥（不会下发给节点）</span>'}${health.latestCheckedAt ? `<span class="pill tabular">探活 ${escapeHtml(formatTime(health.latestCheckedAt))}${health.latestLatencyMs !== null ? ` · ${health.latestLatencyMs}ms` : ''}</span>` : ''}<span class="caret">▾</span></div>`;
-      row.addEventListener('click', (ev) => {
+      row.innerHTML = `<span class="dot ${health.dotCls}"></span><div class="who"><div class="name"><span>${eh(sp.name || spId)}</span><span class="pill">${eh(spId)}</span><span class="${health.pillCls}">${eh(health.statusText)}</span><span class="pill ${isLocal ? 'pill--amber' : 'pill--green'}">${isLocal ? '本地私有，不下发节点' : '共享下发'}</span>${caps.map((c) => `<span class="pill pill--accent">${eh(c)}</span>`).join('')}${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}</div><div class="sub">${eh(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${eh(sp.base_url || '未设 Base URL')} · ${sp.timeout_ms || 15000}ms</div></div><div class="fields">${health.totalCount ? `<span class="pill tabular">启用 ${health.enabledCount} / 总 ${health.totalCount} 把 Key</span>` : '<span class="pill">未配置密钥（不会下发给节点）</span>'}${health.latestCheckedAt ? `<span class="pill tabular">探活 ${eh(formatTime(health.latestCheckedAt))}${health.latestLatencyMs !== null ? ` · ${health.latestLatencyMs}ms` : ''}</span>` : ''}<span class="caret">▾</span></div>`;
+      clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `sp_${spId}`;
         renderSearchProvidersList();
@@ -2248,7 +2291,7 @@
 
       container.appendChild(row);
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildSearchProviderEditor(spId, sp));
         container.appendChild(editor);
@@ -2257,12 +2300,12 @@
   }
 
   function buildSearchProviderEditor(spId, sp) {
-    const wrap = document.createElement('div');
+    const wrap = ce('div');
     const keys = sp.api_keys || [];
     const caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
     const fmtJson = (obj) => (obj ? JSON.stringify(obj, null, 2) : '');
 
-    wrap.innerHTML = `<div class="form-grid"><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="ed_sp_name_${spId}" value="${escapeHtml(sp.name || spId)}"></div><div class="form-group"><label class="form-label">作用域 (origin)</label><select class="select" id="ed_sp_origin_${spId}"><option value="vault" ${sp.origin !== 'local' ? 'selected' : ''}>vault (共享下发)</option><option value="local" ${sp.origin === 'local' ? 'selected' : ''}>local (仅本中枢留存)</option></select></div><div class="form-group"><label class="form-label">适配器 adapter (可选)</label><input class="input input--code" id="ed_sp_adapter_${spId}" value="${escapeHtml(sp.adapter || '')}"></div><div class="form-group"><label class="form-label">超时 ms (timeout_ms)</label><input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}"></div><div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="ed_sp_base_${spId}" value="${escapeHtml(sp.base_url || '')}"></div><div class="form-group"><label class="form-label">启用与能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label></div></div></div><details class="headers-details mt-3"><summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary><div class="form-grid form-grid--2 mt-2">${[['req', 'request', sp.request], ['resp', 'response', sp.response], ['fetch', 'fetch', sp.fetch], ['quirks', 'quirks', sp.quirks]].map(([kId, lbl, val]) => `<div class="form-group"><label class="form-label">${lbl} (JSON)</label><textarea class="textarea textarea--json" id="ed_sp_${kId}_${spId}">${escapeHtml(fmtJson(val))}</textarea></div>`).join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length} 把 Key)</span><div class="fields"><button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button><button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>密钥 (脱敏)</th><th>来源</th><th>状态</th><th>操作</th></tr></thead><tbody id="sp_keys_tbody_${spId}"></tbody></table></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_sp_key_lbl_${spId}" placeholder="Key 标签 (如 k1)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button></div></div>`;
+    wrap.innerHTML = `<div class="form-grid"><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="ed_sp_name_${spId}" value="${eh(sp.name || spId)}"></div><div class="form-group"><label class="form-label">作用域 (origin)</label><select class="select" id="ed_sp_origin_${spId}"><option value="vault" ${sp.origin !== 'local' ? 'selected' : ''}>vault (共享下发)</option><option value="local" ${sp.origin === 'local' ? 'selected' : ''}>local (仅本中枢留存)</option></select></div><div class="form-group"><label class="form-label">适配器 adapter (可选)</label><input class="input input--code" id="ed_sp_adapter_${spId}" value="${eh(sp.adapter || '')}"></div><div class="form-group"><label class="form-label">超时 ms (timeout_ms)</label><input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}"></div><div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="ed_sp_base_${spId}" value="${eh(sp.base_url || '')}"></div><div class="form-group"><label class="form-label">启用与能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label></div></div></div><details class="headers-details mt-3"><summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary><div class="form-grid form-grid--2 mt-2">${[['req', 'request', sp.request], ['resp', 'response', sp.response], ['fetch', 'fetch', sp.fetch], ['quirks', 'quirks', sp.quirks]].map(([kId, lbl, val]) => `<div class="form-group"><label class="form-label">${lbl} (JSON)</label><textarea class="textarea textarea--json" id="ed_sp_${kId}_${spId}">${eh(fmtJson(val))}</textarea></div>`).join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length} 把 Key)</span><div class="fields"><button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button><button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>密钥 (脱敏)</th><th>来源</th><th>状态</th><th>操作</th></tr></thead><tbody id="sp_keys_tbody_${spId}"></tbody></table></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_sp_key_lbl_${spId}" placeholder="Key 标签 (如 k1)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button></div></div>`;
 
     function buildSearchVerifyPayload(k, idx) {
       const adapterVal = wrap.querySelector(`#ed_sp_adapter_${spId}`)?.value.trim() || sp.adapter || '';
@@ -2310,24 +2353,24 @@
         if (k.last_ok === true) {
           stHtml = `<span class="pill pill--green">正常 ${k.last_latency_ms || 0}ms</span>`;
         } else if (k.last_ok === false) {
-          const errSub = k.last_error ? `<div class="text-xs text-muted mt-1">${escapeHtml(scrubUiText(k.last_error, [k.key]))}</div>` : '';
+          const errSub = k.last_error ? `<div class="text-xs text-muted mt-1">${eh(scrubUiText(k.last_error, [k.key]))}</div>` : '';
           stHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}${k.last_latency_ms ? ` · ${k.last_latency_ms}ms` : ''}</span>${errSub}`;
         }
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td><td><strong>${escapeHtml(keyLabel)}</strong></td><td><span class="tabular privacy-mask">${escapeHtml(maskKeyForDisplay(k.key))}</span></td><td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td><td>${stHtml}</td><td><div class="fields"><button class="btn btn--sm sp_btn_verify_k" type="button">${k.last_ok === false ? '重新校验' : '校验'}</button><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></div></td>`;
+        const tr = ce('tr');
+        tr.innerHTML = `<td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td><td><strong>${eh(keyLabel)}</strong></td><td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td><td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td><td>${stHtml}</td><td><div class="fields"><button class="btn btn--sm sp_btn_verify_k" type="button">${k.last_ok === false ? '重新校验' : '校验'}</button><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></div></td>`;
         tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => { k.enabled = e.target.checked; });
-        tr.querySelector('.sp_btn_verify_k').addEventListener('click', async () => {
+        clk(tr.querySelector('.sp_btn_verify_k'), async () => {
           toast(`正在校验 [${keyLabel}]...`, 'info');
           const ok = await runSearchKeyVerify(k, idx);
           toast(ok ? `Key [${keyLabel}] 正常 (${k.last_latency_ms}ms)` : `Key [${keyLabel}] 失败: ${k.last_error}`, ok ? 'ok' : 'err');
           renderSearchProvidersList();
         });
-        tr.querySelector('.sp_btn_del_k').addEventListener('click', () => { sp.api_keys.splice(idx, 1); renderSearchProvidersList(); });
+        clk(tr.querySelector('.sp_btn_del_k'), () => { sp.api_keys.splice(idx, 1); renderSearchProvidersList(); });
         tbody.appendChild(tr);
       });
     }
 
-    wrap.querySelector(`#btn_verify_all_sp_keys_${spId}`)?.addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_verify_all_sp_keys_${spId}`), async () => {
       if (!keys.length) return toast('暂无密钥可校验', 'warn');
       toast(`正在校验 ${keys.length} 把 Key...`, 'info');
       let succ = 0;
@@ -2336,7 +2379,7 @@
       toast(`校验完成: ${succ}/${keys.length} 可用`, succ === keys.length ? 'ok' : 'warn');
     });
 
-    wrap.querySelector(`#btn_add_sp_key_${spId}`).addEventListener('click', () => {
+    clk(wrap.querySelector(`#btn_add_sp_key_${spId}`), () => {
       const lbl = wrap.querySelector(`#new_sp_key_lbl_${spId}`).value.trim();
       const val = wrap.querySelector(`#new_sp_key_val_${spId}`).value.trim();
       if (!lbl || !val) return toast('请填写 Key 标签和密钥内容', 'warn');
@@ -2351,13 +2394,13 @@
       renderSearchProvidersList();
     });
 
-    wrap.querySelector(`#btn_clear_sp_keys_${spId}`).addEventListener('click', () => {
+    clk(wrap.querySelector(`#btn_clear_sp_keys_${spId}`), () => {
       sp.api_keys = [];
       renderSearchProvidersList();
       toast('已清空密钥列表，点击「保存搜索提供商」生效', 'info');
     });
 
-    wrap.querySelector(`#btn_save_sp_${spId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_save_sp_${spId}`), async () => {
       const nextName = wrap.querySelector(`#ed_sp_name_${spId}`).value.trim();
       const nextBaseUrl = wrap.querySelector(`#ed_sp_base_${spId}`).value.trim();
       const nextCaps = [];
@@ -2392,7 +2435,7 @@
       await persistConfig('搜索提供商配置已保存');
     });
 
-    wrap.querySelector(`#btn_del_sp_${spId}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_del_sp_${spId}`), async () => {
       if (!confirm(`确定删除搜索提供商 ${spId} 吗？`)) return;
       delete state.config.search_providers[spId];
       if (state.config.search_selection) {
@@ -2412,55 +2455,51 @@
 
   // --- View: Nodes (Hub mode) ---
   function renderNodesList() {
-    const container = document.getElementById('nodesList');
+    const container = $('nodesList');
     if (!container) return;
     container.innerHTML = '';
 
-    const nodes = state.nodes || [];
+    const allNodes = state.nodes || [];
+    const filter = state.nodeKindFilter || 'all';
+    const nodes = filter === 'all' ? allNodes : allNodes.filter((n) => getNodeKind(n) === filter);
     if (nodes.length === 0) {
-      const emptyRow = document.createElement('div');
+      const emptyRow = ce('div');
       emptyRow.className = 'row text-muted';
-      emptyRow.textContent = '暂无中转节点，点击上方「＋ 签发新节点」一键生成';
+      emptyRow.textContent = allNodes.length === 0 ? '暂无中转节点，点击上方「签发新节点」生成' : `暂无 ${filter.toUpperCase()} 节点`;
       container.appendChild(emptyRow);
       return;
     }
 
     for (const node of nodes) {
       const isExpanded = state.activeEditorKey === `node_${node.id}`;
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = document.createElement('span');
+      const dot = ce('span');
       dot.className = `dot ${node.enabled ? 'dot--ok' : 'dot--err'}`;
 
-      const who = document.createElement('div');
+      const who = ce('div');
       who.className = 'who';
+      const kind = getNodeKind(node);
       const modelsScope = formatScopeInput(node.scope?.models);
       const provsScope = formatScopeInput(node.scope?.providers);
       const searchScope = formatScopeInput(node.scope?.search_providers);
       const snap = getNodeSyncSnapshotStatus(node);
-      const mcpSub = node.mcp_url ? ` · MCP: ${node.mcp_url}` : '';
-      who.innerHTML = `
-        <div class="name">
-          <span>${escapeHtml(node.name || node.id)}</span>
-          <span class="pill pill--accent">${escapeHtml(node.role)}</span>
-          <span class="pill ${snap.pillCls}">${escapeHtml(snap.label)}</span>
-        </div>
-        <div class="sub">模型: ${escapeHtml(modelsScope)} · 供应商: ${escapeHtml(provsScope)} · 搜索: ${escapeHtml(searchScope)}${escapeHtml(mcpSub)} · Token: ${escapeHtml(node.token_prefix)}</div>
-      `;
+      const kindBadge = kind === 'mcp' ? `MCP · ${node.service_type || 'khc-search'}` : `LLM · ${node.role || 'full'}`;
+      const subText = kind === 'mcp'
+        ? `搜索: ${searchScope}${node.mcp_url ? ` · URL: ${node.mcp_url}` : ''} · Token: ${node.token_prefix}`
+        : `模型: ${modelsScope} · 供应商: ${provsScope} · Token: ${node.token_prefix}`;
+      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill ${kind === 'mcp' ? 'pill--green' : 'pill--accent'}">${eh(kindBadge)}</span><span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
 
-      const fields = document.createElement('div');
+      const fields = ce('div');
       fields.className = 'fields';
-      fields.innerHTML = `
-        <span class="pill">${snap.syncMs ? '同步: ' + formatTime(snap.syncMs) : '从未同步'} · ${escapeHtml(snap.leaseText)}</span>
-        <span class="caret">▾</span>
-      `;
+      fields.innerHTML = `<span class="pill">${snap.syncMs ? '同步: ' + formatTime(snap.syncMs) : '从未同步'} · ${eh(snap.leaseText)}</span><span class="caret">▾</span>`;
 
       row.appendChild(dot);
       row.appendChild(who);
       row.appendChild(fields);
 
-      row.addEventListener('click', (ev) => {
+      clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
         renderNodesList();
@@ -2469,7 +2508,7 @@
       container.appendChild(row);
 
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildNodeEditor(node));
         container.appendChild(editor);
@@ -2478,117 +2517,163 @@
   }
 
   function buildNodeEditor(node) {
-    const wrap = document.createElement('div');
+    const wrap = ce('div');
     const isEnabled = node.enabled;
+    const initKind = getNodeKind(node);
+    const id = node.id;
+    const q = (s) => wrap.querySelector(s);
 
-    wrap.innerHTML = `<div class="form-grid"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="ed_node_name_${node.id}" value="${escapeHtml(node.name)}"></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="ed_node_ttl_${node.id}" type="number" value="${node.lease_ttl || 86400}"></div><div class="form-group"><label class="form-label">允许供应商 (* 全量, [] 无)</label><input class="input input--code" id="ed_node_provs_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.providers))}"></div><div class="form-group"><label class="form-label">允许模型 (* 全量, [] 无)</label><input class="input input--code" id="ed_node_models_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.models))}"></div><div class="form-group"><label class="form-label">允许搜索 (* 全量, [] 无)</label><input class="input input--code" id="ed_node_search_provs_${node.id}" value="${escapeHtml(formatScopeInput(node.scope?.search_providers))}"></div><div class="form-group form-group--span2"><label class="form-label">MCP 接入地址 mcp_url (可选)</label><input class="input input--code" id="ed_node_mcp_url_${node.id}" value="${escapeHtml(node.mcp_url || '')}" placeholder="https://your-space.hf.space/mcp"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${node.id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${node.id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${node.id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${node.id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${node.id}" hidden><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">新 NODE_TOKEN (仅显示一次)</label><input class="input input--code" readonly id="node_new_token_val_${node.id}"></div><div class="form-group"><label class="form-label">启动环境变量</label><input class="input input--code" readonly id="node_new_env_val_${node.id}"></div></div></div>`;
+    wrap.innerHTML = `<div class="form-grid">${[
+      fg('节点类型', `<select class="select" id="ed_node_kind_${id}"><option value="llm" ${initKind === 'llm' ? 'selected' : ''}>LLM 代理网关 (llm)</option><option value="mcp" ${initKind === 'mcp' ? 'selected' : ''}>MCP 扩展服务 (mcp)</option></select>`),
+      fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(node.name)}">`),
+      fg('服务类型 (service_type)', `<input class="input input--code" id="ed_node_st_${id}" value="${eh(node.service_type || 'khc-search')}">`, `ed_node_st_grp_${id}`),
+      fg('租约时长 (秒)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || (initKind === 'mcp' ? 600 : 86400)}">`),
+      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" value="${eh(formatScopeInput(node.scope?.providers))}">`, `ed_node_provs_grp_${id}`),
+      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" value="${eh(formatScopeInput(node.scope?.models))}">`, `ed_node_models_grp_${id}`),
+      fg('搜索提供商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_search_provs_${id}" value="${eh(formatScopeInput(node.scope?.search_providers))}">`, `ed_node_sp_grp_${id}`),
+      fg('MCP 接入地址 mcp_url (可选)', `<input class="input input--code" id="ed_node_mcp_url_${id}" value="${eh(node.mcp_url || '')}" placeholder="https://your-space.hf.space/mcp">`, `ed_node_mu_grp_${id}`, 'form-group--span2'),
+    ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
+      fg('新 NODE_TOKEN (仅显示一次)', `<input class="input input--code" readonly id="node_new_token_val_${id}">`),
+      fg('启动环境变量', `<input class="input input--code" readonly id="node_new_env_val_${id}">`),
+    ].join('')}</div></div>`;
 
-    wrap.querySelector(`#btn_save_node_${node.id}`).addEventListener('click', async () => {
-      const name = wrap.querySelector(`#ed_node_name_${node.id}`).value.trim();
-      const leaseTtl = Number(wrap.querySelector(`#ed_node_ttl_${node.id}`).value) || 86400;
-      const provsStr = wrap.querySelector(`#ed_node_provs_${node.id}`).value;
-      const modelsStr = wrap.querySelector(`#ed_node_models_${node.id}`).value;
-      const searchProvsStr = wrap.querySelector(`#ed_node_search_provs_${node.id}`).value;
-      const mcpUrl = (wrap.querySelector(`#ed_node_mcp_url_${node.id}`)?.value || '').trim();
-      if (!isValidOptionalHttpUrl(mcpUrl)) {
-        return toast('mcp_url 必须是合法的 http:// 或 https:// URL（不含凭据）', 'warn');
+    const kindSel = q(`#ed_node_kind_${id}`);
+    const syncEditorKind = (reset) => {
+      const isMcp = kindSel.value === 'mcp';
+      q(`#ed_node_st_grp_${id}`).hidden = !isMcp;
+      q(`#ed_node_mu_grp_${id}`).hidden = !isMcp;
+      q(`#ed_node_provs_grp_${id}`).hidden = isMcp;
+      q(`#ed_node_models_grp_${id}`).hidden = isMcp;
+      const hasLegacySearch = Array.isArray(node.scope?.search_providers) && node.scope.search_providers.length > 0;
+      q(`#ed_node_sp_grp_${id}`).hidden = !isMcp && !(!reset && hasLegacySearch);
+      if (reset) {
+        q(`#ed_node_ttl_${id}`).value = isMcp ? '600' : '86400';
+        q(`#ed_node_provs_${id}`).value = isMcp ? '[]' : '*';
+        q(`#ed_node_models_${id}`).value = isMcp ? '[]' : '*';
+        q(`#ed_node_search_provs_${id}`).value = isMcp ? '*' : '[]';
+        if (isMcp && !q(`#ed_node_st_${id}`).value.trim()) q(`#ed_node_st_${id}`).value = 'khc-search';
       }
+    };
+    syncEditorKind(false);
+    kindSel.addEventListener('change', () => syncEditorKind(true));
+
+    clk(q(`#btn_save_node_${id}`), async () => {
+      const kind = kindSel.value === 'mcp' ? 'mcp' : 'llm';
+      const name = q(`#ed_node_name_${id}`).value.trim();
+      const serviceType = q(`#ed_node_st_${id}`).value.trim() || 'khc-search';
+      const leaseTtl = Number(q(`#ed_node_ttl_${id}`).value) || (kind === 'mcp' ? 600 : 86400);
+      const mcpUrl = kind === 'mcp' ? (q(`#ed_node_mcp_url_${id}`)?.value || '').trim() : '';
+      if (kind === 'mcp' && !/^[a-z0-9-]+$/.test(serviceType)) return toast('service_type 仅支持小写字母、数字和连字符', 'warn');
+      if (!isValidOptionalHttpUrl(mcpUrl)) return toast('mcp_url 必须是合法的 http:// 或 https:// URL（不含凭据）', 'warn');
 
       const scope = {
-        providers: parseScopeInput(provsStr),
-        models: parseScopeInput(modelsStr),
-        search_providers: parseScopeInput(searchProvsStr),
+        providers: parseScopeInput(q(`#ed_node_provs_${id}`).value),
+        models: parseScopeInput(q(`#ed_node_models_${id}`).value),
+        search_providers: parseScopeInput(q(`#ed_node_search_provs_${id}`).value),
       };
 
       try {
-        const res = await window.HOST.patchNode(node.id, { name, lease_ttl: leaseTtl, scope, mcp_url: mcpUrl });
-        if (res && res.ok) {
-          toast('节点配置更新成功', 'ok');
-          await loadNodesData();
-        } else {
-          toast(res.error || '更新失败', 'err');
-        }
-      } catch (e) {
-        toast(scrubUiText(e.message), 'err');
-      }
+        const patch = { name, kind, lease_ttl: leaseTtl, scope, mcp_url: mcpUrl };
+        if (kind === 'mcp') patch.service_type = serviceType;
+        const res = await window.HOST.patchNode(id, patch);
+        if (res && res.ok) { toast('节点配置更新成功', 'ok'); await loadNodesData(); }
+        else toast(res.error || '更新失败', 'err');
+      } catch (e) { toast(scrubUiText(e.message), 'err'); }
     });
 
-    wrap.querySelector(`#btn_toggle_node_${node.id}`).addEventListener('click', async () => {
+    clk(q(`#btn_toggle_node_${id}`), async () => {
       try {
-        const res = await window.HOST.patchNode(node.id, { enabled: !isEnabled });
-        if (res && res.ok) {
-          toast(isEnabled ? '节点已吊销' : '节点已恢复', 'ok');
-          await loadNodesData();
-        }
-      } catch (e) {
-        toast(e.message, 'err');
-      }
+        const res = await window.HOST.patchNode(id, { enabled: !isEnabled });
+        if (res && res.ok) { toast(isEnabled ? '节点已吊销' : '节点已恢复', 'ok'); await loadNodesData(); }
+      } catch (e) { toast(e.message, 'err'); }
     });
 
-    wrap.querySelector(`#btn_rotate_node_${node.id}`).addEventListener('click', async () => {
+    clk(q(`#btn_rotate_node_${id}`), async () => {
       if (!confirm('轮换 Token 会使旧 Token 立即失效，确定继续吗？')) return;
       try {
-        const res = await window.HOST.rotateNode(node.id);
+        const res = await window.HOST.rotateNode(id);
         if (res && res.ok) {
           toast('Token 轮换成功！', 'ok');
-          const box = wrap.querySelector(`#node_token_display_box_${node.id}`);
-          box.hidden = false;
-          wrap.querySelector(`#node_new_token_val_${node.id}`).value = res.node_token;
-          wrap.querySelector(`#node_new_env_val_${node.id}`).value = res.bootstrap_env;
+          q(`#node_token_display_box_${id}`).hidden = false;
+          q(`#node_new_token_val_${id}`).value = res.node_token;
+          q(`#node_new_env_val_${id}`).value = res.bootstrap_env;
         }
-      } catch (e) {
-        toast(e.message, 'err');
-      }
+      } catch (e) { toast(e.message, 'err'); }
     });
 
-    wrap.querySelector(`#btn_del_node_${node.id}`).addEventListener('click', async () => {
+    clk(q(`#btn_del_node_${id}`), async () => {
       if (!confirm(`确认永久删除节点 ${node.name} 吗？`)) return;
       try {
-        const res = await window.HOST.deleteNode(node.id);
-        if (res && res.ok) {
-          toast('节点已删除', 'ok');
-          state.activeEditorKey = null;
-          await loadNodesData();
-        }
-      } catch (e) {
-        toast(e.message, 'err');
-      }
+        const res = await window.HOST.deleteNode(id);
+        if (res && res.ok) { toast('节点已删除', 'ok'); state.activeEditorKey = null; await loadNodesData(); }
+      } catch (e) { toast(e.message, 'err'); }
     });
 
     return wrap;
   }
 
+  function applyIssueNodeKindUI(resetValues = false) {
+    const kindEl = $('issueNodeKind');
+    if (!kindEl) return;
+    const isMcp = kindEl.value === 'mcp';
+    const setHidden = (id, v) => { const el = $(id); if (el) el.hidden = v; };
+    setHidden('issueNodeRoleGroup', isMcp);
+    setHidden('issueNodeProvsGroup', isMcp);
+    setHidden('issueNodeModelsGroup', isMcp);
+    setHidden('issueNodeServiceTypeGroup', !isMcp);
+    setHidden('issueNodeSearchProvsGroup', !isMcp);
+    setHidden('issueNodeMcpUrlGroup', !isMcp);
+    if (!resetValues) return;
+    $('issueNodeTTL').value = isMcp ? '600' : '86400';
+    $('issueNodeProvs').value = isMcp ? '[]' : '*';
+    $('issueNodeModels').value = isMcp ? '[]' : '*';
+    $('issueNodeSearchProvs').value = isMcp ? '*' : '[]';
+    if (isMcp) {
+      $('issueNodeRole').value = 'lite';
+      const st = $('issueNodeServiceType');
+      if (st && !st.value.trim()) st.value = 'khc-search';
+    } else {
+      $('issueNodeMcpUrl').value = '';
+    }
+  }
+
   async function handleIssueNode() {
-    const name = document.getElementById('issueNodeName').value.trim();
-    const role = document.getElementById('issueNodeRole').value;
-    const leaseTtl = Number(document.getElementById('issueNodeTTL').value) || 86400;
-    const provsRaw = document.getElementById('issueNodeProvs')?.value;
-    const modelsRaw = document.getElementById('issueNodeModels')?.value;
-    const searchProvsRaw = document.getElementById('issueNodeSearchProvs')?.value;
-    const mcpUrl = (document.getElementById('issueNodeMcpUrl')?.value || '').trim();
+    const kind = $('issueNodeKind')?.value === 'mcp' ? 'mcp' : 'llm';
+    const name = $('issueNodeName').value.trim();
+    const role = kind === 'mcp' ? 'lite' : $('issueNodeRole').value;
+    const serviceType = ($('issueNodeServiceType')?.value || '').trim() || 'khc-search';
+    const leaseTtl = Number($('issueNodeTTL').value) || (kind === 'mcp' ? 600 : 86400);
+    const provsRaw = $('issueNodeProvs')?.value;
+    const modelsRaw = $('issueNodeModels')?.value;
+    const searchProvsRaw = $('issueNodeSearchProvs')?.value;
+    const mcpUrl = kind === 'mcp' ? ($('issueNodeMcpUrl')?.value || '').trim() : '';
 
     if (!name) return toast('请输入节点名称', 'warn');
+    if (kind === 'mcp' && !/^[a-z0-9-]+$/.test(serviceType)) {
+      return toast('service_type 仅支持小写字母、数字和连字符', 'warn');
+    }
     if (!isValidOptionalHttpUrl(mcpUrl)) return toast('mcp_url 必须是合法的 http:// 或 https:// URL（不含凭据）', 'warn');
 
-    const scope = {
-      providers: parseScopeInput(provsRaw),
-      models: parseScopeInput(modelsRaw),
-      search_providers: parseScopeInput(searchProvsRaw),
-    };
+    const scope = kind === 'mcp'
+      ? { providers: [], models: [], search_providers: parseScopeInput(searchProvsRaw || '*') }
+      : { providers: parseScopeInput(provsRaw), models: parseScopeInput(modelsRaw), search_providers: [] };
 
     try {
-      const payload = { name, role, lease_ttl: leaseTtl, scope };
-      if (mcpUrl) payload.mcp_url = mcpUrl;
+      const payload = { kind, name, role, lease_ttl: leaseTtl, scope };
+      if (kind === 'mcp') {
+        payload.service_type = serviceType;
+        if (mcpUrl) payload.mcp_url = mcpUrl;
+      }
       const res = await window.HOST.issueNode(payload);
       if (res && res.ok) {
         toast('节点签发成功！', 'ok');
-        const mcpEl = document.getElementById('issueNodeMcpUrl');
+        const mcpEl = $('issueNodeMcpUrl');
         if (mcpEl) mcpEl.value = '';
-        const tokenDisplay = document.getElementById('issuedTokenDisplay');
+        const tokenDisplay = $('issuedTokenDisplay');
         if (tokenDisplay) {
           tokenDisplay.hidden = false;
-          document.getElementById('issuedTokenVal').value = res.node_token;
-          document.getElementById('issuedEnvVal').value = res.bootstrap_env;
+          $('issuedTokenVal').value = res.node_token;
+          $('issuedEnvVal').value = res.bootstrap_env;
         }
         await loadNodesData();
       } else {
@@ -2601,12 +2686,12 @@
 
   // --- View: Models & KB Pipeline Visual Editor (U1, U5, M16) ---
   function renderModelsList() {
-    const container = document.getElementById('modelsList');
+    const container = $('modelsList');
     if (!container) return;
     container.innerHTML = '';
 
     const isAgent = (state.modelSubMode || 'agent') === 'agent';
-    const btnAddModel = document.getElementById('btnAddModel');
+    const btnAddModel = $('btnAddModel');
     if (btnAddModel) {
       btnAddModel.hidden = !isAgent;
       btnAddModel.classList.toggle('hidden', !isAgent);
@@ -2629,7 +2714,7 @@
     });
 
     if (mKeys.length === 0) {
-      const emptyRow = document.createElement('div');
+      const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
       emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
       container.appendChild(emptyRow);
@@ -2642,34 +2727,34 @@
       const isExpanded = state.activeEditorKey === `m_${mName}`;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
 
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = document.createElement('span');
+      const dot = ce('span');
       dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}`;
 
-      const who = document.createElement('div');
+      const who = ce('div');
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
-          <span>${escapeHtml(mName)}</span>
-          <span class="pill pill--accent">${escapeHtml(m.routing_strategy || 'sticky_failover')}</span>
+          <span>${eh(mName)}</span>
+          <span class="pill pill--accent">${eh(m.routing_strategy || 'sticky_failover')}</span>
           ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
         </div>
-        <div class="sub">首选 Key: ${escapeHtml(m.active_key || '未指定')} · 候选池: ${cCount} 个</div>
+        <div class="sub">首选 Key: ${eh(m.active_key || '未指定')} · 候选池: ${cCount} 个</div>
       `;
 
-      const fields = document.createElement('div');
+      const fields = ce('div');
       fields.className = 'fields';
       fields.innerHTML = `
-        <button class="btn btn--sm btn_test_agent_m" data-model="${escapeHtml(mName)}" type="button">测试路由</button>
+        <button class="btn btn--sm btn_test_agent_m" data-model="${eh(mName)}" type="button">测试路由</button>
         <span class="pill">${cCount} 候选</span>
         <span class="caret">▾</span>
       `;
 
       // Agent Model Route Test Button (U5)
-      fields.querySelector('.btn_test_agent_m').addEventListener('click', async (e) => {
+      clk(fields.querySelector('.btn_test_agent_m'), async (e) => {
         e.stopPropagation();
         toast(`正在测试模型 ${mName} 路由...`, 'info');
         try {
@@ -2691,7 +2776,7 @@
       row.appendChild(who);
       row.appendChild(fields);
 
-      row.addEventListener('click', (ev) => {
+      clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `m_${mName}`;
         renderModelsList();
@@ -2700,7 +2785,7 @@
       container.appendChild(row);
 
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildModelEditor(mName, m));
         container.appendChild(editor);
@@ -2709,7 +2794,7 @@
   }
 
   function buildModelEditor(mName, m) {
-    const wrap = document.createElement('div');
+    const wrap = ce('div');
     const candidates = m.candidates || [];
 
     wrap.innerHTML = `
@@ -2724,7 +2809,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">首选粘性 Key (active_key)</label>
-          <input class="input" id="ed_m_act_${mName}" value="${escapeHtml(m.active_key || '')}" placeholder="格式: provider:key_label">
+          <input class="input" id="ed_m_act_${mName}" value="${eh(m.active_key || '')}" placeholder="格式: provider:key_label">
         </div>
       </div>
 
@@ -2776,25 +2861,25 @@
 
     const tbody = wrap.querySelector(`#m_cands_tbody_${mName}`);
     candidates.forEach((c, idx) => {
-      const tr = document.createElement('tr');
+      const tr = ce('tr');
       const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
       tr.innerHTML = `
-        <td>${brandIco}<strong>${escapeHtml(c.provider)}</strong></td>
-        <td><span class="pill">${escapeHtml(c.key_label)}</span></td>
-        <td><span class="tabular">${escapeHtml(c.target_model || '原名')}</span></td>
+        <td>${brandIco}<strong>${eh(c.provider)}</strong></td>
+        <td><span class="pill">${eh(c.key_label)}</span></td>
+        <td><span class="tabular">${eh(c.target_model || '原名')}</span></td>
         <td><span class="tabular">${c.weight || 1}</span></td>
         <td>
           <button class="btn btn--sm btn--danger btn_del_cand" data-idx="${idx}" type="button">移除</button>
         </td>
       `;
-      tr.querySelector('.btn_del_cand').addEventListener('click', () => {
+      clk(tr.querySelector('.btn_del_cand'), () => {
         candidates.splice(idx, 1);
         renderModelsList();
       });
       tbody.appendChild(tr);
     });
 
-    wrap.querySelector(`#btn_add_cand_${mName}`).addEventListener('click', () => {
+    clk(wrap.querySelector(`#btn_add_cand_${mName}`), () => {
       const prov = wrap.querySelector(`#new_c_prov_${mName}`).value.trim();
       const lbl = wrap.querySelector(`#new_c_lbl_${mName}`).value.trim();
       const target = wrap.querySelector(`#new_c_target_${mName}`).value.trim();
@@ -2809,13 +2894,13 @@
       renderModelsList();
     });
 
-    wrap.querySelector(`#btn_save_model_${mName}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_save_model_${mName}`), async () => {
       m.routing_strategy = wrap.querySelector(`#ed_m_strat_${mName}`).value;
       m.active_key = wrap.querySelector(`#ed_m_act_${mName}`).value.trim();
       await persistConfig('模型配置保存成功');
     });
 
-    wrap.querySelector(`#btn_del_model_${mName}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_del_model_${mName}`), async () => {
       if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
       delete state.config.agent_models[mName];
       state.activeEditorKey = null;
@@ -2840,13 +2925,13 @@
       const cands = state.config.kb_models[pl.id] || [];
       const isExpanded = state.activeEditorKey === `kb_${pl.id}`;
 
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = document.createElement('span');
+      const dot = ce('span');
       dot.className = `dot ${cands.length > 0 ? 'dot--ok' : 'dot--warn'}`;
 
-      const who = document.createElement('div');
+      const who = ce('div');
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
@@ -2857,7 +2942,7 @@
         <div class="sub">${pl.desc}</div>
       `;
 
-      const fields = document.createElement('div');
+      const fields = ce('div');
       fields.className = 'fields';
       fields.innerHTML = `
         <span class="caret">▾</span>
@@ -2867,7 +2952,7 @@
       row.appendChild(who);
       row.appendChild(fields);
 
-      row.addEventListener('click', (ev) => {
+      clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `kb_${pl.id}`;
         renderModelsList();
@@ -2876,7 +2961,7 @@
       container.appendChild(row);
 
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildKBPipelineEditor(pl.id, pl, cands));
         container.appendChild(editor);
@@ -2885,7 +2970,7 @@
   }
 
   function buildKBPipelineEditor(cat, pl, cands) {
-    const wrap = document.createElement('div');
+    const wrap = ce('div');
 
     wrap.innerHTML = `
       <div class="section-bar">
@@ -2935,13 +3020,13 @@
 
     const tbody = wrap.querySelector(`#kb_cands_tbody_${cat}`);
     cands.forEach((c, idx) => {
-      const tr = document.createElement('tr');
+      const tr = ce('tr');
       const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
       tr.innerHTML = `
         <td><input type="checkbox" class="kb_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td>
-        <td>${brandIco}<strong>${escapeHtml(c.provider)}</strong></td>
-        <td><span class="pill">${escapeHtml(c.key_label || c.key)}</span></td>
-        <td><span class="tabular">${escapeHtml(c.model)}</span></td>
+        <td>${brandIco}<strong>${eh(c.provider)}</strong></td>
+        <td><span class="pill">${eh(c.key_label || c.key)}</span></td>
+        <td><span class="tabular">${eh(c.model)}</span></td>
         <td><span class="tabular">${c.max_concurrency || c.max_conc || 4}</span></td>
         <td>
           <button class="btn btn--sm btn_test_kb_cand" data-idx="${idx}" type="button">测试管道</button>
@@ -2954,7 +3039,7 @@
       });
 
       // Test candidate endpoint (POST /api/admin/test-candidate)
-      tr.querySelector('.btn_test_kb_cand').addEventListener('click', async () => {
+      clk(tr.querySelector('.btn_test_kb_cand'), async () => {
         toast(`正在烟雾测试 [${cat}] 候选 ${c.provider}/${c.model}...`, 'info');
         try {
           const res = await window.HOST.testCandidate({
@@ -2973,7 +3058,7 @@
         }
       });
 
-      tr.querySelector('.btn_del_kb_cand').addEventListener('click', () => {
+      clk(tr.querySelector('.btn_del_kb_cand'), () => {
         cands.splice(idx, 1);
         renderModelsList();
       });
@@ -2981,7 +3066,7 @@
       tbody.appendChild(tr);
     });
 
-    wrap.querySelector(`#btn_add_kb_cand_${cat}`).addEventListener('click', () => {
+    clk(wrap.querySelector(`#btn_add_kb_cand_${cat}`), () => {
       const prov = wrap.querySelector(`#new_kb_prov_${cat}`).value.trim();
       const kLbl = wrap.querySelector(`#new_kb_key_${cat}`).value.trim();
       const mdl = wrap.querySelector(`#new_kb_model_${cat}`).value.trim();
@@ -2999,7 +3084,7 @@
       renderModelsList();
     });
 
-    wrap.querySelector(`#btn_save_kb_${cat}`).addEventListener('click', async () => {
+    clk(wrap.querySelector(`#btn_save_kb_${cat}`), async () => {
       state.config.kb_models[cat] = cands;
       await persistConfig('知识库流水线配置保存成功');
     });
@@ -3009,7 +3094,7 @@
 
   // --- View: Activity & Traces (M7~M10, M12) ---
   function renderTracesList() {
-    const container = document.getElementById('tracesList');
+    const container = $('tracesList');
     if (!container) return;
     container.innerHTML = '';
 
@@ -3019,7 +3104,7 @@
       : traces;
 
     if (filtered.length === 0) {
-      const emptyRow = document.createElement('div');
+      const emptyRow = ce('div');
       emptyRow.className = 'row text-muted';
       emptyRow.textContent = '暂无符合条件的请求轨迹';
       container.appendChild(emptyRow);
@@ -3033,27 +3118,27 @@
       const hasRetries = triesCount > 1 || (t.retried_ms || 0) > 0;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(t.winner_provider || t.req_model) : '';
 
-      const row = document.createElement('div');
+      const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = document.createElement('span');
+      const dot = ce('span');
       dot.className = `dot ${!isOk ? 'dot--err' : hasRetries ? 'dot--warn' : 'dot--ok'}`;
 
-      const who = document.createElement('div');
+      const who = ce('div');
       who.className = 'who';
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${formatTime(t.ts)}</span>
-          <span class="tabular">${escapeHtml(t.req_model)}</span>
+          <span class="tabular">${eh(t.req_model)}</span>
           <span class="text-muted">→</span>
-          <span class="pill">${escapeHtml(t.winner_provider || 'none')}</span>
+          <span class="pill">${eh(t.winner_provider || 'none')}</span>
           ${hasRetries ? `<span class="pill pill--amber">${triesCount}次尝试</span>` : ''}
         </div>
-        <div class="sub">${escapeHtml(t.endpoint)} · ${t.total_ms || 0}ms (TTFT ${t.ttft_ms || 0}ms)</div>
+        <div class="sub">${eh(t.endpoint)} · ${t.total_ms || 0}ms (TTFT ${t.ttft_ms || 0}ms)</div>
       `;
 
-      const fields = document.createElement('div');
+      const fields = ce('div');
       fields.className = 'fields';
       fields.innerHTML = `
         <span class="pill ${isOk ? 'pill--green' : 'pill--red'}">HTTP ${t.status}</span>
@@ -3064,7 +3149,7 @@
       row.appendChild(who);
       row.appendChild(fields);
 
-      row.addEventListener('click', () => {
+      clk(row, () => {
         state.activeEditorKey = isExpanded ? null : `tr_${t.id}`;
         renderTracesList();
       });
@@ -3072,7 +3157,7 @@
       container.appendChild(row);
 
       if (isExpanded) {
-        const editor = document.createElement('div');
+        const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(window.USAGE.buildTraceWaterfall(t));
         container.appendChild(editor);
@@ -3086,7 +3171,7 @@
     const isFull = window.HOST.capabilities.runModes;
 
     const setVal = (id, val) => {
-      const el = document.getElementById(id);
+      const el = $(id);
       if (el) el.value = val !== undefined ? val : '';
     };
 
@@ -3098,9 +3183,9 @@
     setVal('cfgCooldownAuth', s.cooldown_auth_error_sec ?? 86400);
 
     // Full role Gateway Access Center (M16)
-    const gwBox = document.getElementById('gatewayAccessCenter');
-    const modeBox = document.getElementById('modeScheduleBox');
-    const backupBox = document.getElementById('configBackupBox');
+    const gwBox = $('gatewayAccessCenter');
+    const modeBox = $('modeScheduleBox');
+    const backupBox = $('configBackupBox');
 
     if (gwBox) gwBox.hidden = !isFull;
     if (modeBox) modeBox.hidden = !isFull;
@@ -3111,19 +3196,19 @@
       const localBase = `${baseOrigin}/v1`;
       const clientKey = s.client_key || s.proxy_api_key || 'sk-proxy-key';
 
-      const gwBaseUrl = document.getElementById('gwBaseUrl');
+      const gwBaseUrl = $('gwBaseUrl');
       if (gwBaseUrl) gwBaseUrl.value = localBase;
 
-      const gwClientKey = document.getElementById('gwClientKey');
+      const gwClientKey = $('gwClientKey');
       if (gwClientKey) gwClientKey.value = clientKey;
 
-      const snippetClaude = document.getElementById('snippetClaude');
+      const snippetClaude = $('snippetClaude');
       if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${clientKey}"`;
 
-      const snippetCursor = document.getElementById('snippetCursor');
+      const snippetCursor = $('snippetCursor');
       if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${clientKey}"`;
 
-      const btnGen = document.getElementById('btnGenClientKey');
+      const btnGen = $('btnGenClientKey');
       if (btnGen) {
         btnGen.onclick = () => {
           const rand = `sk-proxy-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
@@ -3133,7 +3218,7 @@
         };
       }
 
-      const btnSaveKey = document.getElementById('btnSaveClientKey');
+      const btnSaveKey = $('btnSaveClientKey');
       if (btnSaveKey) {
         btnSaveKey.onclick = async () => {
           const k = (gwClientKey?.value || '').trim();
@@ -3144,7 +3229,7 @@
         };
       }
 
-      const btnCopyClaude = document.getElementById('btnCopyClaudeSnippet');
+      const btnCopyClaude = $('btnCopyClaudeSnippet');
       if (btnCopyClaude) {
         btnCopyClaude.onclick = () => {
           navigator.clipboard.writeText(snippetClaude?.textContent || '');
@@ -3152,7 +3237,7 @@
         };
       }
 
-      const btnCopyCursor = document.getElementById('btnCopyCursorSnippet');
+      const btnCopyCursor = $('btnCopyCursorSnippet');
       if (btnCopyCursor) {
         btnCopyCursor.onclick = () => {
           navigator.clipboard.writeText(snippetCursor?.textContent || '');
@@ -3161,7 +3246,7 @@
       }
 
       // Mode Schedule (U4)
-      const schedEnabled = document.getElementById('cfgModeSchedEnabled');
+      const schedEnabled = $('cfgModeSchedEnabled');
       if (schedEnabled) schedEnabled.checked = !!s.mode_schedule_enabled;
       setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
       setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
@@ -3169,7 +3254,7 @@
       setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
       setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
-      const btnClearCd = document.getElementById('btnClearAllCooldowns');
+      const btnClearCd = $('btnClearAllCooldowns');
       if (btnClearCd) {
         btnClearCd.onclick = async () => {
           if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
@@ -3189,28 +3274,28 @@
       setVal('cfgVaultToken', v.node_token || '');
     }
 
-    const btnSave = document.getElementById('btnSaveSettings');
+    const btnSave = $('btnSaveSettings');
     if (btnSave) {
       btnSave.onclick = async () => {
-        s.agent_routing_strategy = document.getElementById('cfgRoutingStrategy').value;
-        s.agent_first_byte_timeout_sec = Number(document.getElementById('cfgFirstByteTimeout').value) || 120;
-        s.cooldown_rate_limit_sec = Number(document.getElementById('cfgCooldown429').value) || 15;
-        s.cooldown_server_error_sec = Number(document.getElementById('cfgCooldown5xx').value) || 30;
-        s.cooldown_network_error_sec = Number(document.getElementById('cfgCooldownNet').value) || 15;
-        s.cooldown_auth_error_sec = Math.max(0, Number(document.getElementById('cfgCooldownAuth').value) || 0);
+        s.agent_routing_strategy = $('cfgRoutingStrategy').value;
+        s.agent_first_byte_timeout_sec = Number($('cfgFirstByteTimeout').value) || 120;
+        s.cooldown_rate_limit_sec = Number($('cfgCooldown429').value) || 15;
+        s.cooldown_server_error_sec = Number($('cfgCooldown5xx').value) || 30;
+        s.cooldown_network_error_sec = Number($('cfgCooldownNet').value) || 15;
+        s.cooldown_auth_error_sec = Math.max(0, Number($('cfgCooldownAuth').value) || 0);
 
         if (isFull) {
-          s.mode_schedule_enabled = !!document.getElementById('cfgModeSchedEnabled')?.checked;
-          s.mode_schedule_agent_window = document.getElementById('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
-          s.mode_schedule_timezone = document.getElementById('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
-          s.mode_schedule_webhook_url = document.getElementById('cfgModeSchedWebhook')?.value.trim() || '';
-          s.ocr_max_inflight = Number(document.getElementById('cfgOcrInflight')?.value) || 4;
-          s.kb_global_max_concurrency = Number(document.getElementById('cfgKbConcurrency')?.value) || 16;
+          s.mode_schedule_enabled = !!$('cfgModeSchedEnabled')?.checked;
+          s.mode_schedule_agent_window = $('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
+          s.mode_schedule_timezone = $('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
+          s.mode_schedule_webhook_url = $('cfgModeSchedWebhook')?.value.trim() || '';
+          s.ocr_max_inflight = Number($('cfgOcrInflight')?.value) || 4;
+          s.kb_global_max_concurrency = Number($('cfgKbConcurrency')?.value) || 16;
         }
 
         if (window.HOST.capabilities.vaultClient) {
-          const vUrl = document.getElementById('cfgVaultUrl')?.value.trim();
-          const vToken = document.getElementById('cfgVaultToken')?.value.trim();
+          const vUrl = $('cfgVaultUrl')?.value.trim();
+          const vToken = $('cfgVaultToken')?.value.trim();
           if (vUrl || vToken) {
             state.config.vault = {
               url: vUrl || '',
@@ -3258,7 +3343,7 @@
           state.config = data;
         }
         const ver = state.config?._version || data._version;
-        const verEl = document.getElementById('configVersionDisplay');
+        const verEl = $('configVersionDisplay');
         if (verEl && ver) verEl.textContent = `v${ver}`;
         toast(successMsg || '保存成功', 'ok');
         renderProvidersList();

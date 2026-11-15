@@ -182,6 +182,8 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       const issueData = await issueResp.json();
       assert.equal(issueData.ok, true);
       assert.match(issueData.node_token, /^stk_node_[a-f0-9]{48}$/);
+      assert.equal(issueData.node.kind, 'llm');
+      assert.equal(issueData.node.service_type, '');
       assert.equal(issueData.node.role, 'lite');
       assert.equal(issueData.node.enabled, true);
 
@@ -1367,6 +1369,91 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(customBody.status, 401);
       assert.ok(!customBody.error.includes('custom-raw-secret-9999'), 'Raw secret must be scrubbed from error');
       assert.ok(!customBody.error.includes('stk_node_abcdef0123456789'), 'Node token must be scrubbed from error');
+    });
+
+    test('Node classification (kind: mcp vs llm), service_type validation, defaults, PATCH, and legacy inference', async () => {
+      const mockKv = new MockKV();
+
+      // 1. Explicit kind: 'mcp' applies strict MCP-only defaults
+      const mcpIssue = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        kind: 'mcp',
+        service_type: 'khc-search',
+        name: 'hf-search-node',
+        mcp_url: 'https://khcsearch.hf.space/mcp',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(mcpIssue.status, 200);
+      const mcpBody = await mcpIssue.json();
+      assert.strictEqual(mcpBody.node.kind, 'mcp');
+      assert.strictEqual(mcpBody.node.role, 'lite');
+      assert.strictEqual(mcpBody.node.service_type, 'khc-search');
+      assert.strictEqual(mcpBody.node.lease_ttl, 600);
+      assert.deepStrictEqual(mcpBody.node.scope, { models: [], providers: [], search_providers: ['*'] });
+      assert.ok(mcpBody.bootstrap_env.includes('HUB_URL=') && mcpBody.bootstrap_env.includes('NODE_TOKEN='));
+      assert.ok(!mcpBody.bootstrap_env.includes('LLMPROXY_ROLE='));
+
+      // 2. Explicit kind: 'llm' isolates LLM proxy from search provider keys by default
+      const llmIssue = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        kind: 'llm',
+        name: 'edge-llm-node',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(llmIssue.status, 200);
+      const llmBody = await llmIssue.json();
+      assert.strictEqual(llmBody.node.kind, 'llm');
+      assert.strictEqual(llmBody.node.role, 'lite');
+      assert.strictEqual(llmBody.node.service_type, '');
+      assert.strictEqual(llmBody.node.lease_ttl, 86400);
+      assert.deepStrictEqual(llmBody.node.scope, { models: ['*'], providers: ['*'], search_providers: [] });
+      assert.ok(llmBody.bootstrap_env.includes('LLMPROXY_HUB_URL=') && llmBody.bootstrap_env.includes('LLMPROXY_NODE_TOKEN='));
+
+      // 3. Invalid kind or service_type rejected with HTTP 400
+      const badKind = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        kind: 'unknown',
+        name: 'bad-kind',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(badKind.status, 400);
+
+      const badType = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        kind: 'mcp',
+        service_type: 'BAD_TYPE!',
+        name: 'bad-type',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(badType.status, 400);
+
+      // 4. PATCH validation & custom service_type extensibility
+      const badPatchKind = await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${mcpBody.node.id}`, {
+        kind: 'other',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(badPatchKind.status, 400);
+
+      const badPatchType = await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${mcpBody.node.id}`, {
+        service_type: 'INVALID SLUG',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(badPatchType.status, 400);
+
+      const okPatchType = await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${mcpBody.node.id}`, {
+        service_type: 'image-mcp',
+      }), TEST_ENV, mockKv);
+      assert.strictEqual(okPatchType.status, 200);
+      assert.strictEqual((await okPatchType.json()).node.service_type, 'image-mcp');
+
+      // 5. Legacy node stored without kind is inferred accurately on GET /api/admin/nodes
+      const existing = JSON.parse(await mockKv.get('relay_nodes'));
+      existing.push({
+        id: 'node_legacy_mcp',
+        name: 'Legacy MCP',
+        role: 'lite',
+        enabled: true,
+        token_prefix: 'stk_node_abcd...',
+        token_sha256: '0'.repeat(64),
+        lease_ttl: 600,
+        grace_ttl: 3600,
+        scope: { models: [], providers: [], search_providers: ['*'] },
+      });
+      await mockKv.put('relay_nodes', JSON.stringify(existing));
+      const listAfter = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, mockKv)).json();
+      const legacy = listAfter.nodes.find((n) => n.id === 'node_legacy_mcp');
+      assert.strictEqual(legacy.kind, 'mcp');
+      assert.strictEqual(legacy.service_type, 'khc-search');
     });
   });
 });

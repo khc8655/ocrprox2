@@ -33,28 +33,20 @@
     {
       "id": "node_hk_nat_01",
       "name": "香港 NAT 小鸡 01",
+      "kind": "llm",
       "role": "lite",
+      "service_type": "",
       "enabled": true,
       "token_prefix": "stk_node_9f8e...",
       "lease_ttl": 86400,
       "grace_ttl": 3600,
-      "mcp_url": "https://khcsearch.hf.space/mcp",
+      "mcp_url": "",
       "scope": {
         "models": ["*"],
         "providers": ["minimax", "deepseek", "openrouter"],
-        "search_providers": ["brave", "tavily"]
+        "search_providers": []
       },
-      "telemetry": {
-        "version": "1.2.0",
-        "uptime_sec": 3600,
-        "playwright_ready": true,
-        "search_count": 42,
-        "crawl_count": 7,
-        "resting_keys": [],
-        "resting_keys_count": 0,
-        "last_error": "",
-        "updated_at": "2026-11-15T12:00:00Z"
-      },
+      "telemetry": null,
       "created_at": "2026-11-08T08:00:00Z",
       "last_seen": "2026-11-08T08:30:12Z",
       "last_config_version": 137,
@@ -65,9 +57,13 @@
 ```
 
 ### 2.2 签发新节点 `POST /api/admin/nodes`
+- 支持节点分类字段 `kind`（`llm` | `mcp`）与扩展服务类型 `service_type`（如 `khc-search`，`kind="mcp"` 时默认为 `khc-search`）：
+  - `kind="llm"`：默认 `lease_ttl: 86400`、`scope: { models: ["*"], providers: ["*"], search_providers: [] }`（防止将搜索 Key 下发给纯大模型代理，也支持与旧版请求字段兼容）。
+  - `kind="mcp"`：强制 `role: "lite"`，默认 `lease_ttl: 600`、`scope: { models: [], providers: [], search_providers: ["*"] }`，确保 **MCP 外部节点默认拿不到任何 LLM API Key**。
 - **Request**:
 ```json
 {
+  "kind": "llm",
   "name": "日本 NAT 极简节点",
   "role": "lite",
   "lease_ttl": 86400,

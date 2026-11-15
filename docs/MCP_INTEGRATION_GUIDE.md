@@ -30,15 +30,15 @@
 
 ## 二、 在 Hub 中创建 MCP 专属节点
 
-1. 登录 `llmproxy2` Hub 管理控制台，进入 **「中转节点」** → **「+ 签发新节点」**。
+1. 登录 `llmproxy2` Hub 管理控制台，进入 **「中转节点」** → **「签发新节点」**（扩展服务 Key 统一在 **「扩展服务」** 页签集中录入，LLM 模型提供商则在 **「模型供应商」** 独立管理）。
 2. 建议配置如下：
-   - **节点角色**：选择 `lite`（极简无盘运行语义，名称可设为 `khcsearch-hf-01`）。
-   - **租约时长（`lease_ttl`）**：搜索 MCP 节点建议设为 `300`~`900` 秒（仍只在真实请求触发时按需续租、无后台心跳，可兼顾 telemetry 快照时效与 `304` 低开销）。
-   - **允许 LLM 供应商 / 允许 LLM 模型**：若该 MCP 不使用大模型 Key，填入 `[]`（表示不投影 `providers` 与 `agent_models`）。
-   - **允许搜索提供商**（`scope.search_providers`）：填入 `*`（全量共享）或白名单 ID（如 `brave,tavily,jina`）。
-   - **MCP 接入地址（`mcp_url`，可选）**：可填入 MCP 节点对外提供的 HTTP/HTTPS 地址（例如 `https://your-space.hf.space/mcp`，不含 URL 凭据）。填写后，控制台 **「扩展服务」** 页签会自动展示服务地址、暴露工具与 `mcpServers` 客户端配置示例。
+   - **节点类型（`kind`）**：选择 **`MCP 扩展服务 (mcp)`**（UI 自动隐藏 LLM 角色/供应商/模型字段，并将 `scope.providers` / `scope.models` 锁为 `[]`，防止误把大模型 Key 下发给外部 Hugging Face Space）。
+   - **服务类型（`service_type`）**：默认 `khc-search`（支持自定义小写字母/数字/连字符标识，方便后续扩展 `image-mcp` 等其它 MCP 服务）。
+   - **租约时长（`lease_ttl`）**：选中 `mcp` 后默认 `600` 秒（推荐 `300`~`900` 秒；仍只在真实请求触发时按需续租、无后台心跳，可兼顾 telemetry 快照时效与 `304` 低开销）。
+   - **搜索提供商**（`scope.search_providers`）：默认 `*`（全量共享）或填写白名单 ID（如 `brave,tavily,jina`）。
+   - **MCP 接入地址（`mcp_url`，可选）**：填入 MCP 节点对外提供的 HTTP/HTTPS 地址（例如 `https://your-space.hf.space/mcp`，不含 URL 凭据）。填写后，控制台 **「扩展服务」** 页签会自动展示服务地址、暴露工具与 `mcpServers` 客户端配置示例。
    - **无 `status_url`**：单向架构下无需填写或暴露节点回调 URL；Hub「概览」中的节点状态严格按 `last_seen` 与 `lease_ttl`/`grace_ttl` 计算快照状态（`已同步` / `宽限期内` / `过期 / 离线` / `从未同步` / `已吊销`）。
-3. 签发完成后妥善保存一次性明文 `NODE_TOKEN`（格式为 `stk_node_<48hex>`），注入 MCP 运行时环境变量（`HUB_URL` + `NODE_TOKEN`）。
+3. 签发完成后复制 **「节点启动环境变量」**（`HUB_URL=... NODE_TOKEN=...`）或一次性明文 `NODE_TOKEN`（`stk_node_<48hex>`），写入外部 MCP 运行时 Secret / 环境变量（如 Hugging Face Space Secrets）。
 
 > **凭据隔离说明**：Hub KV 仅保存 `NODE_TOKEN` 的单向 SHA-256 摘要（`token_sha256`）及前缀，浏览器与服务端均不保存也不反向解密任何 `node_token_enc`。
 
