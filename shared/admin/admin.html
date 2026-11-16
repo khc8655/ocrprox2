@@ -20,7 +20,6 @@
           <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
           <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
           <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
-          <button class="seg-btn" id="navSearch" data-tab="search" type="button" hidden>扩展服务</button>
           <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button>
           <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
         </div>
@@ -95,7 +94,7 @@
               <thead>
                 <tr>
                   <th>节点名称</th>
-                  <th>类型</th>
+                  <th>角色</th>
                   <th>同步快照状态</th>
                   <th>最近 IP / Config</th>
                   <th>同步 / 304 命中</th>
@@ -103,31 +102,6 @@
                 </tr>
               </thead>
               <tbody id="hubNodeStatsBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">MCP 节点最后同步快照</h2>
-              <div class="card-sub">仅展示节点最后一次 POST /api/node/config 捎带的同步快照（单向架构，非实时状态；零心跳）</div>
-            </div>
-            <button class="btn btn--sm" id="btnGoSearchFromHub" type="button">管理扩展服务</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>节点名称</th>
-                  <th>快照状态 / 租约剩余</th>
-                  <th>版本 / Playwright</th>
-                  <th>Search / Crawl</th>
-                  <th>休眠 Key / 最近错误</th>
-                  <th>最后同步时间</th>
-                </tr>
-              </thead>
-              <tbody id="hubMcpTelemetryBody"></tbody>
             </table>
           </div>
         </div>
@@ -366,49 +340,30 @@
       </div>
 
       <div class="card card-pad" id="issueNodeForm" hidden>
-        <h2 class="card-title mb-3">签发新节点凭证</h2>
+        <h2 class="card-title mb-3">签发新中转节点凭证</h2>
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label">节点类型</label>
-            <select class="select" id="issueNodeKind">
-              <option value="llm">LLM 代理网关 (llm)</option>
-              <option value="mcp">MCP 扩展服务 (mcp)</option>
-            </select>
+            <label class="form-label">节点名称</label>
+            <input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
           </div>
           <div class="form-group">
-            <label class="form-label">节点名称</label>
-            <input class="input" id="issueNodeName" placeholder="hk-edge-01 / hf-search">
-          </div>
-          <div class="form-group" id="issueNodeRoleGroup">
             <label class="form-label">节点角色</label>
             <select class="select" id="issueNodeRole">
-              <option value="full">Full (全功能)</option>
-              <option value="lite">Lite (轻量)</option>
+              <option value="full">Full (全功能代理网关)</option>
+              <option value="lite">Lite (轻量本地代理)</option>
             </select>
-          </div>
-          <div class="form-group" id="issueNodeServiceTypeGroup" hidden>
-            <label class="form-label">服务类型 (service_type)</label>
-            <input class="input input--code" id="issueNodeServiceType" value="khc-search" placeholder="khc-search">
           </div>
           <div class="form-group">
             <label class="form-label">租约时长 (秒)</label>
             <input class="input tabular" id="issueNodeTTL" type="number" value="86400" placeholder="86400">
           </div>
-          <div class="form-group" id="issueNodeProvsGroup">
-            <label class="form-label">LLM 供应商 (* 全量, [] 无)</label>
-            <input class="input input--code" id="issueNodeProvs" value="*" placeholder="* 或 []">
+          <div class="form-group">
+            <label class="form-label">允许 LLM 供应商 (* 全量)</label>
+            <input class="input input--code" id="issueNodeProvs" value="*" placeholder="* 或 minimax,deepseek">
           </div>
-          <div class="form-group" id="issueNodeModelsGroup">
-            <label class="form-label">LLM 模型 (* 全量, [] 无)</label>
-            <input class="input input--code" id="issueNodeModels" value="*" placeholder="* 或 []">
-          </div>
-          <div class="form-group" id="issueNodeSearchProvsGroup" hidden>
-            <label class="form-label">搜索提供商 (* 全量, [] 无)</label>
-            <input class="input input--code" id="issueNodeSearchProvs" value="[]" placeholder="* 或 brave,tavily">
-          </div>
-          <div class="form-group form-group--span2" id="issueNodeMcpUrlGroup" hidden>
-            <label class="form-label">MCP 接入地址 mcp_url (可选)</label>
-            <input class="input input--code" id="issueNodeMcpUrl" placeholder="https://your-space.hf.space/mcp">
+          <div class="form-group form-group--span2">
+            <label class="form-label">允许 LLM 模型 (* 全量)</label>
+            <input class="input input--code" id="issueNodeModels" value="*" placeholder="* 或 gpt-4o,claude-sonnet-4">
           </div>
         </div>
         <div class="form-actions">
@@ -418,131 +373,18 @@
         <div class="editor-section" id="issuedTokenDisplay" hidden>
           <div class="form-grid form-grid--2">
             <div class="form-group">
-              <label class="form-label">签发凭据 (仅显示一次)</label>
+              <label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
               <input class="input input--code" id="issuedTokenVal" readonly>
             </div>
             <div class="form-group">
-              <label class="form-label">启动环境变量</label>
+              <label class="form-label">节点启动环境变量</label>
               <input class="input input--code" id="issuedEnvVal" readonly>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">已签发节点</h2>
-            <div class="card-sub">LLM 节点同步模型密钥；MCP 节点仅同步扩展服务密钥</div>
-          </div>
-          <div class="seg" id="nodeKindSeg">
-            <button class="seg-btn active" data-kind="all" type="button">全部</button>
-            <button class="seg-btn" data-kind="llm" type="button">LLM 代理</button>
-            <button class="seg-btn" data-kind="mcp" type="button">MCP 服务</button>
-          </div>
-        </div>
-        <div id="nodesList"></div>
-      </div>
-    </section>
-
-    <!-- 4b. 扩展服务 (Hub) -->
-    <section id="viewSearch" hidden>
-      <div class="view-header">
-        <div>
-          <h1 class="view-title">扩展服务</h1>
-          <p class="view-sub">纳管外部 MCP 服务接入地址、同步快照与上游密钥池（严格单向控制面）</p>
-        </div>
-        <div class="view-actions">
-          <button class="btn btn--primary" id="btnAddSearchProvider" type="button">添加搜索提供商</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="card-title">已注册扩展服务</h2>
-            <div class="card-sub">集中下发上游提供商与筛选策略；MCP 节点单向拉取后在本地运行</div>
-          </div>
-          <div class="seg" id="extServiceProtoSeg">
-            <button class="seg-btn active" data-proto="all" type="button">全部</button>
-            <button class="seg-btn" data-proto="mcp" type="button">MCP</button>
-          </div>
-        </div>
-        <div id="extServicesList"></div>
-      </div>
-
-      <div class="card card-pad" id="mcpAccessCard"></div>
-
-      <div class="card card-pad" id="addSearchProviderForm" hidden>
-        <div class="section-bar">
-          <h2 class="card-title">新增搜索提供商</h2>
-        </div>
-        <div class="form-grid">
-          <div class="form-group"><label class="form-label">快速模板</label><select class="select" id="newSearchPreset"></select></div>
-          <div class="form-group"><label class="form-label">提供商 ID</label><input class="input input--code" id="newSearchId" placeholder="brave / tavily / exa"></div>
-          <div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newSearchName" placeholder="Exa Search"></div>
-          <div class="form-group"><label class="form-label">adapter (可选)</label><input class="input input--code" id="newSearchAdapter" placeholder="brave/tavily/jina/serper/firecrawl/exa"></div>
-          <div class="form-group"><label class="form-label">timeout_ms</label><input class="input tabular" id="newSearchTimeoutMs" type="number" value="15000" placeholder="15000"></div>
-          <div class="form-group"><label class="form-label">能力</label><div class="check-group"><label class="check-chip"><input type="checkbox" id="newSearchCapSearch" checked> search</label><label class="check-chip"><input type="checkbox" id="newSearchCapFetch"> fetch</label></div></div>
-          <div class="form-group form-group--span2"><label class="form-label">Base URL (可选)</label><input class="input input--code" id="newSearchBaseUrl" placeholder="https://api.exa.ai"></div>
-          <div class="form-group"><label class="form-label">初始 Key 标签 (留空自动 k1, k2...)</label><input class="input" id="newSearchKeyAlias" placeholder="自动递增或填前缀"></div>
-          <div class="form-group form-group--span2"><label class="form-label">初始 API Key (可选，每行一个可批量添加多把)</label><textarea class="textarea input--code privacy-mask" id="newSearchApiKey" placeholder="粘贴 API Key（每行一个可一次添加多把）"></textarea></div>
-        </div>
-
-        <details class="headers-details mt-3" id="newSearchDeclarativeDetails">
-          <summary class="form-label">声明式协议配置 (无 adapter 时必填 request 或 fetch JSON；支持 {{api_key}}/{{key}}/{{query}}/{{url}})</summary>
-          <div class="form-grid mt-2">
-            <div class="form-group">
-              <label class="form-label">request (JSON)</label>
-              <textarea class="textarea textarea--json" id="newSearchRequestJson" placeholder='{"method":"POST","path":"/search","headers":{"Authorization":"Bearer {{api_key}}"}}'></textarea>
-            </div>
-            <div class="form-group">
-              <label class="form-label">response 映射 (JSON)</label>
-              <textarea class="textarea textarea--json" id="newSearchResponseJson" placeholder='{"results_path":"results","fields":{"title":"title","url":"url","snippet":"content"}}'></textarea>
-            </div>
-            <div class="form-group">
-              <label class="form-label">fetch 端点配置 (JSON)</label>
-              <textarea class="textarea textarea--json" id="newSearchFetchJson" placeholder='{"method":"GET","path":"/{{url}}","response":{"content_path":"data.content"}}'></textarea>
-            </div>
-          </div>
-        </details>
-
-        <div class="form-actions">
-          <button class="btn" id="btnCancelAddSearchProvider" type="button">取消</button>
-          <button class="btn btn--primary" id="btnConfirmAddSearchProvider" type="button">保存搜索提供商</button>
-        </div>
-      </div>
-
-      <div class="card card-pad" id="searchSelectionCard">
-        <div class="section-bar">
-          <div>
-            <h2 class="card-title">全局启用筛选策略 (search_selection)</h2>
-            <div class="card-sub" id="searchSelectionSummary">正在加载筛选策略...</div>
-          </div>
-          <button class="btn" id="btnSaveSearchSelection" type="button">保存启用策略</button>
-        </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group">
-            <label class="form-label">Search 能力提供商 (多选)</label>
-            <div class="check-group" id="searchSelectionSearchGroup"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Fetch 能力提供商 (单选互斥)</label>
-            <div class="check-group" id="searchSelectionFetchGroup"></div>
-          </div>
-        </div>
-        <div class="mt-3" id="searchSelectionAlerts"></div>
-        <p class="text-xs text-muted mt-2">控制台可直接探测 Key；Search 与 Playwright 抓页由 MCP 节点单向拉取后在本地执行。</p>
-      </div>
-
-      <div class="toolbar">
-        <div class="search-box">
-          <span class="search-ico" id="searchProvSearchIcon"></span>
-          <input class="input search-input" id="searchProvSearchInput" placeholder="搜索提供商 ID、名称、适配器或 Base URL">
-        </div>
-      </div>
-
-      <div class="card" id="searchProvidersList"></div>
+      <div class="card" id="nodesList"></div>
     </section>
 
     <!-- 5. 系统设置 -->

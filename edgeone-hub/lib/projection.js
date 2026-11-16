@@ -99,76 +99,10 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     }
   }
 
-  const projectedSearchProviders = projectSearchProviders(node, config);
-  const srcSel = config.search_selection || {};
-  const projectedSearchSelection = {
-    search: Array.isArray(srcSel.search)
-      ? srcSel.search.filter((id) => Boolean(projectedSearchProviders[id]))
-      : [],
-    fetch:
-      srcSel.fetch &&
-      projectedSearchProviders[srcSel.fetch] &&
-      Array.isArray(projectedSearchProviders[srcSel.fetch].capabilities) &&
-      projectedSearchProviders[srcSel.fetch].capabilities.includes('fetch')
-        ? srcSel.fetch
-        : '',
-  };
-
   return {
     providers: projectedProviders,
     agent_models: projectedModels,
     settings: config.settings || {},
     adapter_rules: projectedAdapterRules,
-    search_providers: projectedSearchProviders,
-    search_selection: projectedSearchSelection,
   };
-}
-
-function projectSearchProviders(node, config) {
-  const scopeSearch = Array.isArray(node.scope?.search_providers)
-    ? node.scope.search_providers
-    : ['*'];
-  const allowAllSearch = scopeSearch.includes('*');
-
-  const projected = {};
-  const source = config.search_providers || {};
-  for (const [spId, sp] of Object.entries(source)) {
-    if (!sp || sp.enabled === false) continue;
-    if (sp.origin === 'local') continue;
-    if (!allowAllSearch && !scopeSearch.includes(spId)) continue;
-
-    const rawKeys = Array.isArray(sp.api_keys) ? sp.api_keys : [];
-    const validKeys = rawKeys.filter((k) => {
-      if (!k || k.enabled === false) return false;
-      if (k.origin === 'local') return false;
-      if (!k.key) return false;
-      return true;
-    });
-    if (validKeys.length === 0) continue;
-
-    const entry = {
-      id: sp.id || spId,
-      name: sp.name || spId,
-      enabled: true,
-      origin: 'vault',
-      base_url: sp.base_url || '',
-      capabilities: Array.isArray(sp.capabilities) ? [...sp.capabilities] : ['search'],
-      timeout_ms: Number(sp.timeout_ms) || 10000,
-      api_keys: validKeys.map((k) => ({
-        id: k.id || k.label,
-        label: k.label,
-        key: k.key,
-        enabled: true,
-        origin: 'vault',
-      })),
-    };
-    if (sp.adapter) entry.adapter = sp.adapter;
-    if (sp.quirks && typeof sp.quirks === 'object') entry.quirks = sp.quirks;
-    if (sp.request && typeof sp.request === 'object') entry.request = sp.request;
-    if (sp.response && typeof sp.response === 'object') entry.response = sp.response;
-    if (sp.fetch && typeof sp.fetch === 'object') entry.fetch = sp.fetch;
-
-    projected[spId] = entry;
-  }
-  return projected;
 }

@@ -57,7 +57,6 @@ function maskKeysInProviderMap(providerMap) {
 export function toMaskedConfig(config) {
   const cloned = JSON.parse(JSON.stringify(config || {}));
   maskKeysInProviderMap(cloned.providers);
-  maskKeysInProviderMap(cloned.search_providers);
   return cloned;
 }
 
@@ -98,182 +97,7 @@ function restoreMaskedKeysInMap(incomingMap, storedMap, scopeName) {
 export function applyKernelGuard(incomingConfig, storedConfig) {
   if (!incomingConfig || typeof incomingConfig !== 'object') return incomingConfig;
   restoreMaskedKeysInMap(incomingConfig.providers, storedConfig?.providers, 'providers');
-  restoreMaskedKeysInMap(incomingConfig.search_providers, storedConfig?.search_providers, 'search_providers');
   return incomingConfig;
-}
-
-const VALID_SEARCH_CAPABILITIES = new Set(['search', 'fetch']);
-const VALID_ORIGINS = new Set(['vault', 'local']);
-const VALID_DOT_PATH_RE = /^[a-zA-Z0-9_.-]+$/;
-const VALID_ID_RE = /^[a-z0-9-]+$/;
-
-function validateHttpBaseUrl(rawUrl, ctx) {
-  if (rawUrl === undefined || rawUrl === null || rawUrl === '') return;
-  if (typeof rawUrl !== 'string') {
-    throw new ConfigValidationError(`${ctx}: base_url must be a string`);
-  }
-  let parsed;
-  try {
-    parsed = new URL(rawUrl);
-  } catch (_) {
-    throw new ConfigValidationError(`${ctx}: invalid base_url`);
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new ConfigValidationError(`${ctx}: base_url must use http or https`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new ConfigValidationError(`${ctx}: base_url must not contain credentials`);
-  }
-}
-
-function validateDeclarativeSpec(spec, responseObj, ctx) {
-  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
-    throw new ConfigValidationError(`${ctx}: declarative request spec must be an object`);
-  }
-  const method = String(spec.method || '').toUpperCase();
-  if (method !== 'GET' && method !== 'POST') {
-    throw new ConfigValidationError(`${ctx}: method must be GET or POST`);
-  }
-  if (typeof spec.path !== 'string' || !spec.path.startsWith('/') || spec.path.includes('..')) {
-    throw new ConfigValidationError(`${ctx}: path must start with '/' and must not contain '..'`);
-  }
-  if (spec.headers !== undefined) {
-    if (!spec.headers || typeof spec.headers !== 'object' || Array.isArray(spec.headers)) {
-      throw new ConfigValidationError(`${ctx}: headers must be an object`);
-    }
-    for (const [hk, hv] of Object.entries(spec.headers)) {
-      if (/[\r\n]/.test(String(hk)) || /[\r\n]/.test(String(hv))) {
-        throw new ConfigValidationError(`${ctx}: headers must not contain CR/LF`);
-      }
-    }
-  }
-  const resp = responseObj || spec.response;
-  if (resp !== undefined) {
-    if (!resp || typeof resp !== 'object' || Array.isArray(resp)) {
-      throw new ConfigValidationError(`${ctx}: response mapping must be an object`);
-    }
-    for (const pathKey of ['results_path', 'content_path', 'title_path']) {
-      if (resp[pathKey] !== undefined && resp[pathKey] !== '') {
-        if (typeof resp[pathKey] !== 'string' || !VALID_DOT_PATH_RE.test(resp[pathKey])) {
-          throw new ConfigValidationError(`${ctx}: response.${pathKey} must be a valid dot-path`);
-        }
-      }
-    }
-    if (resp.fields !== undefined) {
-      if (!resp.fields || typeof resp.fields !== 'object' || Array.isArray(resp.fields)) {
-        throw new ConfigValidationError(`${ctx}: response.fields must be an object`);
-      }
-      for (const [fk, fv] of Object.entries(resp.fields)) {
-        if (fv !== undefined && fv !== '' && (typeof fv !== 'string' || !VALID_DOT_PATH_RE.test(fv))) {
-          throw new ConfigValidationError(`${ctx}: response.fields.${fk} must be a valid dot-path`);
-        }
-      }
-    }
-  }
-}
-
-/**
- * Validates search_providers and search_selection fields. Throws ConfigValidationError (400).
- */
-export function validateSearchConfig(config) {
-  if (!config || typeof config !== 'object') return;
-  const spMap = config.search_providers;
-  if (spMap !== undefined) {
-    if (!spMap || typeof spMap !== 'object' || Array.isArray(spMap)) {
-      throw new ConfigValidationError('search_providers must be an object map');
-    }
-    for (const [keyId, sp] of Object.entries(spMap)) {
-      if (!sp || typeof sp !== 'object' || Array.isArray(sp)) {
-        throw new ConfigValidationError(`search_providers.${keyId}: entry must be an object`);
-      }
-      const pId = sp.id || keyId;
-      if (!VALID_ID_RE.test(String(pId)) || (sp.id && sp.id !== keyId)) {
-        throw new ConfigValidationError(`search_providers.${keyId}: id must match [a-z0-9-]+ and equal its key`);
-      }
-      if (!sp.name || typeof sp.name !== 'string' || !sp.name.trim()) {
-        throw new ConfigValidationError(`search_providers.${keyId}: name is required`);
-      }
-      const origin = sp.origin || 'vault';
-      if (!VALID_ORIGINS.has(origin)) {
-        throw new ConfigValidationError(`search_providers.${keyId}: origin must be 'vault' or 'local'`);
-      }
-      if (!Array.isArray(sp.capabilities) || sp.capabilities.length === 0) {
-        throw new ConfigValidationError(`search_providers.${keyId}: capabilities must have at least one item ('search' or 'fetch')`);
-      }
-      for (const cap of sp.capabilities) {
-        if (!VALID_SEARCH_CAPABILITIES.has(cap)) {
-          throw new ConfigValidationError(`search_providers.${keyId}: unsupported capability '${cap}'`);
-        }
-      }
-      validateHttpBaseUrl(sp.base_url, `search_providers.${keyId}`);
-      if (sp.timeout_ms !== undefined && (!Number.isFinite(Number(sp.timeout_ms)) || Number(sp.timeout_ms) <= 0)) {
-        throw new ConfigValidationError(`search_providers.${keyId}: timeout_ms must be a positive number`);
-      }
-
-      const hasAdapter = typeof sp.adapter === 'string' && sp.adapter.trim().length > 0;
-      if (hasAdapter && !VALID_ID_RE.test(sp.adapter.trim())) {
-        throw new ConfigValidationError(`search_providers.${keyId}: adapter must match [a-z0-9-]+`);
-      }
-      const hasSearchSpec = Boolean(sp.request);
-      const hasFetchSpec = Boolean(sp.fetch);
-      if (!hasAdapter && !hasSearchSpec && !hasFetchSpec) {
-        throw new ConfigValidationError(`search_providers.${keyId}: either adapter or declarative request/fetch spec is required`);
-      }
-      if (hasSearchSpec) {
-        if (!hasAdapter && !sp.response) {
-          throw new ConfigValidationError(`search_providers.${keyId}: response mapping is required when using declarative request without adapter`);
-        }
-        validateDeclarativeSpec(sp.request, sp.response, `search_providers.${keyId}.request`);
-      }
-      if (hasFetchSpec) {
-        validateDeclarativeSpec(sp.fetch, sp.fetch.response, `search_providers.${keyId}.fetch`);
-      }
-
-      if (!Array.isArray(sp.api_keys)) {
-        throw new ConfigValidationError(`search_providers.${keyId}: api_keys must be an array`);
-      }
-      for (const k of sp.api_keys) {
-        if (!k || typeof k !== 'object') {
-          throw new ConfigValidationError(`search_providers.${keyId}: invalid api_keys entry`);
-        }
-        if (k.enabled !== false && (!k.key || !String(k.key).trim())) {
-          throw new ConfigValidationError(`search_providers.${keyId}: enabled api_key cannot be empty`);
-        }
-        if (k.origin !== undefined && !VALID_ORIGINS.has(k.origin)) {
-          throw new ConfigValidationError(`search_providers.${keyId}: key origin must be 'vault' or 'local'`);
-        }
-      }
-    }
-  }
-
-  const sel = config.search_selection;
-  if (sel !== undefined) {
-    if (!sel || typeof sel !== 'object' || Array.isArray(sel)) {
-      throw new ConfigValidationError('search_selection must be an object');
-    }
-    const providers = spMap || {};
-    if (sel.search !== undefined) {
-      if (!Array.isArray(sel.search)) {
-        throw new ConfigValidationError('search_selection.search must be an array');
-      }
-      for (const id of sel.search) {
-        if (!providers[id]) {
-          throw new ConfigValidationError(`search_selection.search references unknown provider '${id}'`);
-        }
-        if (!(providers[id].capabilities || []).includes('search')) {
-          throw new ConfigValidationError(`search_selection.search provider '${id}' does not support 'search' capability`);
-        }
-      }
-    }
-    if (sel.fetch !== undefined && sel.fetch !== null && sel.fetch !== '') {
-      if (typeof sel.fetch !== 'string' || !providers[sel.fetch]) {
-        throw new ConfigValidationError(`search_selection.fetch references unknown provider '${sel.fetch}'`);
-      }
-      if (!(providers[sel.fetch].capabilities || []).includes('fetch')) {
-        throw new ConfigValidationError(`search_selection.fetch provider '${sel.fetch}' does not support 'fetch' capability`);
-      }
-    }
-  }
 }
 
 /**
@@ -293,12 +117,6 @@ export async function loadConfig(kv) {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (parsed && typeof parsed._version === 'number') {
-        if (!parsed.search_providers || typeof parsed.search_providers !== 'object') {
-          parsed.search_providers = {};
-        }
-        if (!parsed.search_selection || typeof parsed.search_selection !== 'object') {
-          parsed.search_selection = { search: [], fetch: '' };
-        }
         return parsed;
       }
     } catch (_) {}
@@ -309,8 +127,6 @@ export async function loadConfig(kv) {
     _version: 1,
     providers: {},
     agent_models: {},
-    search_providers: {},
-    search_selection: { search: [], fetch: '' },
     settings: {
       run_mode: 'agent',
       agent_routing_strategy: 'sticky_failover',
@@ -343,17 +159,6 @@ export async function saveConfigWithCAS(incomingConfig, kv) {
 
   // Apply Kernel Guard to restore masked secrets
   const sanitized = applyKernelGuard(incomingConfig, stored);
-
-  // Preserve search configuration if client did not submit it (backward compatibility)
-  if (sanitized.search_providers === undefined && stored.search_providers !== undefined) {
-    sanitized.search_providers = stored.search_providers;
-  }
-  if (sanitized.search_selection === undefined && stored.search_selection !== undefined) {
-    sanitized.search_selection = stored.search_selection;
-  }
-
-  // Validate search providers & selection before persisting
-  validateSearchConfig(sanitized);
 
   // Bump version
   sanitized._version = currentVer + 1;

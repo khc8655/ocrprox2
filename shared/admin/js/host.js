@@ -67,12 +67,6 @@
   function normalizeImportedConfig(raw, defaultOrigin) {
     const src = raw?.config && typeof raw.config === 'object' ? raw.config : raw || {};
     const providers = normalizeProviderMap(src.providers, defaultOrigin);
-    const searchProviders = normalizeProviderMap(src.search_providers, defaultOrigin);
-    const rawSel = src.search_selection && typeof src.search_selection === 'object' ? src.search_selection : {};
-    const searchSelection = {
-      search: Array.isArray(rawSel.search) ? rawSel.search.map((s) => String(s || '').trim()).filter(Boolean) : [],
-      fetch: typeof rawSel.fetch === 'string' ? rawSel.fetch.trim() : '',
-    };
 
     const agentModels = {};
     for (const [mName, m] of Object.entries(src.agent_models || {})) {
@@ -110,8 +104,6 @@
 
     return {
       providers,
-      search_providers: searchProviders,
-      search_selection: searchSelection,
       agent_models: agentModels,
       kb_models: kbModels,
       settings: src.settings && typeof src.settings === 'object' ? { ...src.settings } : {},
@@ -330,18 +322,6 @@
 
     async verifyKey(data) {
       const res = await HOST.request('/api/admin/verify-key', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      try {
-        return await res.json();
-      } catch (_) {
-        return { ok: res.ok, status: res.status };
-      }
-    },
-
-    async verifySearchKey(data) {
-      const res = await HOST.request('/api/admin/verify-search-key', {
         method: 'POST',
         body: JSON.stringify(data),
       });

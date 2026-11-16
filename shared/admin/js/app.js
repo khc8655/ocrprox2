@@ -26,9 +26,6 @@
     currentPeriod: 'today',
     lanesTimer: null,
     batchVerifying: false,
-    extServiceProto: 'all',
-    selectedMcpNodeId: '',
-    nodeKindFilter: 'all',
   };
 
   function toast(msg, type = 'info') {
@@ -59,12 +56,6 @@
     if (!text) return toast('无可复制内容', 'warn');
     try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(String(text)); return toast(msg || '已复制', 'ok'); } } catch (_) {}
     toast('请手动复制', 'warn');
-  }
-
-  function isValidOptionalHttpUrl(raw) {
-    const t = String(raw || '').trim();
-    if (!t) return true;
-    try { const u = new URL(t); return (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password; } catch (_) { return false; }
   }
 
   function isHubMode() {
@@ -100,61 +91,15 @@
     return { keys: out };
   }
 
-  function getNodeKind(n) {
-    if (n?.kind === 'mcp' || n?.kind === 'llm') return n.kind;
-    return (n && (n.mcp_url || n.telemetry || (Array.isArray(n.scope?.providers) && !n.scope.providers.length))) ? 'mcp' : 'llm';
-  }
-
-  function getMcpNodes() {
-    return (state.nodes || []).filter((n) => n && getNodeKind(n) === 'mcp');
-  }
-
   function getNodeSyncSnapshotStatus(n) {
     if (!n || n.enabled === false) return { key: 'revoked', pillCls: 'pill--red', label: '已吊销', leaseText: '已吊销', syncMs: 0 };
-    const r = n.last_seen || n.telemetry?.updated_at;
+    const r = n.last_seen;
     const syncMs = r ? (typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : new Date(r).getTime()) : 0;
     if (!syncMs || Number.isNaN(syncMs)) return { key: 'never', pillCls: 'pill', label: '从未同步', leaseText: '从未同步', syncMs: 0 };
     const lease = Number(n.lease_ttl) || 86400, grace = Number(n.grace_ttl) || 3600, age = Math.max(0, Math.floor((Date.now() - syncMs) / 1000));
     if (age > lease + grace) return { key: 'expired', pillCls: 'pill--red', label: '过期 / 离线', leaseText: '租约已过期', syncMs };
     if (age > lease) return { key: 'grace', pillCls: 'pill--amber', label: '宽限期内', leaseText: '宽限期内', syncMs };
     return { key: 'synced', pillCls: 'pill--green', label: '已同步', leaseText: `租约剩 ${formatCooldown(Math.max(1, lease - age))}`, syncMs };
-  }
-
-  function computeSearchProviderHealth(sp) {
-    const keys = Array.isArray(sp?.api_keys) ? sp.api_keys : [];
-    const enabled = keys.filter((k) => k && k.enabled !== false);
-    const ok = enabled.filter((k) => k.last_ok === true).length;
-    const fail = enabled.filter((k) => k.last_ok === false).length;
-    let statusText = '未校验', pillCls = 'pill', dotCls = 'dot--warn';
-    if (sp?.enabled === false) { statusText = '已停用'; pillCls = 'pill pill--red'; dotCls = 'dot--err'; }
-    else if (!enabled.length) statusText = '无可用 Key';
-    else if (ok && !fail) { statusText = '正常'; pillCls = 'pill pill--green'; dotCls = 'dot--ok'; }
-    else if (ok && fail) { statusText = '部分异常'; pillCls = 'pill pill--amber'; }
-    else if (fail && !ok) { statusText = '全部异常'; pillCls = 'pill pill--red'; dotCls = 'dot--err'; }
-    let maxMs = 0, latestCheckedAt = '', latestLatencyMs = null;
-    for (const k of keys) {
-      const ms = k?.last_checked_at ? new Date(k.last_checked_at).getTime() : 0;
-      if (ms >= maxMs && k?.last_checked_at) { maxMs = ms; latestCheckedAt = k.last_checked_at; latestLatencyMs = Number.isFinite(Number(k.last_latency_ms)) ? Number(k.last_latency_ms) : null; }
-    }
-    return { totalCount: keys.length, enabledCount: enabled.length, statusText, pillCls, dotCls, latestCheckedAt, latestLatencyMs };
-  }
-
-  function validateSearchSpec({ name, baseUrl, timeoutRaw, caps, adapter, reqRaw, respRaw, fetchRaw, quirksRaw, secrets = [] }) {
-    if (!name) return { error: '显示名称不能为空' };
-    if (!caps.length) return { error: '请至少勾选一种能力 (search 或 fetch)' };
-    if (!isValidOptionalHttpUrl(baseUrl)) return { error: 'Base URL 需为 http:// 或 https:// 地址' };
-    const timeoutMs = String(timeoutRaw || '').trim() ? Number(timeoutRaw) : 15000;
-    if (!Number.isFinite(timeoutMs) || timeoutMs < 500 || timeoutMs > 60000) return { error: 'timeout_ms 需在 500-60000 之间' };
-    let reqObj, respObj, fetchObj, quirksObj;
-    try {
-      reqObj = parseOptionalJsonField(reqRaw, 'request');
-      respObj = parseOptionalJsonField(respRaw, 'response');
-      fetchObj = parseOptionalJsonField(fetchRaw, 'fetch');
-      quirksObj = quirksRaw !== undefined ? parseOptionalJsonField(quirksRaw, 'quirks') : undefined;
-    } catch (e) { return { error: scrubUiText(e.message, secrets) }; }
-    if (!adapter && !reqObj && !fetchObj) return { error: '未填 adapter 时需提供 request 或 fetch JSON' };
-    if (!adapter && reqObj && !respObj) return { error: '未填 adapter 且有 request 时需补充 response JSON' };
-    return { timeoutMs: Math.round(timeoutMs), reqObj, respObj, fetchObj, quirksObj };
   }
 
   // Never render a raw secret in the key table: saved keys arrive masked from the
@@ -216,7 +161,6 @@
     setIcon('loginBrandMark', 'server');
     setIcon('logoutBtn', 'logout');
     setIcon('providerSearchIcon', 'search');
-    setIcon('searchProvSearchIcon', 'search');
     setIcon('modelSearchIcon', 'search');
   }
 
@@ -297,7 +241,6 @@
     if (brandRole) brandRole.textContent = isHub ? 'Hub' : 'Full';
 
     const navModels = $('navModels');
-    const navSearch = $('navSearch');
     const navNodes = $('navNodes');
     const navActivity = $('navActivity');
     const topVersionBox = $('topVersionBox');
@@ -309,7 +252,6 @@
     const btnClearAllCooldowns = $('btnClearAllCooldowns');
 
     if (navModels) navModels.hidden = false;
-    if (navSearch) navSearch.hidden = !caps.vaultHub;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
     if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
@@ -378,19 +320,16 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         const pForm = $('addProviderForm');
-        const spForm = $('addSearchProviderForm');
         const mForm = $('addModelForm');
         const nForm = $('issueNodeForm');
         let closedSomething = false;
         if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
-        if (spForm && !spForm.hidden) { spForm.hidden = true; spForm.classList.add('hidden'); closedSomething = true; }
         if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
         if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
         if (state.activeEditorKey) {
           state.activeEditorKey = null;
           closedSomething = true;
           if (state.activeTab === 'providers') renderProvidersList();
-          else if (state.activeTab === 'search') renderSearchProvidersList();
           else if (state.activeTab === 'models') renderModelsList();
           else if (state.activeTab === 'nodes') renderNodesList();
           else if (state.activeTab === 'activity') renderTracesList();
@@ -495,16 +434,8 @@
 
     const btnIssueNode = $('btnIssueNode');
     if (btnIssueNode) {
-      clk(btnIssueNode, () => {
-        const form = $('issueNodeForm');
-        if (form) {
-          form.hidden = !form.hidden;
-          if (!form.hidden) applyIssueNodeKindUI(false);
-        }
-      });
+      clk(btnIssueNode, () => toggle('issueNodeForm'));
     }
-
-    $('issueNodeKind')?.addEventListener('change', () => applyIssueNodeKindUI(true));
 
     const btnDoIssue = $('btnDoIssue');
     if (btnDoIssue) {
@@ -731,14 +662,6 @@
       });
     }
 
-    const searchProvSearch = $('searchProvSearchInput');
-    if (searchProvSearch) {
-      searchProvSearch.addEventListener('input', (e) => {
-        state.searchQuery = (e.target.value || '').trim().toLowerCase();
-        renderSearchProvidersList();
-      });
-    }
-
     const modelSubSeg = $('modelPipelineSeg');
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -757,33 +680,6 @@
     clk($('btnHubBatchVerifyAll'), verifyAllHubKeys);
     clk($('btnGoProvidersFromHub'), () => switchTab('providers'));
     clk($('btnGoNodesFromHub'), () => switchTab('nodes'));
-    clk($('btnGoSearchFromHub'), () => switchTab('search'));
-
-    const extSeg = $('extServiceProtoSeg');
-    if (extSeg) {
-      extSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        clk(btn, () => {
-          const proto = btn.getAttribute('data-proto') || 'all';
-          state.extServiceProto = proto;
-          extSeg.querySelectorAll('.seg-btn').forEach((b) => {
-            b.classList.toggle('active', b.getAttribute('data-proto') === proto);
-          });
-          renderExtensionServices();
-        });
-      });
-    }
-
-    const nodeSeg = $('nodeKindSeg');
-    if (nodeSeg) {
-      nodeSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        clk(btn, () => {
-          const kind = btn.getAttribute('data-kind') || 'all';
-          state.nodeKindFilter = kind;
-          nodeSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-kind') === kind));
-          renderNodesList();
-        });
-      });
-    }
   }
 
   function setupConfigBackup() {
@@ -963,165 +859,6 @@
       toggle(mForm, false);
       await persistConfig('模型添加成功');
     });
-
-    setupSearchCreationForm(toggle);
-  }
-
-  const SEARCH_PRESETS_META = {
-    brave: { id: 'brave', name: 'Brave Search', adapter: 'brave', base_url: 'https://api.search.brave.com', capabilities: ['search'] },
-    tavily: { id: 'tavily', name: 'Tavily Search', adapter: 'tavily', base_url: 'https://api.tavily.com', capabilities: ['search', 'fetch'] },
-    jina: { id: 'jina', name: 'Jina Reader / Search', adapter: 'jina', base_url: 'https://s.jina.ai', capabilities: ['search', 'fetch'] },
-    serper: { id: 'serper', name: 'Serper (Google)', adapter: 'serper', base_url: 'https://google.serper.dev', capabilities: ['search'] },
-    firecrawl: { id: 'firecrawl', name: 'Firecrawl', adapter: 'firecrawl', base_url: 'https://api.firecrawl.dev', capabilities: ['search', 'fetch'] },
-    exa: { id: 'exa', name: 'Exa Search', adapter: 'exa', base_url: 'https://api.exa.ai', capabilities: ['search', 'fetch'] },
-  };
-
-  function inferSearchAdapter(id, baseUrl) {
-    if (SEARCH_PRESETS_META[id]?.adapter) return SEARCH_PRESETS_META[id].adapter;
-    try {
-      const h = new URL(String(baseUrl || '').trim()).hostname;
-      if (h === 'r.jina.ai') return 'jina';
-      return Object.values(SEARCH_PRESETS_META).find((m) => m.base_url.includes(`://${h}`))?.adapter || '';
-    } catch (_) { return ''; }
-  }
-
-  function parseOptionalJsonField(raw, fieldName) {
-    const txt = String(raw || '').trim();
-    if (!txt) return undefined;
-    try {
-      const parsed = JSON.parse(txt);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error(`${fieldName} 必须是 JSON 对象`);
-      }
-      return parsed;
-    } catch (e) {
-      throw new Error(`${fieldName} JSON 解析失败: ${e.message}`);
-    }
-  }
-
-  function setupSearchCreationForm(toggle) {
-    const presetSel = $('newSearchPreset');
-    const declDetails = $('newSearchDeclarativeDetails');
-    if (presetSel) {
-      presetSel.innerHTML = '<option value="">-- 自定义搜索提供商 --</option>';
-      Object.entries(SEARCH_PRESETS_META).forEach(([k, meta]) => {
-        const opt = ce('option');
-        opt.value = k;
-        opt.textContent = meta.name;
-        presetSel.appendChild(opt);
-      });
-      presetSel.addEventListener('change', (e) => {
-        const meta = SEARCH_PRESETS_META[e.target.value];
-        if (!meta) {
-          if (declDetails) declDetails.open = true;
-          return;
-        }
-        $('newSearchId').value = meta.id;
-        $('newSearchName').value = meta.name;
-        $('newSearchAdapter').value = meta.adapter;
-        $('newSearchBaseUrl').value = meta.base_url;
-        $('newSearchCapSearch').checked = meta.capabilities.includes('search');
-        $('newSearchCapFetch').checked = meta.capabilities.includes('fetch');
-        if (declDetails) declDetails.open = false;
-      });
-    }
-
-    const spForm = $('addSearchProviderForm');
-    clk($('btnAddSearchProvider'), () => toggle(spForm));
-    clk($('btnCancelAddSearchProvider'), () => toggle(spForm, false));
-
-    clk($('btnConfirmAddSearchProvider'), async () => {
-      const id = ($('newSearchId')?.value || '').trim().toLowerCase();
-      const name = ($('newSearchName')?.value || '').trim();
-      const baseUrl = ($('newSearchBaseUrl')?.value || '').trim();
-      let adapter = ($('newSearchAdapter')?.value || '').trim();
-      const timeoutRaw = $('newSearchTimeoutMs')?.value;
-      const keyAlias = ($('newSearchKeyAlias')?.value || '').trim();
-      const apiKeyRaw = ($('newSearchApiKey')?.value || '').trim();
-      const reqRaw = $('newSearchRequestJson')?.value;
-      const respRaw = $('newSearchResponseJson')?.value;
-      const fetchRaw = $('newSearchFetchJson')?.value;
-
-      const caps = [];
-      if ($('newSearchCapSearch')?.checked) caps.push('search');
-      if ($('newSearchCapFetch')?.checked) caps.push('fetch');
-
-      if (!/^[a-z0-9-]+$/.test(id)) return toast('提供商 ID 仅支持小写字母、数字和连字符', 'warn');
-
-      state.config = state.config || { providers: {}, agent_models: {}, search_providers: {}, search_selection: { search: [], fetch: '' } };
-      state.config.search_providers = state.config.search_providers || {};
-      if (state.config.search_providers[id]) {
-        state.activeEditorKey = `sp_${id}`;
-        toggle(spForm, false);
-        renderSearchProvidersList();
-        $('searchProvidersList')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        return toast(`提供商 ${id} 已存在，已在下方展开，可直接追加多把 Key`, 'info');
-      }
-
-      if (!adapter && !String(reqRaw || '').trim() && !String(fetchRaw || '').trim()) {
-        adapter = inferSearchAdapter(id, baseUrl);
-        if (adapter && $('newSearchAdapter')) $('newSearchAdapter').value = adapter;
-      }
-
-      const v = validateSearchSpec({
-        name,
-        baseUrl,
-        timeoutRaw,
-        caps,
-        adapter,
-        reqRaw,
-        respRaw,
-        fetchRaw,
-        secrets: apiKeyRaw.split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean),
-      });
-      if (v.error) {
-        if (!adapter && declDetails) declDetails.open = true;
-        return toast(v.error, 'warn');
-      }
-
-      const parsedKeys = parseMultiApiKeys(apiKeyRaw, keyAlias, [], 'vault');
-      if (parsedKeys.error) return toast(parsedKeys.error, 'warn');
-
-      const entry = {
-        id,
-        name,
-        enabled: true,
-        origin: 'vault',
-        capabilities: caps,
-        timeout_ms: v.timeoutMs,
-        api_keys: parsedKeys.keys,
-      };
-      if (baseUrl) entry.base_url = baseUrl;
-      if (adapter) entry.adapter = adapter;
-      if (v.reqObj) entry.request = v.reqObj;
-      if (v.respObj) entry.response = v.respObj;
-      if (v.fetchObj) entry.fetch = v.fetchObj;
-
-      state.config.search_providers[id] = entry;
-      state.activeEditorKey = `sp_${id}`;
-      ['newSearchId', 'newSearchName', 'newSearchAdapter', 'newSearchBaseUrl', 'newSearchKeyAlias', 'newSearchApiKey', 'newSearchRequestJson', 'newSearchResponseJson', 'newSearchFetchJson'].forEach((fid) => {
-        const el = $(fid);
-        if (el) el.value = '';
-      });
-      toggle(spForm, false);
-      await persistConfig('搜索提供商创建成功');
-    });
-
-    clk($('btnSaveSearchSelection'), async () => {
-      const spMap = state.config?.search_providers || {};
-      const searchIds = Array.from(document.querySelectorAll('#searchSelectionSearchGroup input[type="checkbox"]:checked'))
-        .map((cb) => cb.value)
-        .filter((id) => Boolean(id) && spMap[id] && Array.isArray(spMap[id].capabilities) && spMap[id].capabilities.includes('search'));
-      const fetchRadio = document.querySelector('#searchSelectionFetchGroup input[type="radio"]:checked');
-      const fetchId = fetchRadio ? fetchRadio.value : '';
-      if (fetchId && (!spMap[fetchId] || !Array.isArray(spMap[fetchId].capabilities) || !spMap[fetchId].capabilities.includes('fetch'))) {
-        return toast(`选中的抓取提供商 ${fetchId} 不存在或未启用 fetch 能力`, 'warn');
-      }
-
-      state.config = state.config || { providers: {}, agent_models: {} };
-      state.config.search_selection = { search: searchIds, fetch: fetchId };
-      await persistConfig('全局搜索筛选策略已保存');
-    });
   }
 
   function populateModelProvidersDropdown() {
@@ -1157,7 +894,6 @@
     const views = {
       models: $('viewModels'),
       providers: $('viewProviders'),
-      search: $('viewSearch'),
       nodes: $('viewNodes'),
       activity: $('viewActivity'),
       settings: $('viewSettings'),
@@ -1167,9 +903,7 @@
       if (v) v.hidden = k !== tab;
     }
 
-    if (tab === 'search') {
-      renderSearchView();
-    } else if (tab === 'activity') {
+    if (tab === 'activity') {
       if (window.HOST.kind === 'hub') {
         renderHubOverview();
       } else if (window.HOST.capabilities.usageAndTraces) {
@@ -1229,7 +963,6 @@
 
         renderProvidersList();
         renderModelsList();
-        renderSearchView();
         renderSettingsView();
       }
 
@@ -1253,7 +986,6 @@
       if (res && res.ok) {
         state.nodes = res.nodes || [];
         renderNodesList();
-        renderSearchView();
         if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
           renderHubOverview();
         }
@@ -1387,30 +1119,9 @@
     nodeBody.innerHTML = nodes.length
       ? nodes.map((n) => {
           const snap = getNodeSyncSnapshotStatus(n);
-          const kind = getNodeKind(n);
-          const badge = kind === 'mcp' ? `MCP · ${n.service_type || 'khc-search'}` : `LLM · ${n.role || 'full'}`;
-          return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill ${kind === 'mcp' ? 'pill--green' : 'pill--accent'}">${eh(badge)}</span></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(`${n.last_ip || '-'} · ${n.last_config_version ? `v${n.last_config_version}` : '-'}`)}</td><td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
+          return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill pill--accent">${eh(n.role || 'full')}</span></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(`${n.last_ip || '-'} · ${n.last_config_version ? `v${n.last_config_version}` : '-'}`)}</td><td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
         }).join('')
       : '<tr><td colspan="6" class="text-muted">暂无中转节点</td></tr>';
-
-    renderHubMcpTelemetry();
-  }
-
-  function renderHubMcpTelemetry() {
-    const tbody = $('hubMcpTelemetryBody');
-    if (!tbody) return;
-    const targets = getMcpNodes();
-    if (!targets.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无 MCP 节点快照，同步 /api/node/config 时上报</td></tr>';
-      return;
-    }
-    tbody.innerHTML = targets.map((n) => {
-      const snap = getNodeSyncSnapshotStatus(n), t = n.telemetry;
-      const pwPill = t?.playwright_ready === true ? '<span class="pill pill--green">就绪</span>' : (t?.playwright_ready === false ? '<span class="pill pill--red">未就绪</span>' : '<span class="pill">-</span>');
-      const counts = t ? `${t.search_count ?? t.requests ?? 0} / ${t.crawl_count ?? 0}` : '-';
-      const resting = t ? (t.resting_keys?.length ? t.resting_keys.join(', ') : `${t.resting_keys_count ?? 0} 休眠`) : '未上报';
-      return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(t?.version || '-')} · ${pwPill}</td><td class="tabular">${eh(counts)}</td><td><span class="tabular">${eh(resting)}</span> · <span class="text-xs text-muted">${eh(t?.last_error ? scrubUiText(t.last_error) : '-')}</span></td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
-    }).join('');
   }
 
   async function verifyProviderKeys(pId) {
@@ -2100,355 +1811,17 @@
     return arr.join(', ');
   }
 
-  // --- View: Extension Services / Search Providers & Selection (Hub mode) ---
-  function isUsableSharedSearchProvider(sp) {
-    if (!sp || sp.enabled === false || sp.origin === 'local') return false;
-    return Array.isArray(sp.api_keys) && sp.api_keys.some((k) => k && k.enabled !== false && String(k.key || '').trim());
-  }
-
-  function renderSearchView() {
-    renderExtensionServices();
-    renderMcpAccessCard();
-    renderSearchSelectionCard();
-    renderSearchProvidersList();
-  }
-
-  function goToNodesWithKind(kind) {
-    state.nodeKindFilter = kind;
-    document.querySelectorAll('#nodeKindSeg .seg-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-kind') === kind));
-    switchTab('nodes');
-  }
-
-  function renderExtensionServices() {
-    const el = $('extServicesList');
-    if (!el) return;
-    if (state.extServiceProto && state.extServiceProto !== 'all' && state.extServiceProto !== 'mcp') {
-      el.innerHTML = '<div class="row row--static text-muted">暂无该协议服务</div>';
-      return;
-    }
-    const spEntries = Object.entries(state.config?.search_providers || {});
-    const searchCnt = spEntries.filter(([, sp]) => sp?.capabilities?.includes('search')).length;
-    const fetchCnt = spEntries.filter(([, sp]) => sp?.capabilities?.includes('fetch')).length;
-    const usable = spEntries.filter(([, sp]) => isUsableSharedSearchProvider(sp)).length;
-    const mcpNodes = getMcpNodes();
-    const khcNodes = mcpNodes.filter((n) => (n.service_type || 'khc-search') === 'khc-search');
-    const khcActive = khcNodes.filter((n) => n.enabled !== false).length;
-    const extraTypes = [...new Set(mcpNodes.map((n) => n.service_type).filter((t) => t && t !== 'khc-search'))];
-
-    el.innerHTML = `<div class="row row--static"><span class="dot ${usable > 0 ? 'dot--ok' : 'dot--warn'}"></span><div class="who"><div class="name"><span>网络搜索 (khc-search)</span><span class="pill pill--accent">MCP</span><span class="pill ${usable > 0 ? 'pill--green' : 'pill--amber'}">${usable > 0 ? `${usable} 共享就绪` : '待配上游'}</span><span class="pill tabular">v${state.config?._version || 1}</span><span class="pill">${khcActive} 节点${khcNodes.some((n) => n.mcp_url) ? '' : ' · 未填地址'}</span></div><div class="sub">集中配置搜索/抓取上游与策略；MCP 节点单向拉取并在本地运行（支持 Playwright 兜底）。</div></div><div class="fields"><span class="pill tabular">Search ${searchCnt} · Fetch ${fetchCnt}</span><button class="btn btn--sm btn-ext-nodes" type="button">节点地址</button></div></div>`
-      + extraTypes.map((st) => {
-        const list = mcpNodes.filter((n) => n.service_type === st);
-        const on = list.filter((n) => n.enabled !== false).length;
-        return `<div class="row row--static"><span class="dot ${on > 0 ? 'dot--ok' : 'dot--warn'}"></span><div class="who"><div class="name"><span>${eh(st)}</span><span class="pill pill--accent">MCP</span><span class="pill">${on} / ${list.length} 节点</span></div><div class="sub">自定义 service_type 扩展服务节点</div></div><div class="fields"><button class="btn btn--sm btn-ext-nodes" type="button">节点管理</button></div></div>`;
-      }).join('');
-    el.querySelectorAll('.btn-ext-nodes').forEach((b) => b.addEventListener('click', () => goToNodesWithKind('mcp')));
-  }
-
-  function renderMcpAccessCard() {
-    const card = $('mcpAccessCard');
-    if (!card) return;
-    const mcpNodes = getMcpNodes();
-    if (!state.selectedMcpNodeId || !mcpNodes.some((n) => n.id === state.selectedMcpNodeId)) {
-      const pref = mcpNodes.find((n) => n.enabled !== false && n.mcp_url) || mcpNodes.find((n) => n.enabled !== false) || mcpNodes[0];
-      state.selectedMcpNodeId = pref ? pref.id : '';
-    }
-    const node = mcpNodes.find((n) => n.id === state.selectedMcpNodeId) || null;
-    const mcpUrl = (node?.mcp_url || '').trim();
-    const snap = node ? getNodeSyncSnapshotStatus(node) : null;
-    const snippet = JSON.stringify({ mcpServers: { 'khc-search': { type: 'http', url: mcpUrl || 'https://<your-space>.hf.space/mcp', headers: { Authorization: 'Bearer <MCP_BEARER_TOKEN>' } } } }, null, 2);
-    const opts = mcpNodes.length
-      ? mcpNodes.map((n) => `<option value="${eh(n.id)}" ${n.id === state.selectedMcpNodeId ? 'selected' : ''}>${eh(n.name || n.id)}${n.mcp_url ? ` (${eh(n.mcp_url)})` : ' (未设地址)'}</option>`).join('')
-      : '<option value="">暂无 MCP 节点</option>';
-    const notice = !node
-      ? '<div class="notice-strip notice-strip--warn mb-3"><span>未检测到 MCP 节点，请先在「中转节点」签发节点。</span><button class="btn btn--sm" id="btnMcpAccessGoNodes" type="button">前往中转节点</button></div>'
-      : !mcpUrl
-        ? `<div class="notice-strip notice-strip--warn mb-3"><span>节点 <strong>${eh(node.name || node.id)}</strong> 未配置服务地址，请在中转节点填写 <code>mcp_url</code>。</span><button class="btn btn--sm" id="btnMcpAccessGoNodes" type="button">去配置</button></div>`
-        : `<div class="notice-strip notice-strip--ok mb-3"><span>${eh(node.name || node.id)} · 快照：${eh(snap.label)}（${eh(snap.leaseText)}）</span></div>`;
-
-    card.innerHTML = `<div class="card-header"><div><h2 class="card-title">MCP 接入信息</h2><div class="card-sub">客户端 Bearer 令牌与 NODE_TOKEN 独立</div></div><div class="fields"><select class="select" id="mcpAccessNodeSelect">${opts}</select></div></div>${notice}<div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">服务地址 (mcp_url)</label><div class="input-row"><input class="input input--code" readonly value="${eh(mcpUrl || '未配置服务地址')}"><button class="btn" id="btnCopyMcpUrl" type="button">复制</button></div></div><div class="form-group"><label class="form-label">暴露的工具</label><div class="check-group mt-1">${['khc_research', 'khc_search', 'khc_fetch', 'khc_crawl_site'].map((t) => `<span class="pill pill--accent">${t}</span>`).join('')}</div></div></div><div class="snippet-card mt-3"><div class="code-snippet-head"><label class="form-label">客户端配置示例 (mcpServers)</label><button class="btn btn--sm" id="btnCopyMcpSnippet" type="button">复制</button></div><pre class="code-pre">${eh(snippet)}</pre></div>`;
-
-    card.querySelector('#mcpAccessNodeSelect')?.addEventListener('change', (e) => { state.selectedMcpNodeId = e.target.value; renderMcpAccessCard(); });
-    clk(card.querySelector('#btnMcpAccessGoNodes'), () => goToNodesWithKind('mcp'));
-    clk(card.querySelector('#btnCopyMcpUrl'), () => (mcpUrl ? copyToClipboard(mcpUrl, 'MCP 地址已复制') : toast('尚未配置 mcp_url', 'warn')));
-    clk(card.querySelector('#btnCopyMcpSnippet'), () => copyToClipboard(snippet, 'MCP 配置已复制'));
-  }
-
-  function renderSearchSelectionCard() {
-    const searchGroup = $('searchSelectionSearchGroup');
-    const fetchGroup = $('searchSelectionFetchGroup');
-    const summaryEl = $('searchSelectionSummary');
-    const alertsEl = $('searchSelectionAlerts');
-    if (!searchGroup || !fetchGroup) return;
-
-    const spMap = state.config?.search_providers || {}, sel = state.config?.search_selection || { search: [], fetch: '' };
-    const selectedSearchIds = Array.isArray(sel.search) ? sel.search : [], selectedSearch = new Set(selectedSearchIds);
-    const selectedFetch = typeof sel.fetch === 'string' ? sel.fetch : '';
-    const entries = Object.entries(spMap).sort(([a], [b]) => a.localeCompare(b));
-    const searchCap = entries.filter(([, sp]) => sp?.capabilities?.includes('search'));
-    const fetchCap = entries.filter(([, sp]) => sp?.capabilities?.includes('fetch'));
-    const usableSel = selectedSearchIds.filter((id) => isUsableSharedSearchProvider(spMap[id]));
-    const fetchUsable = selectedFetch && isUsableSharedSearchProvider(spMap[selectedFetch]);
-
-    if (summaryEl) summaryEl.textContent = `已选 Search: ${selectedSearch.size} (共享可用 ${usableSel.length}) · Fetch: ${selectedFetch ? (spMap[selectedFetch]?.name || selectedFetch) : '无'}`;
-
-    const suffixOf = (sp) => (sp.enabled === false ? ' (停用)' : (!(sp.api_keys || []).some((k) => k.enabled !== false) ? ' (无Key)' : ''));
-    searchGroup.innerHTML = '';
-    if (!searchCap.length) searchGroup.innerHTML = '<span class="text-xs text-muted">暂无 search 提供商</span>';
-    else for (const [spId, sp] of searchCap) {
-      const lbl = ce('label');
-      lbl.className = 'check-chip';
-      lbl.innerHTML = `<input type="checkbox" value="${eh(spId)}" ${selectedSearch.has(spId) ? 'checked' : ''}><span>${eh((sp.name || spId) + suffixOf(sp))}</span>`;
-      searchGroup.appendChild(lbl);
-    }
-
-    fetchGroup.innerHTML = `<label class="check-chip"><input type="radio" name="searchSelectionFetch" value="" ${!selectedFetch ? 'checked' : ''}><span>不启用（本地兜底）</span></label>`;
-    for (const [spId, sp] of fetchCap) {
-      const lbl = ce('label');
-      lbl.className = 'check-chip';
-      lbl.innerHTML = `<input type="radio" name="searchSelectionFetch" value="${eh(spId)}" ${selectedFetch === spId ? 'checked' : ''}><span>${eh((sp.name || spId) + suffixOf(sp))}</span>`;
-      fetchGroup.appendChild(lbl);
-    }
-
-    if (alertsEl) {
-      const notices = [usableSel.length
-        ? `<div class="notice-strip notice-strip--ok"><span>网页搜索就绪：${eh(usableSel.join(', '))}</span></div>`
-        : '<div class="notice-strip notice-strip--warn"><span>无可用共享 Search 提供商，khc_search 将无可用上游。</span></div>'];
-      if (!fetchUsable) notices.push('<div class="notice-strip notice-strip--warn mt-2"><span>未选择抓取提供商，khc_fetch 将走节点本地兜底。</span></div>');
-      alertsEl.innerHTML = notices.join('');
-    }
-  }
-
-  function renderSearchProvidersList() {
-    const container = $('searchProvidersList');
-    if (!container) return;
-    container.innerHTML = '';
-
-    const spMap = state.config?.search_providers || {}, sel = state.config?.search_selection || { search: [], fetch: '' };
-    const selectedSearch = new Set(Array.isArray(sel.search) ? sel.search : []), q = state.searchQuery || '';
-    const ids = Object.keys(spMap).sort().filter((spId) => !q || `${spId} ${spMap[spId]?.name || ''} ${spMap[spId]?.adapter || ''} ${spMap[spId]?.base_url || ''}`.toLowerCase().includes(q));
-
-    if (!ids.length) {
-      const emptyRow = ce('div');
-      emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = q ? '没有匹配的搜索提供商' : '暂无搜索提供商，请点击右上角「添加搜索提供商」';
-      container.appendChild(emptyRow);
-      return;
-    }
-
-    for (const spId of ids) {
-      const sp = spMap[spId] || {}, health = computeSearchProviderHealth(sp), isExpanded = state.activeEditorKey === `sp_${spId}`, caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
-      const row = ce('div');
-      row.className = `row ${isExpanded ? 'expanded' : ''}`;
-      row.innerHTML = `<span class="dot ${health.dotCls}"></span><div class="who"><div class="name"><span>${eh(sp.name || spId)}</span><span class="pill">${eh(spId)}</span><span class="${health.pillCls}">${eh(health.statusText)}</span>${caps.map((c) => `<span class="pill pill--accent">${eh(c)}</span>`).join('')}${selectedSearch.has(spId) ? '<span class="pill pill--green">Search 已选</span>' : ''}${sel.fetch === spId ? '<span class="pill pill--green">Fetch 已选</span>' : ''}</div><div class="sub">${eh(sp.adapter ? `适配器: ${sp.adapter}` : '声明式 HTTP')} · ${eh(sp.base_url || '未设 Base URL')} · ${sp.timeout_ms || 15000}ms</div></div><div class="fields">${health.totalCount ? `<span class="pill tabular">启用 ${health.enabledCount} / 总 ${health.totalCount} 把 Key</span>` : '<span class="pill">未配置密钥（点击展开添加）</span>'}${health.latestCheckedAt ? `<span class="pill tabular">探活 ${eh(formatTime(health.latestCheckedAt))}${health.latestLatencyMs !== null ? ` · ${health.latestLatencyMs}ms` : ''}</span>` : ''}<span class="caret">▾</span></div>`;
-      clk(row, (ev) => {
-        if (ev.target.closest('button') || ev.target.closest('input')) return;
-        state.activeEditorKey = isExpanded ? null : `sp_${spId}`;
-        renderSearchProvidersList();
-      });
-
-      container.appendChild(row);
-      if (isExpanded) {
-        const editor = ce('div');
-        editor.className = 'editor';
-        editor.appendChild(buildSearchProviderEditor(spId, sp));
-        container.appendChild(editor);
-      }
-    }
-  }
-
-  function buildSearchProviderEditor(spId, sp) {
-    const wrap = ce('div');
-    const keys = sp.api_keys || [];
-    const caps = Array.isArray(sp.capabilities) ? sp.capabilities : [];
-    const fmtJson = (obj) => (obj ? JSON.stringify(obj, null, 2) : '');
-    const q = (s) => wrap.querySelector(s);
-    const nextLbl = nextKeyLabel(keys);
-
-    wrap.innerHTML = `<div class="form-grid">${[
-      fg('显示名称', `<input class="input" id="ed_sp_name_${spId}" value="${eh(sp.name || spId)}">`),
-      fg('适配器 adapter (可选)', `<input class="input input--code" id="ed_sp_adapter_${spId}" value="${eh(sp.adapter || '')}">`),
-      fg('超时 ms (timeout_ms)', `<input class="input tabular" id="ed_sp_timeout_${spId}" type="number" value="${sp.timeout_ms || 15000}">`),
-      fg('Base URL (可选)', `<input class="input input--code" id="ed_sp_base_${spId}" value="${eh(sp.base_url || '')}">`, '', 'form-group--span2'),
-      fg('启用与能力', `<div class="check-group"><label class="check-chip"><input type="checkbox" id="ed_sp_enabled_${spId}" ${sp.enabled !== false ? 'checked' : ''}> 启用</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_search_${spId}" ${caps.includes('search') ? 'checked' : ''}> search</label><label class="check-chip"><input type="checkbox" id="ed_sp_cap_fetch_${spId}" ${caps.includes('fetch') ? 'checked' : ''}> fetch</label></div>`),
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">声明式请求 / 响应映射与 Quirks (JSON)</summary><div class="form-grid form-grid--2 mt-2">${[['req', 'request', sp.request], ['resp', 'response', sp.response], ['fetch', 'fetch', sp.fetch], ['quirks', 'quirks', sp.quirks]].map(([kId, lbl, val]) => fg(`${lbl} (JSON)`, `<textarea class="textarea textarea--json" id="ed_sp_${kId}_${spId}">${eh(fmtJson(val))}</textarea>`)).join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length} 把 Key)</span><div class="fields"><button class="btn btn--sm" id="btn_verify_all_sp_keys_${spId}" type="button">一键测 Key</button><button class="btn btn--sm" id="btn_clear_sp_keys_${spId}" type="button">清除全部密钥</button></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>密钥 (脱敏)</th><th>状态</th><th>操作</th></tr></thead><tbody id="sp_keys_tbody_${spId}"></tbody></table></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_sp_key_lbl_${spId}" placeholder="标签（留空自动 ${eh(nextLbl)}）"></div><div class="form-group form-group--span2"><textarea class="textarea input--code privacy-mask" id="new_sp_key_val_${spId}" placeholder="粘贴 API Key（可每行/逗号分隔一次添加多把）"></textarea></div><div class="form-group flex-end"><button class="btn" id="btn_add_sp_key_${spId}" type="button">添加 Key</button></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_sp_${spId}" type="button">删除提供商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_sp_${spId}" type="button">保存搜索提供商</button></div></div>`;
-
-    function buildSearchVerifyPayload(k, idx) {
-      const payload = {
-        provider: spId,
-        key_label: k.label || k.id || `key-${idx}`,
-        api_key: k.key,
-        adapter: q(`#ed_sp_adapter_${spId}`)?.value.trim() || sp.adapter || '',
-        base_url: q(`#ed_sp_base_${spId}`)?.value.trim() || sp.base_url || '',
-      };
-      try {
-        const reqDraft = parseOptionalJsonField(q(`#ed_sp_req_${spId}`)?.value, 'request');
-        if (reqDraft) payload.request = reqDraft;
-        const fetchDraft = parseOptionalJsonField(q(`#ed_sp_fetch_${spId}`)?.value, 'fetch');
-        if (fetchDraft) payload.fetch = fetchDraft;
-      } catch (_) {}
-      return payload;
-    }
-
-    async function runSearchKeyVerify(k, idx) {
-      try {
-        const res = await window.HOST.verifySearchKey(buildSearchVerifyPayload(k, idx));
-        k.last_checked_at = new Date().toISOString();
-        k.last_latency_ms = res?.latency_ms || 0;
-        k.last_ok = Boolean(res && res.valid === true);
-        k.last_status = res?.status || (k.last_ok ? 200 : 0);
-        k.last_error = k.last_ok ? '' : scrubUiText(res?.error || '无效凭据', [k.key]);
-        return k.last_ok;
-      } catch (e) {
-        k.last_checked_at = new Date().toISOString();
-        k.last_ok = false;
-        k.last_error = scrubUiText(e?.message || '校验异常', [k.key]);
-        return false;
-      }
-    }
-
-    function applyEditorToSp() {
-      const nextName = q(`#ed_sp_name_${spId}`).value.trim();
-      const nextBaseUrl = q(`#ed_sp_base_${spId}`).value.trim();
-      const nextCaps = [];
-      if (q(`#ed_sp_cap_search_${spId}`)?.checked) nextCaps.push('search');
-      if (q(`#ed_sp_cap_fetch_${spId}`)?.checked) nextCaps.push('fetch');
-      const adapter = q(`#ed_sp_adapter_${spId}`)?.value.trim() || inferSearchAdapter(spId, nextBaseUrl);
-      const v = validateSearchSpec({
-        name: nextName,
-        baseUrl: nextBaseUrl,
-        timeoutRaw: q(`#ed_sp_timeout_${spId}`).value,
-        caps: nextCaps,
-        adapter,
-        reqRaw: q(`#ed_sp_req_${spId}`)?.value,
-        respRaw: q(`#ed_sp_resp_${spId}`)?.value,
-        fetchRaw: q(`#ed_sp_fetch_${spId}`)?.value,
-        quirksRaw: q(`#ed_sp_quirks_${spId}`)?.value,
-      });
-      if (v.error) return v.error;
-      sp.name = nextName;
-      sp.origin = 'vault';
-      sp.enabled = Boolean(q(`#ed_sp_enabled_${spId}`)?.checked);
-      sp.capabilities = nextCaps;
-      sp.base_url = nextBaseUrl;
-      sp.timeout_ms = v.timeoutMs;
-      if (adapter) sp.adapter = adapter; else delete sp.adapter;
-      if (v.reqObj) sp.request = v.reqObj; else delete sp.request;
-      if (v.respObj) sp.response = v.respObj; else delete sp.response;
-      if (v.fetchObj) sp.fetch = v.fetchObj; else delete sp.fetch;
-      if (v.quirksObj) sp.quirks = v.quirksObj; else delete sp.quirks;
-      (sp.api_keys || []).forEach((k) => { if (k) k.origin = 'vault'; });
-      return '';
-    }
-
-    function appendPendingKeys() {
-      const rawVal = q(`#new_sp_key_val_${spId}`).value.trim();
-      if (!rawVal) return { count: 0 };
-      const lbl = q(`#new_sp_key_lbl_${spId}`).value.trim();
-      const parsed = parseMultiApiKeys(rawVal, lbl, sp.api_keys || [], 'vault');
-      if (parsed.error) return { error: parsed.error };
-      sp.api_keys = sp.api_keys || [];
-      sp.api_keys.push(...parsed.keys);
-      return { count: parsed.keys.length };
-    }
-
-    const tbody = q(`#sp_keys_tbody_${spId}`);
-    if (keys.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-muted">未配置密钥（不会下发给节点）</td></tr>';
-    } else {
-      keys.forEach((k, idx) => {
-        const keyLabel = k.label || k.id || `key-${idx}`;
-        let stHtml = '<span class="pill">未校验</span>';
-        if (k.last_ok === true) stHtml = `<span class="pill pill--green">正常 ${k.last_latency_ms || 0}ms</span>`;
-        else if (k.last_ok === false) {
-          const errSub = k.last_error ? `<div class="text-xs text-muted mt-1">${eh(scrubUiText(k.last_error, [k.key]))}</div>` : '';
-          stHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}${k.last_latency_ms ? ` · ${k.last_latency_ms}ms` : ''}</span>${errSub}`;
-        }
-        const tr = ce('tr');
-        tr.innerHTML = `<td><input type="checkbox" class="sp_k_enable_cb" ${k.enabled !== false ? 'checked' : ''}></td><td><strong>${eh(keyLabel)}</strong></td><td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td><td>${stHtml}</td><td><div class="fields"><button class="btn btn--sm sp_btn_verify_k" type="button">${k.last_ok === false ? '重新校验' : '校验'}</button><button class="btn btn--sm btn--danger sp_btn_del_k" type="button">删除</button></div></td>`;
-        tr.querySelector('.sp_k_enable_cb').addEventListener('change', (e) => { k.enabled = e.target.checked; });
-        clk(tr.querySelector('.sp_btn_verify_k'), async () => {
-          toast(`正在校验 [${keyLabel}]...`, 'info');
-          const ok = await runSearchKeyVerify(k, idx);
-          toast(ok ? `Key [${keyLabel}] 正常 (${k.last_latency_ms}ms)` : `Key [${keyLabel}] 失败: ${k.last_error}`, ok ? 'ok' : 'err');
-          renderSearchProvidersList();
-        });
-        clk(tr.querySelector('.sp_btn_del_k'), () => {
-          sp.api_keys.splice(idx, 1);
-          renderSearchProvidersList();
-          toast(`已移除 [${keyLabel}]，点击「保存搜索提供商」持久化`, 'info');
-        });
-        tbody.appendChild(tr);
-      });
-    }
-
-    clk(q(`#btn_verify_all_sp_keys_${spId}`), async () => {
-      if (!keys.length) return toast('暂无密钥可校验', 'warn');
-      toast(`正在校验 ${keys.length} 把 Key...`, 'info');
-      let succ = 0;
-      for (let i = 0; i < keys.length; i++) if (await runSearchKeyVerify(keys[i], i)) succ++;
-      renderSearchProvidersList();
-      toast(`校验完成: ${succ}/${keys.length} 可用`, succ === keys.length ? 'ok' : 'warn');
-    });
-
-    clk(q(`#btn_add_sp_key_${spId}`), async () => {
-      if (!q(`#new_sp_key_val_${spId}`).value.trim()) return toast('请粘贴至少一把 API Key', 'warn');
-      const err = applyEditorToSp();
-      if (err) return toast(err, 'warn');
-      const prevLen = (sp.api_keys || []).length;
-      const added = appendPendingKeys();
-      if (added.error) return toast(added.error, 'warn');
-      try {
-        await persistConfig(`已添加并保存 ${added.count} 把密钥`);
-      } catch (e) {
-        sp.api_keys = (sp.api_keys || []).slice(0, prevLen);
-      }
-    });
-
-    clk(q(`#btn_clear_sp_keys_${spId}`), () => {
-      sp.api_keys = [];
-      renderSearchProvidersList();
-      toast('已清空密钥列表，点击「保存搜索提供商」生效', 'info');
-    });
-
-    clk(q(`#btn_save_sp_${spId}`), async () => {
-      const err = applyEditorToSp();
-      if (err) return toast(err, 'warn');
-      const added = appendPendingKeys();
-      if (added.error) return toast(added.error, 'warn');
-      await persistConfig('搜索提供商配置已保存');
-    });
-
-    clk(q(`#btn_del_sp_${spId}`), async () => {
-      if (!confirm(`确定删除搜索提供商 ${spId} 吗？`)) return;
-      delete state.config.search_providers[spId];
-      if (state.config.search_selection) {
-        if (Array.isArray(state.config.search_selection.search)) {
-          state.config.search_selection.search = state.config.search_selection.search.filter((id) => id !== spId);
-        }
-        if (state.config.search_selection.fetch === spId) {
-          state.config.search_selection.fetch = '';
-        }
-      }
-      state.activeEditorKey = null;
-      await persistConfig('搜索提供商已删除');
-    });
-
-    return wrap;
-  }
-
   // --- View: Nodes (Hub mode) ---
   function renderNodesList() {
     const container = $('nodesList');
     if (!container) return;
     container.innerHTML = '';
 
-    const allNodes = state.nodes || [];
-    const filter = state.nodeKindFilter || 'all';
-    const nodes = filter === 'all' ? allNodes : allNodes.filter((n) => getNodeKind(n) === filter);
+    const nodes = state.nodes || [];
     if (nodes.length === 0) {
       const emptyRow = ce('div');
       emptyRow.className = 'row text-muted';
-      emptyRow.textContent = allNodes.length === 0 ? '暂无中转节点，点击上方「签发新节点」生成' : `暂无 ${filter.toUpperCase()} 节点`;
+      emptyRow.textContent = '暂无中转节点，点击上方「签发新节点」生成';
       container.appendChild(emptyRow);
       return;
     }
@@ -2463,16 +1836,11 @@
 
       const who = ce('div');
       who.className = 'who';
-      const kind = getNodeKind(node);
       const modelsScope = formatScopeInput(node.scope?.models);
       const provsScope = formatScopeInput(node.scope?.providers);
-      const searchScope = formatScopeInput(node.scope?.search_providers);
       const snap = getNodeSyncSnapshotStatus(node);
-      const kindBadge = kind === 'mcp' ? `MCP · ${node.service_type || 'khc-search'}` : `LLM · ${node.role || 'full'}`;
-      const subText = kind === 'mcp'
-        ? `搜索: ${searchScope}${node.mcp_url ? ` · URL: ${node.mcp_url}` : ''} · Token: ${node.token_prefix}`
-        : `模型: ${modelsScope} · 供应商: ${provsScope} · Token: ${node.token_prefix}`;
-      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill ${kind === 'mcp' ? 'pill--green' : 'pill--accent'}">${eh(kindBadge)}</span><span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
+      const subText = `模型: ${modelsScope} · 供应商: ${provsScope} · Token: ${node.token_prefix}`;
+      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill pill--accent">${eh(node.role || 'full')}</span><span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
 
       const fields = ce('div');
       fields.className = 'fields';
@@ -2502,63 +1870,30 @@
   function buildNodeEditor(node) {
     const wrap = ce('div');
     const isEnabled = node.enabled;
-    const initKind = getNodeKind(node);
     const id = node.id;
     const q = (s) => wrap.querySelector(s);
 
     wrap.innerHTML = `<div class="form-grid">${[
-      fg('节点类型', `<select class="select" id="ed_node_kind_${id}"><option value="llm" ${initKind === 'llm' ? 'selected' : ''}>LLM 代理网关 (llm)</option><option value="mcp" ${initKind === 'mcp' ? 'selected' : ''}>MCP 扩展服务 (mcp)</option></select>`),
       fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(node.name)}">`),
-      fg('服务类型 (service_type)', `<input class="input input--code" id="ed_node_st_${id}" value="${eh(node.service_type || 'khc-search')}">`, `ed_node_st_grp_${id}`),
-      fg('租约时长 (秒)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || (initKind === 'mcp' ? 600 : 86400)}">`),
-      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" value="${eh(formatScopeInput(node.scope?.providers))}">`, `ed_node_provs_grp_${id}`),
-      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" value="${eh(formatScopeInput(node.scope?.models))}">`, `ed_node_models_grp_${id}`),
-      fg('搜索提供商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_search_provs_${id}" value="${eh(formatScopeInput(node.scope?.search_providers))}">`, `ed_node_sp_grp_${id}`),
-      fg('MCP 接入地址 mcp_url (可选)', `<input class="input input--code" id="ed_node_mcp_url_${id}" value="${eh(node.mcp_url || '')}" placeholder="https://your-space.hf.space/mcp">`, `ed_node_mu_grp_${id}`, 'form-group--span2'),
+      fg('租约时长 (秒)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || 86400}">`),
+      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" value="${eh(formatScopeInput(node.scope?.providers))}">`),
+      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" value="${eh(formatScopeInput(node.scope?.models))}">`),
     ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
       fg('新 NODE_TOKEN (仅显示一次)', `<input class="input input--code" readonly id="node_new_token_val_${id}">`),
       fg('启动环境变量', `<input class="input input--code" readonly id="node_new_env_val_${id}">`),
     ].join('')}</div></div>`;
 
-    const kindSel = q(`#ed_node_kind_${id}`);
-    const syncEditorKind = (reset) => {
-      const isMcp = kindSel.value === 'mcp';
-      q(`#ed_node_st_grp_${id}`).hidden = !isMcp;
-      q(`#ed_node_mu_grp_${id}`).hidden = !isMcp;
-      q(`#ed_node_provs_grp_${id}`).hidden = isMcp;
-      q(`#ed_node_models_grp_${id}`).hidden = isMcp;
-      const hasLegacySearch = Array.isArray(node.scope?.search_providers) && node.scope.search_providers.length > 0;
-      q(`#ed_node_sp_grp_${id}`).hidden = !isMcp && !(!reset && hasLegacySearch);
-      if (reset) {
-        q(`#ed_node_ttl_${id}`).value = isMcp ? '600' : '86400';
-        q(`#ed_node_provs_${id}`).value = isMcp ? '[]' : '*';
-        q(`#ed_node_models_${id}`).value = isMcp ? '[]' : '*';
-        q(`#ed_node_search_provs_${id}`).value = isMcp ? '*' : '[]';
-        if (isMcp && !q(`#ed_node_st_${id}`).value.trim()) q(`#ed_node_st_${id}`).value = 'khc-search';
-      }
-    };
-    syncEditorKind(false);
-    kindSel.addEventListener('change', () => syncEditorKind(true));
-
     clk(q(`#btn_save_node_${id}`), async () => {
-      const kind = kindSel.value === 'mcp' ? 'mcp' : 'llm';
       const name = q(`#ed_node_name_${id}`).value.trim();
-      const serviceType = q(`#ed_node_st_${id}`).value.trim() || 'khc-search';
-      const leaseTtl = Number(q(`#ed_node_ttl_${id}`).value) || (kind === 'mcp' ? 600 : 86400);
-      const mcpUrl = kind === 'mcp' ? (q(`#ed_node_mcp_url_${id}`)?.value || '').trim() : '';
-      if (kind === 'mcp' && !/^[a-z0-9-]+$/.test(serviceType)) return toast('service_type 仅支持小写字母、数字和连字符', 'warn');
-      if (!isValidOptionalHttpUrl(mcpUrl)) return toast('mcp_url 必须是合法的 http:// 或 https:// URL（不含凭据）', 'warn');
+      const leaseTtl = Number(q(`#ed_node_ttl_${id}`).value) || 86400;
 
       const scope = {
         providers: parseScopeInput(q(`#ed_node_provs_${id}`).value),
         models: parseScopeInput(q(`#ed_node_models_${id}`).value),
-        search_providers: parseScopeInput(q(`#ed_node_search_provs_${id}`).value),
       };
 
       try {
-        const patch = { name, kind, lease_ttl: leaseTtl, scope, mcp_url: mcpUrl };
-        if (kind === 'mcp') patch.service_type = serviceType;
-        const res = await window.HOST.patchNode(id, patch);
+        const res = await window.HOST.patchNode(id, { name, lease_ttl: leaseTtl, scope });
         if (res && res.ok) { toast('节点配置更新成功', 'ok'); await loadNodesData(); }
         else toast(res.error || '更新失败', 'err');
       } catch (e) { toast(scrubUiText(e.message), 'err'); }
@@ -2595,63 +1930,24 @@
     return wrap;
   }
 
-  function applyIssueNodeKindUI(resetValues = false) {
-    const kindEl = $('issueNodeKind');
-    if (!kindEl) return;
-    const isMcp = kindEl.value === 'mcp';
-    const setHidden = (id, v) => { const el = $(id); if (el) el.hidden = v; };
-    setHidden('issueNodeRoleGroup', isMcp);
-    setHidden('issueNodeProvsGroup', isMcp);
-    setHidden('issueNodeModelsGroup', isMcp);
-    setHidden('issueNodeServiceTypeGroup', !isMcp);
-    setHidden('issueNodeSearchProvsGroup', !isMcp);
-    setHidden('issueNodeMcpUrlGroup', !isMcp);
-    if (!resetValues) return;
-    $('issueNodeTTL').value = isMcp ? '600' : '86400';
-    $('issueNodeProvs').value = isMcp ? '[]' : '*';
-    $('issueNodeModels').value = isMcp ? '[]' : '*';
-    $('issueNodeSearchProvs').value = isMcp ? '*' : '[]';
-    if (isMcp) {
-      $('issueNodeRole').value = 'lite';
-      const st = $('issueNodeServiceType');
-      if (st && !st.value.trim()) st.value = 'khc-search';
-    } else {
-      $('issueNodeMcpUrl').value = '';
-    }
-  }
-
   async function handleIssueNode() {
-    const kind = $('issueNodeKind')?.value === 'mcp' ? 'mcp' : 'llm';
     const name = $('issueNodeName').value.trim();
-    const role = kind === 'mcp' ? 'lite' : $('issueNodeRole').value;
-    const serviceType = ($('issueNodeServiceType')?.value || '').trim() || 'khc-search';
-    const leaseTtl = Number($('issueNodeTTL').value) || (kind === 'mcp' ? 600 : 86400);
+    const role = $('issueNodeRole').value;
+    const leaseTtl = Number($('issueNodeTTL').value) || 86400;
     const provsRaw = $('issueNodeProvs')?.value;
     const modelsRaw = $('issueNodeModels')?.value;
-    const searchProvsRaw = $('issueNodeSearchProvs')?.value;
-    const mcpUrl = kind === 'mcp' ? ($('issueNodeMcpUrl')?.value || '').trim() : '';
 
     if (!name) return toast('请输入节点名称', 'warn');
-    if (kind === 'mcp' && !/^[a-z0-9-]+$/.test(serviceType)) {
-      return toast('service_type 仅支持小写字母、数字和连字符', 'warn');
-    }
-    if (!isValidOptionalHttpUrl(mcpUrl)) return toast('mcp_url 必须是合法的 http:// 或 https:// URL（不含凭据）', 'warn');
 
-    const scope = kind === 'mcp'
-      ? { providers: [], models: [], search_providers: parseScopeInput(searchProvsRaw || '*') }
-      : { providers: parseScopeInput(provsRaw), models: parseScopeInput(modelsRaw), search_providers: [] };
+    const scope = {
+      providers: parseScopeInput(provsRaw),
+      models: parseScopeInput(modelsRaw),
+    };
 
     try {
-      const payload = { kind, name, role, lease_ttl: leaseTtl, scope };
-      if (kind === 'mcp') {
-        payload.service_type = serviceType;
-        if (mcpUrl) payload.mcp_url = mcpUrl;
-      }
-      const res = await window.HOST.issueNode(payload);
+      const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl, scope });
       if (res && res.ok) {
         toast('节点签发成功！', 'ok');
-        const mcpEl = $('issueNodeMcpUrl');
-        if (mcpEl) mcpEl.value = '';
         const tokenDisplay = $('issuedTokenDisplay');
         if (tokenDisplay) {
           tokenDisplay.hidden = false;
@@ -3313,13 +2609,6 @@
         return;
       }
 
-      const activeSecrets = [];
-      for (const sp of Object.values(state.config?.search_providers || {})) {
-        for (const k of sp?.api_keys || []) {
-          if (k?.key && !String(k.key).includes('●')) activeSecrets.push(k.key);
-        }
-      }
-
       if (res?.status === 200 || data?.ok || data?._version !== undefined) {
         if (data.config) {
           state.config = data.config;
@@ -3333,11 +2622,10 @@
         toast(successMsg || '保存成功', 'ok');
         renderProvidersList();
         renderModelsList();
-        renderSearchView();
         renderSettingsView();
       } else {
         const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
-        toast(scrubUiText(errMsg, activeSecrets), 'err');
+        toast(scrubUiText(errMsg), 'err');
       }
     } catch (e) {
       toast(`保存异常: ${scrubUiText(e.message)}`, 'err');

@@ -32,9 +32,7 @@
           "providers": "object (keyed by provider id)",
           "agent_models": "object (keyed by model name)",
           "settings": "object (RuntimeSettings)",
-          "adapter_rules": "object (keyed by provider id)",
-          "search_providers": "object (keyed by search provider id, omitted/empty when filtered out)",
-          "search_selection": "object ({ search: string[], fetch: string })"
+          "adapter_rules": "object (keyed by provider id)"
         }
       }
     },
@@ -57,8 +55,8 @@
     }
   },
   "invariants": {
-    "physical_zero_leak": "No provider, search_provider, or key with origin='local' may ever appear in the projected payload.",
-    "scope_isolation": "Only providers listed in node.scope.providers, models listed in node.scope.models, and search_providers listed in node.scope.search_providers may appear in the payload.",
+    "physical_zero_leak": "No provider or key with origin='local' may ever appear in the projected payload.",
+    "scope_isolation": "Only providers listed in node.scope.providers and models listed in node.scope.models may appear in the payload.",
     "zero_disk": "Lite nodes must hold the payload in-memory (atomic.Pointer) and never persist to disk."
   }
 }

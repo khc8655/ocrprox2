@@ -204,7 +204,6 @@ const apiRoutes = [
   { file: 'api/admin/nodes/[id]/rotate.js', target: '../../../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/nodes/[[default]].js', target: '../../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/verify-key.js', target: '../../_hub/api/admin/verify-key.js' },
-  { file: 'api/admin/verify-search-key.js', target: '../../_hub/api/admin/verify-search-key.js' },
   { file: 'api/admin/probe-models.js', target: '../../_hub/api/admin/probe-models.js' },
   { file: 'api/vault/manifest.js', target: '../../_hub/api/vault/manifest.js' },
   { file: 'api/vault/fetch.js', target: '../../_hub/api/vault/fetch.js' },

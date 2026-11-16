@@ -108,7 +108,6 @@ llmproxy2/
 | **Magpie 复用矩阵** | [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md) | `yetone/magpie` 85 个包与 1 代 17 个模块的逐文件搬运/裁剪对照表 |
 | **安全与凭据规范** | [`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md) | 节点签发/吊销、极简模式内存安全、SSRF DNS Pinning、密钥隔离 |
 | **前后端与节点契约** | [`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md) | `POST /api/node/config` 协议、`HOST.capabilities`、设置项生效契约 |
-| **外部 MCP 接入指南** | [`docs/MCP_INTEGRATION_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/MCP_INTEGRATION_GUIDE.md) | 外部 MCP（Search / Image 等）接入 Hub 鉴权、`search_*` 投影、`status_url` 回调与跨项目协作规范 |
 | **Web 管理端 UI 规范** | [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) | **Magpie 极简风格 UI 标准**：安静表面、列表行内原地展开编辑（零抽屉）、零内联样式门禁 |
 | **测试体系规范** | [`docs/TESTING_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/TESTING_SPEC.md) | T1 契约 / T2 Go 单元 (`-race`) / T3 黑盒 E2E 与零轮询/零落盘专项测试 |
 | **发版与门禁规范** | [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md) | 版本规范、多平台静态交叉编译、G1~G6 六道自动化门禁 |

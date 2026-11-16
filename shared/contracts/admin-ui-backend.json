@@ -46,8 +46,6 @@
         "ok": "boolean",
         "_version": "integer",
         "providers": "object",
-        "search_providers": "object",
-        "search_selection": "object ({ search: string[], fetch: string })",
         "agent_models": "object",
         "settings": "object"
       }
@@ -63,8 +61,6 @@
       "request": {
         "_version": "integer",
         "providers": "object",
-        "search_providers": "object (optional)",
-        "search_selection": "object (optional, { search: string[], fetch: string })",
         "agent_models": "object",
         "settings": "object"
       },
@@ -87,7 +83,7 @@
       ],
       "response": {
         "ok": true,
-        "nodes": "array of node objects (includes optional sanitized telemetry snapshot)"
+        "nodes": "array of node objects"
       }
     },
     "nodes_issue": {
@@ -98,17 +94,13 @@
         "hub"
       ],
       "request": {
-        "kind": "string (optional: llm | mcp; default llm unless inferred from legacy fields)",
-        "service_type": "string (optional lowercase slug ^[a-z0-9-]+$; default khc-search when kind=mcp)",
         "name": "string",
-        "role": "string (lite | full; forced to lite when kind=mcp)",
-        "lease_ttl": "integer (default 86400 for llm, 600 for mcp)",
+        "role": "string (lite | full)",
+        "lease_ttl": "integer",
         "grace_ttl": "integer",
-        "mcp_url": "string (optional http/https URL without credentials)",
         "scope": {
-          "models": "array of strings (default ['*'] for llm, [] for mcp)",
-          "providers": "array of strings (default ['*'] for llm, [] for mcp)",
-          "search_providers": "array of strings (default [] when kind=llm, ['*'] when kind=mcp)"
+          "models": "array of strings",
+          "providers": "array of strings"
         }
       },
       "response": {
@@ -124,17 +116,7 @@
       "auth": "ADMIN_PASSWORD",
       "roles": [
         "hub"
-      ],
-      "request": {
-        "kind": "string (optional: llm | mcp)",
-        "service_type": "string (optional lowercase slug ^[a-z0-9-]+$)",
-        "name": "string (optional)",
-        "enabled": "boolean (optional)",
-        "lease_ttl": "integer (optional)",
-        "grace_ttl": "integer (optional)",
-        "mcp_url": "string (optional http/https URL without credentials, empty clears)",
-        "scope": "object (optional models/providers/search_providers arrays)"
-      }
+      ]
     },
     "nodes_rotate": {
       "method": "POST",
@@ -167,9 +149,6 @@
       "headers": {
         "Authorization": "Bearer stk_node_<48hex>",
         "If-None-Match": "optional etag"
-      },
-      "request": {
-        "telemetry": "optional runtime snapshot object piggybacked on demand (version, uptime_sec, playwright_ready, search_count, crawl_count, resting_keys, resting_keys_count, last_error)"
       }
     },
     "usage": {
@@ -248,30 +227,6 @@
         "status": "integer",
         "latency_ms": "integer (optional)",
         "models_count": "integer (optional)",
-        "error": "string (optional)"
-      }
-    },
-    "verify_search_key": {
-      "method": "POST",
-      "path": "/api/admin/verify-search-key",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
-        "hub"
-      ],
-      "request": {
-        "provider": "string",
-        "key_label": "string (optional)",
-        "api_key": "string (optional if stored in KV)",
-        "adapter": "string (optional)",
-        "base_url": "string (optional)",
-        "request": "object (optional declarative HTTP probe spec)",
-        "fetch": "object (optional declarative HTTP fetch fallback spec)"
-      },
-      "response": {
-        "ok": true,
-        "valid": "boolean",
-        "status": "integer",
-        "latency_ms": "integer (optional)",
         "error": "string (optional)"
       }
     },

@@ -64,17 +64,8 @@ export async function handleNodeConfigRequest(request, env, kv) {
       .split(',')[0]
       .trim() || null;
 
-  let telemetry = null;
-  try {
-    const reqClone = request.clone();
-    const reqJson = await reqClone.json();
-    if (reqJson && typeof reqJson.telemetry === 'object') {
-      telemetry = reqJson.telemetry;
-    }
-  } catch (_) {}
-
   // Touch node's last_seen and sync counters
-  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, telemetry }).catch(() => {});
+  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp }).catch(() => {});
 
   const responseHeaders = {
     'ETag': etag,

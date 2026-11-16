@@ -33,20 +33,15 @@
     {
       "id": "node_hk_nat_01",
       "name": "香港 NAT 小鸡 01",
-      "kind": "llm",
       "role": "lite",
-      "service_type": "",
       "enabled": true,
       "token_prefix": "stk_node_9f8e...",
       "lease_ttl": 86400,
       "grace_ttl": 3600,
-      "mcp_url": "",
       "scope": {
         "models": ["*"],
-        "providers": ["minimax", "deepseek", "openrouter"],
-        "search_providers": []
+        "providers": ["minimax", "deepseek", "openrouter"]
       },
-      "telemetry": null,
       "created_at": "2026-11-08T08:00:00Z",
       "last_seen": "2026-11-08T08:30:12Z",
       "last_config_version": 137,
@@ -57,13 +52,9 @@
 ```
 
 ### 2.2 签发新节点 `POST /api/admin/nodes`
-- 支持节点分类字段 `kind`（`llm` | `mcp`）与扩展服务类型 `service_type`（如 `khc-search`，`kind="mcp"` 时默认为 `khc-search`）：
-  - `kind="llm"`：默认 `lease_ttl: 86400`、`scope: { models: ["*"], providers: ["*"], search_providers: [] }`（防止将搜索 Key 下发给纯大模型代理，也支持与旧版请求字段兼容）。
-  - `kind="mcp"`：强制 `role: "lite"`，默认 `lease_ttl: 600`、`scope: { models: [], providers: [], search_providers: ["*"] }`，确保 **MCP 外部节点默认拿不到任何 LLM API Key**。
 - **Request**:
 ```json
 {
-  "kind": "llm",
   "name": "日本 NAT 极简节点",
   "role": "lite",
   "lease_ttl": 86400,
@@ -88,13 +79,12 @@
 - **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
 - **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`，旧 Token 立即失效。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
-- **Hub 侧搜索 Key 校验**：`POST /api/admin/verify-search-key` → 校验 Brave / Tavily / Jina / Serper / Firecrawl / Exa 或声明式 HTTP 搜索 Key 连通性（带 `isSafePublicHttpUrl` SSRF 防护与结果写回 KV）。
 
 ---
 
 ## 三、 节点按需配置投影契约（`POST /api/node/config`）
 
-受 `NODE_TOKEN`（`Authorization: Bearer <NODE_TOKEN>`）保护，遵循零轮询、零心跳、严格单向被动响应原则（可选请求体 `{ "telemetry": { ... } }` 在拉取/续租时顺带上报运行快照）：
+受 `NODE_TOKEN`（`Authorization: Bearer <NODE_TOKEN>`）保护，遵循零轮询、零心跳、严格单向被动响应原则：
 
 | 场景 | 请求头 / 参数 | HTTP 状态码 | 响应头 | 响应体 | 节点侧标准动作 |
 |---|---|---:|---|---|---|

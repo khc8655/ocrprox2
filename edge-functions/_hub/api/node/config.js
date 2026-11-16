@@ -49,15 +49,7 @@ request.headers.get('x-forwarded-for') ||
 '')
 .split(',')[0]
 .trim() || null;
-let telemetry = null;
-try {
-const reqClone = request.clone();
-const reqJson = await reqClone.json();
-if (reqJson && typeof reqJson.telemetry === 'object') {
-telemetry = reqJson.telemetry;
-}
-} catch (_) {}
-touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, telemetry }).catch(() => {});
+touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp }).catch(() => {});
 const responseHeaders = {
 'ETag': etag,
 'Cache-Control': 'no-store',
