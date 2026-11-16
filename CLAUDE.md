@@ -49,7 +49,7 @@
 
 1. **EdgeOne Makers（`hub` 角色）**：
    - **只做**：供应商与 Key（Vault Hub）管理、预设适配规则管理、VM 节点的**签发（Issue `NODE_TOKEN`）与注销/吊销（Revoke）**、被动响应 `POST /api/node/config` 配置投影、托管管理端 UI。
-   - **绝不做**：不再提供 `/v1/*` 推理代理、不再接收定时心跳、不再主动连接任何 VM。
+   - **绝不做**：不再提供 `/v1/*` 推理代理、不再接收定时心跳、不再主动连接任何 VM；**本仓已封存并移除 MCP / 扩展服务（`search_providers`、`verify-search-key`、`mcp_url` 等）**，保持纯粹的 LLM Proxy + Hub 定位。
 2. **NAT VM 极简客户端（`--role=lite`）**：
    - **只做**：Agent 数据面代理（`/v1/models`、`/v1/chat/completions`、`/v1/messages`、`/v1/responses`）、首次真实请求触发拉取配置（`lazy-once + lease`）、租约到期 `If-None-Match` 304 续租。
    - **绝不做**：**绝不落盘任何配置或明文/密文 Key**、绝不挂载 `/api/admin/*` 或任何写接口、绝不启动后台轮询或心跳定时器；收到中枢 `401` 或租约宽限期耗尽立即清空内存并停服（返回 `503`）。
