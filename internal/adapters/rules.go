@@ -8,9 +8,16 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
+	providerpkg "github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/types"
+)
+
+const (
+	maxAggregateScannerToken = 4 << 20  // 4 MiB max single SSE line
+	maxAggregateTotalBytes   = 16 << 20 // 16 MiB max aggregated response content
 )
 
 var jsonBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\{\\[].*?[\\]\\}])\\s*```")
@@ -23,6 +30,72 @@ func NewDefaultEngine() *DefaultEngine {
 	return &DefaultEngine{}
 }
 
+// ResolveAdapterRules returns provider.AdapterRules when present, or falls back to
+// built-in preset rules when provider.PresetID is set.
+func ResolveAdapterRules(prov *types.ProviderConfig) *types.AdapterRules {
+	if prov == nil {
+		return nil
+	}
+	if prov.AdapterRules != nil {
+		return prov.AdapterRules
+	}
+	if prov.PresetID != "" {
+		return providerpkg.DefaultPresetAdapterRules(prov.PresetID)
+	}
+	return nil
+}
+
+func resolveEffectiveModel(targetModel, currentModel string, prov *types.ProviderConfig, rules *types.AdapterRules) string {
+	effective := targetModel
+	if effective == "" {
+		effective = currentModel
+	}
+	if effective == "" {
+		return ""
+	}
+
+	if targetModel == "" || targetModel == currentModel {
+		matched := false
+		if prov != nil && prov.ModelAliases != nil {
+			if alias, exists := prov.ModelAliases[effective]; exists && alias != "" {
+				effective = alias
+				matched = true
+			}
+		}
+		if !matched && rules != nil && rules.ModelAliases != nil {
+			if alias, exists := rules.ModelAliases[effective]; exists && alias != "" {
+				effective = alias
+			}
+		}
+	}
+
+	if rules != nil && rules.EnsureGooglePrefix {
+		if strings.HasPrefix(strings.ToLower(effective), "gemini-") {
+			effective = "google/" + effective
+		}
+	}
+	return effective
+}
+
+func parseJSONInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		if i, err := strconv.Atoi(n.String()); err == nil {
+			return i, true
+		}
+		if f, err := strconv.ParseFloat(n.String(), 64); err == nil {
+			return int(f), true
+		}
+	}
+	return 0, false
+}
+
 // PrepareRequest adapts client request body and headers according to provider rules.
 func (e *DefaultEngine) PrepareRequest(
 	endpoint string,
@@ -32,18 +105,15 @@ func (e *DefaultEngine) PrepareRequest(
 	clientForcedStream bool,
 ) ([]byte, map[string]string, bool, error) {
 	extraHeaders := make(map[string]string)
-	var rules *types.AdapterRules
-	if provider != nil {
-		rules = provider.AdapterRules
-	}
+	rules := ResolveAdapterRules(provider)
 
 	// Fast-Path for large payloads (> 512KB) to eliminate AST heap expansion (OOM defense in 64MB containers)
 	if len(reqBody) > 512*1024 {
 		needsComplex := false
 		if rules != nil {
 			if rules.GeminiCompat || rules.StripReasoningEnabled || len(rules.StripParams) > 0 || len(rules.RenameParams) > 0 || len(rules.OverrideParams) > 0 ||
-				rules.DenyDeveloperRole || rules.MergeSystem || rules.StripEmpty || rules.ThinkingPolicy != "" ||
-				rules.AnthropicStrictSig || rules.AnthropicPassbackReq {
+				rules.DenyDeveloperRole || rules.SystemFirstOnly || rules.MergeSystem || rules.StripEmpty || rules.ThinkingPolicy != "" ||
+				rules.AnthropicStrictSig || rules.AnthropicPassbackReq || rules.MaxTokensCeiling > 0 || rules.NormalizeChoiceToString {
 				needsComplex = true
 			}
 		}
@@ -74,12 +144,7 @@ func (e *DefaultEngine) PrepareRequest(
 					upstreamStream = bVal
 				}
 
-				effectiveModel := targetModel
-				if effectiveModel == "" && currentModel != "" && provider != nil && provider.ModelAliases != nil {
-					if alias, exists := provider.ModelAliases[currentModel]; exists {
-						effectiveModel = alias
-					}
-				}
+				effectiveModel := resolveEffectiveModel(targetModel, currentModel, provider, rules)
 
 				mutated := reqBody
 				if effectiveModel != "" && effectiveModel != currentModel {
@@ -90,27 +155,38 @@ func (e *DefaultEngine) PrepareRequest(
 						buf.WriteString(effectiveModel)
 						buf.Write(reqBody[vEnd:])
 						mutated = buf.Bytes()
-					} else {
-						// Inject model field at root
-						if idx := bytes.IndexByte(mutated, '{'); idx >= 0 {
-							inject := fmt.Sprintf(`"model":%q,`, effectiveModel)
-							var buf bytes.Buffer
-							buf.Grow(len(mutated) + len(inject))
-							buf.Write(mutated[:idx+1])
-							buf.WriteString(inject)
-							buf.Write(mutated[idx+1:])
-							mutated = buf.Bytes()
-						}
+					} else if idx := bytes.IndexByte(mutated, '{'); idx >= 0 {
+						inject := fmt.Sprintf(`"model":%q,`, effectiveModel)
+						var buf bytes.Buffer
+						buf.Grow(len(mutated) + len(inject))
+						buf.Write(mutated[:idx+1])
+						buf.WriteString(inject)
+						buf.Write(mutated[idx+1:])
+						mutated = buf.Bytes()
 					}
 				}
 
 				if rules != nil && rules.StreamOnly {
-					if bVal, bStart, bEnd, bFound := findTopLevelBool(mutated, "stream"); bFound && !bVal {
+					if bVal, bStart, bEnd, bFound := findTopLevelBool(mutated, "stream"); bFound {
+						if !bVal {
+							var buf bytes.Buffer
+							buf.Grow(len(mutated) - (bEnd - bStart) + 4)
+							buf.Write(mutated[:bStart])
+							buf.WriteString("true")
+							buf.Write(mutated[bEnd:])
+							mutated = buf.Bytes()
+						}
+					} else if idx := bytes.IndexByte(mutated, '{'); idx >= 0 {
+						rest := bytes.TrimSpace(mutated[idx+1:])
+						inject := `"stream":true,`
+						if len(rest) > 0 && rest[0] == '}' {
+							inject = `"stream":true`
+						}
 						var buf bytes.Buffer
-						buf.Grow(len(mutated) - (bEnd - bStart) + 4)
-						buf.Write(mutated[:bStart])
-						buf.WriteString("true")
-						buf.Write(mutated[bEnd:])
+						buf.Grow(len(mutated) + len(inject))
+						buf.Write(mutated[:idx+1])
+						buf.WriteString(inject)
+						buf.Write(mutated[idx+1:])
 						mutated = buf.Bytes()
 					}
 				}
@@ -129,13 +205,10 @@ func (e *DefaultEngine) PrepareRequest(
 		bodyMap = make(map[string]any)
 	}
 
-	// 1. Model Alias and Target Model override
-	if targetModel != "" {
-		bodyMap["model"] = targetModel
-	} else if currentModel, ok := bodyMap["model"].(string); ok && provider != nil && provider.ModelAliases != nil {
-		if alias, exists := provider.ModelAliases[currentModel]; exists {
-			bodyMap["model"] = alias
-		}
+	// 1. Model Alias, Preset Alias, EnsureGooglePrefix, and Target Model override
+	currentModel, _ := bodyMap["model"].(string)
+	if effectiveModel := resolveEffectiveModel(targetModel, currentModel, provider, rules); effectiveModel != "" {
+		bodyMap["model"] = effectiveModel
 	}
 
 	// 2. Extra Headers
@@ -186,34 +259,53 @@ func (e *DefaultEngine) PrepareRequest(
 			bodyMap[k] = v
 		}
 
+		// 7b. MaxTokensCeiling: clamp max_tokens / max_completion_tokens
+		if rules.MaxTokensCeiling > 0 {
+			for _, tk := range []string{"max_tokens", "max_completion_tokens"} {
+				if raw, exists := bodyMap[tk]; exists {
+					if n, ok := parseJSONInt(raw); ok && n > rules.MaxTokensCeiling {
+						bodyMap[tk] = rules.MaxTokensCeiling
+					}
+				}
+			}
+		}
+
+		// 7c. NormalizeChoiceToString: coerce map tool_choice to "auto"
+		if rules.NormalizeChoiceToString {
+			if _, isMap := bodyMap["tool_choice"].(map[string]any); isMap {
+				bodyMap["tool_choice"] = "auto"
+			}
+		}
+
 		// 8. Messages normalization & Thinking Policy
 		if msgs, ok := bodyMap["messages"].([]any); ok && len(msgs) > 0 {
 			activeModel, _ := bodyMap["model"].(string)
 			bodyMap["messages"] = NormalizeMessages(msgs, rules, activeModel)
 		}
+	}
 
-		// 9. Gemini Compatibility
-		activeModel, _ := bodyMap["model"].(string)
-		keepSigs := rules.GeminiCompat || strings.Contains(strings.ToLower(activeModel), "gemini") || rules.ThinkingPolicy == "passback_required" || rules.AnthropicPassbackReq
-		if rules.GeminiCompat || strings.Contains(strings.ToLower(activeModel), "gemini") {
-			ApplyGeminiThinking(bodyMap, activeModel)
-			RestoreSignatures(bodyMap, true)
+	// 9. Gemini Compatibility & Signature Restoration
+	activeModel, _ := bodyMap["model"].(string)
+	isGeminiCompat := (rules != nil && rules.GeminiCompat) || strings.Contains(strings.ToLower(activeModel), "gemini")
+	keepSigs := isGeminiCompat || (rules != nil && (rules.ThinkingPolicy == "passback_required" || rules.AnthropicPassbackReq))
+	if isGeminiCompat {
+		ApplyGeminiThinking(bodyMap, activeModel)
+		RestoreSignatures(bodyMap, true)
 
-			// Clean tool schemas for Gemini
-			if tools, ok := bodyMap["tools"].([]any); ok {
-				for _, tObj := range tools {
-					if tMap, ok := tObj.(map[string]any); ok {
-						if fn, ok := tMap["function"].(map[string]any); ok {
-							if params, ok := fn["parameters"].(map[string]any); ok {
-								fn["parameters"] = SanitizeGeminiSchema(params)
-							}
+		// Clean tool schemas for Gemini
+		if tools, ok := bodyMap["tools"].([]any); ok {
+			for _, tObj := range tools {
+				if tMap, ok := tObj.(map[string]any); ok {
+					if fn, ok := tMap["function"].(map[string]any); ok {
+						if params, ok := fn["parameters"].(map[string]any); ok {
+							fn["parameters"] = SanitizeGeminiSchema(params)
 						}
 					}
 				}
 			}
-		} else {
-			RestoreSignatures(bodyMap, keepSigs)
 		}
+	} else if rules != nil || bytes.Contains(reqBody, []byte(SigSep)) {
+		RestoreSignatures(bodyMap, keepSigs)
 	}
 
 	mutated, err := json.Marshal(bodyMap)
@@ -231,18 +323,24 @@ func (e *DefaultEngine) TransformNonStreamResponse(
 	provider *types.ProviderConfig,
 	reqModel string,
 ) ([]byte, error) {
-	if len(respBody) == 0 || provider == nil || provider.AdapterRules == nil {
+	if len(respBody) == 0 {
 		return respBody, nil
 	}
 
-	rules := provider.AdapterRules
+	rules := ResolveAdapterRules(provider)
+	reqIsGemini := strings.Contains(strings.ToLower(reqModel), "gemini")
+	hasSigInBody := bytes.Contains(respBody, []byte("thought_signature"))
+	if rules == nil && !reqIsGemini && !hasSigInBody {
+		return respBody, nil
+	}
+
 	var data map[string]any
 	if err := json.Unmarshal(respBody, &data); err != nil {
 		return respBody, nil
 	}
 
 	// 1. UnwrapRoot (e.g. data in {code: 0, data: {...}})
-	if rules.UnwrapRoot != "" {
+	if rules != nil && rules.UnwrapRoot != "" {
 		if inner, ok := data[rules.UnwrapRoot].(map[string]any); ok {
 			if inner["choices"] != nil || inner["id"] != nil {
 				data = inner
@@ -251,12 +349,17 @@ func (e *DefaultEngine) TransformNonStreamResponse(
 	}
 
 	// 2. Rescue From Text: extract markdown JSON tool call blocks into standard tool_calls
-	if rules.RescueFromText {
+	if rules != nil && rules.RescueFromText {
 		rescueToolCalls(data)
 	}
 
-	// 3. Gemini Thought Splitting for non-stream
-	if rules.ThoughtTagMarker != "" || rules.GeminiCompat {
+	// 3. ReasoningFields: normalize e.g. message["reasoning"] -> message["reasoning_content"]
+	if rules != nil && len(rules.ReasoningFields) > 0 {
+		normalizeReasoningFields(data, rules.ReasoningFields)
+	}
+
+	// 4. Gemini Thought Splitting for non-stream
+	if rules != nil && (rules.ThoughtTagMarker != "" || rules.GeminiCompat) {
 		marker := rules.ThoughtTagMarker
 		if marker == "" {
 			marker = "thought"
@@ -264,7 +367,98 @@ func (e *DefaultEngine) TransformNonStreamResponse(
 		splitNonStreamThoughts(data, marker)
 	}
 
+	// 5. Non-stream Gemini tool_calls thought_signature encoding & caching
+	respModel, _ := data["model"].(string)
+	isGemini := (rules != nil && (rules.GeminiCompat || rules.ThinkingPolicy == "passback_required" || rules.AnthropicPassbackReq)) ||
+		reqIsGemini || strings.Contains(strings.ToLower(respModel), "gemini")
+	if isGemini {
+		encodeNonStreamToolSignatures(data)
+	}
+
 	return json.Marshal(data)
+}
+
+func normalizeReasoningFields(data map[string]any, fields []string) {
+	choices, ok := data["choices"].([]any)
+	if !ok {
+		return
+	}
+	for _, chObj := range choices {
+		ch, ok := chObj.(map[string]any)
+		if !ok {
+			continue
+		}
+		msg, ok := ch["message"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if existing, ok := msg["reasoning_content"].(string); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		for _, field := range fields {
+			if field == "" || field == "reasoning_content" {
+				continue
+			}
+			if val, ok := msg[field].(string); ok && strings.TrimSpace(val) != "" {
+				msg["reasoning_content"] = val
+				break
+			}
+		}
+	}
+}
+
+func encodeNonStreamToolSignatures(data map[string]any) {
+	choices, ok := data["choices"].([]any)
+	if !ok {
+		return
+	}
+	for _, chObj := range choices {
+		ch, ok := chObj.(map[string]any)
+		if !ok {
+			continue
+		}
+		msg, ok := ch["message"].(map[string]any)
+		if !ok {
+			continue
+		}
+		tcs, ok := msg["tool_calls"].([]any)
+		if !ok || len(tcs) == 0 {
+			continue
+		}
+		for _, tcObj := range tcs {
+			tc, ok := tcObj.(map[string]any)
+			if !ok {
+				continue
+			}
+			idStr, _ := tc["id"].(string)
+			if idStr == "" {
+				continue
+			}
+			var sig string
+			if s, ok := tc["thought_signature"].(string); ok && s != "" {
+				sig = s
+			} else if ec, ok := tc["extra_content"].(map[string]any); ok {
+				if g, ok := ec["google"].(map[string]any); ok {
+					if s, ok := g["thought_signature"].(string); ok && s != "" {
+						sig = s
+					}
+				}
+			}
+			if sig == "" {
+				if strings.Contains(idStr, SigSep) {
+					parts := strings.SplitN(idStr, SigSep, 2)
+					DefaultSigCache.Put(parts[0], parts[1])
+				}
+				continue
+			}
+			baseID := idStr
+			if strings.Contains(idStr, SigSep) {
+				baseID = strings.SplitN(idStr, SigSep, 2)[0]
+			}
+			DefaultSigCache.Put(baseID, sig)
+			tc["id"] = baseID + SigSep + sig
+		}
+	}
 }
 
 func rescueToolCalls(data map[string]any) {
@@ -372,13 +566,14 @@ func splitNonStreamThoughts(data map[string]any, marker string) {
 	}
 }
 
-// NormalizeMessages applies DenyDeveloperRole, StripEmpty, MergeSystem, and ThinkingPolicy to messages.
+// NormalizeMessages applies DenyDeveloperRole, SystemFirstOnly, StripEmpty, MergeSystem, and ThinkingPolicy to messages.
 func NormalizeMessages(msgs []any, rules *types.AdapterRules, modelName string) []any {
 	if rules == nil || len(msgs) == 0 {
 		return msgs
 	}
 
 	denyDev := rules.DenyDeveloperRole
+	sysFirstOnly := rules.SystemFirstOnly
 	mergeSys := rules.MergeSystem
 	stripEmpty := rules.StripEmpty
 	thinkingPolicy := rules.ThinkingPolicy
@@ -424,6 +619,9 @@ func NormalizeMessages(msgs []any, rules *types.AdapterRules, modelName string) 
 				systemParts = append(systemParts, strings.TrimSpace(contentStr))
 			}
 		} else {
+			if sysFirstOnly && role == "system" && len(intermediate) > 0 {
+				mCopy["role"] = "user"
+			}
 			intermediate = append(intermediate, mCopy)
 		}
 	}
@@ -585,6 +783,7 @@ func (e *DefaultEngine) WrapStreamTransformer(
 // AggregateStreamToJSON converts an upstream SSE event stream into a complete non-streaming chat.completion JSON response.
 func AggregateStreamToJSON(r io.Reader) ([]byte, error) {
 	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), maxAggregateScannerToken)
 	var finalID string
 	var finalModel string
 	var contentBuilder strings.Builder
@@ -592,6 +791,24 @@ func AggregateStreamToJSON(r io.Reader) ([]byte, error) {
 	var role string
 	var finishReason string
 
+	appendCapped := func(dst *strings.Builder, s string) bool {
+		if s == "" {
+			return false
+		}
+		used := contentBuilder.Len() + reasoningBuilder.Len()
+		if used >= maxAggregateTotalBytes {
+			return true
+		}
+		rem := maxAggregateTotalBytes - used
+		if len(s) > rem {
+			dst.WriteString(s[:rem])
+			return true
+		}
+		dst.WriteString(s)
+		return contentBuilder.Len()+reasoningBuilder.Len() >= maxAggregateTotalBytes
+	}
+
+	capped := false
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
@@ -633,14 +850,25 @@ func AggregateStreamToJSON(r io.Reader) ([]byte, error) {
 			continue
 		}
 
-		if r, ok := delta["role"].(string); ok && r != "" {
-			role = r
+		if rStr, ok := delta["role"].(string); ok && rStr != "" {
+			role = rStr
 		}
 		if c, ok := delta["content"].(string); ok {
-			contentBuilder.WriteString(c)
+			if appendCapped(&contentBuilder, c) {
+				capped = true
+				break
+			}
 		}
 		if rc, ok := delta["reasoning_content"].(string); ok {
-			reasoningBuilder.WriteString(rc)
+			if appendCapped(&reasoningBuilder, rc) {
+				capped = true
+				break
+			}
+		}
+	}
+	if !capped {
+		if err := sc.Err(); err != nil {
+			return nil, err
 		}
 	}
 

@@ -3,8 +3,12 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/khc8655/llmproxy2/internal/auth"
@@ -27,6 +31,7 @@ func TestSystemVersionCheckUpdateAndMultiAccessKeys(t *testing.T) {
 	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
 
 	srv := NewServer(authMgr, localSrc, obsMgr, sched)
+	srv.SetAllowPrivate(true)
 	srv.SetBuildInfo("v20261115-06", "2.2.1", "abc1234")
 
 	// Mock GitHub Releases API
@@ -95,5 +100,93 @@ func TestSystemVersionCheckUpdateAndMultiAccessKeys(t *testing.T) {
 	primary, extras := authMgr.GetClientKeys()
 	if primary != "sk-new-main" || len(extras) != 2 {
 		t.Fatalf("unexpected updated keys: primary=%q extras=%v", primary, extras)
+	}
+}
+
+func TestSystemUpgrade_MandatorySHA256FailsClosed(t *testing.T) {
+	binName := fmt.Sprintf("llmproxy-%s-%s", runtime.GOOS, runtime.GOARCH)
+
+	cases := []struct {
+		name           string
+		omitChecksum   bool
+		checksumStatus int
+		checksumBody   string
+	}{
+		{
+			name:         "missing SHA256SUMS asset in release",
+			omitChecksum: true,
+		},
+		{
+			name:           "SHA256SUMS returns 404",
+			checksumStatus: http.StatusNotFound,
+			checksumBody:   "not found",
+		},
+		{
+			name:           "SHA256SUMS missing entry for binary",
+			checksumStatus: http.StatusOK,
+			checksumBody:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other-binary\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var binDownloads atomic.Int32
+			var baseURL string
+			mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+					assets := []map[string]any{
+						{"name": binName, "browser_download_url": baseURL + "/download/" + binName},
+					}
+					if !tc.omitChecksum {
+						assets = append(assets, map[string]any{
+							"name":                 "SHA256SUMS",
+							"browser_download_url": baseURL + "/download/SHA256SUMS",
+						})
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"tag_name": "v20261199-01",
+						"assets":   assets,
+					})
+				case r.URL.Path == "/download/SHA256SUMS":
+					w.WriteHeader(tc.checksumStatus)
+					_, _ = w.Write([]byte(tc.checksumBody))
+				case strings.HasPrefix(r.URL.Path, "/download/"):
+					binDownloads.Add(1)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(bytes.Repeat([]byte("X"), 2048))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer mockGH.Close()
+			baseURL = mockGH.URL
+
+			tmpDir := t.TempDir()
+			localSrc, _ := config.NewLocalSource(tmpDir, "pass")
+			authMgr := auth.NewAuthenticator("sk-init", "adminpass")
+			srv := NewServer(authMgr, localSrc, nil, nil)
+			srv.SetAllowPrivate(true)
+			srv.updateAPIBase = mockGH.URL
+
+			mux := http.NewServeMux()
+			srv.RegisterRoutes(mux)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/system/upgrade", nil)
+			req.Header.Set("Authorization", "Bearer adminpass")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("expected 502 Bad Gateway when SHA256SUMS invalid/missing, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "missing or unverifiable SHA256SUMS for release asset") {
+				t.Fatalf("unexpected error body: %s", rec.Body.String())
+			}
+			if binDownloads.Load() != 0 {
+				t.Fatalf("SEC-05 violation: binary download URL was requested %d times before SHA256SUMS verification!", binDownloads.Load())
+			}
+		})
 	}
 }

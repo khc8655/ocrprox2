@@ -25,6 +25,9 @@ type LRUSigCache struct {
 // GlobalSigCache holds up to 2000 tool call thought signatures.
 var GlobalSigCache = NewLRUSigCache(2000)
 
+// DefaultSigCache aliases GlobalSigCache for non-stream and stream signature caching.
+var DefaultSigCache = GlobalSigCache
+
 func NewLRUSigCache(cap int) *LRUSigCache {
 	return &LRUSigCache{
 		capacity: cap,
@@ -264,19 +267,21 @@ func (s *ThoughtStreamSplitter) Flush() (reasoning string, content string) {
 	return "", h
 }
 
-// ApplyGeminiThinking configures Gemini 2.5 thinking_budget or 3.x thinking_level.
+// ApplyGeminiThinking configures Gemini 2.5 thinking_budget or 3.x thinking_level
+// strictly inside extra_body.google.thinking_config (never top-level fields).
 func ApplyGeminiThinking(reqMap map[string]any, modelName string) {
 	mName := strings.ToLower(modelName)
 	effort, hasEffort := reqMap["reasoning_effort"].(string)
 
 	is25 := strings.Contains(mName, "gemini-2.5") || strings.Contains(mName, "2.5-")
-	is3x := strings.Contains(mName, "gemini-3") || strings.Contains(mName, "3.0-") || strings.Contains(mName, "3.8-")
+	is25Pro := is25 && strings.Contains(mName, "pro")
+	is3x := strings.Contains(mName, "gemini-3") || strings.Contains(mName, "3.0-") || strings.Contains(mName, "3.1-") || strings.Contains(mName, "3.8-")
 
 	if !hasEffort && !is25 && !is3x {
 		return
 	}
 
-	effort = strings.ToLower(effort)
+	effort = strings.TrimSpace(strings.ToLower(effort))
 	if effort == "xhigh" || effort == "max" {
 		effort = "high"
 	}
@@ -290,7 +295,22 @@ func ApplyGeminiThinking(reqMap map[string]any, modelName string) {
 		google = make(map[string]any)
 	}
 
-	if is25 {
+	if effort == "none" {
+		if is25 {
+			budget := 0
+			if is25Pro {
+				budget = 128
+			}
+			google["thinking_config"] = map[string]any{
+				"include_thoughts": false,
+				"thinking_budget":  budget,
+			}
+		} else {
+			google["thinking_config"] = map[string]any{
+				"include_thoughts": false,
+			}
+		}
+	} else if is25 {
 		budget := 8192
 		switch effort {
 		case "minimal", "low":
@@ -304,8 +324,6 @@ func ApplyGeminiThinking(reqMap map[string]any, modelName string) {
 			"include_thoughts": true,
 			"thinking_budget":  budget,
 		}
-		// Also provide top-level thinking_budget for direct JSON tests
-		reqMap["thinking_budget"] = budget
 	} else if is3x {
 		level := "MEDIUM"
 		switch effort {
@@ -320,7 +338,6 @@ func ApplyGeminiThinking(reqMap map[string]any, modelName string) {
 			"include_thoughts": true,
 			"thinking_level":   level,
 		}
-		reqMap["thinking_level"] = level
 	}
 
 	extraBody["google"] = google

@@ -12,10 +12,13 @@ import (
 	"time"
 )
 
+const MaxPeekBufferBytes = 4 << 20 // 4 MiB cap on pre-payload SSE peek buffer
+
 var (
-	ErrEmptyStream      = errors.New("scheduler: upstream returned empty stream without payload")
-	ErrBareJSONStream   = errors.New("scheduler: upstream returned bare JSON error in 200 stream")
-	ErrFirstByteTimeout = errors.New("scheduler: upstream first-byte timeout exceeded")
+	ErrEmptyStream        = errors.New("scheduler: upstream returned empty stream without payload")
+	ErrBareJSONStream     = errors.New("scheduler: upstream returned bare JSON error in 200 stream")
+	ErrFirstByteTimeout   = errors.New("scheduler: upstream first-byte timeout exceeded")
+	ErrPeekBufferExceeded = errors.New("scheduler: upstream stream exceeded 4MB peek buffer before payload")
 )
 
 // PeekResult holds the inspected stream outcome before committing HTTP 200 to client.
@@ -154,6 +157,17 @@ func PeekFirstChunk(
 					}, nil
 				}
 				return nil, msg.err
+			}
+
+			if buffered.Len()+len(msg.line) > MaxPeekBufferBytes || currentLine.Len()+len(msg.line) > MaxPeekBufferBytes {
+				stop()
+				if closer, ok := r.(io.Closer); ok {
+					_ = closer.Close()
+				}
+				return &PeekResult{
+					IsError:      true,
+					ErrorSnippet: "stream peek buffer exceeded 4MB limit",
+				}, ErrPeekBufferExceeded
 			}
 
 			buffered.Write(msg.line)

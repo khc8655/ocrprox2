@@ -1,8 +1,11 @@
 package upstream
 
 import (
+	"errors"
 	"net/http"
-	"strings"
+	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -44,42 +47,6 @@ func TestBuildMessagesUpstream(t *testing.T) {
 	}
 }
 
-func TestReadSSE(t *testing.T) {
-	input := "event: message\ndata: hello\n\n: keepalive\n\ndata: world\n\n"
-	var events []string
-	var dataItems []string
-
-	err := ReadSSE(strings.NewReader(input), func(event, data string) error {
-		events = append(events, event)
-		dataItems = append(dataItems, data)
-		return nil
-	}, nil)
-
-	if err != nil {
-		t.Fatalf("ReadSSE error: %v", err)
-	}
-
-	if len(events) != 2 || events[0] != "message" || dataItems[0] != "hello" || dataItems[1] != "world" {
-		t.Fatalf("unexpected SSE parsed: %v, %v", events, dataItems)
-	}
-}
-
-func TestReadSSE_BareJSONError(t *testing.T) {
-	input := `{"error": {"message": "upstream model overloaded", "code": 503}}` + "\n"
-	var errFound string
-
-	_ = ReadSSE(strings.NewReader(input), func(event, data string) error {
-		if event == "error" {
-			errFound = data
-		}
-		return nil
-	}, nil)
-
-	if !strings.Contains(errFound, "upstream model overloaded") {
-		t.Fatalf("expected bare error to be captured, got %q", errFound)
-	}
-}
-
 func TestUpstreamClient_StreamingTimeoutZero(t *testing.T) {
 	client := UpstreamClient(60*time.Second, true)
 	if client.Timeout != 0 {
@@ -103,3 +70,119 @@ func TestUpstreamClient_StreamingTimeoutZero(t *testing.T) {
 	}
 }
 
+func TestUpstreamClient_BlocksCrossHostRedirectAndCapsSameHostHops(t *testing.T) {
+	var evilHit atomic.Bool
+	evilSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		evilHit.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer evilSrv.Close()
+
+	originSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cross":
+			http.Redirect(w, r, evilSrv.URL+"/steal", http.StatusFound)
+		case "/hop0":
+			http.Redirect(w, r, "/hop1", http.StatusFound)
+		case "/hop1":
+			http.Redirect(w, r, "/hop2", http.StatusFound)
+		case "/hop2":
+			http.Redirect(w, r, "/ok", http.StatusFound)
+		case "/loop":
+			step, _ := strconv.Atoi(r.URL.Query().Get("n"))
+			http.Redirect(w, r, "/loop?n="+strconv.Itoa(step+1), http.StatusFound)
+		case "/ok":
+			if r.Header.Get("Authorization") != "Bearer sk-vendor" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer originSrv.Close()
+
+	client := UpstreamClient(5*time.Second, true)
+
+	// 1. Cross-host redirect must be rejected before hitting evilSrv
+	reqCross, _ := http.NewRequest("GET", originSrv.URL+"/cross", nil)
+	reqCross.Header.Set("Authorization", "Bearer sk-vendor")
+	resp, err := client.Do(reqCross)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if !errors.Is(err, ErrCrossHostRedirect) {
+		t.Fatalf("expected ErrCrossHostRedirect, got %v", err)
+	}
+	if evilHit.Load() {
+		t.Fatalf("cross-host redirect must not contact target server")
+	}
+
+	// 2. 3 same-host hops succeed and preserve auth header
+	reqSame, _ := http.NewRequest("GET", originSrv.URL+"/hop0", nil)
+	reqSame.Header.Set("Authorization", "Bearer sk-vendor")
+	resp2, err := client.Do(reqSame)
+	if err != nil {
+		t.Fatalf("expected 3 same-host hops to succeed, got %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK after same-host hops, got %d", resp2.StatusCode)
+	}
+
+	// 3. >3 same-host hops fail with ErrTooManyRedirects
+	reqLoop, _ := http.NewRequest("GET", originSrv.URL+"/loop?n=0", nil)
+	resp3, err := client.Do(reqLoop)
+	if resp3 != nil {
+		resp3.Body.Close()
+	}
+	if !errors.Is(err, ErrTooManyRedirects) {
+		t.Fatalf("expected ErrTooManyRedirects after >3 hops, got %v", err)
+	}
+}
+
+func TestDefaultClient_StripsAuthHeadersOnCrossHostRedirectAndCaps5Hops(t *testing.T) {
+	var leakedAuth, leakedXAPI, leakedGoog string
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leakedAuth = r.Header.Get("Authorization")
+		leakedXAPI = r.Header.Get("X-Api-Key")
+		leakedGoog = r.Header.Get("x-goog-api-key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetSrv.Close()
+
+	originSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/loop" {
+			step, _ := strconv.Atoi(r.URL.Query().Get("n"))
+			http.Redirect(w, r, "/loop?n="+strconv.Itoa(step+1), http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, targetSrv.URL+"/landing", http.StatusFound)
+	}))
+	defer originSrv.Close()
+
+	client := DefaultClient(5*time.Second, true)
+	req, _ := http.NewRequest("GET", originSrv.URL+"/start", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set("X-Api-Key", "secret-x-api-key")
+	req.Header.Set("x-goog-api-key", "secret-goog-key")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("expected cross-host redirect to succeed on DefaultClient, got %v", err)
+	}
+	resp.Body.Close()
+
+	if leakedAuth != "" || leakedXAPI != "" || leakedGoog != "" {
+		t.Fatalf("expected auth headers stripped on cross-host redirect, got auth=%q x-api-key=%q x-goog-api-key=%q",
+			leakedAuth, leakedXAPI, leakedGoog)
+	}
+
+	reqLoop, _ := http.NewRequest("GET", originSrv.URL+"/loop?n=0", nil)
+	respLoop, err := client.Do(reqLoop)
+	if respLoop != nil {
+		respLoop.Body.Close()
+	}
+	if !errors.Is(err, ErrTooManyRedirects) {
+		t.Fatalf("expected ErrTooManyRedirects after >5 hops, got %v", err)
+	}
+}

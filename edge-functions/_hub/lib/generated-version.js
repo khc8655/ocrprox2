@@ -1,3 +1,3 @@
-export const VERSION = "v20261117-06";
-export const SEMVER = "2.4.4";
-export const RELEASE_DATE = "2026-11-17";
+export const VERSION = "v20261118-01";
+export const SEMVER = "2.5.0";
+export const RELEASE_DATE = "2026-11-18";

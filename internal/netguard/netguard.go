@@ -54,16 +54,24 @@ func IsMetadataIP(a netip.Addr) bool {
 	return a == metaAWSv4 || a == metaAWSv6 || a == metaAli
 }
 
+// isAlwaysBlocked returns true for addresses that must NEVER be dialed even when
+// allowPrivate is true: cloud metadata endpoints, link-local unicast (169.254.0.0/16
+// including AWS ECS 169.254.170.2 and IPv6 fe80::/10), unspecified, and multicast.
+func isAlwaysBlocked(a netip.Addr) bool {
+	a = a.Unmap()
+	if !a.IsValid() || a.IsUnspecified() || a.IsLinkLocalUnicast() ||
+		a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast() || a.IsMulticast() {
+		return true
+	}
+	return IsMetadataIP(a)
+}
+
 // Public checks if the IP address is on the public open internet.
 // Blocks loopback, private RFC 1918, fc00::/7, link-local, CGNAT (100.64.0.0/10),
 // Clash Fake-IP (198.18.0.0/15), and cloud metadata.
 func Public(a netip.Addr) bool {
 	a = a.Unmap()
-	if !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsUnspecified() ||
-		a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast() || a.IsMulticast() {
-		return false
-	}
-	if IsMetadataIP(a) {
+	if isAlwaysBlocked(a) || a.IsLoopback() || a.IsPrivate() {
 		return false
 	}
 	for _, n := range specialNets {
@@ -77,6 +85,96 @@ func Public(a netip.Addr) bool {
 // PinnedDialer dial function type
 type DialContextFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
+func newCheckedDialer(timeout time.Duration, allowPrivate bool) *net.Dialer {
+	return &net.Dialer{
+		Timeout: timeout,
+		Control: func(network, address string, c syscall.RawConn) error {
+			h, _, e := net.SplitHostPort(address)
+			if e == nil {
+				if parsed, pe := netip.ParseAddr(h); pe == nil {
+					u := parsed.Unmap()
+					if isAlwaysBlocked(u) {
+						return ErrBlockedAddress
+					}
+					if !allowPrivate && !Public(u) {
+						return ErrBlockedAddress
+					}
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// happyEyeballsDial races v6Addr with a headStart timeout before falling back to v4List,
+// guaranteeing that any late-arriving IPv6 socket is closed if IPv4 wins.
+func happyEyeballsDial(
+	ctx context.Context,
+	dialFn func(ctx context.Context, network, address string) (net.Conn, error),
+	v6Addr netip.Addr,
+	v4List []netip.Addr,
+	port string,
+	headStart time.Duration,
+) (net.Conn, bool) {
+	type dialRes struct {
+		conn net.Conn
+		err  error
+	}
+	resCh := make(chan dialRes, 1)
+	v6Ctx, v6Cancel := context.WithTimeout(ctx, headStart)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		target := net.JoinHostPort(v6Addr.String(), port)
+		conn, dialErr := dialFn(v6Ctx, "tcp", target)
+		if dialErr == nil && conn != nil {
+			resCh <- dialRes{conn: conn}
+		}
+	}()
+
+	select {
+	case res := <-resCh:
+		v6Cancel()
+		return res.conn, true
+	case <-v6Ctx.Done():
+		// IPv6 timed out or context expired: fall back to IPv4
+	}
+
+	// Try IPv4 candidates in order
+	for _, v4 := range v4List {
+		target := net.JoinHostPort(v4.String(), port)
+		conn, err := dialFn(ctx, "tcp", target)
+		if err == nil {
+			v6Cancel()
+			go func() {
+				wg.Wait()
+				select {
+				case r := <-resCh:
+					if r.conn != nil {
+						_ = r.conn.Close()
+					}
+				default:
+				}
+			}()
+			return conn, true
+		}
+	}
+
+	// If IPv4 all failed, wait for IPv6 goroutine and inspect resCh
+	v6Cancel()
+	wg.Wait()
+	select {
+	case res := <-resCh:
+		if res.err == nil && res.conn != nil {
+			return res.conn, true
+		}
+	default:
+	}
+	return nil, false
+}
+
 // NewPinnedDialContext returns a dialer function that performs:
 // 1. DNS resolution and SSRF address validation.
 // 2. DNS Pinning (dials the resolved IP directly to prevent DNS rebinding).
@@ -88,16 +186,17 @@ func NewPinnedDialContext(timeout time.Duration, allowPrivate bool) DialContextF
 			return nil, fmt.Errorf("netguard: split host port error: %w", err)
 		}
 
+		dialer := newCheckedDialer(timeout, allowPrivate)
+
 		// Check if host is direct IP
 		if ip, err := netip.ParseAddr(host); err == nil {
 			ip = ip.Unmap()
-			if IsMetadataIP(ip) {
+			if isAlwaysBlocked(ip) {
 				return nil, ErrBlockedAddress
 			}
 			if !allowPrivate && !Public(ip) {
 				return nil, ErrBlockedAddress
 			}
-			dialer := &net.Dialer{Timeout: timeout}
 			return dialer.DialContext(ctx, network, addr)
 		}
 
@@ -109,6 +208,7 @@ func NewPinnedDialContext(timeout time.Duration, allowPrivate bool) DialContextF
 
 		var v4List []netip.Addr
 		var v6List []netip.Addr
+		sawBlockedAlways := false
 
 		for _, ip := range ips {
 			addr, ok := netip.AddrFromSlice(ip)
@@ -116,8 +216,12 @@ func NewPinnedDialContext(timeout time.Duration, allowPrivate bool) DialContextF
 				continue
 			}
 			addr = addr.Unmap()
-			if IsMetadataIP(addr) {
+			if IsMetadataIP(addr) || (addr.Is4() && addr.IsLinkLocalUnicast()) {
 				return nil, ErrBlockedAddress
+			}
+			if isAlwaysBlocked(addr) {
+				sawBlockedAlways = true
+				continue
 			}
 			if !allowPrivate && !Public(addr) {
 				continue
@@ -130,72 +234,24 @@ func NewPinnedDialContext(timeout time.Duration, allowPrivate bool) DialContextF
 		}
 
 		if len(v4List) == 0 && len(v6List) == 0 {
+			if sawBlockedAlways {
+				return nil, ErrBlockedAddress
+			}
 			return nil, ErrNoValidIP
 		}
 
-		dialer := &net.Dialer{
-			Timeout: timeout,
-			Control: func(network, address string, c syscall.RawConn) error {
-				h, _, e := net.SplitHostPort(address)
-				if e == nil {
-					if parsed, pe := netip.ParseAddr(h); pe == nil {
-						if IsMetadataIP(parsed.Unmap()) {
-							return ErrBlockedAddress
-						}
-						if !allowPrivate && !Public(parsed.Unmap()) {
-							return ErrBlockedAddress
-						}
-					}
-				}
-				return nil
-			},
-		}
-
-		// Happy Eyeballs fallback logic
-		// If both IPv6 and IPv4 exist:
+		// Happy Eyeballs fallback logic when both IPv6 and IPv4 exist
 		if len(v6List) > 0 && len(v4List) > 0 {
-			type dialRes struct {
-				conn net.Conn
-				err  error
+			if conn, ok := happyEyeballsDial(ctx, dialer.DialContext, v6List[0], v4List, port, 300*time.Millisecond); ok {
+				return conn, nil
 			}
-			resCh := make(chan dialRes, 1)
-			v6Ctx, v6Cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-			defer v6Cancel()
-
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				target := net.JoinHostPort(v6List[0].String(), port)
-				conn, dialErr := dialer.DialContext(v6Ctx, "tcp", target)
-				if dialErr == nil {
-					resCh <- dialRes{conn: conn}
-				}
-			}()
-
-			select {
-			case res := <-resCh:
-				return res.conn, nil
-			case <-v6Ctx.Done():
-				// IPv6 timed out or context expired: fall back to IPv4
-			}
-
-			// Try IPv4 candidates in order
-			for _, v4 := range v4List {
-				target := net.JoinHostPort(v4.String(), port)
-				conn, err := dialer.DialContext(ctx, "tcp", target)
-				if err == nil {
+			for _, v6 := range v6List[1:] {
+				target := net.JoinHostPort(v6.String(), port)
+				if conn, err := dialer.DialContext(ctx, "tcp", target); err == nil {
 					return conn, nil
 				}
 			}
-
-			// If IPv4 all failed, wait for IPv6 goroutine if parent context still alive
-			wg.Wait()
-			select {
-			case res := <-resCh:
-				return res.conn, res.err
-			default:
-			}
+			return nil, fmt.Errorf("netguard: failed to connect to any resolved IP for %s", host)
 		}
 
 		// Try v6 candidates first if available

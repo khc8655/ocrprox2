@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,10 +25,8 @@ import (
 	"github.com/khc8655/llmproxy2/internal/config"
 	"github.com/khc8655/llmproxy2/internal/hubsync"
 	"github.com/khc8655/llmproxy2/internal/kb"
-	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/obs"
-	"github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/router"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
@@ -38,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261117-06"
+	version    = "v20261118-01"
 	commit     = "dev"
-	AppVersion = "2.4.4"
+	AppVersion = "2.5.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -50,7 +49,10 @@ var (
 	}
 )
 
-const maxRequestBodySize = 20 << 20 // 20 MB hard limit (P3)
+const (
+	largeBodyThreshold = 1 << 20  // 1 MiB threshold for largeBodySem serialization (F-04)
+	maxRequestBodySize = 20 << 20 // 20 MiB hard limit (P3)
+)
 
 func writePayloadTooLarge(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
@@ -62,6 +64,101 @@ func writePayloadTooLarge(w http.ResponseWriter) {
 			"code":    "payload_too_large",
 		},
 	})
+}
+
+// readInferenceBody reads and bounds an inference request body up to maxRequestBodySize (20 MiB).
+// For 64MB Lite node OOM safety (F-04), largeBodySem is acquired BEFORE buffering > 1 MiB:
+//   - If Content-Length > 1 MiB, largeBodySem is acquired before allocating/reading any bytes.
+//   - If Content-Length < 0 (chunked), at most 1 MiB + 1 bytes are read first; if > 1 MiB,
+//     largeBodySem is acquired before reading the remainder.
+//
+// Callers MUST invoke cleanup() via defer once bodyBytes is no longer referenced; pooled buffers
+// are returned only inside cleanup() (never while bodyBytes is still live, preventing UAF).
+func readInferenceBody(w http.ResponseWriter, r *http.Request, largeBodySem chan struct{}) (bodyBytes []byte, cleanup func(), ok bool) {
+	noop := func() {}
+	if r.ContentLength > maxRequestBodySize {
+		writePayloadTooLarge(w)
+		return nil, noop, false
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	acquired := false
+	acquireSem := func() bool {
+		if acquired || largeBodySem == nil {
+			return true
+		}
+		select {
+		case largeBodySem <- struct{}{}:
+			acquired = true
+			return true
+		case <-r.Context().Done():
+			http.Error(w, "request cancelled", http.StatusRequestTimeout)
+			return false
+		}
+	}
+	releaseSem := func() {
+		if acquired {
+			acquired = false
+			<-largeBodySem
+		}
+	}
+
+	writeReadErr := func(err error) {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writePayloadTooLarge(w)
+			return
+		}
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+	}
+
+	// Known large body (> 1 MiB): acquire semaphore BEFORE allocating or reading bytes.
+	if r.ContentLength > largeBodyThreshold {
+		if !acquireSem() {
+			return nil, noop, false
+		}
+		buf := bytes.NewBuffer(make([]byte, 0, int(r.ContentLength)))
+		if _, err := buf.ReadFrom(r.Body); err != nil {
+			releaseSem()
+			writeReadErr(err)
+			return nil, noop, false
+		}
+		return buf.Bytes(), releaseSem, true
+	}
+
+	// Small or unknown-length (chunked) body: read up to 1 MiB + 1 bytes first.
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	returnBufIfSmall := func() {
+		if buf.Cap() <= largeBodyThreshold {
+			buf.Reset()
+			bufferPool.Put(buf)
+		}
+	}
+
+	if _, err := buf.ReadFrom(io.LimitReader(r.Body, largeBodyThreshold+1)); err != nil {
+		returnBufIfSmall()
+		writeReadErr(err)
+		return nil, noop, false
+	}
+
+	// Exceeded 1 MiB on chunked/unknown stream: acquire semaphore BEFORE reading remainder.
+	if buf.Len() > largeBodyThreshold {
+		if !acquireSem() {
+			// Do not return >1 MiB buffer to pool; allow GC to reclaim immediately.
+			return nil, noop, false
+		}
+		if _, err := buf.ReadFrom(r.Body); err != nil {
+			releaseSem()
+			writeReadErr(err)
+			return nil, noop, false
+		}
+		return buf.Bytes(), releaseSem, true
+	}
+
+	// Body <= 1 MiB: return pooled buffer ONLY after caller finishes using bodyBytes.
+	return buf.Bytes(), returnBufIfSmall, true
 }
 
 func init() {
@@ -196,52 +293,11 @@ func main() {
 		}
 	}
 
-	// Initialize KB Pipeline, ModeScheduler, and OAuth for Full mode
+	// Initialize KB Pipeline and OAuth for Full mode
 	var kbPipeline *kb.Pipeline
-	var modeSched *modesched.ModeScheduler
 	var oauthMgr *oauth.Manager
-	var refreshMgr *provider.RefreshManager
-
-	runCtx, runCancel := context.WithCancel(context.Background())
-	defer runCancel()
 
 	if role == types.RoleFull {
-		refreshMgr = provider.NewRefreshManager(nil, func(providerID string, models []string, err error) {
-			if err != nil {
-				log.Printf("warn: autolist refresh provider %s failed: %v", providerID, err)
-				return
-			}
-			log.Printf("info: autolist refreshed %d models for provider %s", len(models), providerID)
-		})
-		refreshMgr.Start(runCtx)
-
-		syncRefreshProviders := func(cfg *types.ProxyConfig) {
-			if cfg == nil || refreshMgr == nil {
-				return
-			}
-			for _, prov := range cfg.Providers {
-				if prov == nil {
-					continue
-				}
-				if prov.RefreshEvery != "" && prov.RefreshEvery != "off" {
-					apiKey := ""
-					if len(prov.APIKeys) > 0 && prov.APIKeys[0] != nil {
-						apiKey = prov.APIKeys[0].Key
-					}
-					_ = refreshMgr.Register(prov, apiKey)
-				} else {
-					refreshMgr.Unregister(prov.ID)
-				}
-			}
-		}
-
-		if localSrc != nil {
-			localSrc.OnConfigChange(syncRefreshProviders)
-			if snap, _ := localSrc.Current(context.Background(), false); snap != nil && snap.Config != nil {
-				syncRefreshProviders(snap.Config)
-			}
-		}
-
 		oauthMgr = oauth.NewManager(*allowPrivateFlag)
 		// Wire OAuth token refresh persistence to localSrc (D4)
 		if localSrc != nil {
@@ -253,22 +309,6 @@ func main() {
 
 		kbPipeline = kb.NewPipeline(configSrc, kb.DefaultMaxOCR, kb.DefaultMaxGlobal, *allowPrivateFlag)
 		kbPipeline.SetScheduler(sched)
-
-		initialMode := types.ModeAgent
-		if localSrc != nil {
-			if snap, _ := localSrc.Current(context.Background(), false); snap != nil && snap.Config != nil && snap.Config.Settings.RunMode != "" {
-				initialMode = snap.Config.Settings.RunMode
-			}
-		}
-		modeSched = modesched.NewModeScheduler(initialMode, *allowPrivateFlag)
-
-		modeSched.Start(runCtx, func() (types.RuntimeSettings, error) {
-			snap, err := configSrc.Current(context.Background(), false)
-			if err != nil || snap == nil || snap.Config == nil {
-				return types.RuntimeSettings{}, errors.New("no config")
-			}
-			return snap.Config.Settings, nil
-		}, nil)
 	}
 
 	// Build HTTP Route Mux
@@ -393,54 +433,11 @@ func main() {
 			_, _ = configSrc.Current(r.Context(), true)
 		}
 
-		if modeSched != nil {
-			modeSched.IncInflight()
-			defer modeSched.DecInflight()
-		}
-
-		var bodyBytes []byte
-		// Enforce hard 20MB limit (P3): immediate check for ContentLength if known
-		if r.ContentLength > maxRequestBodySize {
-			writePayloadTooLarge(w)
+		bodyBytes, cleanupBody, ok := readInferenceBody(w, r, largeBodySem)
+		if !ok {
 			return
 		}
-
-		// Wrap body with http.MaxBytesReader to enforce 20MB limit on chunked/streamed bodies (P3)
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-
-		// Acquire reusable buffer from pool (P3: zero allocations & reusable byte buffers)
-		buf := bufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer func() {
-			if buf.Cap() <= 4<<20 { // Return buffers <= 4MB to pool
-				bufferPool.Put(buf)
-			}
-		}()
-
-		_, err := buf.ReadFrom(r.Body)
-		if err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				writePayloadTooLarge(w)
-				return
-			}
-			http.Error(w, "failed to read body", http.StatusBadRequest)
-			return
-		}
-		bodyBytes = buf.Bytes()
-
-		isLarge := len(bodyBytes) > 1*1024*1024
-		if isLarge {
-			select {
-			case largeBodySem <- struct{}{}:
-				defer func() {
-					<-largeBodySem
-				}()
-			case <-r.Context().Done():
-				http.Error(w, "request cancelled", http.StatusRequestTimeout)
-				return
-			}
-		}
+		defer cleanupBody()
 
 		type quickRequest struct {
 			Model  string `json:"model"`
@@ -456,9 +453,6 @@ func main() {
 		clientStream := q.Stream
 
 		_ = sched.Dispatch(r.Context(), r.URL.Path, bodyBytes, reqModel, clientStream, w, r)
-		if isLarge {
-			bodyBytes = nil
-		}
 	})
 
 	mux.HandleFunc("POST /v1/chat/completions", handleInference)
@@ -489,9 +483,8 @@ func main() {
 		mux.HandleFunc("POST /api/v1/rerank", wrapKBRoute(kbPipeline.HandleRerank))
 
 		adminSrv := admin.NewServer(authMgr, localSrc, obsMgr, sched)
-		adminSrv.SetModeScheduler(modeSched)
+		adminSrv.SetAllowPrivate(*allowPrivateFlag)
 		adminSrv.SetOAuthManager(oauthMgr)
-		adminSrv.SetRefreshManager(refreshMgr)
 		adminSrv.SetBuildInfo(version, AppVersion, commit)
 		adminSrv.SetAdminPassword(*adminPassFlag)
 		if *hubURLFlag != "" || *nodeTokenFlag != "" {
@@ -550,20 +543,9 @@ func main() {
 
 	<-sigChan
 	log.Println("shutting down llmproxy...")
-	runCancel()
-
-	if refreshMgr != nil {
-		log.Println("stopping provider refresh manager...")
-		refreshMgr.Stop()
-	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
-
-	if modeSched != nil {
-		log.Println("draining active requests...")
-		modeSched.Drain(5 * time.Second)
-	}
 
 	_ = server.Shutdown(shutdownCtx)
 	log.Println("llmproxy exited cleanly")

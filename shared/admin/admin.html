@@ -536,45 +536,18 @@
         </div>
       </div>
 
-      <!-- 3. Mode Scheduler & High-Concurrency Guards (Full) -->
-      <div class="card card-pad" id="modeScheduleBox" hidden>
+      <!-- 3. High-Concurrency & Multimodal Guards (Full) -->
+      <div class="card card-pad" id="concurrencyGuardBox" hidden>
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">3</span>运行模式调度与并发护栏</h2>
-          <div class="seg" id="runModeSwitchSeg">
-            <button class="seg-btn active" data-mode="agent" type="button">Agent 模式</button>
-            <button class="seg-btn" data-mode="kb" type="button">KB 知识库模式</button>
-          </div>
+          <h2 class="card-title"><span class="step-num">3</span>高并发与多模态护栏</h2>
         </div>
-        <div class="form-grid">
+        <div class="form-grid form-grid--2">
           <div class="form-group">
-            <label class="form-label">
-              <input type="checkbox" id="cfgModeSchedEnabled">
-              <span>启用时段自动切换模式</span>
-            </label>
-            <span class="text-xs text-muted">在设定窗口内自动切为 Agent，其余时段切为 KB</span>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Agent 时段窗口</label>
-            <input class="input input--code" id="cfgModeSchedWindow" placeholder="08:30-22:30">
-          </div>
-          <div class="form-group">
-            <label class="form-label">调度时区</label>
-            <input class="input input--code" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
-          </div>
-          <div class="form-group">
-            <label class="form-label">状态变更 Webhook URL (可选)</label>
-            <input class="input input--code" id="cfgModeWebhookUrl" placeholder="https://notify.example.com/hook">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Webhook HMAC 密钥 (可选)</label>
-            <input class="input input--code privacy-mask" id="cfgModeWebhookSecret" placeholder="X-Webhook-Signature 密钥">
-          </div>
-          <div class="form-group">
-            <label class="form-label">OCR 预读并发上限 (防大图 OOM)</label>
+            <label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (防大图 OOM)</label>
             <input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="32" placeholder="4">
           </div>
           <div class="form-group">
-            <label class="form-label">固定通道全局并发上限</label>
+            <label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限</label>
             <input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="128" placeholder="16">
           </div>
         </div>

@@ -98,8 +98,8 @@
       ? usage.models.length
       : Object.keys(usage?.models || {}).length;
     const provCount = Object.keys(usage?.providers || {}).length;
-    const activeLanes = Object.values(meta.lanes || {}).reduce((acc, v) => acc + (v?.Busy || 0), 0);
-    const waitingLanes = Object.values(meta.lanes || {}).reduce((acc, v) => acc + (v?.Waiting || 0), 0);
+    const activeLanes = Object.values(meta.lanes || {}).reduce((acc, v) => acc + (v?.busy ?? v?.Busy ?? 0), 0);
+    const waitingLanes = Object.values(meta.lanes || {}).reduce((acc, v) => acc + (v?.waiting ?? v?.Waiting ?? 0), 0);
     const cooldownCount = (meta.cooldowns || []).length;
 
     setText('statActiveScope', `${modelCount} 模型 / ${provCount} 供应商`);
@@ -111,7 +111,7 @@
     const strip = document.getElementById('liveRuntimeStrip');
     if (!card || !strip) return;
 
-    const busyEntries = Object.entries(lanes || {}).filter(([, v]) => (v?.Busy || 0) > 0 || (v?.Waiting || 0) > 0);
+    const busyEntries = Object.entries(lanes || {}).filter(([, v]) => (v?.busy ?? v?.Busy ?? 0) > 0 || (v?.waiting ?? v?.Waiting ?? 0) > 0);
     const cdList = Array.isArray(cooldowns) ? cooldowns : [];
 
     if (busyEntries.length === 0 && cdList.length === 0) {
@@ -139,11 +139,14 @@
       leftGroup.appendChild(idlePill);
     } else {
       busyEntries.forEach(([name, v]) => {
+        const busy = v?.busy ?? v?.Busy ?? 0;
+        const waiting = v?.waiting ?? v?.Waiting ?? 0;
+        const limit = v?.limit ?? v?.Limit ?? 0;
         const pill = document.createElement('span');
         pill.className = 'pill pill--accent tabular';
-        const limitText = v.Limit > 0 ? `/${v.Limit}` : '';
-        const waitText = v.Waiting > 0 ? ` 排队:${v.Waiting}` : '';
-        pill.textContent = `${name}: ${v.Busy}${limitText}${waitText}`;
+        const limitText = limit > 0 ? `/${limit}` : '';
+        const waitText = waiting > 0 ? ` 排队:${waiting}` : '';
+        pill.textContent = `${name}: ${busy}${limitText}${waitText}`;
         leftGroup.appendChild(pill);
       });
     }

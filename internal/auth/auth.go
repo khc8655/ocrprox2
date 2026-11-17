@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ const (
 	MaxFailedAttempts = 5
 	WindowDuration    = 10 * time.Minute
 	BlockDuration     = 10 * time.Minute
+	MaxTrackedIPs     = 4096
 )
 
 // Authenticator handles client key and admin password authentication with anti-bruteforce defense.
@@ -76,10 +78,14 @@ func (a *Authenticator) SetAdminPassword(pass string) {
 	a.adminPassword = pass
 }
 
-// ExtractToken extracts auth token from request headers (Authorization, X-Api-Key, x-goog-api-key) or query parameter.
-func ExtractToken(r *http.Request) string {
+// ExtractHeaderToken extracts auth token strictly from request headers
+// (Authorization, X-Api-Key, x-goog-api-key), ignoring URL query parameters.
+func ExtractHeaderToken(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
 	if h := r.Header.Get("Authorization"); h != "" {
-		if strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		if len(h) >= 7 && strings.EqualFold(h[:7], "bearer ") {
 			return strings.TrimSpace(h[7:])
 		}
 		return strings.TrimSpace(h)
@@ -90,6 +96,17 @@ func ExtractToken(r *http.Request) string {
 	if k := r.Header.Get("x-goog-api-key"); k != "" {
 		return strings.TrimSpace(k)
 	}
+	return ""
+}
+
+// ExtractToken extracts auth token from request headers (Authorization, X-Api-Key, x-goog-api-key) or query parameter.
+func ExtractToken(r *http.Request) string {
+	if tok := ExtractHeaderToken(r); tok != "" {
+		return tok
+	}
+	if r == nil || r.URL == nil {
+		return ""
+	}
 	if q := r.URL.Query().Get("key"); q != "" {
 		return strings.TrimSpace(q)
 	}
@@ -99,29 +116,59 @@ func ExtractToken(r *http.Request) string {
 	return ""
 }
 
-// GetClientIP resolves the client IP, respecting X-Forwarded-For only from loopback or trusted proxies.
+// GetClientIP resolves the client IP, respecting X-Forwarded-For only from loopback
+// (or when TRUST_PROXY_HEADERS=1) and extracting the rightmost non-loopback IP so
+// client-prepended X-Forwarded-For values cannot spoof arbitrary IPs behind a local proxy.
 func GetClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-
-	trustHeaders := os.Getenv("TRUST_PROXY_HEADERS") == "1" ||
-		strings.ToLower(os.Getenv("TRUST_PROXY_HEADERS")) == "true"
-
-	if trustHeaders || host == "127.0.0.1" || host == "::1" {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			return strings.TrimSpace(parts[0])
-		}
-		if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-			return strings.TrimSpace(xrip)
-		}
-	}
-
-	if host == "" {
+	if r == nil {
 		return "127.0.0.1"
 	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
+	remoteAddr, parseErr := netip.ParseAddr(host)
+	isLoopback := (parseErr == nil && remoteAddr.Unmap().IsLoopback()) || host == "127.0.0.1" || host == "::1"
+
+	trustEnv := strings.TrimSpace(os.Getenv("TRUST_PROXY_HEADERS"))
+	trustHeaders := trustEnv == "1" || strings.EqualFold(trustEnv, "true")
+
+	if isLoopback || trustHeaders {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			var fallbackLoopback string
+			for i := len(parts) - 1; i >= 0; i-- {
+				cand := strings.TrimSpace(parts[i])
+				if cand == "" {
+					continue
+				}
+				parsed, pErr := netip.ParseAddr(cand)
+				if pErr != nil {
+					continue
+				}
+				u := parsed.Unmap()
+				if !u.IsLoopback() {
+					return u.String()
+				}
+				if fallbackLoopback == "" {
+					fallbackLoopback = u.String()
+				}
+			}
+			if fallbackLoopback != "" {
+				return fallbackLoopback
+			}
+		}
+		if xrip := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrip != "" {
+			if parsed, pErr := netip.ParseAddr(xrip); pErr == nil {
+				return parsed.Unmap().String()
+			}
+		}
+	}
+
 	return host
 }
 
@@ -134,6 +181,7 @@ func ConstantTimeCompare(a, b string) bool {
 
 // VerifyClientKey verifies client request authentication for /v1/* endpoints.
 // Enforced for ALL sources including 127.0.0.1 and ::1.
+// Strictly accepts only configured clientKey or extraKeys (never adminPassword).
 func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 	token := ExtractToken(r)
 	if token == "" {
@@ -144,7 +192,6 @@ func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 	ck := a.clientKey
 	extras := make([]string, len(a.extraKeys))
 	copy(extras, a.extraKeys)
-	ap := a.adminPassword
 	a.mu.RUnlock()
 
 	// Check against configured CLIENT_KEY
@@ -159,15 +206,11 @@ func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 		}
 	}
 
-	// Also allow ADMIN_PASSWORD as override/management testing
-	if ap != "" && ConstantTimeCompare(token, ap) {
-		return true
-	}
-
 	return false
 }
 
 // VerifyAdminAuth verifies admin authentication for management endpoints with anti-bruteforce lockout.
+// Accepts credentials strictly via HTTP headers (never URL query parameters).
 func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 	ip := GetClientIP(r)
 
@@ -188,7 +231,7 @@ func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 		return false
 	}
 
-	token := ExtractToken(r)
+	token := ExtractHeaderToken(r)
 	if token == "" {
 		// Credential-less requests (page loads, health probes, unauthenticated
 		// scripts) must NOT consume the brute-force budget: the admin console
@@ -208,7 +251,7 @@ func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 }
 
 func (a *Authenticator) recordAdminFailure(ip string, now time.Time) {
-	// Clean attempts older than window
+	// Clean attempts older than window for this IP
 	var fresh []time.Time
 	for _, t := range a.failedAttempts[ip] {
 		if now.Sub(t) < WindowDuration {
@@ -216,10 +259,54 @@ func (a *Authenticator) recordAdminFailure(ip string, now time.Time) {
 		}
 	}
 	fresh = append(fresh, now)
+
+	if _, exists := a.failedAttempts[ip]; !exists && len(a.failedAttempts) >= MaxTrackedIPs {
+		a.evictFailedAttemptsLocked(now)
+	}
 	a.failedAttempts[ip] = fresh
 
 	if len(fresh) >= MaxFailedAttempts {
+		if _, exists := a.blockedIPs[ip]; !exists && len(a.blockedIPs) >= MaxTrackedIPs {
+			a.evictBlockedIPsLocked(now)
+		}
 		a.blockedIPs[ip] = now.Add(BlockDuration)
+	}
+}
+
+func (a *Authenticator) evictFailedAttemptsLocked(now time.Time) {
+	var oldestKey string
+	var oldestTime time.Time
+	for k, ts := range a.failedAttempts {
+		if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= WindowDuration {
+			delete(a.failedAttempts, k)
+			continue
+		}
+		last := ts[len(ts)-1]
+		if oldestKey == "" || last.Before(oldestTime) {
+			oldestKey = k
+			oldestTime = last
+		}
+	}
+	if len(a.failedAttempts) >= MaxTrackedIPs && oldestKey != "" {
+		delete(a.failedAttempts, oldestKey)
+	}
+}
+
+func (a *Authenticator) evictBlockedIPsLocked(now time.Time) {
+	var oldestKey string
+	var oldestUntil time.Time
+	for k, until := range a.blockedIPs {
+		if !now.Before(until) {
+			delete(a.blockedIPs, k)
+			continue
+		}
+		if oldestKey == "" || until.Before(oldestUntil) {
+			oldestKey = k
+			oldestUntil = until
+		}
+	}
+	if len(a.blockedIPs) >= MaxTrackedIPs && oldestKey != "" {
+		delete(a.blockedIPs, oldestKey)
 	}
 }
 
@@ -239,5 +326,6 @@ func (a *Authenticator) BlockRemaining(ip string) time.Duration {
 	if d := until.Sub(time.Now()); d > 0 {
 		return d
 	}
+	delete(a.blockedIPs, ip)
 	return 0
 }

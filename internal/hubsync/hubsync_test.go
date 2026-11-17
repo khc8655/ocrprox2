@@ -332,3 +332,126 @@ func TestHubSource_OnConfigChangeAndAdapterRules(t *testing.T) {
 		t.Errorf("expected embedded provider adapter_rules auth_header=X-API-Key, got %q", gotAuthHeader)
 	}
 }
+
+func TestHubSource_ColdStart502AndGraceExpiryAutoHeal(t *testing.T) {
+	var mode atomic.Int32 // 0 = 502, 1 = 200 short grace, 2 = 502, 3 = 200 healed
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch mode.Load() {
+		case 0, 2:
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("upstream hub 502"))
+		case 1:
+			w.Header().Set("ETag", `"v1"`)
+			w.Header().Set("X-Lease-Until", time.Now().Add(40*time.Millisecond).Format(time.RFC3339Nano))
+			w.Header().Set("X-Grace-Until", time.Now().Add(80*time.Millisecond).Format(time.RFC3339Nano))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(types.ProxyConfig{
+				Version: 1,
+				Providers: map[string]*types.ProviderConfig{
+					"openai": {ID: "openai", BaseURL: "https://api.openai.com", Enabled: true, APIKeys: []*types.KeyEntry{{ID: "k1", Key: "sk-1", Enabled: true}}},
+				},
+			})
+		case 3:
+			w.Header().Set("ETag", `"v2"`)
+			w.Header().Set("X-Lease-Until", time.Now().Add(time.Hour).Format(time.RFC3339Nano))
+			w.Header().Set("X-Grace-Until", time.Now().Add(2*time.Hour).Format(time.RFC3339Nano))
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(types.ProxyConfig{Version: 2})
+		}
+	}))
+	defer ts.Close()
+
+	src := NewHubSource(ts.URL, "stk_node_test", true)
+	ctx := context.Background()
+
+	// 1. Cold start 502 -> StateError (NOT StateRevoked!), ErrSourceUnavailable
+	_, err := src.Current(ctx, false)
+	if err != ErrSourceUnavailable {
+		t.Fatalf("expected ErrSourceUnavailable on cold start 502, got %v", err)
+	}
+	_, state, _, _ := src.HealthState()
+	if state != StateError {
+		t.Fatalf("expected StateError (not StateRevoked) on cold start 502, got %s", state)
+	}
+
+	// 2. Hub recovers -> node automatically heals on next request!
+	mode.Store(1)
+	snap1, err := src.Current(ctx, false)
+	if err != nil || snap1 == nil || snap1.Config.Version != 1 {
+		t.Fatalf("expected auto-heal after cold start 502, got snap=%v err=%v", snap1, err)
+	}
+
+	// 3. Wait for both lease AND grace to expire, then Hub returns 502 -> StateError (NOT StateRevoked)
+	time.Sleep(100 * time.Millisecond)
+	mode.Store(2)
+	_, err = src.Current(ctx, false)
+	if err != ErrSourceUnavailable {
+		t.Fatalf("expected ErrSourceUnavailable after grace expiry 502, got %v", err)
+	}
+	_, state, _, _ = src.HealthState()
+	if state != StateError {
+		t.Fatalf("expected StateError after grace expiry 502, got %s", state)
+	}
+	// Old snapshot's key must NOT have been zeroed in-place (safe for in-flight readers)
+	if snap1.Config.Providers["openai"].APIKeys[0].Key != "sk-1" {
+		t.Fatalf("expected old snapshot key left intact for GC, got %q", snap1.Config.Providers["openai"].APIKeys[0].Key)
+	}
+
+	// 4. Hub recovers again -> node auto-heals to v2!
+	mode.Store(3)
+	snap2, err := src.Current(ctx, false)
+	if err != nil || snap2 == nil || snap2.Config.Version != 2 {
+		t.Fatalf("expected auto-heal after grace expiry recovery, got snap=%v err=%v", snap2, err)
+	}
+}
+
+func TestHubSource_SingleflightCaller1CancelResilience(t *testing.T) {
+	hubEntered := make(chan struct{})
+	allowHubFinish := make(chan struct{})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(hubEntered)
+		<-allowHubFinish
+		w.Header().Set("ETag", `"v9"`)
+		w.Header().Set("X-Lease-Until", time.Now().Add(time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(types.ProxyConfig{Version: 9})
+	}))
+	defer ts.Close()
+
+	src := NewHubSource(ts.URL, "stk_node_test", true)
+
+	caller1Ctx, cancelCaller1 := context.WithCancel(context.Background())
+	type res struct {
+		snap *types.RuntimeSnapshot
+		err  error
+	}
+	c1Ch := make(chan res, 1)
+	c2Ch := make(chan res, 1)
+
+	go func() {
+		sn, err := src.Current(caller1Ctx, false)
+		c1Ch <- res{sn, err}
+	}()
+
+	<-hubEntered
+	// Start Caller #2 while Hub request is in-flight, then cancel Caller #1's context!
+	go func() {
+		sn, err := src.Current(context.Background(), false)
+		c2Ch <- res{sn, err}
+	}()
+	time.Sleep(15 * time.Millisecond)
+	cancelCaller1()
+	time.Sleep(15 * time.Millisecond)
+	close(allowHubFinish)
+
+	r2 := <-c2Ch
+	if r2.err != nil || r2.snap == nil || r2.snap.Config.Version != 9 {
+		t.Fatalf("expected Caller #2 to succeed despite Caller #1 context cancel, got snap=%v err=%v", r2.snap, r2.err)
+	}
+	r1 := <-c1Ch
+	if r1.err != nil || r1.snap == nil || r1.snap.Config.Version != 9 {
+		t.Fatalf("expected detached Hub fetch to succeed cleanly, got snap=%v err=%v", r1.snap, r1.err)
+	}
+}

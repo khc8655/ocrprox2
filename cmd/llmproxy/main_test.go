@@ -1,16 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +19,6 @@ import (
 	"github.com/khc8655/llmproxy2/internal/config"
 	"github.com/khc8655/llmproxy2/internal/hubsync"
 	"github.com/khc8655/llmproxy2/internal/kb"
-	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/obs"
 	"github.com/khc8655/llmproxy2/internal/router"
@@ -27,7 +26,7 @@ import (
 	"github.com/khc8655/llmproxy2/internal/types"
 )
 
-func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
+func TestFullMode_RouteValidationAndUnifiedEndpoints(t *testing.T) {
 	tmpDir := t.TempDir()
 	authMgr := auth.NewAuthenticator("test-client-key", "test-admin-pass")
 	localSrc, err := config.NewLocalSource(tmpDir, "pass")
@@ -45,9 +44,7 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 	kbPipeline := kb.NewPipeline(localSrc, 4, 16, true)
 	kbPipeline.SetObservabilitySink(obsMgr)
 
-	modeSched := modesched.NewModeScheduler(types.ModeAgent, true)
-
-	// Save initial config with 1 agent model and 1 kb model
+	// Save initial config with 1 agent model and KB models
 	_, err = localSrc.SaveConfig(&types.ProxyConfig{
 		Version: 1,
 		Providers: map[string]*types.ProviderConfig{
@@ -72,28 +69,9 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 			"embedding": {{Provider: "p1", Enabled: true}},
 			"reranker":  {{Provider: "p1", Enabled: true}},
 		},
-		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
-		},
 	})
 	if err != nil {
 		t.Fatalf("save initial config: %v", err)
-	}
-
-	getEffectiveMode := func(ctx context.Context) types.RunMode {
-		snap, err := localSrc.Current(ctx, false)
-		if err == nil && snap != nil && snap.Config != nil {
-			if snap.Config.Settings.ModeScheduleEnabled && modeSched != nil {
-				return modeSched.CurrentMode()
-			}
-			if snap.Config.Settings.RunMode != "" {
-				return snap.Config.Settings.RunMode
-			}
-		}
-		if modeSched != nil {
-			return modeSched.CurrentMode()
-		}
-		return types.ModeAgent
 	}
 
 	mux := router.NewRouteMux()
@@ -128,7 +106,7 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 		}
 	}
 
-	// Models
+	// Models (unified Agent + KB)
 	handleModels := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		forceRefresh := r.Header.Get("X-Node-Refresh") == "1"
 		snap, err := localSrc.Current(r.Context(), forceRefresh)
@@ -137,26 +115,15 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 			return
 		}
 
-		mode := getEffectiveMode(r.Context())
-		if mode == types.ModeKB {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"object": "list",
-				"data": []map[string]any{
-					{"id": "chat"},
-					{"id": "embedding"},
-					{"id": "reranker"},
-					{"id": "ocr"},
-				},
-			})
-			return
-		}
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
 			"data": []map[string]any{
 				{"id": "agent-model-1"},
+				{"id": "chat"},
+				{"id": "embedding"},
+				{"id": "reranker"},
+				{"id": "ocr"},
 			},
 		})
 	})
@@ -164,71 +131,14 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 	mux.HandleFunc("GET /api/v1/models", handleModels)
 
 	// Inference
+	largeBodySem := make(chan struct{}, 1)
 	handleInference := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.ContentLength > maxRequestBodySize {
-			writePayloadTooLarge(w)
+		_, cleanup, ok := readInferenceBody(w, r, largeBodySem)
+		if !ok {
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		defer cleanup()
 
-		buf := bufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer func() {
-			if buf.Cap() <= 4<<20 {
-				bufferPool.Put(buf)
-			}
-		}()
-
-		_, err := buf.ReadFrom(r.Body)
-		if err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				writePayloadTooLarge(w)
-				return
-			}
-			http.Error(w, "failed to read body", http.StatusBadRequest)
-			return
-		}
-		bodyBytes := buf.Bytes()
-
-		effectiveMode := getEffectiveMode(r.Context())
-		isMessagesOrResponses := strings.HasSuffix(r.URL.Path, "/messages") || strings.HasSuffix(r.URL.Path, "/responses")
-		if effectiveMode == types.ModeKB && isMessagesOrResponses {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]any{
-					"message": "endpoint disabled in kb mode",
-					"type":    "invalid_request_error",
-				},
-			})
-			return
-		}
-
-		var q struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-		}
-		_ = json.Unmarshal(bodyBytes, &q)
-
-		if effectiveMode == types.ModeKB {
-			if q.Model != "chat" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "only model 'chat' is supported in kb mode"}})
-				return
-			}
-			if q.Stream {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "streaming is not supported in kb chat mode"}})
-				return
-			}
-			kbPipeline.HandleChat(w, r, bodyBytes)
-			return
-		}
-
-		// Agent mode OK mock response
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"agent response"}}]}`))
@@ -241,34 +151,16 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 	mux.HandleFunc("POST /v1/responses", handleInference)
 	mux.HandleFunc("POST /api/v1/responses", handleInference)
 
-	// KB endpoints
-	wrapKBMode := func(handler http.HandlerFunc) http.HandlerFunc {
-		return wrapAuth(func(w http.ResponseWriter, r *http.Request) {
-			mode := getEffectiveMode(r.Context())
-			if mode == types.ModeAgent {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error": map[string]any{
-						"message": "kb endpoint disabled in agent mode",
-						"type":    "invalid_request_error",
-					},
-				})
-				return
-			}
-			handler(w, r)
-		})
-	}
-
-	mux.HandleFunc("POST /v1/ocr", wrapKBMode(kbPipeline.HandleOCR))
-	mux.HandleFunc("POST /api/v1/ocr", wrapKBMode(kbPipeline.HandleOCR))
-	mux.HandleFunc("POST /v1/embeddings", wrapKBMode(kbPipeline.HandleEmbeddings))
-	mux.HandleFunc("POST /api/v1/embeddings", wrapKBMode(kbPipeline.HandleEmbeddings))
-	mux.HandleFunc("POST /v1/rerank", wrapKBMode(kbPipeline.HandleRerank))
-	mux.HandleFunc("POST /api/v1/rerank", wrapKBMode(kbPipeline.HandleRerank))
+	// KB endpoints (always active in Full mode)
+	mux.HandleFunc("POST /v1/ocr", wrapAuth(kbPipeline.HandleOCR))
+	mux.HandleFunc("POST /api/v1/ocr", wrapAuth(kbPipeline.HandleOCR))
+	mux.HandleFunc("POST /v1/embeddings", wrapAuth(kbPipeline.HandleEmbeddings))
+	mux.HandleFunc("POST /api/v1/embeddings", wrapAuth(kbPipeline.HandleEmbeddings))
+	mux.HandleFunc("POST /v1/rerank", wrapAuth(kbPipeline.HandleRerank))
+	mux.HandleFunc("POST /api/v1/rerank", wrapAuth(kbPipeline.HandleRerank))
 
 	adminSrv := admin.NewServer(authMgr, localSrc, obsMgr, sched)
-	adminSrv.SetModeScheduler(modeSched)
+	adminSrv.SetAllowPrivate(true)
 	adminSrv.SetOAuthManager(oauthMgr)
 	adminSrv.RegisterRoutes(mux)
 
@@ -290,25 +182,6 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 	if healthResp["app_version"] != version || healthResp["semver"] != wantSemver {
 		t.Errorf("unexpected healthz response: %+v", healthResp)
 	}
-
-	// Configure KB routes alongside Agent routes and verify unified simultaneous access (no mode lockout)
-	_, _ = localSrc.SaveConfig(&types.ProxyConfig{
-		Version: 1,
-		Providers: map[string]*types.ProviderConfig{
-			"p1": {
-				ID:      "p1",
-				Enabled: true,
-				APIKeys: []*types.KeyEntry{{ID: "k1", Label: "k1", Key: "sk-1", Enabled: true}},
-			},
-		},
-		AgentModels: map[string]*types.AgentModelRoute{
-			"agent-model-1": {Enabled: true, Candidates: []*types.RouteCandidate{{Provider: "p1", KeyLabel: "k1", Enabled: true}}},
-		},
-		KBModels: map[string][]*types.KBCandidate{
-			"chat": {{Provider: "p1", KeyLabel: "k1", Model: "chat", Enabled: true}},
-			"ocr":  {{Provider: "p1", KeyLabel: "k1", Model: "ocr", Enabled: true}},
-		},
-	})
 
 	// Test X-Node-Refresh: 1 header
 	req = httptest.NewRequest("GET", "/v1/models", nil)
@@ -406,6 +279,7 @@ func TestVersionVariables(t *testing.T) {
 
 func TestMaxBodyLimit_20MB_ContentLength_And_Chunked(t *testing.T) {
 	authMgr := auth.NewAuthenticator("test-client-key", "")
+	largeBodySem := make(chan struct{}, 1)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !authMgr.VerifyClientKey(r) {
@@ -413,32 +287,16 @@ func TestMaxBodyLimit_20MB_ContentLength_And_Chunked(t *testing.T) {
 			return
 		}
 
-		// Enforce hard 20MB limit (P3)
-		if r.ContentLength > maxRequestBodySize {
-			writePayloadTooLarge(w)
+		bodyBytes, cleanup, ok := readInferenceBody(w, r, largeBodySem)
+		if !ok {
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		defer cleanup()
 
-		buf := bufferPool.Get().(*bytes.Buffer)
-		buf.Reset()
-		defer func() {
-			if buf.Cap() <= 4<<20 {
-				bufferPool.Put(buf)
-			}
-		}()
-
-		_, err := buf.ReadFrom(r.Body)
-		if err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				writePayloadTooLarge(w)
-				return
-			}
-			http.Error(w, "failed to read body", http.StatusBadRequest)
+		if len(bodyBytes) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
@@ -479,6 +337,113 @@ func TestMaxBodyLimit_20MB_ContentLength_And_Chunked(t *testing.T) {
 	handler.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK {
 		t.Fatalf("expected 200 for normal request, got %d: %s", rec3.Code, rec3.Body.String())
+	}
+}
+
+type countingReader struct {
+	remaining int
+	readBytes *atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	if c.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := len(p)
+	if n > c.remaining {
+		n = c.remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = 'a'
+	}
+	c.remaining -= n
+	c.readBytes.Add(int64(n))
+	return n, nil
+}
+
+func TestLargeBodySem_PreReadSerialization_ContentLength_And_Chunked(t *testing.T) {
+	largeBodySem := make(chan struct{}, 1)
+	// Pre-hold semaphore to simulate an active large request in flight
+	largeBodySem <- struct{}{}
+
+	// 1. Content-Length > 1 MiB must block on largeBodySem BEFORE reading ANY bytes from r.Body!
+	var clBytesRead atomic.Int64
+	ctxCL, cancelCL := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancelCL()
+	reqCL := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", &countingReader{
+		remaining: 2 << 20,
+		readBytes: &clBytesRead,
+	}).WithContext(ctxCL)
+	reqCL.ContentLength = 2 << 20
+	recCL := httptest.NewRecorder()
+	_, cleanupCL, okCL := readInferenceBody(recCL, reqCL, largeBodySem)
+	defer cleanupCL()
+	if okCL || recCL.Code != http.StatusRequestTimeout {
+		t.Fatalf("expected 408 timeout while largeBodySem held, got ok=%v status=%d", okCL, recCL.Code)
+	}
+	if clBytesRead.Load() != 0 {
+		t.Fatalf("F-04 violation: read %d bytes before acquiring largeBodySem on Content-Length > 1MiB!", clBytesRead.Load())
+	}
+
+	// 2. Chunked (Content-Length == -1) > 1 MiB must read at most 1 MiB + 1 bytes before blocking on largeBodySem!
+	var chunkedBytesRead atomic.Int64
+	ctxCh, cancelCh := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancelCh()
+	reqCh := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", &countingReader{
+		remaining: 5 << 20,
+		readBytes: &chunkedBytesRead,
+	}).WithContext(ctxCh)
+	reqCh.ContentLength = -1
+	recCh := httptest.NewRecorder()
+	_, cleanupCh, okCh := readInferenceBody(recCh, reqCh, largeBodySem)
+	defer cleanupCh()
+	if okCh || recCh.Code != http.StatusRequestTimeout {
+		t.Fatalf("expected 408 timeout on chunked >1MiB while largeBodySem held, got ok=%v status=%d", okCh, recCh.Code)
+	}
+	if chunkedBytesRead.Load() != largeBodyThreshold+1 {
+		t.Fatalf("F-04 violation: expected chunked reader to stop at %d bytes before semaphore, read %d", largeBodyThreshold+1, chunkedBytesRead.Load())
+	}
+
+	// 3. Release semaphore and verify concurrent 2 MiB requests serialize cleanly with max 1 active at a time
+	<-largeBodySem
+
+	var activeLarge atomic.Int32
+	var maxActiveLarge atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var rb atomic.Int64
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", &countingReader{
+				remaining: 2 << 20,
+				readBytes: &rb,
+			})
+			req.ContentLength = 2 << 20
+			rec := httptest.NewRecorder()
+			body, cleanup, ok := readInferenceBody(rec, req, largeBodySem)
+			if !ok {
+				t.Errorf("unexpected readInferenceBody failure: %d", rec.Code)
+				return
+			}
+			cur := activeLarge.Add(1)
+			for {
+				prev := maxActiveLarge.Load()
+				if cur <= prev || maxActiveLarge.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			if len(body) != 2<<20 {
+				t.Errorf("expected 2MiB body, got %d", len(body))
+			}
+			time.Sleep(10 * time.Millisecond)
+			activeLarge.Add(-1)
+			cleanup()
+		}()
+	}
+	wg.Wait()
+	if maxActiveLarge.Load() != 1 {
+		t.Fatalf("F-04: expected maxActiveLarge=1 under largeBodySem, got %d", maxActiveLarge.Load())
 	}
 }
 
@@ -638,7 +603,6 @@ func TestFullMode_InitBans_401PersistsAndReloads(t *testing.T) {
 			},
 		},
 		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
 			// 24h key ban on upstream 401 is the schema default; state it explicitly
 			// because 0 now means disabled (see TestFullMode_ZeroAuthCooldownDoesNotBan).
 			CooldownAuthErrorSec: 86400,
@@ -769,7 +733,7 @@ func TestFullMode_ZeroAuthCooldownDoesNotBan(t *testing.T) {
 				Candidates: []*types.RouteCandidate{{Provider: "p-auth", TargetModel: "m1", KeyLabel: "k-bad", Enabled: true}},
 			},
 		},
-		Settings: types.RuntimeSettings{RunMode: types.ModeAgent, CooldownAuthErrorSec: 0},
+		Settings: types.RuntimeSettings{CooldownAuthErrorSec: 0},
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}

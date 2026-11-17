@@ -1,4 +1,4 @@
-import { constantTimeCompare } from './crypto.js';
+import { constantTimeCompare, hashToken } from './crypto.js';
 export const CONFIG_KV_KEY = 'llmproxy_config';
 export class CASConflictError extends Error {
 constructor(currentVersion, submittedVersion) {
@@ -97,7 +97,6 @@ _version: 1,
 providers: {},
 agent_models: {},
 settings: {
-run_mode: 'agent',
 client_key: '',
 proxy_keys: [],
 agent_routing_strategy: 'sticky_failover',
@@ -108,9 +107,6 @@ cooldown_network_error_sec: 15,
 cooldown_auth_error_sec: 86400,
 ocr_max_inflight: 4,
 kb_global_max_concurrency: 16,
-mode_schedule_enabled: false,
-mode_schedule_agent_window: '08:30-22:30',
-mode_schedule_timezone: 'Asia/Shanghai',
 },
 };
 }
@@ -276,14 +272,20 @@ return target[prop];
 }
 export function checkAdminAuth(request, envOrContext) {
 const env = resolveEnv(envOrContext);
-const adminPassword = (env && env.ADMIN_PASSWORD) || 'admin';
+const adminPassword = env && typeof env.ADMIN_PASSWORD === 'string' ? env.ADMIN_PASSWORD.trim() : '';
+if (!adminPassword) {
+return new Response(
+JSON.stringify({ ok: false, error: 'Hub ADMIN_PASSWORD is not configured' }),
+{ status: 503, headers: { 'content-type': 'application/json' } }
+);
+}
 const authHeader = request.headers.get('authorization') || '';
 const expectedBearer = `Bearer ${adminPassword}`;
-if (constantTimeCompare(authHeader, expectedBearer)) {
+if (authHeader && constantTimeCompare(hashToken(authHeader), hashToken(expectedBearer))) {
 return null;
 }
 const customHeader = request.headers.get('x-admin-key') || '';
-if (constantTimeCompare(customHeader, adminPassword)) {
+if (customHeader && constantTimeCompare(hashToken(customHeader), hashToken(adminPassword))) {
 return null;
 }
 return new Response(
@@ -325,9 +327,10 @@ return null;
 }
 export async function persistProviderKeyHealth(env, mapName, providerId, keyLabel, result) {
 if (!providerId) return;
-try {
 const kv = resolveKvBinding(env);
 if (!kv) return;
+for (let attempt = 0; attempt < 2; attempt++) {
+try {
 const config = await loadConfig(kv);
 const prov = config?.[mapName]?.[providerId];
 if (!prov || !Array.isArray(prov.api_keys)) return;
@@ -342,11 +345,13 @@ if (result.models_count !== undefined) {
 match.last_models_count = Number(result.models_count) || 0;
 }
 match.last_checked_at = new Date().toISOString();
-const serialized = JSON.stringify(config);
-if (typeof kv.put === 'function') {
-await kv.put(CONFIG_KV_KEY, serialized);
-} else if (typeof kv.setItem === 'function') {
-await kv.setItem(CONFIG_KV_KEY, serialized);
+await saveConfigWithCAS(config, kv);
+return;
+} catch (err) {
+if (attempt === 0 && (err instanceof CASConflictError || err?.status === 409)) {
+continue;
 }
-} catch (_) {}
+return;
+}
+}
 }

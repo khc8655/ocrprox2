@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -286,5 +288,82 @@ func TestEnsureValidToken_PersistFunc(t *testing.T) {
 	}
 	if persistedEntry.Key != "rotated-access-tok" {
 		t.Errorf("persisted entry key mismatch: %s", persistedEntry.Key)
+	}
+}
+
+func TestOAuth_ConcurrentRefreshRaceFreeAndSessionPruning(t *testing.T) {
+	var refreshHits atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/device/code" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"device_code":      "fresh-dev-code",
+				"user_code":        "FRESH-1",
+				"verification_uri": "https://auth.example.com",
+				"expires_in":       600,
+				"interval":         5,
+			})
+			return
+		}
+		refreshHits.Add(1)
+		time.Sleep(10 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "concurrent-access-tok",
+			"refresh_token": "concurrent-refresh-tok",
+			"expires_in":    7200,
+			"token_type":    "bearer",
+		})
+	}))
+	defer ts.Close()
+
+	mgr := NewManager(true)
+
+	// Seed a stale session older than 15 minutes
+	mgr.mu.Lock()
+	mgr.sessions["stale-dev-code"] = &DeviceSession{
+		DeviceCode: "stale-dev-code",
+		CreatedAt:  time.Now().Unix() - (SessionMaxAgeSec + 60),
+	}
+	mgr.mu.Unlock()
+
+	if _, err := mgr.StartDeviceFlow(context.Background(), ts.URL+"/device/code", "cid", ""); err != nil {
+		t.Fatalf("StartDeviceFlow err: %v", err)
+	}
+	mgr.mu.Lock()
+	_, staleExists := mgr.sessions["stale-dev-code"]
+	mgr.mu.Unlock()
+	if staleExists {
+		t.Fatalf("expected stale session (>15m) to be pruned during StartDeviceFlow")
+	}
+
+	// Hammer EnsureValidToken + GetAccessToken from 16 goroutines under -race
+	keyEntry := &types.KeyEntry{
+		Key: "expiring-tok",
+		OAuthMeta: &types.OAuthMeta{
+			Provider:     "minimax",
+			ClientID:     "cid",
+			RefreshToken: "rtok",
+			ExpiresAt:    time.Now().Unix() + 30,
+		},
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := mgr.EnsureValidToken(context.Background(), keyEntry, ts.URL+"/oauth/token"); err != nil {
+				t.Errorf("EnsureValidToken err: %v", err)
+			}
+			_ = mgr.GetAccessToken(keyEntry)
+		}()
+	}
+	wg.Wait()
+
+	if refreshHits.Load() != 1 {
+		t.Errorf("expected singleflight per-key lock to refresh exactly once, got %d", refreshHits.Load())
+	}
+	if got := mgr.GetAccessToken(keyEntry); got != "concurrent-access-tok" {
+		t.Errorf("expected refreshed token 'concurrent-access-tok', got %q", got)
 	}
 }

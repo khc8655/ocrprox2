@@ -154,86 +154,6 @@ func TestAdmin_DetectProvider(t *testing.T) {
 	}
 }
 
-func TestAdmin_Balance(t *testing.T) {
-	mockUpstream := setupTestMockUpstream()
-	defer mockUpstream.Close()
-
-	tmpDir := t.TempDir()
-	authMgr := auth.NewAuthenticator("client-key-1", "admin-pass")
-	localSrc, _ := config.NewLocalSource(tmpDir, "pass")
-	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
-	defer obsMgr.Close()
-	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
-
-	srv := NewServer(authMgr, localSrc, obsMgr, sched)
-	srv.SetHTTPClient(mockUpstream.Client())
-
-	_, _ = localSrc.SaveConfig(&types.ProxyConfig{
-		Version: 1,
-		Providers: map[string]*types.ProviderConfig{
-			"ds-prov": {
-				ID:         "ds-prov",
-				PresetID:   "deepseek",
-				BaseURL:    mockUpstream.URL + "/v1",
-				BalanceURL: mockUpstream.URL + "/user/balance",
-				APIKeys:    []*types.KeyEntry{{ID: "k1", Key: "sk-ds-key", Label: "main"}},
-			},
-		},
-	})
-
-	mux := http.NewServeMux()
-	srv.RegisterRoutes(mux)
-
-	// 1. DeepSeek provider balance
-	{
-		body, _ := json.Marshal(map[string]string{
-			"provider": "ds-prov",
-		})
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/balance", bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer admin-pass")
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 for balance, got %d: %s", rec.Code, rec.Body.String())
-		}
-		var res struct {
-			OK      bool                    `json:"ok"`
-			Balance *provider.BalanceResult `json:"balance"`
-		}
-		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || res.Balance == nil {
-			t.Fatalf("expected ok=true with balance result")
-		}
-		if res.Balance.Amount != "¥100.50" {
-			t.Errorf("expected balance ¥100.50, got %s", res.Balance.Amount)
-		}
-	}
-
-	// 2. Custom balance endpoint and path
-	{
-		body, _ := json.Marshal(map[string]string{
-			"balance_url":  mockUpstream.URL + "/custom/balance",
-			"balance_path": "data.balance",
-			"api_key":      "sk-custom",
-		})
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/balance", bytes.NewReader(body))
-		req.Header.Set("Authorization", "Bearer admin-pass")
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 for custom balance, got %d: %s", rec.Code, rec.Body.String())
-		}
-		var res struct {
-			OK      bool                    `json:"ok"`
-			Balance *provider.BalanceResult `json:"balance"`
-		}
-		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || res.Balance == nil || res.Balance.Amount != "$42.00" {
-			t.Fatalf("expected balance $42.00, got %+v", res.Balance)
-		}
-	}
-}
-
 func TestAdmin_TestProvider_And_CooldownClearing(t *testing.T) {
 	mockUpstream := setupTestMockUpstream()
 	defer mockUpstream.Close()
@@ -339,9 +259,15 @@ func TestAdmin_TestProvider_And_CooldownClearing(t *testing.T) {
 	}
 }
 
-func TestAdmin_AutolistSync(t *testing.T) {
+func TestAdmin_DetectAndTestProvider_VaultKeyBaseURLLock(t *testing.T) {
 	mockUpstream := setupTestMockUpstream()
 	defer mockUpstream.Close()
+
+	evilServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("SEC-06 violation: vault key exfiltrated to attacker server: %s", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer evilServer.Close()
 
 	tmpDir := t.TempDir()
 	authMgr := auth.NewAuthenticator("client-key-1", "admin-pass")
@@ -351,23 +277,17 @@ func TestAdmin_AutolistSync(t *testing.T) {
 	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
 
 	srv := NewServer(authMgr, localSrc, obsMgr, sched)
-	srv.SetHTTPClient(mockUpstream.Client())
+	srv.SetAllowPrivate(true)
 
 	_, _ = localSrc.SaveConfig(&types.ProxyConfig{
 		Version: 1,
 		Providers: map[string]*types.ProviderConfig{
-			"autolist-prov": {
-				ID:          "autolist-prov",
-				BaseURL:     mockUpstream.URL + "/v1",
-				AutoInclude: "deepseek-*",
-				APIKeys:     []*types.KeyEntry{{ID: "k1", Key: "sk-key-1", Label: "main"}},
-			},
-		},
-		AgentModels: map[string]*types.AgentModelRoute{
-			"existing-model": {
-				Enabled: true,
-				Candidates: []*types.RouteCandidate{
-					{Provider: "other-prov", TargetModel: "existing-model", Enabled: true},
+			"vault-prov": {
+				ID:      "vault-prov",
+				BaseURL: mockUpstream.URL + "/v1",
+				Origin:  "vault",
+				APIKeys: []*types.KeyEntry{
+					{ID: "vk1", Label: "vault-main", Key: "sk-vault-top-secret", Origin: "vault", Enabled: true},
 				},
 			},
 		},
@@ -376,65 +296,37 @@ func TestAdmin_AutolistSync(t *testing.T) {
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
-	// 1. Dry-run autolist-sync (apply=false)
+	// 1. detect-provider attempting to override base_url while resolving vault key -> 403
 	{
 		body, _ := json.Marshal(map[string]any{
-			"provider": "autolist-prov",
-			"apply":    false,
+			"provider": "vault-prov",
+			"base_url": evilServer.URL + "/v1",
+			"api_key":  "sk-...cret",
 		})
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/autolist-sync", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/detect-provider", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer admin-pass")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 for autolist-sync dry-run, got %d: %s", rec.Code, rec.Body.String())
-		}
-		var res struct {
-			OK      bool     `json:"ok"`
-			Models  []string `json:"models"`
-			Matched []string `json:"matched"`
-			Added   []string `json:"added"`
-		}
-		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || len(res.Matched) != 2 {
-			t.Fatalf("expected 2 matched models ('deepseek-chat', 'deepseek-reasoner'), got %+v", res.Matched)
-		}
-		if len(res.Added) != 0 {
-			t.Fatalf("expected 0 added on dry run, got %d", len(res.Added))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden on detect-provider base_url override for vault key, got %d: %s", rec.Code, rec.Body.String())
 		}
 	}
 
-	// 2. Apply autolist-sync (apply=true)
+	// 2. test-provider attempting to override base_url while resolving vault key -> 403
 	{
 		body, _ := json.Marshal(map[string]any{
-			"provider": "autolist-prov",
-			"apply":    true,
+			"provider": "vault-prov",
+			"base_url": evilServer.URL + "/v1",
+			"api_key":  "",
+			"model":    "gpt-4o-mini",
+			"protocol": "chat",
 		})
-		req := httptest.NewRequest(http.MethodPost, "/api/admin/autolist-sync", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/test-provider", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer admin-pass")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 for autolist-sync apply, got %d: %s", rec.Code, rec.Body.String())
-		}
-		var res struct {
-			OK      bool     `json:"ok"`
-			Models  []string `json:"models"`
-			Matched []string `json:"matched"`
-			Added   []string `json:"added"`
-		}
-		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || len(res.Added) != 2 {
-			t.Fatalf("expected 2 added models, got %+v", res.Added)
-		}
-
-		// Verify stored in localSrc
-		snap, _ := localSrc.Current(nil, false)
-		if snap.Config.AgentModels["deepseek-chat"] == nil {
-			t.Fatalf("expected deepseek-chat to be added to agent_models")
-		}
-		if snap.Config.AgentModels["deepseek-reasoner"] == nil {
-			t.Fatalf("expected deepseek-reasoner to be added to agent_models")
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden on test-provider base_url override for vault key, got %d: %s", rec.Code, rec.Body.String())
 		}
 	}
 }
@@ -486,7 +378,6 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 		},
 		Settings: types.RuntimeSettings{
 			ClientKey: "initial-client-key",
-			RunMode:   types.ModeAgent,
 			ProxyKeys: []string{"extra-1", "extra-2"},
 		},
 	})
@@ -513,7 +404,7 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 			Models              []string `json:"models"`
 		}
 		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || !res.ClientKeyConfigured || len(res.Models) != 2 {
+		if !res.OK || res.Mode != "unified" || !res.ClientKeyConfigured || len(res.Models) != 2 {
 			t.Fatalf("unexpected access-info response: %+v", res)
 		}
 	}

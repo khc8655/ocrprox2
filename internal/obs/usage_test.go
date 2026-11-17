@@ -292,3 +292,78 @@ func TestUsage_TPS_CacheHitRate_Series_Heatmap(t *testing.T) {
 		t.Fatalf("expected endpoints slice in QueryUsage result")
 	}
 }
+
+func TestUsage_RotationAndTimestampSanity(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(types.RoleFull, tmpDir)
+	if err != nil {
+		t.Fatalf("NewManager error: %v", err)
+	}
+	defer mgr.Close()
+
+	// Verify default rotation limit is 10 MiB
+	if mgr.ledgerLimit.Load() != 10<<20 {
+		t.Fatalf("expected default UsageLedgerLimit 10 MiB, got %d", mgr.ledgerLimit.Load())
+	}
+
+	// Lower rotation limit to 2 KiB in test to exercise rotation deterministically
+	mgr.ledgerLimit.Store(2048)
+
+	now := time.Now().Unix()
+	// Record 1 corrupt zero-timestamp record + 40 valid records forcing rotation
+	mgr.RecordRequest(types.RequestTrace{
+		ID:        "corrupt-zero-ts",
+		Timestamp: 0,
+		Mode:      "agent",
+		ReqModel:  "gpt-4o",
+		Status:    200,
+		InTokens:  10,
+	})
+	mgr.RecordRequest(types.RequestTrace{
+		ID:        "corrupt-ancient-ts",
+		Timestamp: 1000,
+		Mode:      "agent",
+		ReqModel:  "gpt-4o",
+		Status:    200,
+		InTokens:  10,
+	})
+
+	for i := 0; i < 40; i++ {
+		mgr.RecordRequest(types.RequestTrace{
+			ID:             "req-rot",
+			Timestamp:      now,
+			Mode:           "agent",
+			Endpoint:       "/v1/chat/completions",
+			ReqModel:       "gpt-4o",
+			ServedModel:    "gpt-4o",
+			WinnerProvider: "openai",
+			WinnerKey:      "k1",
+			Status:         200,
+			InTokens:       50,
+			OutTokens:      25,
+		})
+	}
+
+	if err := mgr.Flush(); err != nil {
+		t.Fatalf("Flush error: %v", err)
+	}
+
+	// Check usage.jsonl.1 was created by rotation
+	rotatedPath := filepath.Join(tmpDir, "usage.jsonl.1")
+	if fi, err := os.Stat(rotatedPath); err != nil || fi.Size() == 0 {
+		t.Fatalf("expected rotated usage.jsonl.1 to exist and be non-empty, err=%v", err)
+	}
+
+	// Query period="all" -> zero/ancient timestamps must NOT allocate 20k series buckets!
+	statsAll, err := mgr.QueryUsage("all", "UTC")
+	if err != nil {
+		t.Fatalf("QueryUsage(all) error: %v", err)
+	}
+	seriesAll, ok := statsAll["series"].([]SeriesPoint)
+	if !ok {
+		t.Fatalf("expected []SeriesPoint, got %T", statsAll["series"])
+	}
+	if len(seriesAll) != 30 {
+		t.Fatalf("expected 30 series buckets despite corrupt Timestamp=0, got %d", len(seriesAll))
+	}
+}

@@ -4,6 +4,23 @@
 
 ---
 
+## [v20261118-01] - 2026-11-18
+
+### Security
+- **Hub 管理端与 Vault 边界加固**：`ADMIN_PASSWORD` 未配置时强制返回 `503` 失败关闭，采用 SHA-256 摘要进行恒定时间比对消除长度侧信道；`/api/vault/manifest` 与 `/api/vault/fetch` 强制校验 `role === "full"` 及节点 `scope.providers` 授权范围，拒绝 Lite 节点令牌越权拉取明文凭证。
+- **配置导出防泄露（仅导出本地配置与 Key）**：Full 节点 `GET /api/admin/config/export` 物理剥离所有 `origin="vault"` 供应商与中枢下发 Key，并清空 `vault.node_token`，严禁全量导出中枢密钥。
+- **全链路 SSRF、重定向与防窃取防护**：`netguard` 无条件拦截 `169.254.0.0/16` / `fe80::/10` 链路本地与云元数据地址；数据面禁止跨主机重定向，探测客户端跨主机重定向自动剥离鉴权头；使用已存 Vault Key 验证/探测时禁止覆盖 `base_url`；更换 Vault Hub URL 时若未重填新令牌自动清空旧 `node_token`；前端 Vault 同步统一走节点同源 `/api/vault/*` 代理。
+- **安装脚本与自升级供应链加固**：`deploy/install.sh`、`llmproxy-ctl upgrade` 与管理端 `/api/admin/system/upgrade` 强制优先从 GitHub 官方源校验 `SHA256SUMS`（缺失或不匹配立即中止）；移除 `llmproxy` 服务账户的 `sudoers` 权限，收紧 `.env` (`umask 077`)、`llmproxy-lite.service` (`0600`) 与卸载备份目录 (`mktemp -d` + `0700`) 权限，消除 `sed` 注入风险。
+- **鉴权与脱敏细节修复**：客户端推理鉴权移除 `adminPassword` 回退；管理端鉴权仅接受请求头凭证（拒绝 URL Query 传参），修复反向代理场景下登录限流 IP 提取与锁定绕过；日志与上游报错回包统一脱敏 `stk_node_*`、`x-api-key`、`x-goog-api-key` 与 `?key=`。
+
+### Fixed
+- **HubSync 高可用自愈与零竞争**：`syncWithHub` 使用独立 15s 上下文避免首个请求取消连带中断并发拉取；Hub 5xx/网络抖动进入可自愈 `StateError` 而非永久 `StateRevoked`；修复 `304` 租约续期原地修改与 `200` 刷新过早清零旧快照导致的并发读写竞争。
+- **流式 Keepalive 与有界内存保护**：修复 `StreamOnly` 聚合模式与客户端 SSE 模式下 `: keep-alive` 提前写入导致的 `WriteHeader` 冲突与响应损坏；`>1 MiB` 请求体在读取缓冲前即获取 `largeBodySem` 信号量；为 `PeekFirstChunk` (4MB)、非流式响应读取 (20MB)、`AggregateStreamToJSON` (16MB) 与 `ThoughtStreamFilter` (4MB) 补齐硬上限；`usage.jsonl` 增加 10 MiB 自动轮转。
+- **一代 `ocrproxy` 预设规则与协议对齐**：Go `AdapterRules` 与 `build-catalog.mjs` 无损解析 `shared/presets/*.json` 嵌套规则；修复 Gemini 思考配置字段层级、`effort="none"` 与非流式 `tool_calls` 签名缓存；`/v1/messages` 透传 `anthropic-version` / `anthropic-beta` / `x-api-key` 并支持 `AuthPrefix="none"`；修复 KB `isNativeOCR` 空目标模型误判与动态并发控制器竞争；修复 Happy Eyeballs IPv6 连接句柄泄漏、OAuth 令牌刷新竞争与前端 `/api/lanes` 字段大小写不匹配。
+
+### Removed
+- **彻底精简冗余模块与死代码**：移除双模定时切换（`internal/modesched`、`/api/admin/mode`、`run_mode`、`mode_schedule_*`）、自动模型列表同步（`autolist.go`、`/api/admin/autolist-sync`）、上游余额查询（`balance.go`、`/api/admin/balance`）以及未使用的 `internal/filememo` 与 `internal/upstream/sse.go`，保留极简高吞吐统一路由内核。
+
 ## [v20261117-06] - 2026-11-17
 
 ### Fixed

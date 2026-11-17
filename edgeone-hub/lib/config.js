@@ -1,4 +1,4 @@
-import { constantTimeCompare } from './crypto.js';
+import { constantTimeCompare, hashToken } from './crypto.js';
 
 export const CONFIG_KV_KEY = 'llmproxy_config';
 
@@ -128,7 +128,6 @@ export async function loadConfig(kv) {
     providers: {},
     agent_models: {},
     settings: {
-      run_mode: 'agent',
       client_key: '',
       proxy_keys: [],
       agent_routing_strategy: 'sticky_failover',
@@ -139,9 +138,6 @@ export async function loadConfig(kv) {
       cooldown_auth_error_sec: 86400,
       ocr_max_inflight: 4,
       kb_global_max_concurrency: 16,
-      mode_schedule_enabled: false,
-      mode_schedule_agent_window: '08:30-22:30',
-      mode_schedule_timezone: 'Asia/Shanghai',
     },
   };
 }
@@ -355,17 +351,23 @@ export function resolveEnv(contextOrEnv) {
  */
 export function checkAdminAuth(request, envOrContext) {
   const env = resolveEnv(envOrContext);
-  const adminPassword = (env && env.ADMIN_PASSWORD) || 'admin';
+  const adminPassword = env && typeof env.ADMIN_PASSWORD === 'string' ? env.ADMIN_PASSWORD.trim() : '';
+  if (!adminPassword) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Hub ADMIN_PASSWORD is not configured' }),
+      { status: 503, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
   const authHeader = request.headers.get('authorization') || '';
   const expectedBearer = `Bearer ${adminPassword}`;
-  
-  // Also support custom header or cookie if present
-  if (constantTimeCompare(authHeader, expectedBearer)) {
+
+  if (authHeader && constantTimeCompare(hashToken(authHeader), hashToken(expectedBearer))) {
     return null;
   }
-  
+
   const customHeader = request.headers.get('x-admin-key') || '';
-  if (constantTimeCompare(customHeader, adminPassword)) {
+  if (customHeader && constantTimeCompare(hashToken(customHeader), hashToken(adminPassword))) {
     return null;
   }
 
@@ -416,28 +418,31 @@ export function findUnmaskedKey(prov, keyLabel) {
  */
 export async function persistProviderKeyHealth(env, mapName, providerId, keyLabel, result) {
   if (!providerId) return;
-  try {
-    const kv = resolveKvBinding(env);
-    if (!kv) return;
-    const config = await loadConfig(kv);
-    const prov = config?.[mapName]?.[providerId];
-    if (!prov || !Array.isArray(prov.api_keys)) return;
-    const match = keyLabel
-      ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
-      : prov.api_keys[0];
-    if (!match) return;
-    match.last_ok = Boolean(result.valid);
-    match.last_status = Number(result.status) || 0;
-    match.last_latency_ms = Number(result.latency_ms) || 0;
-    if (result.models_count !== undefined) {
-      match.last_models_count = Number(result.models_count) || 0;
+  const kv = resolveKvBinding(env);
+  if (!kv) return;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const config = await loadConfig(kv);
+      const prov = config?.[mapName]?.[providerId];
+      if (!prov || !Array.isArray(prov.api_keys)) return;
+      const match = keyLabel
+        ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
+        : prov.api_keys[0];
+      if (!match) return;
+      match.last_ok = Boolean(result.valid);
+      match.last_status = Number(result.status) || 0;
+      match.last_latency_ms = Number(result.latency_ms) || 0;
+      if (result.models_count !== undefined) {
+        match.last_models_count = Number(result.models_count) || 0;
+      }
+      match.last_checked_at = new Date().toISOString();
+      await saveConfigWithCAS(config, kv);
+      return;
+    } catch (err) {
+      if (attempt === 0 && (err instanceof CASConflictError || err?.status === 409)) {
+        continue;
+      }
+      return;
     }
-    match.last_checked_at = new Date().toISOString();
-    const serialized = JSON.stringify(config);
-    if (typeof kv.put === 'function') {
-      await kv.put(CONFIG_KV_KEY, serialized);
-    } else if (typeof kv.setItem === 'function') {
-      await kv.setItem(CONFIG_KV_KEY, serialized);
-    }
-  } catch (_) {}
+  }
 }

@@ -13,9 +13,12 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/khc8655/llmproxy2/internal/upstream"
 )
 
-const defaultGitHubRepo = "khc8655/ocrprox2"
+const UpdateRepo = "khc8655/ocrprox2"
+const defaultGitHubRepo = UpdateRepo
 
 func (s *Server) systemRepo() string {
 	if r := strings.TrimSpace(os.Getenv("LLMPROXY_GITHUB_REPO")); r != "" {
@@ -90,7 +93,7 @@ func (s *Server) fetchLatestRelease(r *http.Request) (*ghLatestRelease, error) {
 
 	client := s.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 12 * time.Second}
+		client = upstream.DefaultClient(12*time.Second, s.allowPrivate)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -198,6 +201,55 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := s.httpClient
+	if client == nil {
+		client = upstream.DefaultClient(120*time.Second, s.allowPrivate)
+	}
+
+	// SEC-05: Mandatory fail-closed SHA256SUMS verification BEFORE downloading or staging binary.
+	if checksumURL == "" {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing or unverifiable SHA256SUMS for release asset"})
+		return
+	}
+	sumReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, checksumURL, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing or unverifiable SHA256SUMS for release asset"})
+		return
+	}
+	sumResp, err := client.Do(sumReq)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing or unverifiable SHA256SUMS for release asset"})
+		return
+	}
+	sumBytes, sumReadErr := io.ReadAll(io.LimitReader(sumResp.Body, 1<<20))
+	sumResp.Body.Close()
+	if sumResp.StatusCode != http.StatusOK || sumReadErr != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing or unverifiable SHA256SUMS for release asset"})
+		return
+	}
+	expectedSHA := ""
+	for _, line := range strings.Split(string(sumBytes), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == binName {
+			cand := strings.ToLower(strings.TrimSpace(fields[0]))
+			if len(cand) == 64 {
+				if _, hexErr := hex.DecodeString(cand); hexErr == nil {
+					expectedSHA = cand
+				}
+			}
+			break
+		}
+	}
+	if expectedSHA == "" {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing or unverifiable SHA256SUMS for release asset"})
+		return
+	}
+
 	exePath, err := os.Executable()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -206,29 +258,6 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
 		exePath = resolved
-	}
-
-	client := s.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
-	}
-
-	// Fetch expected SHA256 if SHA256SUMS is provided
-	expectedSHA := ""
-	if checksumURL != "" {
-		if sumReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, checksumURL, nil); err == nil {
-			if sumResp, err := client.Do(sumReq); err == nil {
-				sumBytes, _ := io.ReadAll(io.LimitReader(sumResp.Body, 1<<20))
-				sumResp.Body.Close()
-				for _, line := range strings.Split(string(sumBytes), "\n") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == binName {
-						expectedSHA = strings.ToLower(fields[0])
-						break
-					}
-				}
-			}
-		}
 	}
 
 	binReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, downloadURL, nil)
@@ -269,7 +298,7 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actualSHA := hex.EncodeToString(hasher.Sum(nil))
-	if expectedSHA != "" && actualSHA != expectedSHA {
+	if actualSHA != expectedSHA {
 		_ = os.Remove(tmpPath)
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": fmt.Sprintf("sha256 mismatch: expected %s, got %s", expectedSHA, actualSHA)})

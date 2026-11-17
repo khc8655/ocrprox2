@@ -1,13 +1,14 @@
 {
-  "version": "v20261117-06",
-  "semver": "2.4.4",
-  "release_date": "2026-11-17",
+  "version": "v20261118-01",
+  "semver": "2.5.0",
+  "release_date": "2026-11-18",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.4.4 — 修复供应商 id 缺失与本地 Key 误标 vault",
+  "title": "LLMProxy2 (OCRProxy v2) 2.5.0 — 上线前全维度安全/稳定性加固、一代规则对齐与冗余模块精简",
   "changelog": [
-    "修复 UI 创建供应商未写入对象 id 字段，导致调度器 Trace/Usage 中 provider 为空、按供应商与按 Key 的用量统计整体失效（后端增加按 map key 回填的兜底）",
-    "修复节点端手动添加的 Key 被误标 origin=vault（三元表达式两支均为 vault），导致本地 Key 显示为只读掩码且无法查看",
-    "Key 可见性规则修正：节点仅对中枢下发的 Key 掩码只读，本地添加的 Key 返回明文并支持显示/隐藏切换",
-    "parseMultiApiKeys 默认 origin 改为 local，避免调用方遗漏时静默产生 vault 归属"
+    "安全加固：Hub 鉴权无 ADMIN_PASSWORD 时强制 503 失败关闭、SHA-256 恒定时间比对；Vault 接口强制校验 Full 角色与节点供应商作用域；SSRF 全链路阻断链路本地/元数据地址与跨主机重定向；升级与一键安装脚本强制 SHA256SUMS 校验并移除守护进程 sudo 权限",
+    "配置导出与掩码安全：Full 节点导出配置物理剥离所有 origin=vault 供应商/Key 及 node_token（仅导出本地配置与本地 Key）；阻断自定义 base_url 窃取存储 Key；修复中枢 URL 变更令牌泄露风险",
+    "稳定性与低内存：修复 HubSync 瞬态故障误判永久吊销及 304/200 并发数据竞争；修复 SSE keepalive 预提交状态码冲突；大请求体信号量前置拦截；usage.jsonl 10MiB 自动轮转；修复 Happy Eyeballs 句柄泄漏与 KB 动态并发控制器竞争",
+    "一代规则与协议对齐：完整兼容 16 个预设嵌套 adapter_rules（Gemini 思考预算矩阵、非流式 tool_calls 签名、模型别名、请求头注入）；补齐 /v1/messages Anthropic 版本头与 x-api-key 透传",
+    "架构精简：彻底移除双模定时切换（ModeScheduler）、自动模型同步（autolist）、上游余额探测（balance）及未使用的 filememo/sse 死代码，统一为单核常驻低内存网关"
   ]
 }

@@ -22,28 +22,35 @@ providers: Array.isArray(scope.providers) ? scope.providers : ['*'],
 };
 return copy;
 }
+function sanitizeShellToken(val) {
+if (!val || typeof val !== 'string') return '';
+return val.trim().replace(/["'$`\\\s;|&<>(){}!]/g, '');
+}
 function buildBootstrapEnv(node, rawToken, hubUrl, clientKey = '') {
+const role = node.role === 'full' ? 'full' : 'lite';
+const cleanHub = sanitizeShellToken(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
 const parts = [
-`LLMPROXY_ROLE=${node.role}`,
-`LLMPROXY_HUB_URL=${hubUrl}`,
+`LLMPROXY_ROLE=${role}`,
+`LLMPROXY_HUB_URL=${cleanHub}`,
 `LLMPROXY_NODE_TOKEN=${rawToken}`,
 ];
-if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
-parts.push(`LLMPROXY_CLIENT_KEY=${clientKey.trim()}`);
+const cleanKey = sanitizeShellToken(clientKey);
+if (cleanKey) {
+parts.push(`LLMPROXY_CLIENT_KEY=${cleanKey}`);
 }
 return parts.join(' ');
 }
 function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
-const cleanHub = String(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
+const cleanHub = sanitizeShellToken(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
 const role = node.role === 'full' ? 'full' : 'lite';
 const args = [
 `--role=${role}`,
 `--hub-url="${cleanHub}"`,
 `--node-token="${rawToken}"`,
 ];
-if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
-const cleanKey = clientKey.trim().replace(/["$`\\]/g, '');
-if (cleanKey) args.push(`--client-key="${cleanKey}"`);
+const cleanKey = sanitizeShellToken(clientKey);
+if (cleanKey) {
+args.push(`--client-key="${cleanKey}"`);
 }
 args.push('-p 8787', '-y');
 return `curl -fsSL ${cleanHub}/install.sh | sudo bash -s -- ${args.join(' ')}`;
@@ -199,7 +206,7 @@ if (meta && meta.ip) {
 node.last_ip = String(meta.ip);
 }
 if (meta && meta.binaryVersion) {
-node.last_binary_version = String(meta.binaryVersion).slice(0, 32);
+node.last_binary_version = String(meta.binaryVersion).replace(/[<>"'&\x00-\x1f\x7f]/g, '').slice(0, 32);
 }
 if (meta && meta.usage && typeof meta.usage === 'object') {
 const models = {};
@@ -208,8 +215,9 @@ let guard = 0;
 for (const [m, n] of Object.entries(raw)) {
 if (guard >= 50) break;
 const count = Number(n);
-if (!m || !Number.isFinite(count) || count <= 0) continue;
-models[String(m).slice(0, 96)] = Math.floor(count);
+const cleanModel = String(m || '').replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 96);
+if (!cleanModel || !Number.isFinite(count) || count <= 0) continue;
+models[cleanModel] = Math.floor(count);
 guard += 1;
 }
 node.usage = {

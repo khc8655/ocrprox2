@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"testing"
 )
@@ -28,11 +29,83 @@ func TestVerifyClientKey(t *testing.T) {
 		t.Errorf("expected loopback request without key to be rejected")
 	}
 
-	// Admin password as fallback -> success
+	// Admin password MUST BE REJECTED on /v1/* client key verification (SEC-08)
 	req = httptest.NewRequest("GET", "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer admin-pass")
-	if !auth.VerifyClientKey(req) {
-		t.Errorf("expected admin password to pass as client key fallback")
+	if auth.VerifyClientKey(req) {
+		t.Errorf("expected admin password to be rejected on VerifyClientKey")
+	}
+}
+
+func TestVerifyAdminAuth_RejectsQueryStringTokens(t *testing.T) {
+	a := NewAuthenticator("my-client-key", "admin-pass")
+
+	req := httptest.NewRequest("GET", "/api/config?key=admin-pass&token=admin-pass", nil)
+	req.RemoteAddr = "192.168.1.77:54321"
+	if a.VerifyAdminAuth(req) {
+		t.Fatalf("expected VerifyAdminAuth to reject credentials supplied via URL query string")
+	}
+
+	reqHdr := httptest.NewRequest("GET", "/api/config", nil)
+	reqHdr.RemoteAddr = "192.168.1.77:54321"
+	reqHdr.Header.Set("X-Api-Key", "admin-pass")
+	if !a.VerifyAdminAuth(reqHdr) {
+		t.Fatalf("expected VerifyAdminAuth to accept X-Api-Key header")
+	}
+}
+
+func TestGetClientIP_AntiSpoofingRightmostXFF(t *testing.T) {
+	t.Setenv("TRUST_PROXY_HEADERS", "")
+
+	// 1. Non-loopback RemoteAddr without TRUST_PROXY_HEADERS must ignore X-Forwarded-For
+	rDirect := httptest.NewRequest("POST", "/api/config", nil)
+	rDirect.RemoteAddr = "203.0.113.50:4444"
+	rDirect.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := GetClientIP(rDirect); got != "203.0.113.50" {
+		t.Errorf("expected direct RemoteAddr 203.0.113.50, got %q", got)
+	}
+
+	// 2. Loopback reverse proxy: client prepends fake IP "1.1.1.1", proxy appends real "198.51.100.99"
+	// Must select rightmost non-loopback IP "198.51.100.99", NOT spoofed parts[0]!
+	rProxy := httptest.NewRequest("POST", "/api/config", nil)
+	rProxy.RemoteAddr = "127.0.0.1:50000"
+	rProxy.Header.Set("X-Forwarded-For", "1.1.1.1, 8.8.8.8, 198.51.100.99")
+	if got := GetClientIP(rProxy); got != "198.51.100.99" {
+		t.Errorf("expected rightmost XFF IP 198.51.100.99, got %q", got)
+	}
+
+	// 3. Chained local proxies: "1.1.1.1, 198.51.100.99, 127.0.0.1" -> rightmost non-loopback "198.51.100.99"
+	rChain := httptest.NewRequest("POST", "/api/config", nil)
+	rChain.RemoteAddr = "[::1]:50000"
+	rChain.Header.Set("X-Forwarded-For", "1.1.1.1, 198.51.100.99, 127.0.0.1")
+	if got := GetClientIP(rChain); got != "198.51.100.99" {
+		t.Errorf("expected rightmost non-loopback XFF IP 198.51.100.99, got %q", got)
+	}
+}
+
+func TestAuthenticator_BoundedMaps(t *testing.T) {
+	a := NewAuthenticator("client-key", "admin-pass")
+
+	for i := 0; i < MaxTrackedIPs+200; i++ {
+		ip := fmt.Sprintf("10.%d.%d.%d", (i>>16)&0xff, (i>>8)&0xff, (i%250)+1)
+		for attempt := 0; attempt < MaxFailedAttempts; attempt++ {
+			req := httptest.NewRequest("POST", "/api/config", nil)
+			req.RemoteAddr = ip + ":12345"
+			req.Header.Set("Authorization", "Bearer wrong")
+			a.VerifyAdminAuth(req)
+		}
+	}
+
+	a.mu.RLock()
+	failedLen := len(a.failedAttempts)
+	blockedLen := len(a.blockedIPs)
+	a.mu.RUnlock()
+
+	if failedLen > MaxTrackedIPs {
+		t.Errorf("failedAttempts exceeded cap %d: got %d", MaxTrackedIPs, failedLen)
+	}
+	if blockedLen > MaxTrackedIPs {
+		t.Errorf("blockedIPs exceeded cap %d: got %d", MaxTrackedIPs, blockedLen)
 	}
 }
 

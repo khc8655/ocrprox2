@@ -62,7 +62,7 @@ func (c *Counter) RecordRequest(trace types.RequestTrace) {
 		if _, seen := c.models[model]; seen || len(c.models) < maxModels {
 			c.models[model]++
 		} else {
-			c.dropped++
+			atomic.AddInt64(&c.dropped, 1)
 		}
 	}
 	c.mu.Unlock()

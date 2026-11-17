@@ -54,6 +54,8 @@ var secrets = []struct {
 }{
 	{regexp.MustCompile(`(?i)\b((?:bearer|basic)\s+)[A-Za-z0-9._~+/=-]{8,}`), "${1}…"},
 	{regexp.MustCompile(`(?i)([?&](?:key|api[_-]?key|apikey|access_token|refresh_token|id_token|token|auth|sig|signature|code)=)[^&\s"'<>]+`), "${1}…"},
+	{regexp.MustCompile(`(?i)((?:x-api-key|x-goog-api-key|api-key)["']?\s*[:=]\s*["']?)[^\s"',;&<>}{]+`), "${1}…"},
+	{regexp.MustCompile(`\b(stk_node_)[a-fA-F0-9]{16,}`), "${1}…"},
 	{regexp.MustCompile(`\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}`), "${1}…"},
 	{regexp.MustCompile(`\b(AIza)[0-9A-Za-z_-]{20,}`), "${1}…"},
 	{regexp.MustCompile(`\b(gh[opsur]_)[A-Za-z0-9]{20,}`), "${1}…"},

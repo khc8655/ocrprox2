@@ -57,48 +57,41 @@ var FullOnlyRoutes = map[string]bool{
 	"GET /api/lanes":              true,
 	"/api/admin/lanes":            true,
 	"GET /api/admin/lanes":        true,
-	"/api/admin/cooldowns":        true,
-	"GET /api/admin/cooldowns":    true,
-	"POST /api/admin/cooldowns":   true,
-	"DELETE /api/admin/cooldowns":  true,
-	"/api/admin/mode":             true,
-	"GET /api/admin/mode":         true,
-	"POST /api/admin/mode":        true,
-	"/api/admin/probe-models":     true,
-	"GET /api/admin/probe-models": true,
-	"POST /api/admin/probe-models": true,
-	"/api/admin/verify-key":       true,
-	"POST /api/admin/verify-key":  true,
-	"/api/admin/oauth/start":      true,
-	"POST /api/admin/oauth/start": true,
-	"/api/admin/oauth/poll":       true,
-	"GET /api/admin/oauth/poll":   true,
-	"POST /api/admin/oauth/poll":  true,
-	"/api/vault/manifest":         true,
-	"GET /api/vault/manifest":     true,
-	"/api/vault/fetch":            true,
-	"POST /api/vault/fetch":       true,
-	"/v1/ocr":                     true,
-	"POST /v1/ocr":                true,
-	"/v1/embeddings":              true,
-	"POST /v1/embeddings":         true,
-	"/v1/rerank":                  true,
-	"POST /v1/rerank":             true,
-	"/api/v1/ocr":                 true,
-	"POST /api/v1/ocr":            true,
-	"/api/v1/embeddings":          true,
-	"POST /api/v1/embeddings":     true,
-	"/api/v1/rerank":              true,
-	"POST /api/v1/rerank":         true,
-	"/api/admin/detect-provider":      true,
-	"POST /api/admin/detect-provider": true,
-	"/api/admin/balance":              true,
-	"POST /api/admin/balance":         true,
-	"/api/admin/test-provider":        true,
-	"POST /api/admin/test-provider":   true,
-	"/api/admin/autolist-sync":        true,
-	"POST /api/admin/autolist-sync":   true,
-	"/api/admin/presets-extra":        true,
+	"/api/admin/cooldowns":              true,
+	"GET /api/admin/cooldowns":          true,
+	"POST /api/admin/cooldowns":         true,
+	"DELETE /api/admin/cooldowns":       true,
+	"/api/admin/probe-models":           true,
+	"GET /api/admin/probe-models":       true,
+	"POST /api/admin/probe-models":      true,
+	"/api/admin/verify-key":             true,
+	"POST /api/admin/verify-key":        true,
+	"/api/admin/oauth/start":            true,
+	"POST /api/admin/oauth/start":       true,
+	"/api/admin/oauth/poll":             true,
+	"GET /api/admin/oauth/poll":         true,
+	"POST /api/admin/oauth/poll":        true,
+	"/api/vault/manifest":               true,
+	"GET /api/vault/manifest":           true,
+	"/api/vault/fetch":                  true,
+	"POST /api/vault/fetch":             true,
+	"/v1/ocr":                           true,
+	"POST /v1/ocr":                      true,
+	"/v1/embeddings":                    true,
+	"POST /v1/embeddings":               true,
+	"/v1/rerank":                        true,
+	"POST /v1/rerank":                   true,
+	"/api/v1/ocr":                       true,
+	"POST /api/v1/ocr":                  true,
+	"/api/v1/embeddings":                true,
+	"POST /api/v1/embeddings":           true,
+	"/api/v1/rerank":                    true,
+	"POST /api/v1/rerank":               true,
+	"/api/admin/detect-provider":        true,
+	"POST /api/admin/detect-provider":   true,
+	"/api/admin/test-provider":          true,
+	"POST /api/admin/test-provider":     true,
+	"/api/admin/presets-extra":          true,
 	"GET /api/admin/presets-extra":    true,
 	"/api/admin/access-info":          true,
 	"GET /api/admin/access-info":      true,
@@ -195,22 +188,19 @@ func ReadOnlyGuard(role types.Role, next http.Handler) http.Handler {
 			method := r.Method
 			path := r.URL.Path
 
-			// Check exact match
+			// Check exact match against AllowedLiteRoutes (already includes all legal /api/v1/* routes)
 			key := method + " " + path
 			if !AllowedLiteRoutes[key] {
-				// Check prefix match for /api/v1/*
-				if !(strings.HasPrefix(path, "/api/v1/") && (method == "GET" || method == "POST")) {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusForbidden)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error": map[string]any{
-							"message": "route is disabled in lite mode",
-							"type":    "permission_error",
-							"code":    "lite_mode_forbidden",
-						},
-					})
-					return
-				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"message": "route is disabled in lite mode",
+						"type":    "permission_error",
+						"code":    "lite_mode_forbidden",
+					},
+				})
+				return
 			}
 		}
 		next.ServeHTTP(w, r)

@@ -12,7 +12,6 @@ import (
 
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
-	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/obs"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
@@ -159,53 +158,6 @@ func TestAdminServer_ConfigAndAuth(t *testing.T) {
 	}
 	if conflictResp.SubmittedVersion != 100 {
 		t.Errorf("expected submitted_version 100, got %d", conflictResp.SubmittedVersion)
-	}
-}
-
-func TestAdminServer_Mode(t *testing.T) {
-	tmpDir := t.TempDir()
-	authMgr := auth.NewAuthenticator("client-k", "admin-pass")
-	localSrc, _ := config.NewLocalSource(tmpDir, "pass")
-	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
-	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
-	modeSched := modesched.NewModeScheduler(types.ModeAgent, true)
-
-	srv := NewServer(authMgr, localSrc, obsMgr, sched)
-	srv.SetModeScheduler(modeSched)
-	mux := http.NewServeMux()
-	srv.RegisterRoutes(mux)
-
-	// GET /api/admin/mode
-	req := httptest.NewRequest("GET", "/api/admin/mode", nil)
-	req.Header.Set("Authorization", "Bearer admin-pass")
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var modeResp map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &modeResp)
-	if modeResp["mode"] != "agent" {
-		t.Errorf("expected mode agent, got %v", modeResp["mode"])
-	}
-
-	// POST /api/admin/mode -> "kb"
-	req = httptest.NewRequest("POST", "/api/admin/mode", strings.NewReader(`{"mode":"kb"}`))
-	req.Header.Set("Authorization", "Bearer admin-pass")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &modeResp)
-	if modeResp["ok"] != true || modeResp["mode"] != "kb" {
-		t.Errorf("expected ok: true, mode: kb, got %+v", modeResp)
-	}
-
-	if modeSched.CurrentMode() != types.ModeKB {
-		t.Errorf("expected modeSched to be updated to kb, got %s", modeSched.CurrentMode())
 	}
 }
 
@@ -513,13 +465,14 @@ func TestAdminServer_DefaultVaultFallback(t *testing.T) {
 	defer hubServer.Close()
 
 	srv := NewServer(authMgr, localSrc, nil, nil)
+	srv.SetAllowPrivate(true)
 	srv.SetAdminPassword("admin-pass")
 	srv.SetDefaultVault(hubServer.URL, "stk_node_seed_token")
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
-	// Uninitialized GET /api/config should include pre-seeded vault fields
+	// Uninitialized GET /api/config should include pre-seeded vault URL with MASKED NodeToken
 	req := httptest.NewRequest("GET", "/api/config", nil)
 	req.Header.Set("Authorization", "Bearer admin-pass")
 	rec := httptest.NewRecorder()
@@ -527,17 +480,20 @@ func TestAdminServer_DefaultVaultFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/config status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), "stk_node_seed_token") {
+		t.Fatalf("SEC-06 violation: GET /api/config leaked plaintext stk_node_seed_token: %s", rec.Body.String())
+	}
 	var cfgResp struct {
 		Vault *types.VaultClientConfig `json:"vault"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &cfgResp); err != nil {
 		t.Fatalf("decode config resp: %v", err)
 	}
-	if cfgResp.Vault == nil || cfgResp.Vault.URL != hubServer.URL || cfgResp.Vault.NodeToken != "stk_node_seed_token" {
-		t.Fatalf("expected seeded vault in /api/config, got %+v", cfgResp.Vault)
+	if cfgResp.Vault == nil || cfgResp.Vault.URL != hubServer.URL || !config.IsMaskedSecret(cfgResp.Vault.NodeToken) {
+		t.Fatalf("expected seeded vault with masked NodeToken in /api/config, got %+v", cfgResp.Vault)
 	}
 
-	// Vault manifest without query params should use SetDefaultVault credentials
+	// Vault manifest without query params should STILL send the unmasked SetDefaultVault token
 	req = httptest.NewRequest("GET", "/api/vault/manifest", nil)
 	req.Header.Set("Authorization", "Bearer admin-pass")
 	rec = httptest.NewRecorder()
@@ -547,6 +503,23 @@ func TestAdminServer_DefaultVaultFallback(t *testing.T) {
 	}
 	if seenAuth != "Bearer stk_node_seed_token" {
 		t.Fatalf("expected Bearer stk_node_seed_token sent to hub, got %q", seenAuth)
+	}
+
+	// SEC-07: Overriding hub_url to a different server without supplying a new token MUST NOT send stk_node_seed_token!
+	var evilSeenAuth string
+	evilHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		evilSeenAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"providers":{}}`))
+	}))
+	defer evilHub.Close()
+
+	req = httptest.NewRequest("GET", "/api/vault/manifest?hub_url="+evilHub.URL, nil)
+	req.Header.Set("Authorization", "Bearer admin-pass")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if evilSeenAuth != "" {
+		t.Fatalf("SEC-07 violation: stored node_token leaked to overridden hub_url! Authorization=%q", evilSeenAuth)
 	}
 }
 
@@ -594,5 +567,197 @@ func TestAdminServer_VaultKeysMasked(t *testing.T) {
 	}
 	if !strings.Contains(body, "sk-local-secret-8888") {
 		t.Errorf("locally added key should stay plaintext, got %s", body)
+	}
+}
+
+func TestAdminServer_ExportExcludesVaultSecrets(t *testing.T) {
+	authMgr := auth.NewAuthenticator("ck", "ap")
+	obsMgr, _ := obs.NewManager(types.RoleFull, t.TempDir())
+	defer obsMgr.Close()
+	src, err := config.NewLocalSource(t.TempDir(), "ap")
+	if err != nil {
+		t.Fatalf("local source: %v", err)
+	}
+
+	if _, err := src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"vault-only-prov": {
+				ID:      "vault-only-prov",
+				Name:    "Vault Provider",
+				BaseURL: "https://vault.example/v1",
+				Origin:  "vault",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "vk-only", Label: "hub-k1", Key: "sk-vault-top-secret-1111", Origin: "vault", Enabled: true},
+				},
+			},
+			"mixed-local-prov": {
+				ID:      "mixed-local-prov",
+				Name:    "Local Provider With Mixed Keys",
+				BaseURL: "https://local.example/v1",
+				Origin:  "local",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "lk-1", Label: "my-local-key", Key: "sk-local-exportable-2222", Origin: "local", Enabled: true},
+					{ID: "vk-2", Label: "merged-vault-key", Key: "sk-vault-merged-secret-3333", Origin: "vault", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"gpt-4o": {
+				Enabled:    true,
+				Candidates: []*types.RouteCandidate{{Provider: "mixed-local-prov", KeyLabel: "my-local-key", Enabled: true}},
+			},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"ocr": {{Provider: "mixed-local-prov", Model: "ocr-v1", KeyLabel: "my-local-key", Enabled: true}},
+		},
+		Settings: types.RuntimeSettings{
+			ClientKey: "sk-client-local-4444",
+		},
+		Vault: &types.VaultClientConfig{
+			URL:       "https://hub.example.com",
+			NodeToken: "stk_node_ultra_secret_5555",
+		},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := NewServer(authMgr, src, obsMgr, scheduler.NewScheduler(src, obsMgr, true))
+	srv.SetAdminPassword("ap")
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/config/export", nil)
+	req.Header.Set("Authorization", "Bearer ap")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on export, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rawExport := rec.Body.String()
+	// Zero vault secrets or node_token may appear anywhere in exported JSON
+	for _, forbidden := range []string{
+		"vault-only-prov",
+		"sk-vault-top-secret-1111",
+		"sk-vault-merged-secret-3333",
+		"stk_node_ultra_secret_5555",
+		"node_token",
+	} {
+		if strings.Contains(rawExport, forbidden) {
+			t.Fatalf("SEC-06 export violation: exported JSON contained forbidden token/provider %q:\n%s", forbidden, rawExport)
+		}
+	}
+
+	// Local provider/key, routes, settings, and vault.url must remain intact
+	var parsed struct {
+		Providers   map[string]*types.ProviderConfig  `json:"providers"`
+		AgentModels map[string]*types.AgentModelRoute `json:"agent_models"`
+		KBModels    map[string][]*types.KBCandidate   `json:"kb_models"`
+		Settings    types.RuntimeSettings             `json:"settings"`
+		Vault       map[string]any                    `json:"vault"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal export: %v", err)
+	}
+	if _, exists := parsed.Providers["vault-only-prov"]; exists {
+		t.Fatalf("vault-only-prov should be omitted from export")
+	}
+	lp := parsed.Providers["mixed-local-prov"]
+	if lp == nil || len(lp.APIKeys) != 1 || lp.APIKeys[0].Key != "sk-local-exportable-2222" {
+		t.Fatalf("expected mixed-local-prov with only its 1 local key, got %+v", lp)
+	}
+	if parsed.AgentModels["gpt-4o"] == nil || len(parsed.KBModels["ocr"]) != 1 || parsed.Settings.ClientKey != "sk-client-local-4444" {
+		t.Fatalf("expected routes & settings intact in export")
+	}
+	if parsed.Vault["url"] != "https://hub.example.com" {
+		t.Fatalf("expected vault.url preserved without node_token, got %+v", parsed.Vault)
+	}
+}
+
+func TestAdminServer_VaultFetchKeysMap_SSRFDefault_And_BaseURLLock(t *testing.T) {
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/vault/fetch" {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"provider": "deepseek",
+				"provider_config": {
+					"name": "DeepSeek Hub",
+					"preset_id": "deepseek",
+					"base_url": "https://api.deepseek.com/v1",
+					"hide_client_name": true,
+					"keys": {
+						"hk-01": "sk-ds-vault-secret-0001",
+						"hk-02": "sk-ds-vault-secret-0002"
+					}
+				}
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer hubServer.Close()
+
+	evilServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("SEC-06 violation: vault key sent to attacker URL: %s", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer evilServer.Close()
+
+	authMgr := auth.NewAuthenticator("ck", "ap")
+	src, _ := config.NewLocalSource(t.TempDir(), "ap")
+	srv := NewServer(authMgr, src, nil, nil)
+	srv.SetAdminPassword("ap")
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// 1. SEC-04: By default (allowPrivate=false), 127.0.0.1 hubServer is blocked by SSRF guard!
+	fetchReq := httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
+		strings.NewReader(`{"hub_url":"`+hubServer.URL+`","node_token":"tok","provider":"deepseek"}`))
+	fetchReq.Header.Set("Authorization", "Bearer ap")
+	fetchRec := httptest.NewRecorder()
+	mux.ServeHTTP(fetchRec, fetchReq)
+	if fetchRec.Code != http.StatusBadGateway {
+		t.Fatalf("SEC-04: expected 502 Bad Gateway when allowPrivate=false blocks 127.0.0.1, got %d: %s", fetchRec.Code, fetchRec.Body.String())
+	}
+
+	// 2. F-08: Enable SetAllowPrivate(true) for local test server -> Vault fetch converts keys map[string]string into APIKeys!
+	srv.SetAllowPrivate(true)
+	fetchReq2 := httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
+		strings.NewReader(`{"hub_url":"`+hubServer.URL+`","node_token":"tok","provider":"deepseek"}`))
+	fetchReq2.Header.Set("Authorization", "Bearer ap")
+	fetchRec2 := httptest.NewRecorder()
+	mux.ServeHTTP(fetchRec2, fetchReq2)
+	if fetchRec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 after SetAllowPrivate(true), got %d: %s", fetchRec2.Code, fetchRec2.Body.String())
+	}
+
+	snap, err := src.Current(context.Background(), false)
+	if err != nil || snap == nil || snap.Config == nil {
+		t.Fatalf("current snap err: %v", err)
+	}
+	ds := snap.Config.Providers["deepseek"]
+	if ds == nil || ds.Origin != "vault" || !ds.Enabled || len(ds.APIKeys) != 2 {
+		t.Fatalf("F-08: expected deepseek provider with 2 vault APIKeys persisted, got %+v", ds)
+	}
+	if ds.APIKeys[0].Label != "hk-01" || ds.APIKeys[0].Key != "sk-ds-vault-secret-0001" || ds.APIKeys[0].Origin != "vault" {
+		t.Fatalf("F-08: unexpected first vault key: %+v", ds.APIKeys[0])
+	}
+
+	// 3. SEC-06: verify-key and probe-models must reject overriding base_url when resolving stored vault key!
+	for _, ep := range []string{"/api/admin/verify-key", "/api/admin/probe-models"} {
+		r := httptest.NewRequest(http.MethodPost, ep,
+			strings.NewReader(`{"provider":"deepseek","base_url":"`+evilServer.URL+`","api_key":"sk--...0001"}`))
+		r.Header.Set("Authorization", "Bearer ap")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("SEC-06: expected 403 Forbidden from %s when overriding base_url with vault key, got %d: %s", ep, w.Code, w.Body.String())
+		}
 	}
 }

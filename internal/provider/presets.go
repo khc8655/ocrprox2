@@ -3,6 +3,8 @@ package provider
 import (
 	"slices"
 	"strings"
+
+	"github.com/khc8655/llmproxy2/internal/types"
 )
 
 // Region represents a regional endpoint or specific subscription plan for a provider.
@@ -39,8 +41,6 @@ type PresetDef struct {
 	Regions         []Region `json:"regions,omitempty"`
 	RegionLabel     string   `json:"region_label,omitempty"`
 	KeyPlans        bool     `json:"key_plans,omitempty"`
-	BalanceURL      string   `json:"balance_url,omitempty"`
-	BalancePath     string   `json:"balance_path,omitempty"`
 }
 
 // Fallback model lists for vendors that do not provide a live /models endpoint (NoList=true).
@@ -147,7 +147,6 @@ var catalogPresets = []PresetDef{
 		ChatURL:      "https://api.deepseek.com/v1",
 		ResponsesURL: "https://api.deepseek.com/v1",
 		AnthropicURL: "https://api.deepseek.com/anthropic",
-		BalanceURL:   "https://api.deepseek.com/user/balance",
 		Website:      "https://platform.deepseek.com",
 		KeysURL:      "https://platform.deepseek.com/api_keys",
 		VisionModels: []string{"deepseek-vl-7b-chat", "deepseek-vl2"},
@@ -191,7 +190,6 @@ var catalogPresets = []PresetDef{
 		BaseURL:      "https://api.moonshot.ai/v1",
 		ChatURL:      "https://api.moonshot.ai/v1",
 		AnthropicURL: "https://api.moonshot.ai/anthropic",
-		BalanceURL:   "https://api.moonshot.ai/v1/users/me/balance",
 		Website:      "https://platform.kimi.ai",
 		KeysURL:      "https://platform.kimi.ai/console/api-keys",
 		VisionModels: []string{"kimi-k3", "kimi-k2.8-preview"},
@@ -207,7 +205,6 @@ var catalogPresets = []PresetDef{
 		BaseURL:      "https://api.moonshot.cn/v1",
 		ChatURL:      "https://api.moonshot.cn/v1",
 		AnthropicURL: "https://api.moonshot.cn/anthropic",
-		BalanceURL:   "https://api.moonshot.cn/v1/users/me/balance",
 		Website:      "https://platform.kimi.com",
 		KeysURL:      "https://platform.kimi.com/console/api-keys",
 		VisionModels: []string{"kimi-k3", "kimi-k2.8-preview"},
@@ -251,8 +248,6 @@ var catalogPresets = []PresetDef{
 		BaseURL:      "https://open.bigmodel.cn/api/paas/v4",
 		ChatURL:      "https://open.bigmodel.cn/api/paas/v4",
 		AnthropicURL: "https://open.bigmodel.cn/api/anthropic",
-		BalanceURL:   "https://open.bigmodel.cn/api/biz/account/query-customer-account-report",
-		BalancePath:  "$data.availableBalance",
 		Website:      "https://open.bigmodel.cn",
 		KeysURL:      "https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys",
 		RegionLabel:  "Plan",
@@ -350,7 +345,6 @@ var catalogPresets = []PresetDef{
 		BaseURL:      "https://openrouter.ai/api/v1",
 		ChatURL:      "https://openrouter.ai/api/v1",
 		AnthropicURL: "https://openrouter.ai/api",
-		BalanceURL:   "https://openrouter.ai/api/v1/credits",
 		Website:      "https://openrouter.ai",
 		KeysURL:      "https://openrouter.ai/keys",
 	},
@@ -381,7 +375,6 @@ var catalogPresets = []PresetDef{
 		BaseURL:      "https://api.stepfun.ai/step_plan/v1",
 		ChatURL:      "https://api.stepfun.ai/step_plan/v1",
 		AnthropicURL: "https://api.stepfun.ai/step_plan",
-		BalanceURL:   "https://api.stepfun.ai/v1/accounts",
 		Website:      "https://platform.stepfun.ai",
 		KeysURL:      "https://platform.stepfun.ai/interface-key",
 		RegionLabel:  "Plan",
@@ -550,4 +543,69 @@ func IsReasoningModel(presetID, model string) bool {
 		return true
 	}
 	return false
+}
+
+// DefaultPresetAdapterRules returns built-in declarative AdapterRules aligned 1:1
+// with shared/presets/*.json for standalone Full nodes when ProviderConfig.AdapterRules is unset.
+func DefaultPresetAdapterRules(presetID string) *types.AdapterRules {
+	switch strings.ToLower(strings.TrimSpace(presetID)) {
+	case "agnes":
+		return &types.AdapterRules{MaxTokensCeiling: 65536}
+	case "amd":
+		return &types.AdapterRules{
+			StripParams:           []string{"thinking", "chat_template_kwargs"},
+			StripReasoningEnabled: true,
+			DenyDeveloperRole:     true,
+			SystemFirstOnly:       true,
+			MergeSystem:           true,
+			StripEmpty:            true,
+			ReasoningFields:       []string{"reasoning"},
+		}
+	case "cline":
+		return &types.AdapterRules{
+			UnwrapRoot: "data",
+			ModelAliases: map[string]string{
+				"cline-free/muse-spark-1.3-contributor": "meta/muse-spark-1.3-contributor",
+				"cline-free/muse-spark-1.3":             "meta/muse-spark-1.3",
+				"cline-free/muse-spark-1.2-contributor": "meta/muse-spark-1.2-contributor",
+			},
+		}
+	case "google":
+		return &types.AdapterRules{
+			GeminiCompat:   true,
+			RescueFromText: true,
+		}
+	case "minimax", "minimax-cn":
+		return &types.AdapterRules{
+			StripParams:    []string{"output_config"},
+			ThinkingPolicy: "force",
+			ModelAliases: map[string]string{
+				"minimax-m3":               "MiniMax-M3",
+				"minimax-m3.1-flash-preview": "MiniMax-M3.1-Flash-Preview",
+			},
+		}
+	case "nvidia":
+		return &types.AdapterRules{NormalizeChoiceToString: true}
+	case "openai":
+		return &types.AdapterRules{StripReasoningEnabled: true}
+	case "openrouter":
+		return &types.AdapterRules{
+			ExtraHeaders: map[string]string{
+				"HTTP-Referer": "https://github.com/khc8655/ocrprox2",
+				"X-Title":      "OCRProxy",
+			},
+		}
+	case "vertex":
+		return &types.AdapterRules{
+			GeminiCompat:       true,
+			ThoughtTagMarker:   "<thought>",
+			RescueFromText:     true,
+			EnsureGooglePrefix: true,
+			ModelAliases: map[string]string{
+				"gemini-3.8-flash": "google/gemini-3.8-flash",
+			},
+		}
+	default:
+		return nil
+	}
 }

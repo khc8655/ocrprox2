@@ -2,8 +2,8 @@ import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 export async function handleVaultFetchRequest(request, env, kv) {
-const authErr = await checkVaultAuth(request, env, kv);
-if (authErr) return authErr;
+const auth = await checkVaultAuth(request, env, kv);
+if (!auth.ok) return auth.response;
 let body = {};
 try {
 body = await request.json();
@@ -20,9 +20,18 @@ JSON.stringify({ ok: false, error: 'provider_required' }),
 { status: 400, headers: { 'content-type': 'application/json' } }
 );
 }
+if (!auth.isAdmin) {
+const scopeProvs = auth.node?.scope?.providers || ['*'];
+if (!scopeProvs.includes('*') && !scopeProvs.includes(provider)) {
+return new Response(
+JSON.stringify({ ok: false, error: 'provider_out_of_node_scope' }),
+{ status: 403, headers: { 'content-type': 'application/json' } }
+);
+}
+}
 const config = await loadConfig(kv);
 const pData = config.providers?.[provider];
-if (!pData || pData.origin === 'local') {
+if (!pData || pData.origin === 'local' || pData.is_local) {
 return new Response(
 JSON.stringify({ ok: false, error: 'provider_not_found_or_local' }),
 { status: 404, headers: { 'content-type': 'application/json' } }
@@ -33,7 +42,7 @@ Array.isArray(keys) ? keys : (key_label ? [key_label] : [])
 );
 const matchedKeys = {};
 for (const k of pData.api_keys || []) {
-if (!k || !k.enabled || k.origin === 'local') continue;
+if (!k || !k.enabled || k.origin === 'local' || k.is_local) continue;
 const lbl = k.label || k.id;
 if (targetLabels.size === 0 || targetLabels.has(lbl)) {
 matchedKeys[lbl] = k.key;

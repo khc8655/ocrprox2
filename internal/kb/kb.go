@@ -8,6 +8,7 @@ package kb
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -36,16 +37,102 @@ var (
 	ErrNoCandidate      = errors.New("kb: no enabled candidate found for kb category")
 )
 
+type dynamicLimiter struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	inflight int
+	limit    int
+}
+
+func newDynamicLimiter(limit int) *dynamicLimiter {
+	l := &dynamicLimiter{limit: limit}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+func (l *dynamicLimiter) tryAcquire() (func(), bool) {
+	l.mu.Lock()
+	if l.inflight >= l.limit {
+		l.mu.Unlock()
+		return nil, false
+	}
+	l.inflight++
+	l.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			l.inflight--
+			if l.inflight < 0 {
+				l.inflight = 0
+			}
+			l.cond.Signal()
+			l.mu.Unlock()
+		})
+	}, true
+}
+
+func (l *dynamicLimiter) acquireContext(ctx context.Context) (func(), bool) {
+	stopWake := context.AfterFunc(ctx, func() {
+		l.mu.Lock()
+		l.cond.Broadcast()
+		l.mu.Unlock()
+	})
+	defer stopWake()
+
+	l.mu.Lock()
+	for l.inflight >= l.limit {
+		if ctx.Err() != nil {
+			l.mu.Unlock()
+			return nil, false
+		}
+		l.cond.Wait()
+	}
+	if ctx.Err() != nil {
+		l.mu.Unlock()
+		return nil, false
+	}
+	l.inflight++
+	l.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			l.inflight--
+			if l.inflight < 0 {
+				l.inflight = 0
+			}
+			l.cond.Signal()
+			l.mu.Unlock()
+		})
+	}, true
+}
+
+func (l *dynamicLimiter) setLimit(newLimit int) {
+	if newLimit <= 0 {
+		return
+	}
+	l.mu.Lock()
+	if newLimit != l.limit {
+		increased := newLimit > l.limit
+		l.limit = newLimit
+		if increased {
+			l.cond.Broadcast()
+		}
+	}
+	l.mu.Unlock()
+}
+
 // Pipeline adapts /v1/ocr, /v1/embeddings, /v1/rerank, and legacy KB chat payloads
 // and delegates execution/failover/cooldowns to the unified Scheduler.
 type Pipeline struct {
-	mu          sync.Mutex
-	configSrc   types.ConfigSource
-	sched       *scheduler.Scheduler
-	ocrSem      chan struct{}
-	globalSem   chan struct{}
-	ocrMaxLimit int
-	globalLimit int
+	mu            sync.Mutex
+	configSrc     types.ConfigSource
+	sched         *scheduler.Scheduler
+	ocrLimiter    *dynamicLimiter
+	globalLimiter *dynamicLimiter
 }
 
 // NewPipeline creates a KB Pipeline backed by an internal unified Scheduler
@@ -59,12 +146,10 @@ func NewPipeline(cfgSrc types.ConfigSource, maxOCR, maxGlobal int, allowPrivate 
 	}
 
 	return &Pipeline{
-		configSrc:   cfgSrc,
-		sched:       scheduler.NewScheduler(cfgSrc, nil, allowPrivate),
-		ocrSem:      make(chan struct{}, maxOCR),
-		globalSem:   make(chan struct{}, maxGlobal),
-		ocrMaxLimit: maxOCR,
-		globalLimit: maxGlobal,
+		configSrc:     cfgSrc,
+		sched:         scheduler.NewScheduler(cfgSrc, nil, allowPrivate),
+		ocrLimiter:    newDynamicLimiter(maxOCR),
+		globalLimiter: newDynamicLimiter(maxGlobal),
 	}
 }
 
@@ -115,16 +200,7 @@ func (p *Pipeline) getScheduler() *scheduler.Scheduler {
 }
 
 func (p *Pipeline) acquireGlobalSem(r *http.Request) (func(), bool) {
-	p.mu.Lock()
-	gSem := p.globalSem
-	p.mu.Unlock()
-
-	select {
-	case gSem <- struct{}{}:
-		return func() { <-gSem }, true
-	case <-r.Context().Done():
-		return nil, false
-	}
+	return p.globalLimiter.acquireContext(r.Context())
 }
 
 func (p *Pipeline) syncDynamicLimits(snap *types.RuntimeSnapshot) {
@@ -132,15 +208,11 @@ func (p *Pipeline) syncDynamicLimits(snap *types.RuntimeSnapshot) {
 		return
 	}
 	s := snap.Config.Settings
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if s.OCRMaxInflight > 0 && s.OCRMaxInflight != p.ocrMaxLimit && len(p.ocrSem) == 0 {
-		p.ocrSem = make(chan struct{}, s.OCRMaxInflight)
-		p.ocrMaxLimit = s.OCRMaxInflight
+	if s.OCRMaxInflight > 0 {
+		p.ocrLimiter.setLimit(s.OCRMaxInflight)
 	}
-	if s.KBGlobalMaxConcurrency > 0 && s.KBGlobalMaxConcurrency != p.globalLimit && len(p.globalSem) == 0 {
-		p.globalSem = make(chan struct{}, s.KBGlobalMaxConcurrency)
-		p.globalLimit = s.KBGlobalMaxConcurrency
+	if s.KBGlobalMaxConcurrency > 0 {
+		p.globalLimiter.setLimit(s.KBGlobalMaxConcurrency)
 	}
 }
 
@@ -391,6 +463,15 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 	return req, nil
 }
 
+func isNativeOCRModelKeyword(model string) bool {
+	m := strings.TrimSpace(strings.ToLower(model))
+	if m == "" {
+		return false
+	}
+	return m == "native_ocr" || m == "native" ||
+		strings.Contains(m, "mistral-ocr") || strings.Contains(m, "paddleocr")
+}
+
 func isNativeOCR(targetModel string, prov *types.ProviderConfig, reqModel string) bool {
 	if prov != nil {
 		if strings.EqualFold(prov.APIType, "ocr") || strings.EqualFold(prov.APIType, "native_ocr") || strings.EqualFold(prov.APIType, "native") {
@@ -402,10 +483,10 @@ func isNativeOCR(targetModel string, prov *types.ProviderConfig, reqModel string
 			}
 		}
 	}
-	if strings.EqualFold(targetModel, "ocr") || strings.EqualFold(targetModel, "native_ocr") || strings.EqualFold(targetModel, "native") {
+	if isNativeOCRModelKeyword(targetModel) {
 		return true
 	}
-	if targetModel == "" && (reqModel == "" || reqModel == "ocr") {
+	if (targetModel == "" || strings.EqualFold(targetModel, "ocr")) && isNativeOCRModelKeyword(reqModel) {
 		return true
 	}
 	return false
@@ -443,15 +524,15 @@ func extractAssistantText(respData map[string]any) string {
 // HandleOCR handles /v1/ocr with pre-read semaphore guard to prevent 20MB OOM
 // and delegates candidate scheduling, cooldowns, RPM, and tracing to Scheduler.
 func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
-	// Pre-read semaphore acquisition: REJECT WITH 429 BEFORE READING BODY!
-	p.mu.Lock()
-	sem := p.ocrSem
-	p.mu.Unlock()
+	if p.configSrc != nil {
+		if snap, sErr := p.configSrc.Current(r.Context(), false); sErr == nil {
+			p.syncDynamicLimits(snap)
+		}
+	}
 
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	default:
+	// Pre-read semaphore acquisition: REJECT WITH 429 BEFORE READING BODY!
+	releaseOCR, acquiredOCR := p.ocrLimiter.tryAcquire()
+	if !acquiredOCR {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -464,6 +545,7 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	defer releaseOCR()
 
 	releaseGlobal, ok := p.acquireGlobalSem(r)
 	if !ok {
@@ -624,6 +706,12 @@ func (p *Pipeline) HandleChat(w http.ResponseWriter, r *http.Request, bodyBytes 
 }
 
 func (p *Pipeline) dispatchKBRequest(category, endpoint string, w http.ResponseWriter, r *http.Request, preReadBody []byte) {
+	if p.configSrc != nil {
+		if snap, sErr := p.configSrc.Current(r.Context(), false); sErr == nil {
+			p.syncDynamicLimits(snap)
+		}
+	}
+
 	releaseGlobal, ok := p.acquireGlobalSem(r)
 	if !ok {
 		return

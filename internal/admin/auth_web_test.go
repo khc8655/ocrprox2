@@ -190,3 +190,102 @@ func TestAuthWeb_LockoutReturns429WithRetryAfter(t *testing.T) {
 		t.Fatalf("expected Retry-After header on 429")
 	}
 }
+
+func TestAuthWeb_SingleFailureCount_ForwardedIP_CookieLockout_And_SecureFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	adminPass := "reverse-proxy-admin-pass"
+	authMgr := auth.NewAuthenticator("client-key-1", adminPass)
+	localSrc, err := config.NewLocalSource(tmpDir, adminPass)
+	if err != nil {
+		t.Fatalf("local source error: %v", err)
+	}
+	obsMgr, _ := obs.NewManager(types.RoleFull, tmpDir)
+	defer obsMgr.Close()
+	sched := scheduler.NewScheduler(localSrc, obsMgr, true)
+
+	srv := NewServer(authMgr, localSrc, obsMgr, sched)
+	srv.SetAdminPassword(adminPass)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// 1. Obtain a valid HTTPS session cookie via X-Forwarded-Proto: https -> Secure=true
+	goodBody, _ := json.Marshal(map[string]string{"password": adminPass})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", bytes.NewReader(goodBody))
+	loginReq.RemoteAddr = "127.0.0.1:4321"
+	loginReq.Header.Set("X-Forwarded-For", "198.51.100.10")
+	loginReq.Header.Set("X-Forwarded-Proto", "https")
+	loginRec := httptest.NewRecorder()
+	mux.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on initial login, got %d", loginRec.Code)
+	}
+	var validCookie *http.Cookie
+	for _, c := range loginRec.Result().Cookies() {
+		if c.Name == adminSessionCookie {
+			validCookie = c
+			break
+		}
+	}
+	if validCookie == nil || !validCookie.Secure {
+		t.Fatalf("SEC-16a: expected Secure=true cookie under X-Forwarded-Proto=https, got %+v", validCookie)
+	}
+
+	// Verify logout under X-Forwarded-Proto: https also sets Secure=true
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/admin/auth/logout", nil)
+	logoutReq.Header.Set("X-Forwarded-Proto", "https")
+	logoutRec := httptest.NewRecorder()
+	mux.ServeHTTP(logoutRec, logoutReq)
+	for _, c := range logoutRec.Result().Cookies() {
+		if c.Name == adminSessionCookie && !c.Secure {
+			t.Fatalf("SEC-16a: expected Secure=true on logout cookie under https")
+		}
+	}
+
+	// 2. Verify single failure count per Bearer request on /api/config:
+	// All MaxFailedAttempts attempts from 198.51.100.77 must return 401 (NOT prematurely 429 on attempt 3!).
+	for i := 0; i < auth.MaxFailedAttempts; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		req.RemoteAddr = "127.0.0.1:4321"
+		req.Header.Set("X-Forwarded-For", "198.51.100.77")
+		req.Header.Set("Authorization", "Bearer wrong-bearer-pass")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("SEC-09 double-count bug: attempt %d expected 401, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 3. SEC-09: Once 198.51.100.77 is locked out, EVEN a valid session cookie must get 429 + Retry-After!
+	cookieReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	cookieReq.RemoteAddr = "127.0.0.1:4321"
+	cookieReq.Header.Set("X-Forwarded-For", "198.51.100.77")
+	cookieReq.AddCookie(validCookie)
+	cookieRec := httptest.NewRecorder()
+	mux.ServeHTTP(cookieRec, cookieReq)
+	if cookieRec.Code != http.StatusTooManyRequests || cookieRec.Header().Get("Retry-After") == "" {
+		t.Fatalf("SEC-09: expected locked-out IP with cookie to receive 429 + Retry-After, got %d", cookieRec.Code)
+	}
+
+	// 4. Reverse-proxy isolation: brute-forcing login from X-Forwarded-For 198.51.100.88 via 127.0.0.1
+	// must NOT lock out another user 198.51.100.99 behind the same 127.0.0.1 reverse proxy!
+	wrongBody, _ := json.Marshal(map[string]string{"password": "bad-pass"})
+	for i := 0; i < auth.MaxFailedAttempts; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", bytes.NewReader(wrongBody))
+		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set("X-Forwarded-For", "198.51.100.88")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 on login attempt %d, got %d", i+1, rec.Code)
+		}
+	}
+
+	otherUserReq := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", bytes.NewReader(goodBody))
+	otherUserReq.RemoteAddr = "127.0.0.1:9999"
+	otherUserReq.Header.Set("X-Forwarded-For", "198.51.100.99")
+	otherUserRec := httptest.NewRecorder()
+	mux.ServeHTTP(otherUserRec, otherUserReq)
+	if otherUserRec.Code != http.StatusOK {
+		t.Fatalf("SEC-09: innocent user behind same reverse proxy was locked out! status=%d body=%s", otherUserRec.Code, otherUserRec.Body.String())
+	}
+}

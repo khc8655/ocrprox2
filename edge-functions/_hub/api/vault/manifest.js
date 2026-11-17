@@ -2,15 +2,18 @@ import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 export async function handleVaultManifestRequest(request, env, kv) {
-const authErr = await checkVaultAuth(request, env, kv);
-if (authErr) return authErr;
+const auth = await checkVaultAuth(request, env, kv);
+if (!auth.ok) return auth.response;
 const config = await loadConfig(kv);
 const presetsMap = getPresetMap();
+const scopeProvs = !auth.isAdmin ? (auth.node?.scope?.providers || ['*']) : ['*'];
+const allowAllProvs = auth.isAdmin || scopeProvs.includes('*');
 const manifest = {};
 for (const [pId, pData] of Object.entries(config.providers || {})) {
-if (!pData || pData.origin === 'local') continue;
+if (!pData || pData.origin === 'local' || pData.is_local) continue;
+if (!allowAllProvs && !scopeProvs.includes(pId)) continue;
 const exportableKeys = (pData.api_keys || [])
-.filter((k) => k && k.enabled && k.origin !== 'local')
+.filter((k) => k && k.enabled && k.origin !== 'local' && !k.is_local)
 .map((k) => k.label || k.id);
 if (exportableKeys.length === 0) continue;
 let rules = pData.adapter_rules;

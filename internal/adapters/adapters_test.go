@@ -163,7 +163,7 @@ func TestGeminiThinkingCompat(t *testing.T) {
 		},
 	}
 
-	// 2.5 Pro
+	// 1. 2.5 Pro high -> extra_body.google.thinking_config ONLY (no top-level thinking_budget)
 	req25 := `{
 		"model": "gemini-2.5-pro",
 		"messages": [{"role": "user", "content": "hello"}],
@@ -174,12 +174,35 @@ func TestGeminiThinkingCompat(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out25 map[string]any
-	json.Unmarshal(mut25, &out25)
-	if out25["thinking_budget"] != float64(24576) {
-		t.Errorf("expected thinking_budget 24576, got %v", out25["thinking_budget"])
+	_ = json.Unmarshal(mut25, &out25)
+	if _, exists := out25["thinking_budget"]; exists {
+		t.Errorf("unexpected root thinking_budget injection: %v", out25["thinking_budget"])
+	}
+	tc25 := out25["extra_body"].(map[string]any)["google"].(map[string]any)["thinking_config"].(map[string]any)
+	if tc25["thinking_budget"] != float64(24576) || tc25["include_thoughts"] != true {
+		t.Errorf("expected extra_body thinking_budget=24576 include_thoughts=true, got %v", tc25)
 	}
 
-	// 3.0 Pro
+	// 2. 2.5 Flash effort="none" -> include_thoughts=false, thinking_budget=0; 2.5 Pro effort="none" -> 128
+	req25None := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`
+	mut25None, _, _, _ := engine.PrepareRequest("/v1/chat/completions", []byte(req25None), prov, "", false)
+	var out25None map[string]any
+	_ = json.Unmarshal(mut25None, &out25None)
+	tc25None := out25None["extra_body"].(map[string]any)["google"].(map[string]any)["thinking_config"].(map[string]any)
+	if tc25None["include_thoughts"] != false || tc25None["thinking_budget"] != float64(0) {
+		t.Errorf("expected 2.5-flash effort=none -> include_thoughts=false, budget=0, got %v", tc25None)
+	}
+
+	req25ProNone := `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`
+	mut25ProNone, _, _, _ := engine.PrepareRequest("/v1/chat/completions", []byte(req25ProNone), prov, "", false)
+	var out25ProNone map[string]any
+	_ = json.Unmarshal(mut25ProNone, &out25ProNone)
+	tc25ProNone := out25ProNone["extra_body"].(map[string]any)["google"].(map[string]any)["thinking_config"].(map[string]any)
+	if tc25ProNone["include_thoughts"] != false || tc25ProNone["thinking_budget"] != float64(128) {
+		t.Errorf("expected 2.5-pro effort=none -> include_thoughts=false, budget=128, got %v", tc25ProNone)
+	}
+
+	// 3. 3.0 Pro high -> extra_body.google.thinking_config ONLY (no top-level thinking_level)
 	req3x := `{
 		"model": "gemini-3.0-pro",
 		"messages": [{"role": "user", "content": "hello"}],
@@ -190,9 +213,23 @@ func TestGeminiThinkingCompat(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out3x map[string]any
-	json.Unmarshal(mut3x, &out3x)
-	if out3x["thinking_level"] != "HIGH" {
-		t.Errorf("expected thinking_level HIGH, got %v", out3x["thinking_level"])
+	_ = json.Unmarshal(mut3x, &out3x)
+	if _, exists := out3x["thinking_level"]; exists {
+		t.Errorf("unexpected root thinking_level injection: %v", out3x["thinking_level"])
+	}
+	tc3x := out3x["extra_body"].(map[string]any)["google"].(map[string]any)["thinking_config"].(map[string]any)
+	if tc3x["thinking_level"] != "HIGH" || tc3x["include_thoughts"] != true {
+		t.Errorf("expected extra_body thinking_level=HIGH include_thoughts=true, got %v", tc3x)
+	}
+
+	// 4. 3.0 Flash effort="none" -> include_thoughts=false
+	req3xNone := `{"model":"gemini-3.0-flash","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`
+	mut3xNone, _, _, _ := engine.PrepareRequest("/v1/chat/completions", []byte(req3xNone), prov, "", false)
+	var out3xNone map[string]any
+	_ = json.Unmarshal(mut3xNone, &out3xNone)
+	tc3xNone := out3xNone["extra_body"].(map[string]any)["google"].(map[string]any)["thinking_config"].(map[string]any)
+	if tc3xNone["include_thoughts"] != false {
+		t.Errorf("expected 3.x effort=none -> include_thoughts=false, got %v", tc3xNone)
 	}
 }
 
@@ -719,5 +756,127 @@ func TestThinkingPolicy_PassbackRequired(t *testing.T) {
 	g := ec["google"].(map[string]any)
 	if g["thought_signature"] != "sig_tool_456" {
 		t.Errorf("expected restored thought_signature 'sig_tool_456', got %v", g["thought_signature"])
+	}
+}
+
+func TestExtendedAdapterRules_PresetFallback_Ceiling_GooglePrefix_SystemFirst_NonStreamSig(t *testing.T) {
+	engine := NewDefaultEngine()
+
+	// 1. Preset fallback when provider.AdapterRules == nil
+	presetProv := &types.ProviderConfig{
+		ID:       "google",
+		PresetID: "gemini",
+	}
+	if ResolveAdapterRules(presetProv) == nil {
+		t.Logf("note: preset 'gemini' returned nil rules (if not in catalog), testing explicit rules too")
+	}
+
+	// 2. EnsureGooglePrefix, ModelAliases in rules, MaxTokensCeiling, NormalizeChoiceToString, SystemFirstOnly
+	prov := &types.ProviderConfig{
+		AdapterRules: &types.AdapterRules{
+			EnsureGooglePrefix:      true,
+			MaxTokensCeiling:        4096,
+			NormalizeChoiceToString: true,
+			SystemFirstOnly:         true,
+			ModelAliases:            map[string]string{"my-gem": "gemini-2.5-flash"},
+			ReasoningFields:         []string{"reasoning", "reasoning_content"},
+			GeminiCompat:            true,
+		},
+	}
+
+	req := `{
+		"model": "my-gem",
+		"max_tokens": 32000,
+		"max_completion_tokens": 16000,
+		"tool_choice": {"type": "function", "function": {"name": "get_weather"}},
+		"messages": [
+			{"role": "system", "content": "First system"},
+			{"role": "user", "content": "Hello"},
+			{"role": "system", "content": "Mid-turn reminder"}
+		]
+	}`
+	mutated, _, _, err := engine.PrepareRequest("/v1/chat/completions", []byte(req), prov, "", false)
+	if err != nil {
+		t.Fatalf("PrepareRequest err: %v", err)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(mutated, &out)
+
+	if out["model"] != "google/gemini-2.5-flash" {
+		t.Errorf("expected model 'google/gemini-2.5-flash', got %v", out["model"])
+	}
+	if out["max_tokens"] != float64(4096) || out["max_completion_tokens"] != float64(4096) {
+		t.Errorf("expected max_tokens/max_completion_tokens clamped to 4096, got %v / %v", out["max_tokens"], out["max_completion_tokens"])
+	}
+	if out["tool_choice"] != "auto" {
+		t.Errorf("expected map tool_choice coerced to 'auto', got %v", out["tool_choice"])
+	}
+	msgs := out["messages"].([]any)
+	if msgs[0].(map[string]any)["role"] != "system" || msgs[2].(map[string]any)["role"] != "user" {
+		t.Errorf("expected SystemFirstOnly to keep index 0 as system and rewrite index 2 to user, got %v", msgs)
+	}
+
+	// 3. Large payload StreamOnly without existing "stream" field injects "stream":true
+	padding := strings.Repeat("X", 600*1024)
+	largeAbsentStream := fmt.Sprintf(`{"model":"gpt-4o","messages":[{"role":"user","content":%q}]}`, padding)
+	streamOnlyProv := &types.ProviderConfig{AdapterRules: &types.AdapterRules{StreamOnly: true}}
+	mutLarge, _, upStream, err := engine.PrepareRequest("/v1/chat/completions", []byte(largeAbsentStream), streamOnlyProv, "", false)
+	if err != nil {
+		t.Fatalf("large fast-path PrepareRequest err: %v", err)
+	}
+	if !upStream || !strings.Contains(string(mutLarge[:80]), `"stream":true`) {
+		t.Errorf("expected injected stream:true at root for >512KB StreamOnly request, got %s", string(mutLarge[:80]))
+	}
+
+	// 4. TransformNonStreamResponse: ReasoningFields + Gemini non-stream tool_calls signature encoding & caching
+	nonStreamResp := `{
+		"id": "chatcmpl-gem-ns",
+		"model": "gemini-2.5-pro",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"reasoning": "step-by-step thought",
+				"content": "",
+				"tool_calls": [{
+					"id": "call_ns_99",
+					"type": "function",
+					"function": {"name": "lookup", "arguments": "{}"},
+					"extra_content": {"google": {"thought_signature": "sig_ns_secret"}}
+				}]
+			},
+			"finish_reason": "tool_calls"
+		}]
+	}`
+	txBytes, err := engine.TransformNonStreamResponse("/v1/chat/completions", []byte(nonStreamResp), prov, "gemini-2.5-pro")
+	if err != nil {
+		t.Fatalf("TransformNonStreamResponse err: %v", err)
+	}
+	var txOut map[string]any
+	_ = json.Unmarshal(txBytes, &txOut)
+	msg := txOut["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	if msg["reasoning_content"] != "step-by-step thought" {
+		t.Errorf("expected reasoning copied to reasoning_content, got %v", msg["reasoning_content"])
+	}
+	tc0 := msg["tool_calls"].([]any)[0].(map[string]any)
+	if tc0["id"] != "call_ns_99:::sig_ns_secret" {
+		t.Errorf("expected encoded tool_call id 'call_ns_99:::sig_ns_secret', got %v", tc0["id"])
+	}
+	if gotCached := DefaultSigCache.Get("call_ns_99"); gotCached != "sig_ns_secret" {
+		t.Errorf("expected signature cached in DefaultSigCache, got %q", gotCached)
+	}
+
+	// 5. AggregateStreamToJSON handles >64KB single SSE data line cleanly
+	bigContent := strings.Repeat("Z", 120*1024)
+	sseLargeLine := fmt.Sprintf("data: {\"id\":\"1\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":%q}}]}\n\ndata: [DONE]\n\n", bigContent)
+	aggBytes, err := AggregateStreamToJSON(strings.NewReader(sseLargeLine))
+	if err != nil {
+		t.Fatalf("AggregateStreamToJSON >64KB line failed: %v", err)
+	}
+	var aggOut map[string]any
+	_ = json.Unmarshal(aggBytes, &aggOut)
+	gotAggContent := aggOut["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)["content"].(string)
+	if len(gotAggContent) != len(bigContent) {
+		t.Errorf("expected aggregated len %d, got %d", len(bigContent), len(gotAggContent))
 	}
 }

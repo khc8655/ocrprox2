@@ -76,6 +76,8 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         'request_total_budget_sec',
         'max_retries',
         'max_attempts_per_provider',
+        'run_mode',
+        'mode_schedule_enabled',
       ];
 
       for (const dep of deprecatedFields) {
@@ -133,7 +135,6 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         'vaultHub',
         'nodeManager',
         'vaultClient',
-        'runModes',
         'kbModels',
         'oauthLogin',
         'usageAndTraces',
@@ -142,6 +143,8 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
 
       for (const role of roles) {
         assert.ok(hostCapabilities[role], `host.js must define capabilities for '${role}'`);
+        assert.strictEqual(hostCapabilities[role].runModes, undefined, `host.js must not define deprecated capability 'runModes' for '${role}'`);
+        assert.strictEqual(contract.capabilities[role].runModes, undefined, `contract must not define deprecated capability 'runModes' for '${role}'`);
         for (const cap of expectedCaps) {
           assert.strictEqual(
             hostCapabilities[role][cap],
@@ -227,7 +230,7 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       assert.ok(readonlyContent.includes('"GET /healthz"'), 'AllowedLiteRoutes must include GET /healthz');
       assert.ok(readonlyContent.includes('"POST /v1/chat/completions"'), 'AllowedLiteRoutes must include POST /v1/chat/completions');
       assert.ok(readonlyContent.includes('"/api/config"'), 'FullOnlyRoutes must include /api/config');
-      assert.ok(readonlyContent.includes('"/api/admin/mode"'), 'FullOnlyRoutes must include /api/admin/mode');
+      assert.ok(readonlyContent.includes('"/api/admin/cooldowns"'), 'FullOnlyRoutes must include /api/admin/cooldowns');
     });
   });
 
@@ -404,7 +407,7 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
           },
         },
         settings: {
-          run_mode: 'agent',
+          client_key: 'sk-test-client',
         },
       };
 

@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/khc8655/llmproxy2/internal/config"
 	"github.com/khc8655/llmproxy2/internal/provider"
@@ -43,13 +43,24 @@ func (s *Server) handleDetectProvider(w http.ResponseWriter, r *http.Request) {
 	if req.Provider != "" && s.localSrc != nil {
 		if snap, _ := s.localSrc.Current(r.Context(), false); snap != nil && snap.Config != nil {
 			if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
+				if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
+					for _, k := range p.APIKeys {
+						if k != nil && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+							if k.Origin == "vault" && !matchesStoredProviderBaseURL(req.BaseURL, p) {
+								w.WriteHeader(http.StatusForbidden)
+								_ = json.NewEncoder(w).Encode(map[string]any{
+									"ok":    false,
+									"error": "cannot override base_url when using a vault-managed key",
+								})
+								return
+							}
+							req.APIKey = k.Key
+							break
+						}
+					}
+				}
 				if req.BaseURL == "" {
 					req.BaseURL = p.BaseURL
-				}
-				if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
-					if len(p.APIKeys) > 0 && p.APIKeys[0] != nil {
-						req.APIKey = p.APIKeys[0].Key
-					}
 				}
 			}
 		}
@@ -61,7 +72,7 @@ func (s *Server) handleDetectProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := provider.Detect(r.Context(), s.httpClient, req.BaseURL, req.APIKey)
+	res, err := provider.Detect(r.Context(), s.outboundClient(15*time.Second), req.BaseURL, req.APIKey)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
@@ -78,94 +89,9 @@ func (s *Server) handleDetectProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type balanceRequest struct {
-	Provider    string `json:"provider"`
-	KeyLabel    string `json:"key_label"`
-	APIKey      string `json:"api_key"`
-	BaseURL     string `json:"base_url"`
-	BalanceURL  string `json:"balance_url"`
-	BalancePath string `json:"balance_path"`
-	PresetID    string `json:"preset_id"`
-}
-
-func (s *Server) handleBalance(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAuth(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-
-	var req balanceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid json: " + err.Error()})
-		return
-	}
-
-	var provCfg *types.ProviderConfig
-	var resolvedKey string
-
-	if req.Provider != "" && s.localSrc != nil {
-		if snap, _ := s.localSrc.Current(r.Context(), false); snap != nil && snap.Config != nil {
-			if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
-				cp := *p
-				provCfg = &cp
-				if req.KeyLabel != "" {
-					for _, k := range p.APIKeys {
-						if k != nil && (k.Label == req.KeyLabel || k.ID == req.KeyLabel) {
-							resolvedKey = k.Key
-							break
-						}
-					}
-				}
-				if resolvedKey == "" && len(p.APIKeys) > 0 && p.APIKeys[0] != nil {
-					resolvedKey = p.APIKeys[0].Key
-				}
-			}
-		}
-	}
-
-	if provCfg == nil {
-		provCfg = &types.ProviderConfig{
-			ID: req.Provider,
-		}
-	}
-
-	if req.BaseURL != "" {
-		provCfg.BaseURL = req.BaseURL
-	}
-	if req.BalanceURL != "" {
-		provCfg.BalanceURL = req.BalanceURL
-	}
-	if req.BalancePath != "" {
-		provCfg.BalancePath = req.BalancePath
-	}
-	if req.PresetID != "" {
-		provCfg.PresetID = req.PresetID
-	}
-	if req.APIKey != "" && !config.IsMaskedSecret(req.APIKey) {
-		resolvedKey = req.APIKey
-	}
-
-	bal, err := provider.QueryBalance(r.Context(), s.httpClient, provCfg, resolvedKey)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":      true,
-		"balance": bal,
-	})
-}
-
 type testProviderRequest struct {
 	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
 	KeyLabel string `json:"key_label"`
 	APIKey   string `json:"api_key"`
 	Model    string `json:"model"`
@@ -190,10 +116,12 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var storedProv *types.ProviderConfig
 	var provCfg *types.ProviderConfig
 	if req.Provider != "" && s.localSrc != nil {
 		if snap, _ := s.localSrc.Current(r.Context(), false); snap != nil && snap.Config != nil {
 			if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
+				storedProv = p
 				cp := *p
 				provCfg = &cp
 			}
@@ -201,17 +129,39 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if provCfg == nil {
+		baseURL := strings.TrimSpace(req.BaseURL)
+		if baseURL == "" {
+			baseURL = req.Provider
+		}
 		provCfg = &types.ProviderConfig{
 			ID:      req.Provider,
-			BaseURL: req.Provider,
+			BaseURL: baseURL,
 		}
 		if req.APIKey != "" && !config.IsMaskedSecret(req.APIKey) {
 			provCfg.APIKeys = []*types.KeyEntry{{Key: req.APIKey, Label: req.KeyLabel}}
 		}
 	}
 
+	client := s.outboundClient(15 * time.Second)
+
 	if req.Batch {
-		results := provider.BatchTestKeys(r.Context(), s.httpClient, provCfg, req.Model)
+		if strings.TrimSpace(req.BaseURL) != "" {
+			if storedProv != nil && !matchesStoredProviderBaseURL(req.BaseURL, storedProv) {
+				for _, k := range provCfg.APIKeys {
+					if k != nil && k.Origin == "vault" {
+						w.WriteHeader(http.StatusForbidden)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"ok":    false,
+							"error": "cannot override base_url when using a vault-managed key",
+						})
+						return
+					}
+				}
+			}
+			provCfg.BaseURL = strings.TrimSpace(req.BaseURL)
+		}
+
+		results := provider.BatchTestKeys(r.Context(), client, provCfg, req.Model)
 		if s.scheduler != nil && s.scheduler.Cooldowns() != nil {
 			for _, res := range results {
 				if res.OK {
@@ -234,11 +184,13 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Single endpoint/protocol test
 	apiKey := req.APIKey
+	var resolvedVaultKey bool
 	if (apiKey == "" || config.IsMaskedSecret(apiKey)) && provCfg != nil {
 		if req.KeyLabel != "" {
 			for _, k := range provCfg.APIKeys {
 				if k != nil && (k.Label == req.KeyLabel || k.ID == req.KeyLabel) {
 					apiKey = k.Key
+					resolvedVaultKey = k.Origin == "vault"
 					break
 				}
 			}
@@ -246,8 +198,21 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		if apiKey == "" || config.IsMaskedSecret(apiKey) {
 			if len(provCfg.APIKeys) > 0 && provCfg.APIKeys[0] != nil {
 				apiKey = provCfg.APIKeys[0].Key
+				resolvedVaultKey = provCfg.APIKeys[0].Origin == "vault"
 			}
 		}
+	}
+
+	if strings.TrimSpace(req.BaseURL) != "" {
+		if resolvedVaultKey && storedProv != nil && !matchesStoredProviderBaseURL(req.BaseURL, storedProv) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":    false,
+				"error": "cannot override base_url when using a vault-managed key",
+			})
+			return
+		}
+		provCfg.BaseURL = strings.TrimSpace(req.BaseURL)
 	}
 
 	testReq := provider.TestRequest{
@@ -258,7 +223,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 		Model:    req.Model,
 	}
 
-	results := provider.TestEndpoint(r.Context(), s.httpClient, testReq)
+	results := provider.TestEndpoint(r.Context(), client, testReq)
 	hasOK := false
 	for _, res := range results {
 		if res.OK {
@@ -287,159 +252,6 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type autolistSyncRequest struct {
-	Provider    string `json:"provider"`
-	AutoInclude string `json:"auto_include"`
-	Apply       bool   `json:"apply"`
-}
-
-func (s *Server) handleAutolistSync(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAuth(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-
-	var req autolistSyncRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid json: " + err.Error()})
-		return
-	}
-
-	if strings.TrimSpace(req.Provider) == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "provider is required"})
-		return
-	}
-
-	if s.localSrc == nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "local config source not available"})
-		return
-	}
-
-	snap, err := s.localSrc.Current(r.Context(), false)
-	if err != nil || snap == nil || snap.Config == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "failed to load config"})
-		return
-	}
-
-	provCfg, ok := snap.Config.Providers[req.Provider]
-	if !ok || provCfg == nil {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": fmt.Sprintf("provider %q not found", req.Provider)})
-		return
-	}
-
-	apiKey := ""
-	if len(provCfg.APIKeys) > 0 && provCfg.APIKeys[0] != nil {
-		apiKey = provCfg.APIKeys[0].Key
-	}
-
-	allModels, err := provider.FetchModels(r.Context(), s.httpClient, provCfg, apiKey)
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-
-	pattern := strings.TrimSpace(req.AutoInclude)
-	if pattern == "" {
-		pattern = provCfg.AutoInclude
-	}
-
-	matched, err := provider.FilterAutoInclude(allModels, pattern)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-
-	var added []string
-	if req.Apply {
-		rawJSON, err := json.Marshal(snap.Config)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		var clonedCfg types.ProxyConfig
-		if err := json.Unmarshal(rawJSON, &clonedCfg); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-
-		if clonedCfg.AgentModels == nil {
-			clonedCfg.AgentModels = make(map[string]*types.AgentModelRoute)
-		}
-
-		firstKeyLabel := ""
-		if len(provCfg.APIKeys) > 0 && provCfg.APIKeys[0] != nil {
-			firstKeyLabel = provCfg.APIKeys[0].Label
-		}
-
-		for _, m := range matched {
-			route, exists := clonedCfg.AgentModels[m]
-			if !exists {
-				clonedCfg.AgentModels[m] = &types.AgentModelRoute{
-					Enabled:         true,
-					RoutingStrategy: "priority",
-					Candidates: []*types.RouteCandidate{
-						{
-							Provider:    provCfg.ID,
-							TargetModel: m,
-							KeyLabel:    firstKeyLabel,
-							Enabled:     true,
-						},
-					},
-				}
-				added = append(added, m)
-			} else {
-				candExists := false
-				for _, c := range route.Candidates {
-					if c != nil && c.Provider == provCfg.ID && (c.TargetModel == m || c.TargetModel == "") {
-						candExists = true
-						break
-					}
-				}
-				if !candExists {
-					route.Candidates = append(route.Candidates, &types.RouteCandidate{
-						Provider:    provCfg.ID,
-						TargetModel: m,
-						KeyLabel:    firstKeyLabel,
-						Enabled:     true,
-					})
-					added = append(added, m)
-				}
-			}
-		}
-
-		if _, err := s.localSrc.SaveConfig(&clonedCfg); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-	}
-
-	if added == nil {
-		added = []string{}
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":      true,
-		"models":  allModels,
-		"matched": matched,
-		"added":   added,
-	})
-}
-
 func (s *Server) handlePresetsExtra(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -459,10 +271,6 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	primaryKey, extraKeys := s.authMgr.GetClientKeys()
-	mode := types.ModeAgent
-	if s.modeSched != nil {
-		mode = s.modeSched.CurrentMode()
-	}
 
 	masked := ""
 	if primaryKey != "" {
@@ -504,7 +312,7 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":                    true,
-		"mode":                  mode,
+		"mode":                  "unified",
 		"client_key_configured": primaryKey != "",
 		"client_key_masked":     masked,
 		"proxy_keys_count":      len(extraKeys),

@@ -20,9 +20,7 @@ import (
 
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
-	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
-	"github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
 	"github.com/khc8655/llmproxy2/internal/upstream"
@@ -50,11 +48,10 @@ type Server struct {
 	localSrc      *config.LocalSource
 	obsSink       types.ObservabilitySink
 	scheduler     *scheduler.Scheduler
-	modeSched     *modesched.ModeScheduler
 	oauthMgr      *oauth.Manager
 	httpClient    *http.Client
+	allowPrivate  bool
 	adminPassword string
-	refreshMgr    *provider.RefreshManager
 	buildVersion  string
 	buildSemver   string
 	buildCommit   string
@@ -74,24 +71,28 @@ func NewServer(
 		localSrc:      localSrc,
 		obsSink:       obsSink,
 		scheduler:     sched,
-		httpClient:    upstream.DefaultClient(15*time.Second, true),
+		allowPrivate:  false,
+		httpClient:    upstream.DefaultClient(15*time.Second, false),
 		adminPassword: os.Getenv("ADMIN_PASSWORD"),
 	}
+}
+
+// SetAllowPrivate configures whether outbound admin/probe/update HTTP requests allow private/loopback IPs.
+func (s *Server) SetAllowPrivate(allow bool) {
+	s.allowPrivate = allow
+	s.httpClient = upstream.DefaultClient(15*time.Second, allow)
+}
+
+func (s *Server) outboundClient(timeout time.Duration) *http.Client {
+	if s.httpClient != nil {
+		return s.httpClient
+	}
+	return upstream.DefaultClient(timeout, s.allowPrivate)
 }
 
 // SetAdminPassword sets the admin password explicitly for session cookie verification.
 func (s *Server) SetAdminPassword(pass string) {
 	s.adminPassword = pass
-}
-
-// SetRefreshManager connects the provider RefreshManager to the admin server.
-func (s *Server) SetRefreshManager(rm *provider.RefreshManager) {
-	s.refreshMgr = rm
-}
-
-// SetModeScheduler connects the mode scheduler to the admin server.
-func (s *Server) SetModeScheduler(ms *modesched.ModeScheduler) {
-	s.modeSched = ms
 }
 
 // SetOAuthManager connects the OAuth manager to the admin server.
@@ -118,12 +119,18 @@ func (s *Server) effectiveVault(cfgVault *types.VaultClientConfig) *types.VaultC
 	if cfgVault != nil {
 		url = strings.TrimSpace(cfgVault.URL)
 		tok = strings.TrimSpace(cfgVault.NodeToken)
+		if config.IsMaskedSecret(tok) {
+			tok = ""
+		}
 	}
 	if s.defaultVault != nil {
 		if url == "" {
 			url = s.defaultVault.URL
-		}
-		if tok == "" {
+			if tok == "" {
+				tok = s.defaultVault.NodeToken
+			}
+		} else if tok == "" && s.defaultVault.URL != "" &&
+			strings.TrimRight(url, "/") == strings.TrimRight(s.defaultVault.URL, "/") {
 			tok = s.defaultVault.NodeToken
 		}
 	}
@@ -136,6 +143,9 @@ func (s *Server) effectiveVault(cfgVault *types.VaultClientConfig) *types.VaultC
 func (s *Server) resolveVaultCredentials(snap *types.RuntimeSnapshot, explicitURL, explicitToken string) (string, string) {
 	hubURL := strings.TrimSpace(explicitURL)
 	nodeToken := strings.TrimSpace(explicitToken)
+	if config.IsMaskedSecret(nodeToken) {
+		nodeToken = ""
+	}
 	var cfgVault *types.VaultClientConfig
 	if snap != nil && snap.Config != nil {
 		cfgVault = snap.Config.Vault
@@ -144,8 +154,11 @@ func (s *Server) resolveVaultCredentials(snap *types.RuntimeSnapshot, explicitUR
 	if eff != nil {
 		if hubURL == "" {
 			hubURL = eff.URL
-		}
-		if nodeToken == "" {
+			if nodeToken == "" {
+				nodeToken = eff.NodeToken
+			}
+		} else if nodeToken == "" && eff.URL != "" &&
+			strings.TrimRight(hubURL, "/") == strings.TrimRight(eff.URL, "/") {
 			nodeToken = eff.NodeToken
 		}
 	}
@@ -198,8 +211,6 @@ func (s *Server) RegisterRoutes(r any) {
 	register("DELETE /api/admin/cooldowns", s.handleCooldowns)
 	register("GET /api/lanes", s.handleLanes)
 	register("GET /api/admin/lanes", s.handleLanes)
-	register("GET /api/admin/mode", s.handleMode)
-	register("POST /api/admin/mode", s.handleMode)
 	register("POST /api/admin/verify-key", s.handleVerifyKey)
 	register("POST /api/admin/probe-models", s.handleProbeModels)
 	register("GET /api/vault/manifest", s.handleVaultManifest)
@@ -208,9 +219,7 @@ func (s *Server) RegisterRoutes(r any) {
 	register("GET /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/detect-provider", s.handleDetectProvider)
-	register("POST /api/admin/balance", s.handleBalance)
 	register("POST /api/admin/test-provider", s.handleTestProvider)
-	register("POST /api/admin/autolist-sync", s.handleAutolistSync)
 	register("GET /api/admin/presets-extra", s.handlePresetsExtra)
 	register("GET /api/admin/access-info", s.handleAccessInfo)
 	register("POST /api/admin/access-key", s.handleAccessKey)
@@ -224,12 +233,15 @@ func (s *Server) RegisterRoutes(r any) {
 }
 
 func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request) bool {
-	// Sample the lockout state BEFORE authenticating: the request that trips the
-	// 5th failure still deserves a 401 ("bad credentials"); only requests made
-	// while already locked get 429.
-	blockedBefore := s.adminIPBlocked(r)
+	// Sample the lockout state BEFORE authenticating: callers already inside the
+	// anti-bruteforce lockout receive 429 + Retry-After immediately (even if they
+	// present a cookie); the attempt that trips the 5th failure still gets 401.
+	if s.adminIPBlocked(r) {
+		s.writeAuthFailure(w, r, true)
+		return false
+	}
 	if !s.isAdminAuthorized(r) {
-		s.writeAuthFailure(w, r, blockedBefore)
+		s.writeAuthFailure(w, r, false)
 		return false
 	}
 	return true
@@ -304,6 +316,18 @@ func (s *Server) handleIndexHTML(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(html)
 }
 
+func (s *Server) maskedEffectiveVault(cfgVault *types.VaultClientConfig) *types.VaultClientConfig {
+	dv := s.effectiveVault(cfgVault)
+	if dv == nil {
+		return nil
+	}
+	out := *dv
+	if out.NodeToken != "" {
+		out.NodeToken = maskSecret(out.NodeToken)
+	}
+	return &out
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -316,7 +340,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		snap, err := s.localSrc.Current(r.Context(), false)
 		if err != nil || snap == nil || snap.Config == nil {
 			var vaultVal any = map[string]any{}
-			if dv := s.effectiveVault(nil); dv != nil {
+			if dv := s.maskedEffectiveVault(nil); dv != nil {
 				vaultVal = dv
 			}
 			w.WriteHeader(http.StatusOK)
@@ -333,7 +357,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		masked := maskConfigSecrets(snap.Config)
-		if dv := s.effectiveVault(masked.Vault); dv != nil {
+		if dv := s.maskedEffectiveVault(snap.Config.Vault); dv != nil {
 			masked.Vault = dv
 		}
 		w.WriteHeader(http.StatusOK)
@@ -388,6 +412,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusOK)
 		masked := maskConfigSecrets(savedSnap.Config)
+		if dv := s.maskedEffectiveVault(savedSnap.Config.Vault); dv != nil {
+			masked.Vault = dv
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":           true,
 			"_version":     masked.Version,
@@ -429,17 +456,40 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deep copy and strip all Vault-originated providers/keys and Vault.NodeToken (SEC-06 / local-only export rule).
+	raw, _ := json.Marshal(snap.Config)
+	var copyCfg types.ProxyConfig
+	_ = json.Unmarshal(raw, &copyCfg)
+
+	localProviders := make(map[string]*types.ProviderConfig)
+	for pID, p := range copyCfg.Providers {
+		if p == nil || p.Origin == "vault" {
+			continue
+		}
+		localKeys := make([]*types.KeyEntry, 0, len(p.APIKeys))
+		for _, k := range p.APIKeys {
+			if k == nil || k.Origin == "vault" {
+				continue
+			}
+			localKeys = append(localKeys, k)
+		}
+		p.APIKeys = localKeys
+		localProviders[pID] = p
+	}
+
 	exportData := map[string]any{
 		"ok":           true,
-		"_version":     snap.Config.Version,
+		"_version":     copyCfg.Version,
 		"_exported_at": time.Now().Format("2006-01-02 15:04:05"),
-		"providers":    snap.Config.Providers,
-		"agent_models": snap.Config.AgentModels,
-		"kb_models":    snap.Config.KBModels,
-		"settings":     snap.Config.Settings,
+		"providers":    localProviders,
+		"agent_models": copyCfg.AgentModels,
+		"kb_models":    copyCfg.KBModels,
+		"settings":     copyCfg.Settings,
 	}
-	if snap.Config.Vault != nil {
-		exportData["vault"] = snap.Config.Vault
+	if copyCfg.Vault != nil {
+		exportData["vault"] = map[string]string{
+			"url": copyCfg.Vault.URL,
+		}
 	}
 
 	enc := json.NewEncoder(w)
@@ -533,9 +583,6 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		targetCfg = incoming
 		if currentCfg != nil {
 			targetCfg.Version = currentCfg.Version
-			if targetCfg.Settings.RunMode == "" {
-				targetCfg.Settings.RunMode = currentCfg.Settings.RunMode
-			}
 		}
 	} else {
 		curBytes, _ := json.Marshal(currentCfg)
@@ -666,7 +713,6 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		curMode := targetCfg.Settings.RunMode
 		if incoming.Settings.AgentRoutingStrategy != "" {
 			targetCfg.Settings.AgentRoutingStrategy = incoming.Settings.AgentRoutingStrategy
 		}
@@ -694,7 +740,6 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		if len(incoming.Settings.ProxyKeys) > 0 {
 			targetCfg.Settings.ProxyKeys = incoming.Settings.ProxyKeys
 		}
-		targetCfg.Settings.RunMode = curMode
 		targetCfg.Version = currentCfg.Version
 	}
 
@@ -894,10 +939,7 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 		upReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	client := s.httpClient
-	if client == nil {
-		client = upstream.DefaultClient(20*time.Second, true)
-	}
+	client := s.outboundClient(20 * time.Second)
 
 	start := time.Now()
 	resp, err := client.Do(upReq)
@@ -1121,10 +1163,7 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 				upReq.Header.Set("Authorization", "Bearer "+apiKey)
 			}
 
-			client := s.httpClient
-			if client == nil {
-				client = upstream.DefaultClient(15*time.Second, true)
-			}
+			client := s.outboundClient(15 * time.Second)
 
 			start := time.Now()
 			resp, err := client.Do(upReq)
@@ -1310,73 +1349,22 @@ func (s *Server) handleCooldowns(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(snapshot)
 }
 
-func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAuth(w, r) {
-		return
+func matchesStoredProviderBaseURL(reqURL string, p *types.ProviderConfig) bool {
+	norm := func(u string) string { return strings.TrimRight(strings.TrimSpace(u), "/") }
+	rNorm := norm(reqURL)
+	if rNorm == "" {
+		return true
 	}
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		currentMode := types.ModeAgent
-		if snap, err := s.localSrc.Current(r.Context(), false); err == nil && snap != nil && snap.Config != nil {
-			if snap.Config.Settings.RunMode != "" {
-				currentMode = snap.Config.Settings.RunMode
-			}
-		}
-		if s.modeSched != nil {
-			currentMode = s.modeSched.CurrentMode()
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":       true,
-			"mode":     currentMode,
-			"run_mode": currentMode,
-		})
-
-	case http.MethodPost:
-		var req struct {
-			Mode    string `json:"mode"`
-			RunMode string `json:"run_mode"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid json"})
-			return
-		}
-		targetMode := req.Mode
-		if targetMode == "" {
-			targetMode = req.RunMode
-		}
-		if targetMode != "agent" && targetMode != "kb" {
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "mode must be agent or kb"})
-			return
-		}
-
-		rm := types.RunMode(targetMode)
-		savedSnap, err := s.localSrc.UpdateRunMode(rm)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-			return
-		}
-		if s.modeSched != nil {
-			s.modeSched.SetManualMode(rm)
-		}
-		var ver int64 = 0
-		if savedSnap != nil && savedSnap.Config != nil {
-			ver = savedSnap.Config.Version
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":       true,
-			"mode":     rm,
-			"run_mode": rm,
-			"_version": ver,
-		})
-
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	if p == nil {
+		return false
 	}
+	if b := norm(p.BaseURL); b != "" && strings.EqualFold(rNorm, b) {
+		return true
+	}
+	if ab := norm(p.AnthropicBaseURL); ab != "" && strings.EqualFold(rNorm, ab) {
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
@@ -1398,17 +1386,27 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 
 	snap, _ := s.localSrc.Current(r.Context(), false)
 	if snap != nil && snap.Config != nil {
-		if p, ok := snap.Config.Providers[req.Provider]; ok {
-			if req.BaseURL == "" {
-				req.BaseURL = p.BaseURL
-			}
+		if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
 			if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
 				for _, k := range p.APIKeys {
-					if k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+					if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+						if k.Origin == "vault" && !matchesStoredProviderBaseURL(req.BaseURL, p) {
+							w.WriteHeader(http.StatusForbidden)
+							_ = json.NewEncoder(w).Encode(map[string]any{
+								"ok":     false,
+								"valid":  false,
+								"status": http.StatusForbidden,
+								"error":  "cannot override base_url when using a vault-managed key",
+							})
+							return
+						}
 						req.APIKey = k.Key
 						break
 					}
 				}
+			}
+			if req.BaseURL == "" {
+				req.BaseURL = p.BaseURL
 			}
 		}
 	}
@@ -1445,10 +1443,7 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 	}
 	upReq.Header.Set("Authorization", "Bearer "+req.APIKey)
 
-	client := s.httpClient
-	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
-	}
+	client := s.outboundClient(15 * time.Second)
 
 	start := time.Now()
 	resp, err := client.Do(upReq)
@@ -1514,17 +1509,25 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 
 	snap, _ := s.localSrc.Current(r.Context(), false)
 	if snap != nil && snap.Config != nil {
-		if p, ok := snap.Config.Providers[req.Provider]; ok {
-			if req.BaseURL == "" {
-				req.BaseURL = p.BaseURL
-			}
+		if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
 			if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
 				for _, k := range p.APIKeys {
-					if k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+					if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+						if k.Origin == "vault" && !matchesStoredProviderBaseURL(req.BaseURL, p) {
+							w.WriteHeader(http.StatusForbidden)
+							_ = json.NewEncoder(w).Encode(map[string]any{
+								"ok":    false,
+								"error": "cannot override base_url when using a vault-managed key",
+							})
+							return
+						}
 						req.APIKey = k.Key
 						break
 					}
 				}
+			}
+			if req.BaseURL == "" {
+				req.BaseURL = p.BaseURL
 			}
 		}
 	}
@@ -1549,10 +1552,7 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	upReq.Header.Set("Authorization", "Bearer "+req.APIKey)
 
-	client := s.httpClient
-	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
-	}
+	client := s.outboundClient(15 * time.Second)
 
 	resp, err := client.Do(upReq)
 	if err != nil {
@@ -1635,10 +1635,7 @@ func (s *Server) handleVaultManifest(w http.ResponseWriter, r *http.Request) {
 		upReq.Header.Set("Authorization", "Bearer "+nodeToken)
 	}
 
-	client := s.httpClient
-	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
-	}
+	client := s.outboundClient(15 * time.Second)
 
 	resp, err := client.Do(upReq)
 	if err != nil {
@@ -1650,6 +1647,58 @@ func (s *Server) handleVaultManifest(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
+}
+
+func decodeVaultProviderConfig(provID string, raw json.RawMessage) (*types.ProviderConfig, error) {
+	var pc types.ProviderConfig
+	if err := json.Unmarshal(raw, &pc); err != nil {
+		return nil, err
+	}
+	var extra struct {
+		Enabled *bool             `json:"enabled"`
+		Keys    map[string]string `json:"keys"`
+	}
+	_ = json.Unmarshal(raw, &extra)
+	if pc.ID == "" {
+		pc.ID = provID
+	}
+	if extra.Enabled == nil {
+		pc.Enabled = true
+	}
+	if len(extra.Keys) > 0 {
+		labels := make([]string, 0, len(extra.Keys))
+		for lbl := range extra.Keys {
+			labels = append(labels, lbl)
+		}
+		sort.Strings(labels)
+		for _, lbl := range labels {
+			secret := strings.TrimSpace(extra.Keys[lbl])
+			if secret == "" {
+				continue
+			}
+			matched := false
+			for _, k := range pc.APIKeys {
+				if k != nil && (k.ID == lbl || k.Label == lbl) {
+					if k.Key == "" || config.IsMaskedSecret(k.Key) {
+						k.Key = secret
+					}
+					k.Origin = "vault"
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				pc.APIKeys = append(pc.APIKeys, &types.KeyEntry{
+					ID:      lbl,
+					Label:   lbl,
+					Key:     secret,
+					Origin:  "vault",
+					Enabled: true,
+				})
+			}
+		}
+	}
+	return &pc, nil
 }
 
 func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
@@ -1668,20 +1717,28 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 	// 1. If payload directly provides "providers", merge into local source
 	if provsRaw, ok := reqBody["providers"]; ok {
 		provsData, _ := json.Marshal(provsRaw)
-		var provs map[string]*types.ProviderConfig
-		if err := json.Unmarshal(provsData, &provs); err == nil && len(provs) > 0 {
-			savedSnap, err := s.localSrc.MergeVaultConfig(provs)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		var rawProvs map[string]json.RawMessage
+		if err := json.Unmarshal(provsData, &rawProvs); err == nil && len(rawProvs) > 0 {
+			provs := make(map[string]*types.ProviderConfig, len(rawProvs))
+			for pID, rawP := range rawProvs {
+				if pc, decErr := decodeVaultProviderConfig(pID, rawP); decErr == nil && pc != nil {
+					provs[pID] = pc
+				}
+			}
+			if len(provs) > 0 {
+				savedSnap, err := s.localSrc.MergeVaultConfig(provs)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":       true,
+					"_version": savedSnap.Config.Version,
+					"merged":   len(provs),
+				})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok":       true,
-				"_version": savedSnap.Config.Version,
-				"merged":   len(provs),
-			})
-			return
 		}
 	}
 
@@ -1710,10 +1767,7 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 		upReq.Header.Set("Authorization", "Bearer "+nodeToken)
 	}
 
-	client := s.httpClient
-	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
-	}
+	client := s.outboundClient(15 * time.Second)
 
 	resp, err := client.Do(upReq)
 	if err != nil {
@@ -1732,18 +1786,24 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-merge fetched providers into local configuration if Hub returned 200 OK
 	var hubResp struct {
-		OK             bool                             `json:"ok"`
-		Provider       string                           `json:"provider"`
-		ProviderConfig *types.ProviderConfig            `json:"provider_config"`
-		Providers      map[string]*types.ProviderConfig `json:"providers"`
+		OK             bool                       `json:"ok"`
+		Provider       string                     `json:"provider"`
+		ProviderConfig json.RawMessage            `json:"provider_config"`
+		Providers      map[string]json.RawMessage `json:"providers"`
 	}
 	if err := json.Unmarshal(respBytes, &hubResp); err == nil && hubResp.OK {
 		toMerge := make(map[string]*types.ProviderConfig)
-		if hubResp.Provider != "" && hubResp.ProviderConfig != nil {
-			toMerge[hubResp.Provider] = hubResp.ProviderConfig
+		if hubResp.Provider != "" && len(hubResp.ProviderConfig) > 0 && string(hubResp.ProviderConfig) != "null" {
+			if pc, decErr := decodeVaultProviderConfig(hubResp.Provider, hubResp.ProviderConfig); decErr == nil && pc != nil {
+				toMerge[hubResp.Provider] = pc
+			}
 		}
-		for k, v := range hubResp.Providers {
-			toMerge[k] = v
+		for k, rawV := range hubResp.Providers {
+			if len(rawV) > 0 && string(rawV) != "null" {
+				if pc, decErr := decodeVaultProviderConfig(k, rawV); decErr == nil && pc != nil {
+					toMerge[k] = pc
+				}
+			}
 		}
 		if len(toMerge) > 0 {
 			_, _ = s.localSrc.MergeVaultConfig(toMerge)
@@ -1877,20 +1937,26 @@ func maskConfigSecrets(cfg *types.ProxyConfig) *types.ProxyConfig {
 	// Visibility rules on a node:
 	//  - keys added locally on this node  -> plaintext (the operator owns them)
 	//  - keys synced from the hub vault   -> short mask only, and the UI locks editing
-	// The hub itself is the authoritative source and always returns plaintext.
+	//  - OAuth refresh tokens & Vault node token -> always masked on readback
 	for _, p := range copyCfg.Providers {
 		if p == nil {
 			continue
 		}
 		for _, k := range p.APIKeys {
-			if k == nil || k.Key == "" {
+			if k == nil {
 				continue
 			}
-			if k.Origin != "vault" {
-				continue
+			if k.OAuthMeta != nil && k.OAuthMeta.RefreshToken != "" {
+				k.OAuthMeta.RefreshToken = maskSecret(k.OAuthMeta.RefreshToken)
 			}
-			k.Key = maskSecret(k.Key)
+			if k.Origin == "vault" && k.Key != "" {
+				k.Key = maskSecret(k.Key)
+			}
 		}
+	}
+
+	if copyCfg.Vault != nil && copyCfg.Vault.NodeToken != "" {
+		copyCfg.Vault.NodeToken = maskSecret(copyCfg.Vault.NodeToken)
 	}
 
 	return &copyCfg

@@ -35,9 +35,6 @@ func TestLocalSource_SaveLoad_KernelGuard_CAS(t *testing.T) {
 				},
 			},
 		},
-		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
-		},
 	}
 
 	snap1, err := src.SaveConfig(initialCfg)
@@ -66,9 +63,6 @@ func TestLocalSource_SaveLoad_KernelGuard_CAS(t *testing.T) {
 					},
 				},
 			},
-		},
-		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
 		},
 	}
 
@@ -182,9 +176,6 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 					},
 				},
 			},
-		},
-		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
 		},
 	}
 
@@ -347,60 +338,6 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 	}
 }
 
-func TestLocalSource_UpdateRunMode(t *testing.T) {
-	tmpDir := t.TempDir()
-	pass := "runmode-test-pass"
-
-	src, err := NewLocalSource(tmpDir, pass)
-	if err != nil {
-		t.Fatalf("NewLocalSource error: %v", err)
-	}
-
-	initialCfg := &types.ProxyConfig{
-		Version:   1,
-		Providers: map[string]*types.ProviderConfig{},
-		Settings: types.RuntimeSettings{
-			RunMode: types.ModeAgent,
-		},
-	}
-
-	snap1, err := src.SaveConfig(initialCfg)
-	if err != nil {
-		t.Fatalf("SaveConfig error: %v", err)
-	}
-	if snap1.Config.Settings.RunMode != types.ModeAgent {
-		t.Errorf("expected initial ModeAgent, got %s", snap1.Config.Settings.RunMode)
-	}
-
-	// Update to ModeKB
-	snap2, err := src.UpdateRunMode(types.ModeKB)
-	if err != nil {
-		t.Fatalf("UpdateRunMode error: %v", err)
-	}
-	if snap2.Config.Settings.RunMode != types.ModeKB {
-		t.Errorf("expected ModeKB, got %s", snap2.Config.Settings.RunMode)
-	}
-	if snap2.Config.Version != 2 {
-		t.Errorf("expected version 2, got %d", snap2.Config.Version)
-	}
-
-	// Verify persistence on disk
-	src2, err := NewLocalSource(tmpDir, pass)
-	if err != nil {
-		t.Fatalf("NewLocalSource reload error: %v", err)
-	}
-	snapLoaded, err := src2.Current(context.Background(), false)
-	if err != nil {
-		t.Fatalf("Current error: %v", err)
-	}
-	if snapLoaded.Config.Settings.RunMode != types.ModeKB {
-		t.Errorf("expected loaded ModeKB, got %s", snapLoaded.Config.Settings.RunMode)
-	}
-	if snapLoaded.Config.Version != 2 {
-		t.Errorf("expected loaded version 2, got %d", snapLoaded.Config.Version)
-	}
-}
-
 func TestLocalSource_PersistKeyEntry_Restart(t *testing.T) {
 	tmpDir := t.TempDir()
 	pass := "persist-test-pass"
@@ -435,7 +372,6 @@ func TestLocalSource_PersistKeyEntry_Restart(t *testing.T) {
 				},
 			},
 		},
-		Settings: types.RuntimeSettings{RunMode: types.ModeAgent},
 	}
 
 	_, err = src.SaveConfig(initialCfg)
@@ -553,10 +489,6 @@ func TestLocalSource_MergeVaultConfig_PreservesMagpieFields(t *testing.T) {
 			Enabled:      true,
 			RPMPerKey:    60,
 			QuotaResetAt: "00:00+08:00",
-			RefreshEvery: "6h",
-			AutoInclude:  "^deepseek-.*",
-			BalanceURL:   "https://api.deepseek.com/user/balance",
-			BalancePath:  "$.balance",
 			APIKeys: []*types.KeyEntry{
 				{ID: "k1", Key: "sk-1-updated", Enabled: true},
 			},
@@ -575,16 +507,139 @@ func TestLocalSource_MergeVaultConfig_PreservesMagpieFields(t *testing.T) {
 	if p.QuotaResetAt != "00:00+08:00" {
 		t.Errorf("expected QuotaResetAt '00:00+08:00', got %q", p.QuotaResetAt)
 	}
-	if p.RefreshEvery != "6h" {
-		t.Errorf("expected RefreshEvery '6h', got %q", p.RefreshEvery)
+}
+
+func TestLocalSource_KernelGuard_VaultOriginLock_And_RefreshToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
 	}
-	if p.AutoInclude != "^deepseek-.*" {
-		t.Errorf("expected AutoInclude '^deepseek-.*', got %q", p.AutoInclude)
+
+	if !IsMaskedSecret("sk-••••••") {
+		t.Fatalf("expected U+2022 bullet string to be recognized as masked")
 	}
-	if p.BalanceURL != "https://api.deepseek.com/user/balance" {
-		t.Errorf("expected BalanceURL, got %q", p.BalanceURL)
+
+	_, err = src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"shared": {
+				ID:      "shared",
+				BaseURL: "https://api.shared.example",
+				Origin:  "vault",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{
+						ID:      "vk-1",
+						Label:   "vault-oauth",
+						Key:     "sk-real-vault-access-token",
+						Origin:  "vault",
+						Enabled: true,
+						OAuthMeta: &types.OAuthMeta{
+							Provider:     "minimax",
+							ClientID:     "cid-1",
+							RefreshToken: "rt-real-vault-refresh-token",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig initial err: %v", err)
 	}
-	if p.BalancePath != "$.balance" {
-		t.Errorf("expected BalancePath, got %q", p.BalancePath)
+
+	// Attempt to flip Origin from "vault" to "local" (and "") while submitting masked secrets
+	snap, err := src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"shared": {
+				ID:      "shared",
+				BaseURL: "https://api.shared.example",
+				Origin:  "local",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{
+						ID:      "vk-1",
+						Label:   "vault-oauth",
+						Key:     "sk--...oken",
+						Origin:  "local", // Attack: try flipping origin to local to unmask on next GET!
+						Enabled: true,
+						OAuthMeta: &types.OAuthMeta{
+							Provider:     "minimax",
+							ClientID:     "cid-1",
+							RefreshToken: "rt--...oken",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig update err: %v", err)
+	}
+
+	got := snap.Config.Providers["shared"].APIKeys[0]
+	if got.Origin != "vault" {
+		t.Fatalf("SEC-06 violation: expected Origin to remain 'vault', got %q", got.Origin)
+	}
+	if got.Key != "sk-real-vault-access-token" {
+		t.Fatalf("expected real vault key to be recovered, got %q", got.Key)
+	}
+	if got.OAuthMeta == nil || got.OAuthMeta.RefreshToken != "rt-real-vault-refresh-token" {
+		t.Fatalf("expected real RefreshToken to be recovered, got %+v", got.OAuthMeta)
+	}
+}
+
+func TestLocalSource_VaultURLChangeGuard(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	// 1. Save initial config with real Vault NodeToken
+	_, err = src.SaveConfig(&types.ProxyConfig{
+		Version:   1,
+		Providers: map[string]*types.ProviderConfig{},
+		Vault: &types.VaultClientConfig{
+			URL:       "https://hub.trusted.example/",
+			NodeToken: "stk_node_super_secret_token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig initial err: %v", err)
+	}
+
+	// 2. Save with SAME URL (without trailing slash) and masked NodeToken -> recovers real NodeToken
+	snapSame, err := src.SaveConfig(&types.ProxyConfig{
+		Version:   1,
+		Providers: map[string]*types.ProviderConfig{},
+		Vault: &types.VaultClientConfig{
+			URL:       "https://hub.trusted.example",
+			NodeToken: "stk-...oken",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig same URL err: %v", err)
+	}
+	if snapSame.Config.Vault.NodeToken != "stk_node_super_secret_token" {
+		t.Fatalf("expected NodeToken recovered when Vault.URL unchanged, got %q", snapSame.Config.Vault.NodeToken)
+	}
+
+	// 3. Save with CHANGED URL and masked NodeToken -> MUST clear NodeToken!
+	snapChanged, err := src.SaveConfig(&types.ProxyConfig{
+		Version:   2,
+		Providers: map[string]*types.ProviderConfig{},
+		Vault: &types.VaultClientConfig{
+			URL:       "https://evil.attacker.example",
+			NodeToken: "stk-...oken",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig changed URL err: %v", err)
+	}
+	if snapChanged.Config.Vault.NodeToken != "" {
+		t.Fatalf("SEC-07 violation: expected NodeToken to be cleared when Vault.URL changed with masked token, got %q", snapChanged.Config.Vault.NodeToken)
 	}
 }

@@ -10,12 +10,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/khc8655/llmproxy2/internal/auth"
 )
 
 const adminSessionCookie = "llmproxy_admin_session"
+
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
 
 func (s *Server) computeSessionToken(adminPass string) string {
 	mac := hmac.New(sha256.New, []byte(adminPass))
@@ -31,15 +36,11 @@ func (s *Server) getAdminPassword() string {
 }
 
 func (s *Server) isAdminAuthorized(r *http.Request) bool {
-	// 1. Check Bearer / header auth via Authenticator
-	token := auth.ExtractToken(r)
-	if token != "" {
-		if s.authMgr.VerifyAdminAuth(r) {
-			return true
-		}
+	if s.authMgr != nil && s.authMgr.BlockRemaining(auth.GetClientIP(r)) > 0 {
+		return false
 	}
 
-	// 2. Check secure session cookie
+	// 1. Check secure session cookie
 	if cookie, err := r.Cookie(adminSessionCookie); err == nil && cookie.Value != "" {
 		adminPass := s.getAdminPassword()
 		if adminPass != "" {
@@ -50,7 +51,10 @@ func (s *Server) isAdminAuthorized(r *http.Request) bool {
 		}
 	}
 
-	// 3. Fallback: if no valid token or cookie, verify with authMgr (records failure for anti-bruteforce)
+	// 2. Verify Bearer / header auth via Authenticator (called at most once per request)
+	if s.authMgr == nil {
+		return false
+	}
 	return s.authMgr.VerifyAdminAuth(r)
 }
 
@@ -73,30 +77,36 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check anti-bruteforce and verify password via authMgr
-	// Lockout state is sampled first: the attempt that trips the 5th failure
-	// still answers 401 ("bad credentials"), later attempts answer 429.
-	blockedBefore := s.adminIPBlocked(r)
+	// Check anti-bruteforce lockout state BEFORE authenticating:
+	// callers already locked out get 429 + Retry-After immediately;
+	// the attempt that trips the 5th failure still answers 401 ("bad credentials").
+	if s.adminIPBlocked(r) {
+		if remaining := s.authMgr.BlockRemaining(auth.GetClientIP(r)); remaining > 0 {
+			secs := int(remaining.Seconds())
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":              false,
+				"error":           "too many failed attempts, retry later",
+				"retry_after_sec": secs,
+			})
+			return
+		}
+	}
+
 	fakeReq := httptest.NewRequest(http.MethodGet, "/test", nil)
 	fakeReq.Header.Set("Authorization", "Bearer "+req.Password)
+	for _, v := range r.Header.Values("X-Forwarded-For") {
+		fakeReq.Header.Add("X-Forwarded-For", v)
+	}
+	for _, v := range r.Header.Values("X-Real-IP") {
+		fakeReq.Header.Add("X-Real-IP", v)
+	}
 	fakeReq.RemoteAddr = r.RemoteAddr
 	if !s.authMgr.VerifyAdminAuth(fakeReq) {
-		if blockedBefore {
-			if remaining := s.authMgr.BlockRemaining(auth.GetClientIP(r)); remaining > 0 {
-				secs := int(remaining.Seconds())
-				if secs < 1 {
-					secs = 1
-				}
-				w.Header().Set("Retry-After", strconv.Itoa(secs))
-				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ok":              false,
-					"error":           "too many failed attempts, retry later",
-					"retry_after_sec": secs,
-				})
-				return
-			}
-		}
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":    false,
@@ -113,6 +123,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   7 * 24 * 3600, // 7 days
 	})
@@ -134,6 +145,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),

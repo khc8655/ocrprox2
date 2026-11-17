@@ -84,6 +84,12 @@ type Heatmap struct {
 	Days []HeatmapDay `json:"days"`
 }
 
+const (
+	UsageLedgerLimit  = 10 << 20 // 10 MiB rotation threshold for usage.jsonl -> usage.jsonl.1
+	MinValidUsageUnix = int64(1_700_000_000)
+	MaxAllSeriesDays  = 3660
+)
+
 // Manager coordinates trace buffer and usage ledger, implementing types.ObservabilitySink.
 type Manager struct {
 	role        types.Role
@@ -91,6 +97,8 @@ type Manager struct {
 	mu          sync.Mutex
 	ledgerPath  string
 	ledgerFile  *os.File
+	ledgerSize  int64
+	ledgerLimit atomic.Int64
 	memRecords  []UsageRecord // For lite mode or fast queries
 
 	// Async non-blocking ledger writer
@@ -107,6 +115,7 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 		role:        role,
 		traceBuffer: NewTraceBuffer(),
 	}
+	m.ledgerLimit.Store(UsageLedgerLimit)
 
 	if role == types.RoleFull && dataDir != "" {
 		if err := os.MkdirAll(dataDir, 0o700); err != nil {
@@ -116,6 +125,9 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return nil, err
+		}
+		if fi, stErr := f.Stat(); stErr == nil {
+			m.ledgerSize = fi.Size()
 		}
 		m.ledgerPath = p
 		m.ledgerFile = f
@@ -132,6 +144,33 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 	return m, nil
 }
 
+func (m *Manager) rotateLedger() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ledgerFile == nil {
+		return
+	}
+	_ = m.ledgerFile.Sync()
+	_ = m.ledgerFile.Close()
+	oldPath := m.ledgerPath + ".1"
+	moved := os.Rename(m.ledgerPath, oldPath)
+	flag := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if moved != nil {
+		flag |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(m.ledgerPath, flag, 0o600)
+	if err != nil {
+		m.ledgerFile = nil
+		m.ledgerSize = 0
+		return
+	}
+	m.ledgerFile = f
+	m.ledgerSize = 0
+	if fi, stErr := f.Stat(); stErr == nil {
+		m.ledgerSize = fi.Size()
+	}
+}
+
 func (m *Manager) backgroundWriter() {
 	defer close(m.doneChan)
 	if m.ledgerFile == nil {
@@ -143,8 +182,39 @@ func (m *Manager) backgroundWriter() {
 	defer ticker.Stop()
 
 	flushWriter := func() {
-		_ = bw.Flush()
-		_ = m.ledgerFile.Sync()
+		if m.ledgerFile != nil {
+			_ = bw.Flush()
+			_ = m.ledgerFile.Sync()
+		}
+	}
+
+	writeRecord := func(rec UsageRecord) {
+		if m.ledgerFile == nil {
+			return
+		}
+		line, err := json.Marshal(rec)
+		if err != nil {
+			return
+		}
+		recLen := int64(len(line) + 1)
+		limit := m.ledgerLimit.Load()
+		if limit <= 0 {
+			limit = UsageLedgerLimit
+		}
+		if m.ledgerSize > 0 && m.ledgerSize+recLen > limit {
+			_ = bw.Flush()
+			m.rotateLedger()
+			if m.ledgerFile == nil {
+				return
+			}
+			bw.Reset(m.ledgerFile)
+		}
+		if n, wErr := bw.Write(line); wErr == nil {
+			m.ledgerSize += int64(n)
+			if bw.WriteByte('\n') == nil {
+				m.ledgerSize++
+			}
+		}
 	}
 
 	for {
@@ -154,11 +224,7 @@ func (m *Manager) backgroundWriter() {
 				flushWriter()
 				return
 			}
-			line, err := json.Marshal(rec)
-			if err == nil {
-				_, _ = bw.Write(line)
-				_ = bw.WriteByte('\n')
-			}
+			writeRecord(rec)
 
 		case respCh := <-m.flushChan:
 			// Drain buffered records
@@ -170,11 +236,7 @@ func (m *Manager) backgroundWriter() {
 						draining = false
 						break
 					}
-					line, err := json.Marshal(rec)
-					if err == nil {
-						_, _ = bw.Write(line)
-						_ = bw.WriteByte('\n')
-					}
+					writeRecord(rec)
 				default:
 					draining = false
 				}
@@ -183,7 +245,9 @@ func (m *Manager) backgroundWriter() {
 			close(respCh)
 
 		case <-ticker.C:
-			_ = bw.Flush()
+			if m.ledgerFile != nil {
+				_ = bw.Flush()
+			}
 		}
 	}
 }
@@ -520,7 +584,7 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 	var earliestTs int64
 
 	m.forEachRecordSince(cutoff, func(r UsageRecord) {
-		if earliestTs == 0 || r.Timestamp < earliestTs {
+		if r.Timestamp > MinValidUsageUnix && r.Timestamp <= now.Unix()+86400 && (earliestTs == 0 || r.Timestamp < earliestTs) {
 			earliestTs = r.Timestamp
 		}
 		totalReqs++
@@ -783,7 +847,7 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 					}
 				}
 			}
-		} else {
+		} else if r.Timestamp > MinValidUsageUnix {
 			dayKey := t.Format("2006-01-02")
 			b, ok := dayBuckets[dayKey]
 			if !ok {
@@ -967,11 +1031,15 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			dayCount = 30
 		} else if period == "all" {
 			dayCount = 30
-			if earliestTs > 0 {
+			if earliestTs > MinValidUsageUnix {
 				earliest := time.Unix(earliestTs, 0).In(loc)
-				diffDays := int(now.Sub(earliest).Hours()/24) + 1
+				earliestMidnight := time.Date(earliest.Year(), earliest.Month(), earliest.Day(), 0, 0, 0, 0, loc)
+				diffDays := int(todayMidnight.Sub(earliestMidnight).Hours()/24) + 1
 				if diffDays > dayCount {
 					dayCount = diffDays
+				}
+				if dayCount > MaxAllSeriesDays {
+					dayCount = MaxAllSeriesDays
 				}
 			}
 		}
@@ -1101,9 +1169,14 @@ func (m *Manager) forEachRecordSince(cutoff int64, fn func(UsageRecord)) {
 		return
 	}
 
-	m.mu.Lock()
-	f, err := os.Open(m.ledgerPath)
-	m.mu.Unlock()
+	// Scan rotated archive (usage.jsonl.1) followed by active ledger (usage.jsonl)
+	// without holding m.mu so concurrent writes/rotations never stall on disk I/O.
+	scanLedgerFile(m.ledgerPath+".1", cutoff, fn)
+	scanLedgerFile(m.ledgerPath, cutoff, fn)
+}
+
+func scanLedgerFile(path string, cutoff int64, fn func(UsageRecord)) {
+	f, err := os.Open(path)
 	if err != nil {
 		return
 	}

@@ -75,24 +75,56 @@ get_env_val() {
     sed -n -E "s/^[[:space:]]*${key}=[[:space:]]*[\"']?([^\"'#]+)[\"']?.*/\1/p" "$file" 2>/dev/null | head -n 1
 }
 
-# 写入或更新环境文件中的键值 (跨平台兼容 GNU/BSD)
+# 写入或更新环境文件中的键值 (无 sed 注入风险，全程 0600 权限保护)
 set_env_val() {
     local file="$1"
     local key="$2"
     local val="$3"
-    if [[ ! -f "$file" ]]; then
-        echo "${key}=${val}" | run_sudo tee "$file" >/dev/null
-        return 0
-    fi
-    if grep -q "^[[:space:]]*${key}=" "$file" 2>/dev/null; then
-        local tmp
-        tmp=$(mktemp)
-        sed -E "s|^[[:space:]]*${key}=.*|${key}=${val}|" "$file" > "$tmp"
-        run_sudo cp "$tmp" "$file"
-        rm -f "$tmp"
+    local tmp
+    tmp=$(umask 077 && mktemp /tmp/llmproxy_env_XXXXXX)
+    if run_sudo test -f "$file" 2>/dev/null; then
+        run_sudo cat "$file" | KEY="$key" VAL="$val" awk '
+            BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VAL"]; found = 0 }
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (!found && index(line, k "=") == 1) {
+                    print k "=" v
+                    found = 1
+                } else {
+                    print $0
+                }
+            }
+            END {
+                if (!found) {
+                    print k "=" v
+                }
+            }
+        ' > "$tmp"
     else
-        echo "${key}=${val}" | run_sudo tee -a "$file" >/dev/null
+        printf '%s=%s\n' "$key" "$val" > "$tmp"
     fi
+    run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$tmp" "$file"
+    rm -f "$tmp"
+}
+
+# 更新 systemd Environment="KEY=VAL" 行 (无 sed 分隔符注入风险，保持 0600 权限)
+set_systemd_env_val() {
+    local file="$1"
+    local key="$2"
+    local val="$3"
+    local tmp
+    tmp=$(umask 077 && mktemp /tmp/llmproxy_svc_XXXXXX)
+    run_sudo cat "$file" | KEY="$key" VAL="$val" awk '
+        BEGIN { prefix = "Environment=\"" ENVIRON["KEY"] "="; v = ENVIRON["VAL"] }
+        index($0, prefix) == 1 {
+            print prefix v "\""
+            next
+        }
+        { print $0 }
+    ' > "$tmp"
+    run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$tmp" "$file"
+    rm -f "$tmp"
 }
 
 # 公网 IP 探测
@@ -416,25 +448,51 @@ resolve_binary() {
     fi
 
     local tmp_bin
-    tmp_bin=$(mktemp /tmp/llmproxy_bin_XXXXXX)
+    tmp_bin=$(umask 077 && mktemp /tmp/llmproxy_bin_XXXXXX)
     local tmp_sha
-    tmp_sha=$(mktemp /tmp/llmproxy_sha_XXXXXX)
+    tmp_sha=$(umask 077 && mktemp /tmp/llmproxy_sha_XXXXXX)
+
+    if ! command -v sha256sum &>/dev/null && ! command -v shasum &>/dev/null; then
+        rm -f "$tmp_bin" "$tmp_sha"
+        error "未检测到 sha256sum 或 shasum 工具，无法执行强制 SHA256 完整性校验"
+    fi
+
+    # SEC-05: 强制先从官方 GitHub 获取 SHA256SUMS 并解析目标产物哈希 (Fail-Closed)
+    local official_sha_url="${release_base}/SHA256SUMS"
+    local sha_candidates=("$official_sha_url")
+    if [[ -n "$CLI_MIRROR" ]]; then
+        sha_candidates+=("${CLI_MIRROR%/}/${official_sha_url}")
+    fi
+
+    local sha_ok=false
+    for surl in "${sha_candidates[@]}"; do
+        if curl -fsSL --connect-timeout 6 --max-time 20 "$surl" -o "$tmp_sha" 2>/dev/null; then
+            sha_ok=true
+            break
+        fi
+    done
+
+    if [[ "$sha_ok" != "true" ]]; then
+        rm -f "$tmp_bin" "$tmp_sha"
+        error "无法获取官方 SHA256SUMS 校验清单，已中止安装以保障供应链安全"
+    fi
+
+    local exp_sha
+    exp_sha=$(awk -v t="$binary_target_name" '$2 == t || $2 == "*"t { print tolower($1); exit }' "$tmp_sha" 2>/dev/null || true)
+    if [[ -z "$exp_sha" || ! "$exp_sha" =~ ^[0-9a-f]{64}$ ]]; then
+        rm -f "$tmp_bin" "$tmp_sha"
+        error "SHA256SUMS 中未找到 ${binary_target_name} 的有效校验值，已中止安装"
+    fi
 
     local dl_candidates=()
-    local sha_candidates=()
     if [[ -n "$CLI_MIRROR" ]]; then
         local custom_mirror="${CLI_MIRROR%/}"
         dl_candidates+=("${custom_mirror}/${release_base}/${binary_target_name}")
-        sha_candidates+=("${custom_mirror}/${release_base}/SHA256SUMS")
     fi
     dl_candidates+=(
         "${release_base}/${binary_target_name}"
         "https://ghfast.top/${release_base}/${binary_target_name}"
         "https://gh-proxy.com/${release_base}/${binary_target_name}"
-    )
-    sha_candidates+=(
-        "${release_base}/SHA256SUMS"
-        "https://ghfast.top/${release_base}/SHA256SUMS"
     )
 
     local dl_ok=false
@@ -451,30 +509,20 @@ resolve_binary() {
         error "无法从 GitHub 下载二进制包，请检查网络、使用 --mirror 指定镜像或通过 --bin=/path/to/binary 指定本地二进制"
     fi
 
-    # SHA256 校验 (若可用)
-    for surl in "${sha_candidates[@]}"; do
-        if curl -fsSL --connect-timeout 4 --max-time 15 "$surl" -o "$tmp_sha" 2>/dev/null; then
-            local exp_sha
-            exp_sha=$(grep "${binary_target_name}" "$tmp_sha" 2>/dev/null | awk '{print $1}' || true)
-            if [[ -n "$exp_sha" ]]; then
-                local act_sha=""
-                if command -v sha256sum &>/dev/null; then
-                    act_sha=$(sha256sum "$tmp_bin" | awk '{print $1}')
-                elif command -v shasum &>/dev/null; then
-                    act_sha=$(shasum -a 256 "$tmp_bin" | awk '{print $1}')
-                fi
-                if [[ -n "$act_sha" && "$act_sha" != "$exp_sha" ]]; then
-                    rm -f "$tmp_bin" "$tmp_sha"
-                    error "SHA256 校验失败！期望值: $exp_sha, 实际计算: $act_sha"
-                fi
-                ok "SHA256 校验通过 ($act_sha)"
-            fi
-            break
-        fi
-    done
+    local act_sha=""
+    if command -v sha256sum &>/dev/null; then
+        act_sha=$(sha256sum "$tmp_bin" | awk '{print tolower($1)}')
+    elif command -v shasum &>/dev/null; then
+        act_sha=$(shasum -a 256 "$tmp_bin" | awk '{print tolower($1)}')
+    fi
+    if [[ -z "$act_sha" || "$act_sha" != "$exp_sha" ]]; then
+        rm -f "$tmp_bin" "$tmp_sha"
+        error "SHA256 校验失败！期望值: $exp_sha, 实际计算: ${act_sha:-empty}"
+    fi
+    ok "SHA256 校验通过 ($act_sha)"
 
     run_sudo cp "$tmp_bin" "$target_bin"
-    run_sudo chmod +x "$target_bin"
+    run_sudo chmod 755 "$target_bin"
     rm -f "$tmp_bin" "$tmp_sha"
     ok "二进制已成功安装至 $target_bin"
     return 0
@@ -488,14 +536,19 @@ setup_cli_and_sudoers() {
     local sudoers_file="/etc/sudoers.d/llmproxy"
 
     if [[ -d /etc/sudoers.d ]]; then
-        local expected_rule=""
-        if [[ "$CURRENT_USER" != "root" ]]; then
-            expected_rule="${CURRENT_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart llmproxy*, /usr/bin/systemctl restart llmproxy*, /bin/systemctl status llmproxy*, /usr/bin/systemctl status llmproxy*, /bin/systemctl stop llmproxy*, /usr/bin/systemctl stop llmproxy*, /bin/systemctl start llmproxy*, /usr/bin/systemctl start llmproxy*, /bin/systemctl daemon-reload, /usr/bin/systemctl daemon-reload"
+        # SEC-11: 绝不授予 llmproxy 服务运行账号任何 sudo 权限；仅对非 root 安装者授予无通配符的精确固定命令
+        if [[ "$CURRENT_USER" != "root" && "$CURRENT_USER" != "llmproxy" && "$CURRENT_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            local expected_rule="${CURRENT_USER} ALL=(root) NOPASSWD: /bin/systemctl restart llmproxy-full, /usr/bin/systemctl restart llmproxy-full, /bin/systemctl restart llmproxy-lite, /usr/bin/systemctl restart llmproxy-lite, /bin/systemctl stop llmproxy-full, /usr/bin/systemctl stop llmproxy-full, /bin/systemctl stop llmproxy-lite, /usr/bin/systemctl stop llmproxy-lite, /bin/systemctl start llmproxy-full, /usr/bin/systemctl start llmproxy-full, /bin/systemctl start llmproxy-lite, /usr/bin/systemctl start llmproxy-lite, /bin/systemctl status llmproxy-full --no-pager, /usr/bin/systemctl status llmproxy-full --no-pager, /bin/systemctl status llmproxy-lite --no-pager, /usr/bin/systemctl status llmproxy-lite --no-pager, /bin/systemctl daemon-reload, /usr/bin/systemctl daemon-reload"
+            local tmp_sudoers
+            tmp_sudoers=$(umask 077 && mktemp /tmp/llmproxy_sudoers_XXXXXX)
+            printf '%s\n' "$expected_rule" > "$tmp_sudoers"
+            if ! command -v visudo &>/dev/null || visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
+                run_sudo sh -c 'umask 0227 && cat "$1" > "$2" && chmod 440 "$2"' _ "$tmp_sudoers" "$sudoers_file" 2>/dev/null || true
+            fi
+            rm -f "$tmp_sudoers"
+        else
+            run_sudo rm -f "$sudoers_file" 2>/dev/null || true
         fi
-        expected_rule="${expected_rule}
-llmproxy ALL=(ALL) NOPASSWD: /bin/systemctl restart llmproxy*, /usr/bin/systemctl restart llmproxy*, /bin/systemctl status llmproxy*, /usr/bin/systemctl status llmproxy*, /bin/systemctl stop llmproxy*, /usr/bin/systemctl stop llmproxy*, /bin/systemctl start llmproxy*, /usr/bin/systemctl start llmproxy*, ${ctl_path}"
-        echo "$expected_rule" | run_sudo tee "$sudoers_file" >/dev/null 2>&1 || true
-        run_sudo chmod 440 "$sudoers_file" 2>/dev/null || true
     fi
 
     local tmp_ctl
@@ -647,38 +700,57 @@ case "$1" in
             *) echo -e "${RED}Error: Unsupported architecture: $ARCH${NC}"; exit 1 ;;
         esac
 
-        TMP_DIR=$(mktemp -d /tmp/llmproxy_ctl_upgrade_XXXXXX)
+        TMP_DIR=$(umask 077 && mktemp -d /tmp/llmproxy_ctl_upgrade_XXXXXX)
+        chmod 700 "$TMP_DIR"
         trap 'rm -rf "$TMP_DIR"' EXIT
+
+        if ! command -v sha256sum &>/dev/null && ! command -v shasum &>/dev/null; then
+            echo -e "${RED}错误: 未检测到 sha256sum 或 shasum，无法验证升级包完整性${NC}"
+            exit 1
+        fi
 
         BIN_TARGET="llmproxy-${OS}-${GOARCH}"
         BIN_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${BIN_TARGET}"
         MIRROR_URL="https://ghfast.top/${BIN_URL}"
+        SHA_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/SHA256SUMS"
+
+        # SEC-05: 强制先从官方 GitHub 获取 SHA256SUMS (Fail-Closed)
+        echo -e "正在从官方源获取 SHA256SUMS 校验清单..."
+        if ! curl -fsSL --connect-timeout 8 --max-time 20 "$SHA_URL" -o "$TMP_DIR/SHA256SUMS" 2>/dev/null; then
+            rm -rf "$TMP_DIR"
+            echo -e "${RED}错误: 无法从官方 GitHub 获取 SHA256SUMS，已中止升级！${NC}"
+            exit 1
+        fi
+
+        EXPECTED_SHA=$(awk -v t="$BIN_TARGET" '$2 == t || $2 == "*"t { print tolower($1); exit }' "$TMP_DIR/SHA256SUMS" 2>/dev/null || true)
+        if [[ -z "$EXPECTED_SHA" || ! "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+            rm -rf "$TMP_DIR"
+            echo -e "${RED}错误: SHA256SUMS 中未找到 ${BIN_TARGET} 的有效校验值，已中止升级！${NC}"
+            exit 1
+        fi
 
         echo -e "正在下载最新发行版 (${OS}/${GOARCH})..."
-        if ! curl -fsSL --connect-timeout 8 --max-time 120 "$MIRROR_URL" -o "$TMP_DIR/llmproxy" 2>/dev/null; then
-            curl -fsSL --connect-timeout 15 --max-time 180 "$BIN_URL" -o "$TMP_DIR/llmproxy"
-        fi
-        chmod +x "$TMP_DIR/llmproxy"
-
-        # SHA256 校验 (若可用)
-        SHA_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/SHA256SUMS"
-        if curl -fsSL --connect-timeout 4 "https://ghfast.top/${SHA_URL}" -o "$TMP_DIR/SHA256SUMS" 2>/dev/null || \
-           curl -fsSL --connect-timeout 6 "$SHA_URL" -o "$TMP_DIR/SHA256SUMS" 2>/dev/null; then
-            EXPECTED_SHA=$(grep "${BIN_TARGET}" "$TMP_DIR/SHA256SUMS" 2>/dev/null | awk '{print $1}' || true)
-            if [[ -n "$EXPECTED_SHA" ]]; then
-                ACTUAL_SHA=""
-                if command -v sha256sum &>/dev/null; then
-                    ACTUAL_SHA=$(sha256sum "$TMP_DIR/llmproxy" | awk '{print $1}')
-                elif command -v shasum &>/dev/null; then
-                    ACTUAL_SHA=$(shasum -a 256 "$TMP_DIR/llmproxy" | awk '{print $1}')
-                fi
-                if [[ -n "$ACTUAL_SHA" && "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-                    echo -e "${RED}错误: SHA256 校验失败！期望: $EXPECTED_SHA, 实际: $ACTUAL_SHA${NC}"
-                    exit 1
-                fi
-                echo -e "  ${GREEN}✔ SHA256 校验通过 (${ACTUAL_SHA:0:16}...)${NC}"
+        if ! curl -fsSL --connect-timeout 10 --max-time 180 "$BIN_URL" -o "$TMP_DIR/llmproxy" 2>/dev/null; then
+            if ! curl -fsSL --connect-timeout 8 --max-time 120 "$MIRROR_URL" -o "$TMP_DIR/llmproxy"; then
+                rm -rf "$TMP_DIR"
+                echo -e "${RED}错误: 二进制包下载失败！${NC}"
+                exit 1
             fi
         fi
+
+        ACTUAL_SHA=""
+        if command -v sha256sum &>/dev/null; then
+            ACTUAL_SHA=$(sha256sum "$TMP_DIR/llmproxy" | awk '{print tolower($1)}')
+        elif command -v shasum &>/dev/null; then
+            ACTUAL_SHA=$(shasum -a 256 "$TMP_DIR/llmproxy" | awk '{print tolower($1)}')
+        fi
+        if [[ -z "$ACTUAL_SHA" || "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+            rm -rf "$TMP_DIR"
+            echo -e "${RED}错误: SHA256 校验失败！期望: $EXPECTED_SHA, 实际: ${ACTUAL_SHA:-empty}${NC}"
+            exit 1
+        fi
+        chmod 755 "$TMP_DIR/llmproxy"
+        echo -e "  ${GREEN}✔ SHA256 校验通过 (${ACTUAL_SHA:0:16}...)${NC}"
 
         echo -e "正在替换二进制并平滑重启服务..."
         run_cmd cp "$TMP_DIR/llmproxy" /usr/local/bin/llmproxy
@@ -730,10 +802,11 @@ case "$1" in
         if [[ "$KEEP_CONFIG" == "true" ]]; then
             echo -e "${GREEN}✔ 配置文件已保留在现有配置目录${NC}"
         else
-            BK="/tmp/llmproxy_backup_$(date +%Y%m%d_%H%M%S)"
-            mkdir -p "$BK"
-            [[ -d /etc/llmproxy ]] && cp -r /etc/llmproxy "$BK/" 2>/dev/null || true
-            [[ -d /opt/llmproxy ]] && cp -r /opt/llmproxy "$BK/" 2>/dev/null || true
+            BK=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
+            chmod 700 "$BK"
+            [[ -d /etc/llmproxy ]] && run_cmd cp -r /etc/llmproxy "$BK/" 2>/dev/null || true
+            [[ -d /opt/llmproxy ]] && run_cmd cp -r /opt/llmproxy "$BK/" 2>/dev/null || true
+            run_cmd chmod -R go-rwx "$BK" 2>/dev/null || true
             echo -e "配置数据已安全归档至: $BK"
             run_cmd rm -rf /etc/llmproxy /opt/llmproxy
             echo -e "${GREEN}✔ 相关配置已清理完毕${NC}"
@@ -861,10 +934,11 @@ if [[ "$CLI_ACTION" == "uninstall" ]]; then
     if [[ "$KEEP_CONFIG" == "true" ]]; then
         ok "服务已卸载，您的配置文件与密钥安全保留在现有配置目录中。"
     else
-        BACKUP_EXPORT="/tmp/llmproxy_backup_$(date +%Y%m%d_%H%M%S)"
-        mkdir -p "$BACKUP_EXPORT"
+        BACKUP_EXPORT=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
+        chmod 700 "$BACKUP_EXPORT"
         [[ -d /etc/llmproxy ]] && run_sudo cp -r /etc/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
         [[ -d /opt/llmproxy ]] && run_sudo cp -r /opt/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
+        run_sudo chmod -R go-rwx "$BACKUP_EXPORT" 2>/dev/null || true
         info "配置数据已安全归档备份至: $BACKUP_EXPORT"
         run_sudo rm -rf /etc/llmproxy /opt/llmproxy 2>/dev/null || true
         ok "LLMProxy2 已完全卸载！"
@@ -952,7 +1026,7 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
         fi
         ok "历史配置已完成安全备份 (仅保留最新 1 份)"
 
-        # 保留并增量更新 .env 凭证
+        # 保留并增量更新 .env 凭证 (umask 077 零暴露窗口)
         run_sudo mkdir -p "$(dirname "$ENV_FILE")"
         if [[ -f "$ENV_FILE" ]]; then
             [[ -n "$CLI_PORT" ]] && set_env_val "$ENV_FILE" "PORT" "$FINAL_PORT" && set_env_val "$ENV_FILE" "LLMPROXY_ADDR" "[::]:${FINAL_PORT}"
@@ -964,27 +1038,31 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
             set_env_val "$ENV_FILE" "CONFIG_DIR" "$CONFIG_DIR"
             set_env_val "$ENV_FILE" "LLMPROXY_ROLE" "full"
         else
-            cat << EOF | run_sudo tee "$ENV_FILE" >/dev/null
-LLMPROXY_ROLE=full
-PORT=${FINAL_PORT}
-LLMPROXY_ADDR=[::]:${FINAL_PORT}
-CONFIG_DIR=${CONFIG_DIR}
-ADMIN_PASSWORD=${FINAL_ADMIN_PASS}
-ENCRYPT_KEY=${FINAL_ENCRYPT_KEY}
-PROXY_API_KEY=${FINAL_CLIENT_KEY}
-LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}
-EOF
-            [[ -n "$FINAL_HUB_URL" ]] && echo "LLMPROXY_HUB_URL=${FINAL_HUB_URL}" | run_sudo tee -a "$ENV_FILE" >/dev/null
-            [[ -n "$FINAL_NODE_TOKEN" ]] && echo "LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}" | run_sudo tee -a "$ENV_FILE" >/dev/null
+            TMP_ENV_FILE=$(umask 077 && mktemp /tmp/llmproxy_env_init_XXXXXX)
+            (
+                umask 077
+                printf 'LLMPROXY_ROLE=full\n'
+                printf 'PORT=%s\n' "$FINAL_PORT"
+                printf 'LLMPROXY_ADDR=[::]:%s\n' "$FINAL_PORT"
+                printf 'CONFIG_DIR=%s\n' "$CONFIG_DIR"
+                printf 'ADMIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASS"
+                printf 'ENCRYPT_KEY=%s\n' "$FINAL_ENCRYPT_KEY"
+                printf 'PROXY_API_KEY=%s\n' "$FINAL_CLIENT_KEY"
+                printf 'LLMPROXY_CLIENT_KEY=%s\n' "$FINAL_CLIENT_KEY"
+                [[ -n "$FINAL_HUB_URL" ]] && printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"
+                [[ -n "$FINAL_NODE_TOKEN" ]] && printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"
+            ) > "$TMP_ENV_FILE"
+            run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$TMP_ENV_FILE" "$ENV_FILE"
+            rm -f "$TMP_ENV_FILE"
         fi
         run_sudo chmod 600 "$ENV_FILE" 2>/dev/null || true
     elif [[ "$FINAL_ROLE" == "lite" && -f "/etc/systemd/system/llmproxy-lite.service" ]]; then
-        local svc="/etc/systemd/system/llmproxy-lite.service"
-        [[ -n "$CLI_PORT" ]] && run_sudo sed -i.bak "s|LLMPROXY_ADDR=.*|LLMPROXY_ADDR=[::]:$CLI_PORT\"|" "$svc" 2>/dev/null || true
-        [[ -n "$CLI_HUB_URL" ]] && run_sudo sed -i.bak "s|LLMPROXY_HUB_URL=.*|LLMPROXY_HUB_URL=$CLI_HUB_URL\"|" "$svc" 2>/dev/null || true
-        [[ -n "$CLI_NODE_TOKEN" ]] && run_sudo sed -i.bak "s|LLMPROXY_NODE_TOKEN=.*|LLMPROXY_NODE_TOKEN=$CLI_NODE_TOKEN\"|" "$svc" 2>/dev/null || true
-        [[ -n "$CLI_CLIENT_KEY" ]] && run_sudo sed -i.bak "s|LLMPROXY_CLIENT_KEY=.*|LLMPROXY_CLIENT_KEY=$CLI_CLIENT_KEY\"|" "$svc" 2>/dev/null || true
-        run_sudo rm -f "${svc}.bak" 2>/dev/null || true
+        SERVICE_FILE="/etc/systemd/system/llmproxy-lite.service"
+        [[ -n "$CLI_PORT" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_ADDR" "[::]:${CLI_PORT}"
+        [[ -n "$CLI_HUB_URL" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_HUB_URL" "$CLI_HUB_URL"
+        [[ -n "$CLI_NODE_TOKEN" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_NODE_TOKEN" "$CLI_NODE_TOKEN"
+        [[ -n "$CLI_CLIENT_KEY" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_CLIENT_KEY" "$CLI_CLIENT_KEY"
+        run_sudo chmod 600 "$SERVICE_FILE" 2>/dev/null || true
     fi
 
     # 升级二进制
@@ -1214,18 +1292,22 @@ if [[ "$FINAL_ROLE" == "full" ]]; then
     run_sudo mkdir -p "$CONFIG_DIR" "$WORK_DIR"
     run_sudo chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 
-    cat << EOF | run_sudo tee "$ENV_FILE" >/dev/null
-LLMPROXY_ROLE=full
-PORT=${FINAL_PORT}
-LLMPROXY_ADDR=[::]:${FINAL_PORT}
-CONFIG_DIR=${CONFIG_DIR}
-ADMIN_PASSWORD=${FINAL_ADMIN_PASS}
-ENCRYPT_KEY=${FINAL_ENCRYPT_KEY}
-PROXY_API_KEY=${FINAL_CLIENT_KEY}
-LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}
-EOF
-    [[ -n "$FINAL_HUB_URL" ]] && echo "LLMPROXY_HUB_URL=${FINAL_HUB_URL}" | run_sudo tee -a "$ENV_FILE" >/dev/null
-    [[ -n "$FINAL_NODE_TOKEN" ]] && echo "LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}" | run_sudo tee -a "$ENV_FILE" >/dev/null
+    TMP_ENV_FILE=$(umask 077 && mktemp /tmp/llmproxy_env_init_XXXXXX)
+    (
+        umask 077
+        printf 'LLMPROXY_ROLE=full\n'
+        printf 'PORT=%s\n' "$FINAL_PORT"
+        printf 'LLMPROXY_ADDR=[::]:%s\n' "$FINAL_PORT"
+        printf 'CONFIG_DIR=%s\n' "$CONFIG_DIR"
+        printf 'ADMIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASS"
+        printf 'ENCRYPT_KEY=%s\n' "$FINAL_ENCRYPT_KEY"
+        printf 'PROXY_API_KEY=%s\n' "$FINAL_CLIENT_KEY"
+        printf 'LLMPROXY_CLIENT_KEY=%s\n' "$FINAL_CLIENT_KEY"
+        [[ -n "$FINAL_HUB_URL" ]] && printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"
+        [[ -n "$FINAL_NODE_TOKEN" ]] && printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"
+    ) > "$TMP_ENV_FILE"
+    run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$TMP_ENV_FILE" "$ENV_FILE"
+    rm -f "$TMP_ENV_FILE"
     run_sudo chmod 600 "$ENV_FILE"
     run_sudo chown -R "${RUN_AS_USER}:${RUN_AS_USER}" "$CONFIG_DIR" "$WORK_DIR" 2>/dev/null || true
 
@@ -1257,7 +1339,10 @@ elif [[ "$FINAL_ROLE" == "lite" ]]; then
     ENV_FILE=""
     SERVICE_FILE="/etc/systemd/system/llmproxy-lite.service"
     info "正在写入 systemd 服务单元 (${SERVICE_FILE})..."
-    cat << EOF | run_sudo tee "$SERVICE_FILE" >/dev/null
+    TMP_SVC_FILE=$(umask 077 && mktemp /tmp/llmproxy_lite_svc_XXXXXX)
+    (
+        umask 077
+        cat << EOF
 [Unit]
 Description=LLMProxy2 Lite Node (Zero-Disk In-Memory Relay)
 After=network-online.target
@@ -1282,6 +1367,10 @@ ${LITE_HARDENING}
 [Install]
 WantedBy=multi-user.target
 EOF
+    ) > "$TMP_SVC_FILE"
+    run_sudo sh -c 'umask 077 && cat "$1" > "$2"' _ "$TMP_SVC_FILE" "$SERVICE_FILE"
+    run_sudo chmod 600 "$SERVICE_FILE"
+    rm -f "$TMP_SVC_FILE"
 fi
 
 # 安装二进制

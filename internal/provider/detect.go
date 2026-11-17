@@ -94,7 +94,7 @@ func Detect(ctx context.Context, client *http.Client, baseURL, apiKey string) (*
 	}
 
 	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
+		client = upstream.DefaultClient(15*time.Second, false)
 	}
 
 	type probeTarget struct {

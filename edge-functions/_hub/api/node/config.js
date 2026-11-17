@@ -59,12 +59,14 @@ usageDigest = JSON.parse(usageHeader);
 usageDigest = null;
 }
 }
-touchNodeLastSeen(node.id, kv, config._version, {
+try {
+await touchNodeLastSeen(node.id, kv, config._version, {
 is304,
 ip: clientIp,
 binaryVersion,
 usage: usageDigest,
-}).catch(() => {});
+});
+} catch (_) {}
 const responseHeaders = {
 'ETag': etag,
 'Cache-Control': 'no-store',

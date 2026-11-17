@@ -8,7 +8,7 @@ findUnmaskedKey,
 persistProviderKeyHealth,
 } from '../../lib/config.js';
 import { getPresetMap } from '../../lib/presets.js';
-import { resolveModelsUrl, scrubSecrets, extractModelIds } from '../../lib/models.js';
+import { resolveModelsUrl, scrubSecrets, extractModelIds, isSafePublicHttpUrl } from '../../lib/models.js';
 const isMaskedKey = isMaskedSecret;
 export async function handleVerifyKey(request, env, fetchImplOrOpts) {
 const authErr = checkAdminAuth(request, env);
@@ -42,9 +42,13 @@ if (prov) {
 const resolvedKey = findUnmaskedKey(prov, keyLabel);
 if (resolvedKey) {
 apiKey = resolvedKey;
-}
+const presets = getPresetMap();
+baseUrl = prov.base_url || presets[prov.preset_id || provider]?.base_url || '';
+apiType = prov.api_type || apiType;
+} else {
 baseUrl = baseUrl || prov.base_url;
 apiType = apiType || prov.api_type;
+}
 }
 }
 if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
@@ -76,6 +80,13 @@ JSON.stringify({ ok: false, error: 'base_url_required' }),
 { status: 400, headers: { 'content-type': 'application/json' } }
 );
 }
+const targetUrl = resolveModelsUrl(baseUrl);
+if (!isSafePublicHttpUrl(targetUrl)) {
+return new Response(
+JSON.stringify({ ok: false, valid: false, error: 'unsafe_upstream_url' }),
+{ status: 400, headers: { 'content-type': 'application/json' } }
+);
+}
 const fetchFn =
 typeof fetchImplOrOpts === 'function'
 ? fetchImplOrOpts
@@ -90,7 +101,6 @@ if (provider === 'anthropic' || provider === 'claude' || apiType === 'anthropic-
 headers['x-api-key'] = cleanKey.replace(/^Bearer\s+/i, '');
 headers['anthropic-version'] = '2023-06-01';
 }
-const targetUrl = resolveModelsUrl(baseUrl);
 const start = Date.now();
 let resp;
 try {

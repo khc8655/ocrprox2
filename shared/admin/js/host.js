@@ -10,7 +10,6 @@
       vaultHub: true,
       nodeManager: true,
       vaultClient: false,
-      runModes: false,
       kbModels: false,
       oauthLogin: false,
       usageAndTraces: false,
@@ -20,7 +19,6 @@
       vaultHub: false,
       nodeManager: false,
       vaultClient: true,
-      runModes: true,
       kbModels: true,
       oauthLogin: true,
       usageAndTraces: true,
@@ -30,13 +28,25 @@
       vaultHub: false,
       nodeManager: false,
       vaultClient: false,
-      runModes: false,
       kbModels: false,
       oauthLogin: false,
       usageAndTraces: false,
       systemUpdate: false,
     },
-  }[hostKind] || capabilities.full;
+  }[hostKind] || {
+    vaultHub: false,
+    nodeManager: false,
+    vaultClient: true,
+    kbModels: true,
+    oauthLogin: true,
+    usageAndTraces: true,
+    systemUpdate: true,
+  };
+
+  function isMaskedVaultToken(val) {
+    if (!val || typeof val !== 'string') return false;
+    return val.includes('●') || val.includes('•') || val.includes('***') || val.includes('...');
+  }
 
   function normalizeProviderMap(rawMap, defaultOrigin) {
     const out = {};
@@ -300,14 +310,6 @@
       return res.json();
     },
 
-    async switchMode(mode) {
-      const res = await HOST.request('/api/admin/mode', {
-        method: 'POST',
-        body: JSON.stringify({ mode }),
-      });
-      return res.json();
-    },
-
     async probeModels(data) {
       const res = await HOST.request('/api/admin/probe-models', {
         method: 'POST',
@@ -344,36 +346,12 @@
       }
     },
 
-    async checkBalance(data) {
-      const res = await HOST.request('/api/admin/balance', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      try {
-        return await res.json();
-      } catch (_) {
-        return { ok: res.ok, status: res.status };
-      }
-    },
-
     async getPresetsExtra() {
       const res = await HOST.request('/api/admin/presets-extra');
       try {
         return await res.json();
       } catch (_) {
         return { ok: false };
-      }
-    },
-
-    async syncAutoList(data) {
-      const res = await HOST.request('/api/admin/autolist-sync', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      try {
-        return await res.json();
-      } catch (_) {
-        return { ok: res.ok, status: res.status };
       }
     },
 
@@ -481,12 +459,23 @@
     },
 
     async fetchVaultManifest(customHubUrl, customToken) {
-      const hubUrl = customHubUrl || '';
-      const token = customToken || '';
-      const target = hubUrl ? `${hubUrl.replace(/\/+$/, '')}/api/vault/manifest` : '/api/vault/manifest';
-      const headers = {};
-      if (token) headers['authorization'] = `Bearer ${token}`;
-      const res = await HOST.request(target, { headers });
+      if (hostKind === 'full') {
+        const params = new URLSearchParams();
+        const hubUrl = typeof customHubUrl === 'string' ? customHubUrl.trim() : '';
+        const nodeToken = typeof customToken === 'string' ? customToken.trim() : '';
+        if (hubUrl) params.set('hub_url', hubUrl);
+        if (nodeToken && !isMaskedVaultToken(nodeToken)) {
+          params.set('node_token', nodeToken);
+        }
+        const qs = params.toString();
+        const res = await HOST.request(qs ? `/api/vault/manifest?${qs}` : '/api/vault/manifest');
+        try {
+          return await res.json();
+        } catch (_) {
+          return { ok: res.ok, status: res.status };
+        }
+      }
+      const res = await HOST.request('/api/vault/manifest');
       try {
         return await res.json();
       } catch (_) {
@@ -494,16 +483,33 @@
       }
     },
 
-    async fetchVaultCredentials(provider, key_label, customHubUrl, customToken) {
-      const hubUrl = customHubUrl || '';
-      const token = customToken || '';
-      const target = hubUrl ? `${hubUrl.replace(/\/+$/, '')}/api/vault/fetch` : '/api/vault/fetch';
-      const headers = {};
-      if (token) headers['authorization'] = `Bearer ${token}`;
-      const res = await HOST.request(target, {
+    async fetchVaultCredentials(provider, key_label, customHubUrl, customToken, keys) {
+      if (hostKind === 'full') {
+        const hubUrl = typeof customHubUrl === 'string' ? customHubUrl.trim() : '';
+        const nodeToken = typeof customToken === 'string' ? customToken.trim() : '';
+        const payload = { provider };
+        if (key_label !== undefined) payload.key_label = key_label;
+        if (Array.isArray(keys)) payload.keys = keys;
+        if (hubUrl) payload.hub_url = hubUrl;
+        if (nodeToken && !isMaskedVaultToken(nodeToken)) {
+          payload.node_token = nodeToken;
+        }
+        const res = await HOST.request('/api/vault/fetch', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        try {
+          return await res.json();
+        } catch (_) {
+          return { ok: res.ok, status: res.status };
+        }
+      }
+      const payload = { provider };
+      if (key_label !== undefined) payload.key_label = key_label;
+      if (Array.isArray(keys)) payload.keys = keys;
+      const res = await HOST.request('/api/vault/fetch', {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ provider, key_label }),
+        body: JSON.stringify(payload),
       });
       try {
         return await res.json();
@@ -519,18 +525,6 @@
         } catch (_) {}
       }
       HOST.setToken('');
-    },
-
-    async testProvider(data) {
-      const res = await HOST.request('/api/admin/test-provider', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      try {
-        return await res.json();
-      } catch (_) {
-        return { ok: res.ok, status: res.status };
-      }
     },
 
     async getSystemVersion() {

@@ -56,7 +56,10 @@ func TestPipeline_OCR_PreReadSemaphore(t *testing.T) {
 	pipe := NewPipeline(&mockKBSource{}, 1, 10, true)
 
 	// Block the 1 semaphore slot
-	pipe.ocrSem <- struct{}{}
+	rel, ok := pipe.ocrLimiter.tryAcquire()
+	if !ok {
+		t.Fatalf("expected initial OCR slot acquisition to succeed")
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader("some image bytes"))
@@ -69,7 +72,7 @@ func TestPipeline_OCR_PreReadSemaphore(t *testing.T) {
 	}
 
 	// Release semaphore
-	<-pipe.ocrSem
+	rel()
 
 	// Now should proceed past semaphore check
 	rec2 := httptest.NewRecorder()
@@ -811,4 +814,70 @@ func TestPipeline_Embeddings_RoundRobin_UnifiedModelAndFilter(t *testing.T) {
 	if hitK1.Load() != 2 || hitK2.Load() != 2 {
 		t.Errorf("expected round_robin 2/2 split across k1/k2, got k1=%d k2=%d", hitK1.Load(), hitK2.Load())
 	}
+}
+
+func TestIsNativeOCR_BlankTargetModelDefaultsToVision(t *testing.T) {
+	visionProv := &types.ProviderConfig{ID: "openai", BaseURL: "https://api.openai.com/v1"}
+	if isNativeOCR("", visionProv, "") {
+		t.Errorf("blank targetModel + blank reqModel on vision provider must NOT assume native OCR")
+	}
+	if isNativeOCR("ocr", visionProv, "ocr") {
+		t.Errorf("slot placeholder 'ocr' on vision provider must NOT assume native OCR")
+	}
+	if !isNativeOCR("", visionProv, "mistral-ocr-latest") {
+		t.Errorf("explicit native OCR reqModel 'mistral-ocr-latest' should select native OCR")
+	}
+	nativeProv := &types.ProviderConfig{ID: "mistral", APIType: "ocr"}
+	if !isNativeOCR("", nativeProv, "") {
+		t.Errorf("provider with APIType='ocr' must select native OCR")
+	}
+}
+
+func TestPipeline_DynamicLimitsUnderLoad(t *testing.T) {
+	var mu sync.Mutex
+	cfg := &types.ProxyConfig{
+		Settings: types.RuntimeSettings{
+			OCRMaxInflight:         1,
+			KBGlobalMaxConcurrency: 2,
+		},
+	}
+	src := &dynamicMockKBSource{get: func() *types.ProxyConfig {
+		mu.Lock()
+		defer mu.Unlock()
+		cloned := *cfg
+		return &cloned
+	}}
+
+	pipe := NewPipeline(src, 1, 2, true)
+	// Occupy slot 1
+	rel1, ok := pipe.ocrLimiter.tryAcquire()
+	if !ok {
+		t.Fatal("expected 1st OCR slot")
+	}
+	defer rel1()
+
+	// Raise OCRMaxInflight dynamically while slot 1 is still in-flight!
+	mu.Lock()
+	cfg.Settings.OCRMaxInflight = 3
+	cfg.Settings.KBGlobalMaxConcurrency = 8
+	mu.Unlock()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader(`{"image_base64":"abc"}`))
+	pipe.HandleOCR(rec, req)
+	if rec.Code == http.StatusTooManyRequests {
+		t.Fatalf("expected raised OCRMaxInflight=3 to take effect immediately while in-flight, got 429")
+	}
+}
+
+type dynamicMockKBSource struct {
+	get func() *types.ProxyConfig
+}
+
+func (d *dynamicMockKBSource) Current(ctx context.Context, forceRefresh bool) (*types.RuntimeSnapshot, error) {
+	return &types.RuntimeSnapshot{Config: d.get()}, nil
+}
+
+func (d *dynamicMockKBSource) HealthState() (status string, state string, leaseValid bool, configVer int64) {
+	return "healthy", "ready", true, 1
 }

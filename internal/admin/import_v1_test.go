@@ -86,7 +86,7 @@ func TestNormalizeImportedConfigV1(t *testing.T) {
 		t.Fatalf("unexpected kb_models: %+v", ocr)
 	}
 
-	if cfg.Settings.ClientKey != "sk-synthetic-client-0000" || cfg.Settings.RunMode != types.ModeAgent {
+	if cfg.Settings.ClientKey != "sk-synthetic-client-0000" {
 		t.Fatalf("unexpected settings: %+v", cfg.Settings)
 	}
 }

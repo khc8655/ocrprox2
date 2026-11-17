@@ -10,18 +10,26 @@ import (
 
 func TestScrub(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected string
+		input      string
+		mustNotSee string
 	}{
-		{"Authorization: Bearer sk-1234567890abcdef", "Bearer …"},
-		{"https://api.openai.com/v1?key=AIzaSyA12345678901234567890", "key=…"},
-		{"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "Bearer …"},
+		{"Authorization: Bearer sk-1234567890abcdef", "sk-1234567890abcdef"},
+		{"https://api.openai.com/v1?key=AIzaSyA12345678901234567890", "AIzaSyA12345678901234567890"},
+		{"https://generativelanguage.googleapis.com/v1beta/models?key=shortSecretKey99&alt=sse", "shortSecretKey99"},
+		{"node_token=stk_node_0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"},
+		{"X-Api-Key: custom-secret-value-1234", "custom-secret-value-1234"},
+		{"x-goog-api-key=goog-secret-9988", "goog-secret-9988"},
+		{`{"api-key": "azure-secret-key-0011"}`, "azure-secret-key-0011"},
+		{"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"},
 	}
 
 	for _, tc := range tests {
 		got := ScrubString(tc.input)
 		if !strings.Contains(got, "…") {
 			t.Errorf("Scrub(%q) did not mask secret, got %q", tc.input, got)
+		}
+		if strings.Contains(got, tc.mustNotSee) {
+			t.Errorf("Scrub(%q) leaked %q in %q", tc.input, tc.mustNotSee, got)
 		}
 	}
 }

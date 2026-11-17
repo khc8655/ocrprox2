@@ -225,9 +225,7 @@ describe('T3 Blackbox End-to-End Suite', () => {
                   candidates: [{ provider: 'mock_p', key_label: 'k1', enabled: true }],
                 },
               },
-              settings: {
-                run_mode: 'agent',
-              },
+              settings: {},
             },
           })
         );
@@ -316,12 +314,12 @@ describe('T3 Blackbox End-to-End Suite', () => {
       const readonlyCheck1 = await httpRequest(`http://127.0.0.1:${litePort}/api/config`);
       assert.strictEqual(readonlyCheck1.statusCode, 403, 'GET /api/config must return 403 in lite mode');
 
-      const readonlyCheck2 = await httpRequest(`http://127.0.0.1:${litePort}/api/admin/mode`, {
+      const readonlyCheck2 = await httpRequest(`http://127.0.0.1:${litePort}/api/admin/cooldowns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: { mode: 'kb' },
+        body: {},
       });
-      assert.strictEqual(readonlyCheck2.statusCode, 403, 'POST /api/admin/mode must return 403 in lite mode');
+      assert.strictEqual(readonlyCheck2.statusCode, 403, 'POST /api/admin/cooldowns must return 403 in lite mode');
 
       // 8. Verify Zero-Disk Scanning in tmpLiteDir
       const diskEntries = readdirSync(tmpLiteDir);
@@ -556,13 +554,11 @@ describe('T3 Blackbox End-to-End Suite', () => {
         },
         kb_models: {
           chat: [{ provider: 'mock_p', key_label: 'k1', enabled: true }],
-          ocr: [{ provider: 'mock_p', key_label: 'k1', enabled: true }],
+          ocr: [{ provider: 'mock_p', model: 'native_ocr', key_label: 'k1', enabled: true }],
           embedding: [{ provider: 'mock_p', key_label: 'k1', enabled: true }],
           reranker: [{ provider: 'mock_p', key_label: 'k1', enabled: true }],
         },
-        settings: {
-          run_mode: 'agent',
-        },
+        settings: {},
       };
 
       const saveRes = await httpRequest(`http://127.0.0.1:${fullPort}/api/config`, {

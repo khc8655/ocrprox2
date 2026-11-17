@@ -126,7 +126,7 @@ func IsMaskedSecret(val string) bool {
 	if s == "" {
 		return false
 	}
-	if strings.Contains(s, "●") || s == "********" || strings.HasPrefix(s, "***") || strings.Contains(s, "…") {
+	if strings.Contains(s, "●") || strings.Contains(s, "•") || s == "********" || strings.HasPrefix(s, "***") || strings.Contains(s, "…") {
 		return true
 	}
 	// Short hint format emitted by maskSecret: "sk--...7Yjl" (prefix-...-suffix).
@@ -157,37 +157,6 @@ func (s *LocalSource) SaveConfig(newCfg *types.ProxyConfig) (*types.RuntimeSnaps
 	defer s.mu.Unlock()
 
 	return s.saveConfigLocked(newCfg)
-}
-
-// UpdateRunMode atomically updates Config.Settings.RunMode and persists to disk.
-func (s *LocalSource) UpdateRunMode(mode types.RunMode) (*types.RuntimeSnapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	currentSnap := s.snapshot.Load()
-	var currentCfg *types.ProxyConfig
-	if currentSnap != nil {
-		currentCfg = currentSnap.Config
-	}
-
-	var clonedCfg types.ProxyConfig
-	if currentCfg != nil {
-		raw, err := json.Marshal(currentCfg)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &clonedCfg); err != nil {
-			return nil, err
-		}
-	} else {
-		clonedCfg = types.ProxyConfig{
-			Providers:   make(map[string]*types.ProviderConfig),
-			AgentModels: make(map[string]*types.AgentModelRoute),
-		}
-	}
-
-	clonedCfg.Settings.RunMode = mode
-	return s.saveConfigLocked(&clonedCfg)
 }
 
 // PersistKeyEntry atomically updates the given KeyEntry (matching by ID, Label, or OAuthMeta) in the current config and saves to proxy_config.enc.
@@ -288,7 +257,6 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 		clonedCfg = types.ProxyConfig{
 			Providers:   make(map[string]*types.ProviderConfig),
 			AgentModels: make(map[string]*types.AgentModelRoute),
-			Settings:    types.RuntimeSettings{RunMode: types.ModeAgent},
 		}
 	}
 
@@ -358,18 +326,6 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			}
 			if vp.QuotaResetAt != "" {
 				existingP.QuotaResetAt = vp.QuotaResetAt
-			}
-			if vp.RefreshEvery != "" {
-				existingP.RefreshEvery = vp.RefreshEvery
-			}
-			if vp.AutoInclude != "" {
-				existingP.AutoInclude = vp.AutoInclude
-			}
-			if vp.BalanceURL != "" {
-				existingP.BalanceURL = vp.BalanceURL
-			}
-			if vp.BalancePath != "" {
-				existingP.BalancePath = vp.BalancePath
 			}
 			if vp.ModelAliases != nil {
 				existingP.ModelAliases = make(map[string]string)
@@ -517,6 +473,18 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.Runtim
 		recoverMaskedKeys(newCfg, currentCfg)
 	}
 
+	// 3. Vault URL-Change Guard (SECURITY_SPEC §4.4 / SEC-07):
+	// Only recover a masked Vault.NodeToken when Vault.URL is unchanged; otherwise clear it.
+	if newCfg.Vault != nil && IsMaskedSecret(newCfg.Vault.NodeToken) {
+		if currentCfg != nil && currentCfg.Vault != nil &&
+			!IsMaskedSecret(currentCfg.Vault.NodeToken) &&
+			strings.TrimRight(strings.TrimSpace(newCfg.Vault.URL), "/") == strings.TrimRight(strings.TrimSpace(currentCfg.Vault.URL), "/") {
+			newCfg.Vault.NodeToken = currentCfg.Vault.NodeToken
+		} else {
+			newCfg.Vault.NodeToken = ""
+		}
+	}
+
 	// Increment version
 	if currentCfg != nil {
 		newCfg.Version = currentCfg.Version + 1
@@ -569,6 +537,7 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 
 	type keyInfo struct {
 		Key       string
+		Origin    string
 		OAuthMeta *types.OAuthMeta
 	}
 	realKeys := make(map[string]keyInfo)
@@ -580,7 +549,10 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 			if k == nil || k.Key == "" || IsMaskedSecret(k.Key) {
 				continue
 			}
-			ki := keyInfo{Key: k.Key}
+			ki := keyInfo{
+				Key:    k.Key,
+				Origin: k.Origin,
+			}
 			if k.OAuthMeta != nil {
 				m := *k.OAuthMeta
 				ki.OAuthMeta = &m
@@ -619,6 +591,9 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 			}
 
 			if found {
+				if ki.Origin == "vault" {
+					k.Origin = "vault"
+				}
 				if IsMaskedSecret(k.Key) {
 					k.Key = ki.Key
 				}
@@ -626,7 +601,8 @@ func recoverMaskedKeys(target, source *types.ProxyConfig) {
 					if k.OAuthMeta == nil {
 						m := *ki.OAuthMeta
 						k.OAuthMeta = &m
-					} else if k.OAuthMeta.RefreshToken == "" && ki.OAuthMeta.RefreshToken != "" {
+					} else if (k.OAuthMeta.RefreshToken == "" || IsMaskedSecret(k.OAuthMeta.RefreshToken)) &&
+						ki.OAuthMeta.RefreshToken != "" && !IsMaskedSecret(ki.OAuthMeta.RefreshToken) {
 						k.OAuthMeta.RefreshToken = ki.OAuthMeta.RefreshToken
 					}
 				}

@@ -41,7 +41,6 @@ func setupBenchScheduler(b *testing.B, withObs bool) (*Scheduler, *httptest.Serv
 			},
 		},
 		Settings: types.RuntimeSettings{
-			RunMode:                  types.ModeAgent,
 			AgentRoutingStrategy:     "round_robin",
 			AgentFirstByteTimeoutSec: 30,
 		},

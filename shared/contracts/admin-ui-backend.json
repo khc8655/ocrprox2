@@ -6,7 +6,6 @@
       "vaultHub": true,
       "nodeManager": true,
       "vaultClient": false,
-      "runModes": false,
       "kbModels": false,
       "oauthLogin": false,
       "usageAndTraces": false,
@@ -16,7 +15,6 @@
       "vaultHub": false,
       "nodeManager": false,
       "vaultClient": true,
-      "runModes": true,
       "kbModels": true,
       "oauthLogin": true,
       "usageAndTraces": true,
@@ -26,7 +24,6 @@
       "vaultHub": false,
       "nodeManager": false,
       "vaultClient": false,
-      "runModes": false,
       "kbModels": false,
       "oauthLogin": false,
       "usageAndTraces": false,
@@ -177,21 +174,6 @@
         "traces": "array of RequestTrace objects"
       }
     },
-    "mode_switch": {
-      "method": "POST",
-      "path": "/api/admin/mode",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
-        "full"
-      ],
-      "request": {
-        "mode": "string (agent | kb)"
-      },
-      "response": {
-        "ok": true,
-        "mode": "string (agent | kb)"
-      }
-    },
     "probe_models": {
       "method": "POST",
       "path": "/api/admin/probe-models",
@@ -283,27 +265,6 @@
         "results": "object"
       }
     },
-    "balance": {
-      "method": "POST",
-      "path": "/api/admin/balance",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
-        "full"
-      ],
-      "request": {
-        "provider": "string (optional)",
-        "key_label": "string (optional)",
-        "api_key": "string (optional)",
-        "base_url": "string (optional)",
-        "balance_url": "string (optional)",
-        "balance_path": "string (optional)",
-        "preset_id": "string (optional)"
-      },
-      "response": {
-        "ok": true,
-        "balance": "object"
-      }
-    },
     "test_provider": {
       "method": "POST",
       "path": "/api/admin/test-provider",
@@ -321,25 +282,6 @@
       "response": {
         "ok": true,
         "results": "array of objects"
-      }
-    },
-    "autolist_sync": {
-      "method": "POST",
-      "path": "/api/admin/autolist-sync",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
-        "full"
-      ],
-      "request": {
-        "provider": "string",
-        "auto_include": "string (optional)",
-        "apply": "boolean (optional)"
-      },
-      "response": {
-        "ok": true,
-        "models": "array of strings",
-        "matched": "array of strings",
-        "added": "array of strings"
       }
     },
     "presets_extra": {

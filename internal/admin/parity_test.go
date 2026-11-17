@@ -164,7 +164,6 @@ func TestAdminServer_ConfigExportImportRoundTrip(t *testing.T) {
 			},
 		},
 		Settings: types.RuntimeSettings{
-			RunMode:   types.ModeAgent,
 			ClientKey: "cli-key-123",
 		},
 	}

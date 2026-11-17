@@ -452,3 +452,172 @@ func TestCooldownManager_Snapshot(t *testing.T) {
 		t.Errorf("expected snapshot to include temporary rate limit entry")
 	}
 }
+
+func TestScheduler_KeepaliveHeadersAndStreamOnlyJsonSafety(t *testing.T) {
+	// 1. StreamOnly provider with !clientStream must NEVER inject ": keep-alive\n\n" into JSON
+	tsStreamOnly := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(45 * time.Millisecond) // longer than test keepaliveInterval (15ms)
+		_, _ = w.Write([]byte("data: {\"id\":\"1\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"clean json\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer tsStreamOnly.Close()
+
+	cfg := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"p-so": {
+				ID:           "p-so",
+				BaseURL:      tsStreamOnly.URL,
+				Enabled:      true,
+				AdapterRules: &types.AdapterRules{StreamOnly: true},
+				APIKeys:      []*types.KeyEntry{{ID: "k1", Label: "k1", Key: "sk-1", Enabled: true}},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"m-so": {Enabled: true, Candidates: []*types.RouteCandidate{{Provider: "p-so", KeyLabel: "k1", Enabled: true}}},
+		},
+	}
+
+	sched := NewScheduler(&mockConfigSource{config: cfg}, nil, true)
+	sched.keepaliveInterval = 15 * time.Millisecond
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	if err := sched.Dispatch(context.Background(), "/v1/chat/completions", []byte(`{"model":"m-so","stream":false,"messages":[{"role":"user","content":"hi"}]}`), "m-so", false, rec, req); err != nil {
+		t.Fatalf("StreamOnly non-stream Dispatch failed: %v", err)
+	}
+	if strings.HasPrefix(rec.Body.String(), ": keep-alive") {
+		t.Fatalf("keep-alive comment corrupted JSON response: %s", rec.Body.String())
+	}
+	if rec.Header().Get("X-Routed-Via") != "p-so" {
+		t.Errorf("expected X-Routed-Via=p-so, got %q", rec.Header().Get("X-Routed-Via"))
+	}
+
+	// 2. Streaming client with slow TTFT commits SSE headers once on keepalive, and on post-commit peek error writes SSE error without failing over
+	var k2Hit bool
+	tsSlowFail := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Authorization"), "sk-2") {
+			k2Hit = true
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(40 * time.Millisecond) // triggers keepalive commit!
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer tsSlowFail.Close()
+
+	cfg2 := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"p-stream": {
+				ID:      "p-stream",
+				BaseURL: tsSlowFail.URL,
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "k1", Label: "k1", Key: "sk-1", Enabled: true},
+					{ID: "k2", Label: "k2", Key: "sk-2", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"m-st": {
+				Enabled: true,
+				Candidates: []*types.RouteCandidate{
+					{Provider: "p-stream", KeyLabel: "k1", Enabled: true},
+					{Provider: "p-stream", KeyLabel: "k2", Enabled: true},
+				},
+			},
+		},
+	}
+	sched2 := NewScheduler(&mockConfigSource{config: cfg2}, nil, true)
+	sched2.keepaliveInterval = 15 * time.Millisecond
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	err := sched2.Dispatch(context.Background(), "/v1/chat/completions", []byte(`{"model":"m-st","stream":true,"messages":[{"role":"user","content":"hi"}]}`), "m-st", true, rec2, req2)
+	if err == nil {
+		t.Fatalf("expected error after post-commit empty stream")
+	}
+	if k2Hit {
+		t.Fatalf("must NOT failover to k2 after SSE headers were already committed via keepalive")
+	}
+	if ct := rec2.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Errorf("expected text/event-stream Content-Type committed before keepalive, got %q", ct)
+	}
+	if !strings.Contains(rec2.Body.String(), ": keep-alive") || !strings.Contains(rec2.Body.String(), `"upstream_error"`) {
+		t.Errorf("expected keep-alive and SSE error event in body, got %q", rec2.Body.String())
+	}
+}
+
+func TestScheduler_MessagesHeaders_AuthPrefixNone_CooldownBeforeRPM_AndErrorScrubbing(t *testing.T) {
+	var gotXAPIKey, gotAnthVer, gotAnthBeta, gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotXAPIKey = r.Header.Get("x-api-key")
+		gotAnthVer = r.Header.Get("anthropic-version")
+		gotAnthBeta = r.Header.Get("anthropic-beta")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"upstream leaked Bearer sk-secret-vendor-key-1234567890"}`))
+	}))
+	defer ts.Close()
+
+	cfg := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"anth": {
+				ID:           "anth",
+				BaseURL:      ts.URL,
+				Enabled:      true,
+				AdapterRules: &types.AdapterRules{AuthPrefix: "none"},
+				APIKeys: []*types.KeyEntry{
+					{ID: "k1", Label: "k1", Key: "sk-ant-raw-key-12345", Enabled: true, MaxRPM: 1},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"claude-sonnet-4": {
+				Enabled:    true,
+				Candidates: []*types.RouteCandidate{{Provider: "anth", KeyLabel: "k1", Enabled: true, MaxConc: 3}},
+			},
+		},
+	}
+
+	sched := NewScheduler(&mockConfigSource{config: cfg}, nil, true)
+
+	// Pre-cool k1 and verify Dispatch skips k1 WITHOUT consuming its 1 RPM token!
+	sched.Cooldowns().ApplyCooldown("anth", "claude-sonnet-4", "k1", 429, time.Minute, time.Minute, time.Minute, time.Minute)
+	recCool := httptest.NewRecorder()
+	reqCool := httptest.NewRequest("POST", "/v1/messages", nil)
+	_ = sched.Dispatch(context.Background(), "/v1/messages", []byte(`{"model":"claude-sonnet-4"}`), "claude-sonnet-4", false, recCool, reqCool)
+	if !sched.RPM().Allow("anth:k1", 1) {
+		t.Fatalf("cooled-down key must NOT consume RPM quota when skipped")
+	}
+
+	// Clear cooldown and test /v1/messages headers + AuthPrefix="none" + upstream error scrubbing
+	sched.Cooldowns().ClearKey("anth", "k1")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+	_ = sched.Dispatch(context.Background(), "/v1/messages", []byte(`{"model":"claude-sonnet-4"}`), "claude-sonnet-4", false, rec, req)
+
+	if gotAuth != "sk-ant-raw-key-12345" {
+		t.Errorf("expected AuthPrefix=none to send bare key, got %q", gotAuth)
+	}
+	if gotXAPIKey != "sk-ant-raw-key-12345" {
+		t.Errorf("expected x-api-key header set for /v1/messages, got %q", gotXAPIKey)
+	}
+	if gotAnthVer != "2023-06-01" {
+		t.Errorf("expected default anthropic-version 2023-06-01, got %q", gotAnthVer)
+	}
+	if gotAnthBeta != "prompt-caching-2024-07-31" {
+		t.Errorf("expected anthropic-beta forwarded, got %q", gotAnthBeta)
+	}
+	if strings.Contains(rec.Body.String(), "sk-secret-vendor-key-1234567890") {
+		t.Errorf("expected upstream error body scrubbed before returning to client, got %s", rec.Body.String())
+	}
+}

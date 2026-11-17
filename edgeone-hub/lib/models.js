@@ -54,7 +54,7 @@ export function isSafePublicHttpUrl(rawUrl) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   if (u.username || u.password) return false;
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (!host || host === 'localhost' || host.endsWith('.local') || host === '::1') return false;
+  if (!host || host === 'localhost' || host.endsWith('.local') || host === '::1' || host === '::' || host.startsWith('::ffff:')) return false;
   if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(host)) {
     return false;
   }

@@ -22,6 +22,8 @@ import (
 	"github.com/khc8655/llmproxy2/internal/upstream"
 )
 
+const SessionMaxAgeSec = 15 * 60 // 15 minutes
+
 var (
 	ErrDevicePending        = errors.New("oauth: authorization pending, user has not completed verification")
 	ErrDeviceExpired        = errors.New("oauth: device code expired")
@@ -160,16 +162,26 @@ func (m *Manager) StartDeviceFlowPKCE(ctx context.Context, endpoint, clientID, s
 	if err != nil {
 		return nil, err
 	}
-	session.CreatedAt = time.Now().Unix()
+	nowUnix := time.Now().Unix()
+	session.CreatedAt = nowUnix
 	if verifier != "" {
 		session.CodeVerifier = verifier
 	}
 
 	m.mu.Lock()
+	m.pruneExpiredSessionsLocked(nowUnix)
 	m.sessions[session.DeviceCode] = session
 	m.mu.Unlock()
 
 	return session, nil
+}
+
+func (m *Manager) pruneExpiredSessionsLocked(nowUnix int64) {
+	for code, sess := range m.sessions {
+		if sess == nil || nowUnix-sess.CreatedAt > SessionMaxAgeSec {
+			delete(m.sessions, code)
+		}
+	}
 }
 
 // parseDeviceSession parses raw device session JSON, accommodating MiniMax quirks:
@@ -232,6 +244,7 @@ func (m *Manager) PollToken(ctx context.Context, endpoint, clientID, deviceCode 
 		verifier = codeVerifier[0]
 	} else {
 		m.mu.Lock()
+		m.pruneExpiredSessionsLocked(time.Now().Unix())
 		if s, ok := m.sessions[deviceCode]; ok && s != nil {
 			verifier = s.CodeVerifier
 		}
@@ -283,6 +296,7 @@ func (m *Manager) PollToken(ctx context.Context, endpoint, clientID, deviceCode 
 	}
 
 	m.mu.Lock()
+	m.pruneExpiredSessionsLocked(time.Now().Unix())
 	delete(m.sessions, deviceCode)
 	m.mu.Unlock()
 
@@ -379,12 +393,49 @@ func parseNumberInt64(n json.Number) int64 {
 	return 0
 }
 
+func (m *Manager) lockForKeyEntry(keyEntry *types.KeyEntry) *sync.Mutex {
+	// Derive lock tag strictly from immutable identity fields (never unlocked mutable Key)
+	keyTag := keyEntry.ID
+	if keyTag == "" {
+		keyTag = keyEntry.Label
+	}
+	if keyTag == "" {
+		keyTag = fmt.Sprintf("ptr:%p", keyEntry)
+	}
+
+	m.mu.Lock()
+	lk, ok := m.tokenLocks[keyTag]
+	if !ok {
+		lk = &sync.Mutex{}
+		m.tokenLocks[keyTag] = lk
+	}
+	m.mu.Unlock()
+	return lk
+}
+
+// GetAccessToken safely reads keyEntry.Key under the per-key OAuth mutex.
+func (m *Manager) GetAccessToken(keyEntry *types.KeyEntry) string {
+	if keyEntry == nil {
+		return ""
+	}
+	lk := m.lockForKeyEntry(keyEntry)
+	lk.Lock()
+	defer lk.Unlock()
+	return keyEntry.Key
+}
+
 // EnsureValidToken checks if key entry's token is close to expiry (within 1 hour) and refreshes if needed.
+// Acquires the per-key lock BEFORE reading or mutating OAuthMeta/Key so concurrent callers are 100% race-free.
 // When a refresh succeeds, if a PersistFunc is configured, it is called to immediately persist the rotated token.
 func (m *Manager) EnsureValidToken(ctx context.Context, keyEntry *types.KeyEntry, endpoint string) error {
 	if keyEntry == nil || keyEntry.OAuthMeta == nil {
 		return nil
 	}
+
+	// Lock per key FIRST before reading mutable ExpiresAt / RefreshToken / Key
+	lk := m.lockForKeyEntry(keyEntry)
+	lk.Lock()
+	defer lk.Unlock()
 
 	now := time.Now().Unix()
 	// If expires in > 1 hour (3600s), token is still fresh
@@ -404,32 +455,6 @@ func (m *Manager) EnsureValidToken(ctx context.Context, keyEntry *types.KeyEntry
 		}
 	}
 
-	// Lock per key to prevent thundering-herd concurrent refreshes on the same account
-	keyTag := keyEntry.Label
-	if keyTag == "" {
-		keyTag = keyEntry.ID
-	}
-	if keyTag == "" {
-		keyTag = keyEntry.Key
-	}
-
-	m.mu.Lock()
-	lk, ok := m.tokenLocks[keyTag]
-	if !ok {
-		lk = &sync.Mutex{}
-		m.tokenLocks[keyTag] = lk
-	}
-	m.mu.Unlock()
-
-	lk.Lock()
-	defer lk.Unlock()
-
-	// Double-check expiry after acquiring per-key lock
-	now = time.Now().Unix()
-	if keyEntry.OAuthMeta.ExpiresAt > now+3600 {
-		return nil
-	}
-
 	tok, err := m.RefreshToken(ctx, endpoint, keyEntry.OAuthMeta.ClientID, keyEntry.OAuthMeta.RefreshToken)
 	if err != nil {
 		return err
@@ -443,13 +468,16 @@ func (m *Manager) EnsureValidToken(ctx context.Context, keyEntry *types.KeyEntry
 		keyEntry.OAuthMeta.ExpiresAt = time.Now().Unix() + tok.ExpiresIn
 	}
 
-	// Invoke atomic persistence callback if configured
+	// Invoke atomic persistence callback with a snapshot copy under lock
 	m.mu.Lock()
 	persist := m.persistFn
 	m.mu.Unlock()
 
 	if persist != nil {
-		if err := persist(ctx, keyEntry); err != nil {
+		metaCopy := *keyEntry.OAuthMeta
+		entryCopy := *keyEntry
+		entryCopy.OAuthMeta = &metaCopy
+		if err := persist(ctx, &entryCopy); err != nil {
 			return fmt.Errorf("oauth: persist refreshed token: %w", err)
 		}
 	}

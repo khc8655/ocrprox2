@@ -6,7 +6,7 @@
   "groups": [
     {
       "id": "routing",
-      "title": "模式与路由策略"
+      "title": "路由策略与鉴权"
     },
     {
       "id": "timeout",
@@ -19,10 +19,6 @@
     {
       "id": "concurrency",
       "title": "并发与队列"
-    },
-    {
-      "id": "schedule",
-      "title": "时段调度"
     }
   ],
   "properties": {
@@ -51,15 +47,6 @@
         "type": "string"
       },
       "default": [],
-      "roles": ["lite", "full"]
-    },
-    "run_mode": {
-      "group": "routing",
-      "label": "兼容运行模式标记 (已统一常驻)",
-      "hint": "全端口已统一常驻可用，该字段仅作旧版配置兼容保留",
-      "type": "string",
-      "enum": ["agent", "kb"],
-      "default": "agent",
       "roles": ["lite", "full"]
     },
     "agent_routing_strategy": {
@@ -129,7 +116,7 @@
     "ocr_max_inflight": {
       "group": "concurrency",
       "label": "OCR 预读并发信号量上限",
-      "hint": "KB 模式流式 OCR 同时在途解析的最大请求数，防大图 OOM",
+      "hint": "流式 OCR 同时在途解析的最大请求数，防大图 OOM",
       "type": "integer",
       "minimum": 1,
       "maximum": 32,
@@ -138,57 +125,16 @@
     },
     "kb_global_max_concurrency": {
       "group": "concurrency",
-      "label": "KB 全局最大并发上限",
-      "hint": "KB 模式跨分类（chat/emb/rerank/ocr）全局总并发限制",
+      "label": "固定通道全局最大并发上限",
+      "hint": "跨固定通道（chat/embedding/reranker/ocr）全局总并发限制",
       "type": "integer",
       "minimum": 1,
       "maximum": 128,
       "default": 16,
       "roles": ["full"]
-    },
-    "mode_schedule_enabled": {
-      "group": "schedule",
-      "label": "时段自动切换开关",
-      "hint": "开启后在指定时间窗口运行 Agent 模式，窗口外切入 KB 模式",
-      "type": "boolean",
-      "default": false,
-      "roles": ["full"]
-    },
-    "mode_schedule_agent_window": {
-      "group": "schedule",
-      "label": "Agent 运行时间窗口",
-      "hint": "格式: 'HH:MM-HH:MM'，如 '08:30-22:30'",
-      "type": "string",
-      "default": "08:30-22:30",
-      "roles": ["full"]
-    },
-    "mode_schedule_timezone": {
-      "group": "schedule",
-      "label": "时段调度时区",
-      "hint": "IANA 时区名称，默认 'Asia/Shanghai'",
-      "type": "string",
-      "default": "Asia/Shanghai",
-      "roles": ["full"]
-    },
-    "mode_schedule_webhook_url": {
-      "group": "schedule",
-      "label": "时段切换通知 Webhook URL",
-      "hint": "模式自动切换时向该 URL 发送 POST 事件通知",
-      "type": "string",
-      "default": "",
-      "roles": ["full"]
-    },
-    "mode_schedule_webhook_secret": {
-      "group": "schedule",
-      "label": "Webhook HMAC-SHA256 签名密钥",
-      "hint": "若提供则在请求头 X-Signature 中携带 HMAC 签名",
-      "type": "string",
-      "default": "",
-      "roles": ["full"]
     }
   },
   "required": [
-    "run_mode",
     "agent_routing_strategy",
     "agent_first_byte_timeout_sec",
     "cooldown_rate_limit_sec",

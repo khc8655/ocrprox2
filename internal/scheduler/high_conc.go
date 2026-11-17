@@ -466,6 +466,12 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			keyID = cand.KeyEntry.Label
 		}
 
+		// Check cooldown BEFORE acquiring RPM token so cooled-down keys never burn RPM quota
+		if s.cooldowns.IsCooledDown(cand.Provider.ID, cand.TargetModel, keyID) {
+			skips = append(skips, fmt.Sprintf("%s (cooling down %s)", keyID, s.cooldowns.RemainingFor(cand.Provider.ID, cand.TargetModel, keyID)))
+			continue
+		}
+
 		rpmLimit := cand.KeyEntry.MaxRPM
 		if rpmLimit <= 0 && cand.Provider != nil {
 			rpmLimit = cand.Provider.RPMPerKey
@@ -474,19 +480,20 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			skips = append(skips, fmt.Sprintf("%s (RPM limit)", keyID))
 			continue
 		}
-		if s.cooldowns.IsCooledDown(cand.Provider.ID, cand.TargetModel, keyID) {
-			skips = append(skips, fmt.Sprintf("%s (cooling down %s)", keyID, s.cooldowns.RemainingFor(cand.Provider.ID, cand.TargetModel, keyID)))
-			continue
-		}
 
-		queuedStart := time.Now()
-		cancelWait := s.lanes.StartWaiting(cand.KeyTag)
-		tryStart := time.Now()
+		var (
+			succeeded bool
+			abortLoop bool
+		)
+		func() {
+			queuedStart := time.Now()
+			cancelWait := s.lanes.StartWaiting(cand.KeyTag)
+			defer cancelWait()
+			tryStart := time.Now()
 
-		if cand.KeyEntry.AuthType == "oauth_device" {
-			if refresher := s.getOAuthRefresher(); refresher != nil {
+			refresher := s.getOAuthRefresher()
+			if cand.KeyEntry.AuthType == "oauth_device" && refresher != nil {
 				if refErr := refresher.EnsureValidToken(budgetCtx, cand.KeyEntry, ""); refErr != nil {
-					cancelWait()
 					lastStatus = http.StatusUnauthorized
 					lastErrSnippet = refErr.Error()
 					cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusUnauthorized, durRateLimit, durServerError, durNetwork, durAuth)
@@ -502,203 +509,210 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 						ErrorSnippet:       obs.ScrubString(lastErrSnippet),
 					})
 					trailParts = append(trailParts, fmt.Sprintf("%s=401", cand.KeyTag))
-					continue
+					return
 				}
 			}
-		}
 
-		var (
-			targetURL    string
-			reqBytes     []byte
-			extraHeaders map[string]string
-			buildErr     error
-		)
-		if spec.BuildRequest != nil {
-			targetURL, reqBytes, extraHeaders, buildErr = spec.BuildRequest(cand)
-		} else {
-			reqBytes, extraHeaders, _, buildErr = s.engine.PrepareRequest(spec.Endpoint, spec.RawBody, cand.Provider, cand.TargetModel, false)
-			targetURL = upstream.JoinUpstream(cand.Provider.BaseURL, strings.TrimPrefix(spec.Endpoint, "/v1/"))
-		}
-		if buildErr != nil {
+			var (
+				targetURL    string
+				reqBytes     []byte
+				extraHeaders map[string]string
+				buildErr     error
+			)
+			if spec.BuildRequest != nil {
+				targetURL, reqBytes, extraHeaders, buildErr = spec.BuildRequest(cand)
+			} else {
+				reqBytes, extraHeaders, _, buildErr = s.engine.PrepareRequest(spec.Endpoint, spec.RawBody, cand.Provider, cand.TargetModel, false)
+				targetURL = upstream.JoinUpstream(cand.Provider.BaseURL, strings.TrimPrefix(spec.Endpoint, "/v1/"))
+			}
+			if buildErr != nil {
+				return
+			}
+
+			upReq, reqErr := http.NewRequestWithContext(budgetCtx, http.MethodPost, targetURL, bytes.NewReader(reqBytes))
+			if reqErr != nil {
+				return
+			}
+			rawKey := resolveCandidateKeySecret(cand, refresher)
+			applyUpstreamHeaders(upReq, r, spec.Endpoint, cand.Provider, rawKey, extraHeaders)
+
+			queuedMillis := time.Since(queuedStart).Milliseconds()
 			cancelWait()
-			continue
-		}
+			releaseBusy := s.lanes.Acquire(cand.KeyTag, cand.MaxConc)
+			var relOnce sync.Once
+			rel := func() { relOnce.Do(releaseBusy) }
+			defer rel()
 
-		upReq, reqErr := http.NewRequestWithContext(budgetCtx, http.MethodPost, targetURL, bytes.NewReader(reqBytes))
-		if reqErr != nil {
-			cancelWait()
-			continue
-		}
-		applyUpstreamHeaders(upReq, r, cand.Provider, cand.KeyEntry.Key, extraHeaders)
+			sendStart := time.Now()
+			resp, callErr := client.Do(upReq)
+			sentMillis := time.Since(sendStart).Milliseconds()
+			tryElapsed := time.Since(tryStart).Milliseconds()
 
-		queuedMillis := time.Since(queuedStart).Milliseconds()
-		cancelWait()
-		releaseBusy := s.lanes.Acquire(cand.KeyTag, rpmLimit)
-		var relOnce sync.Once
-		rel := func() { relOnce.Do(releaseBusy) }
+			if callErr != nil {
+				lastStatus = http.StatusBadGateway
+				lastErrSnippet = callErr.Error()
+				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusBadGateway, durRateLimit, durServerError, durNetwork, durAuth)
+				tries = append(tries, types.Try{
+					Attempt:            len(tries) + 1,
+					Provider:           cand.Provider.ID,
+					KeyID:              cand.KeyEntry.Label,
+					Model:              cand.TargetModel,
+					Status:             http.StatusBadGateway,
+					Millis:             tryElapsed,
+					Reason:             "network_error",
+					CooldownAppliedSec: cooldownSec,
+					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+				})
+				trailParts = append(trailParts, fmt.Sprintf("%s=net_err", cand.KeyTag))
+				return
+			}
 
-		sendStart := time.Now()
-		resp, callErr := client.Do(upReq)
-		sentMillis := time.Since(sendStart).Milliseconds()
-		tryElapsed := time.Since(tryStart).Milliseconds()
+			var tryRespHeaders map[string]string
+			if hasObs {
+				tryRespHeaders = sanitizeHeaders(resp.Header)
+			}
+			lastStatus = resp.StatusCode
 
-		if callErr != nil {
-			rel()
-			lastStatus = http.StatusBadGateway
-			lastErrSnippet = callErr.Error()
-			cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusBadGateway, durRateLimit, durServerError, durNetwork, durAuth)
-			tries = append(tries, types.Try{
-				Attempt:            len(tries) + 1,
-				Provider:           cand.Provider.ID,
-				KeyID:              cand.KeyEntry.Label,
-				Model:              cand.TargetModel,
-				Status:             http.StatusBadGateway,
-				Millis:             tryElapsed,
-				Reason:             "network_error",
-				CooldownAppliedSec: cooldownSec,
-				ErrorSnippet:       obs.ScrubString(lastErrSnippet),
-			})
-			trailParts = append(trailParts, fmt.Sprintf("%s=net_err", cand.KeyTag))
-			continue
-		}
+			if resp.StatusCode != http.StatusOK {
+				errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				_ = resp.Body.Close()
+				rel()
+				lastErrSnippet = string(errBytes)
 
-		var tryRespHeaders map[string]string
-		if hasObs {
-			tryRespHeaders = sanitizeHeaders(resp.Header)
-		}
-		lastStatus = resp.StatusCode
+				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
+				if cand.Provider.QuotaResetAt != "" && (resp.StatusCode == 429 || resp.StatusCode == 402) {
+					if sec, _, qErr := s.cooldowns.ApplyQuotaCooldown(cand.Provider.ID, cand.TargetModel, keyID, cand.Provider.QuotaResetAt); qErr == nil {
+						cooldownSec = sec
+					}
+				}
 
-		if resp.StatusCode != http.StatusOK {
-			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				reason := classifyFailureReason(resp.StatusCode)
+				currAttempt := TryAttempt{
+					Provider:     cand.Provider.ID,
+					KeyID:        keyID,
+					Model:        cand.TargetModel,
+					Status:       resp.StatusCode,
+					ErrorSnippet: lastErrSnippet,
+				}
+				tries = append(tries, types.Try{
+					Attempt:            len(tries) + 1,
+					Provider:           cand.Provider.ID,
+					KeyID:              cand.KeyEntry.Label,
+					Model:              cand.TargetModel,
+					Status:             resp.StatusCode,
+					Millis:             tryElapsed,
+					Reason:             reason,
+					CooldownAppliedSec: cooldownSec,
+					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					RespHeaders:        tryRespHeaders,
+				})
+				trailParts = append(trailParts, fmt.Sprintf("%s=%d", cand.KeyTag, resp.StatusCode))
+
+				if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) || (len(candidates) == 1 && resp.StatusCode == http.StatusBadRequest) {
+					passthrough4xx = &struct {
+						status  int
+						body    []byte
+						headers http.Header
+					}{status: resp.StatusCode, body: obs.Scrub(errBytes), headers: resp.Header}
+					abortLoop = true
+					return
+				}
+				attempts = append(attempts, currAttempt)
+				return
+			}
+
+			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 			_ = resp.Body.Close()
 			rel()
-			lastErrSnippet = string(errBytes)
+			if readErr != nil {
+				lastStatus = http.StatusBadGateway
+				lastErrSnippet = readErr.Error()
+				trailParts = append(trailParts, fmt.Sprintf("%s=read_err", cand.KeyTag))
+				return
+			}
 
-			cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
-			if cand.Provider.QuotaResetAt != "" && (resp.StatusCode == 429 || resp.StatusCode == 402) {
-				if sec, _, qErr := s.cooldowns.ApplyQuotaCooldown(cand.Provider.ID, cand.TargetModel, keyID, cand.Provider.QuotaResetAt); qErr == nil {
-					cooldownSec = sec
+			// Success! Record latency for "fast" strategy and transform response
+			s.latency.Record(cand.KeyTag, tryElapsed)
+			if spec.TransformBody != nil {
+				respBody = spec.TransformBody(cand, respBody)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Routed-Via", cand.Provider.ID)
+			w.Header().Set("X-Fallback-Attempts", strconv.Itoa(len(tries)+1))
+			w.Header().Set("X-Fallback-Trail", strings.Join(append(trailParts, fmt.Sprintf("%s=200", cand.KeyTag)), ";"))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(respBody)
+
+			if hasObs {
+				usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
+				var respMap map[string]any
+				if json.Unmarshal(respBody, &respMap) == nil {
+					usageTracker.ParseJSON(respMap)
 				}
-			}
+				usageTracker.Finish()
 
-			reason := classifyFailureReason(resp.StatusCode)
-			currAttempt := TryAttempt{
-				Provider:     cand.Provider.ID,
-				KeyID:        keyID,
-				Model:        cand.TargetModel,
-				Status:       resp.StatusCode,
-				ErrorSnippet: lastErrSnippet,
-			}
-			tries = append(tries, types.Try{
-				Attempt:            len(tries) + 1,
-				Provider:           cand.Provider.ID,
-				KeyID:              cand.KeyEntry.Label,
-				Model:              cand.TargetModel,
-				Status:             resp.StatusCode,
-				Millis:             tryElapsed,
-				Reason:             reason,
-				CooldownAppliedSec: cooldownSec,
-				ErrorSnippet:       obs.ScrubString(lastErrSnippet),
-				RespHeaders:        tryRespHeaders,
-			})
-			trailParts = append(trailParts, fmt.Sprintf("%s=%d", cand.KeyTag, resp.StatusCode))
+				totalMillis := time.Since(reqStart).Milliseconds()
+				ownMillis := totalMillis - (sentMillis + tryElapsed)
+				if ownMillis < 0 {
+					ownMillis = 0
+				}
 
-			if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) || (len(candidates) == 1 && resp.StatusCode == http.StatusBadRequest) {
-				passthrough4xx = &struct {
-					status  int
-					body    []byte
-					headers http.Header
-				}{status: resp.StatusCode, body: errBytes, headers: resp.Header}
-				break
+				tries = append(tries, types.Try{
+					Attempt:     len(tries) + 1,
+					Provider:    cand.Provider.ID,
+					KeyID:       cand.KeyEntry.Label,
+					Model:       cand.TargetModel,
+					Status:      http.StatusOK,
+					Millis:      tryElapsed,
+					TTFTMillis:  tryElapsed,
+					RespHeaders: tryRespHeaders,
+				})
+
+				s.recordFinalTrace(types.RequestTrace{
+					ID:                 traceID,
+					Timestamp:          time.Now().Unix(),
+					Mode:               spec.TraceMode,
+					Endpoint:           spec.Endpoint,
+					ReqModel:           orderModelKey,
+					ServedModel:        cand.TargetModel,
+					WinnerProvider:     cand.Provider.ID,
+					WinnerKey:          cand.KeyEntry.Label,
+					Status:             http.StatusOK,
+					Stream:             false,
+					InTokens:           usageTracker.InTokens,
+					OutTokens:          usageTracker.OutTokens,
+					CacheReadTokens:    usageTracker.CacheReadTokens,
+					CacheWriteTokens:   usageTracker.CacheWriteTokens,
+					CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+					ReasoningTokens:    usageTracker.ReasoningTokens,
+					StopReason:         usageTracker.StopReason,
+					TTFTMillis:         tryElapsed,
+					OwnMillis:          ownMillis,
+					QueuedMillis:       queuedMillis,
+					SentMillis:         sentMillis,
+					TotalMillis:        totalMillis,
+					UpBytes:            len(reqBytes),
+					DownBytes:          len(respBody),
+					ReqHeaders:         reqHeaders,
+					Tries:              tries,
+				})
 			}
-			attempts = append(attempts, currAttempt)
-			continue
+			succeeded = true
+		}()
+
+		if succeeded {
+			return nil
 		}
-
-		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
-		_ = resp.Body.Close()
-		rel()
-		if readErr != nil {
-			lastStatus = http.StatusBadGateway
-			lastErrSnippet = readErr.Error()
-			trailParts = append(trailParts, fmt.Sprintf("%s=read_err", cand.KeyTag))
-			continue
+		if abortLoop {
+			break
 		}
-
-		// Success! Record latency for "fast" strategy and transform response
-		s.latency.Record(cand.KeyTag, tryElapsed)
-		if spec.TransformBody != nil {
-			respBody = spec.TransformBody(cand, respBody)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Routed-Via", cand.Provider.ID)
-		w.Header().Set("X-Fallback-Attempts", strconv.Itoa(len(tries)+1))
-		w.Header().Set("X-Fallback-Trail", strings.Join(append(trailParts, fmt.Sprintf("%s=200", cand.KeyTag)), ";"))
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(respBody)
-
-		if hasObs {
-			usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
-			var respMap map[string]any
-			if json.Unmarshal(respBody, &respMap) == nil {
-				usageTracker.ParseJSON(respMap)
-			}
-			usageTracker.Finish()
-
-			totalMillis := time.Since(reqStart).Milliseconds()
-			ownMillis := totalMillis - (sentMillis + tryElapsed)
-			if ownMillis < 0 {
-				ownMillis = 0
-			}
-
-			tries = append(tries, types.Try{
-				Attempt:     len(tries) + 1,
-				Provider:    cand.Provider.ID,
-				KeyID:       cand.KeyEntry.Label,
-				Model:       cand.TargetModel,
-				Status:      http.StatusOK,
-				Millis:      tryElapsed,
-				TTFTMillis:  tryElapsed,
-				RespHeaders: tryRespHeaders,
-			})
-
-			s.recordFinalTrace(types.RequestTrace{
-				ID:                 traceID,
-				Timestamp:          time.Now().Unix(),
-				Mode:               spec.TraceMode,
-				Endpoint:           spec.Endpoint,
-				ReqModel:           orderModelKey,
-				ServedModel:        cand.TargetModel,
-				WinnerProvider:     cand.Provider.ID,
-				WinnerKey:          cand.KeyEntry.Label,
-				Status:             http.StatusOK,
-				Stream:             false,
-				InTokens:           usageTracker.InTokens,
-				OutTokens:          usageTracker.OutTokens,
-				CacheReadTokens:    usageTracker.CacheReadTokens,
-				CacheWriteTokens:   usageTracker.CacheWriteTokens,
-				CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
-				ReasoningTokens:    usageTracker.ReasoningTokens,
-				StopReason:         usageTracker.StopReason,
-				TTFTMillis:         tryElapsed,
-				OwnMillis:          ownMillis,
-				QueuedMillis:       queuedMillis,
-				SentMillis:         sentMillis,
-				TotalMillis:        totalMillis,
-				UpBytes:            len(reqBytes),
-				DownBytes:          len(respBody),
-				ReqHeaders:         reqHeaders,
-				Tries:              tries,
-			})
-		}
-		return nil
 	}
 
 	if passthrough4xx != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(passthrough4xx.status)
-		_, _ = w.Write(passthrough4xx.body)
+		_, _ = w.Write(obs.Scrub(passthrough4xx.body))
 		s.recordFinalTrace(types.RequestTrace{
 			ID:          traceID,
 			Timestamp:   time.Now().Unix(),
@@ -797,18 +811,43 @@ func resolveUpstreamUserAgent(inboundReq *http.Request, prov *types.ProviderConf
 	return proxyDefaultUA
 }
 
-func applyUpstreamHeaders(upReq *http.Request, inboundReq *http.Request, prov *types.ProviderConfig, rawKey string, extraHeaders map[string]string) {
+func applyUpstreamHeaders(upReq *http.Request, inboundReq *http.Request, endpoint string, prov *types.ProviderConfig, rawKey string, extraHeaders map[string]string) {
 	authHeader := "Authorization"
 	authPrefix := "Bearer "
-	if prov != nil && prov.AdapterRules != nil {
-		if prov.AdapterRules.AuthHeader != "" {
-			authHeader = prov.AdapterRules.AuthHeader
+	customAuthHeader := false
+	rules := adapters.ResolveAdapterRules(prov)
+	if rules != nil {
+		if rules.AuthHeader != "" {
+			authHeader = rules.AuthHeader
+			customAuthHeader = true
+			if rules.AuthPrefix == "" {
+				authPrefix = ""
+			}
 		}
-		if prov.AdapterRules.AuthPrefix != "" {
-			authPrefix = prov.AdapterRules.AuthPrefix
+		if strings.EqualFold(rules.AuthPrefix, "none") {
+			authPrefix = ""
+		} else if rules.AuthPrefix != "" {
+			authPrefix = rules.AuthPrefix
 		}
 	}
 	upReq.Header.Set(authHeader, authPrefix+rawKey)
+
+	if strings.Contains(endpoint, "messages") {
+		if !customAuthHeader {
+			upReq.Header.Set("x-api-key", rawKey)
+		}
+		anthVer := "2023-06-01"
+		if inboundReq != nil {
+			if v := strings.TrimSpace(inboundReq.Header.Get("anthropic-version")); v != "" {
+				anthVer = v
+			}
+			if beta := strings.TrimSpace(inboundReq.Header.Get("anthropic-beta")); beta != "" {
+				upReq.Header.Set("anthropic-beta", beta)
+			}
+		}
+		upReq.Header.Set("anthropic-version", anthVer)
+	}
+
 	upReq.Header.Set("Content-Type", "application/json")
 	upReq.Header.Set("User-Agent", resolveUpstreamUserAgent(inboundReq, prov))
 	for hk, hv := range extraHeaders {

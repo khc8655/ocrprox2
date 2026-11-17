@@ -118,7 +118,6 @@ func normalizeImportedConfig(raw map[string]any) {
 			}
 		}
 	}
-	copyIfEmpty("run_mode", "run_mode")
 	copyIfEmpty("client_key", "proxy_api_key", "client_key")
 	copyIfEmpty("proxy_api_key", "proxy_api_key")
 	copyIfEmpty("agent_routing_strategy", "agent_routing_strategy")

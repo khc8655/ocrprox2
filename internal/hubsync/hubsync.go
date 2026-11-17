@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ const (
 	DefaultLeaseDuration = 24 * time.Hour
 	DefaultGraceDuration = 1 * time.Hour
 	MinRefreshDebounce   = 5 * time.Minute
+	MaxHubPayloadBytes   = 10 << 20 // 10 MiB
 )
 
 // HubSource coordinates fetching and caching configuration from EdgeOne Hub.
@@ -51,6 +53,9 @@ type HubSource struct {
 	state         atomic.Value // holds string
 	mu            sync.Mutex   // protects refresh coordination
 	refreshing    bool
+	refreshGen    uint64
+	lastResult    *types.RuntimeSnapshot
+	lastErr       error
 	refreshCond   *sync.Cond
 	lastRefresh   time.Time
 	cbMu          sync.RWMutex
@@ -166,26 +171,25 @@ func (s *HubSource) TriggerAllKeysFailed(ctx context.Context) {
 	_, _ = s.Current(ctx, true)
 }
 
-func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeSnapshot, forceRefresh bool) (*types.RuntimeSnapshot, error) {
+func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSnapshot, forceRefresh bool) (retSnap *types.RuntimeSnapshot, retErr error) {
 	s.mu.Lock()
 
-	// Singleflight pattern
-	for s.refreshing {
-		s.refreshCond.Wait()
-		// Check if another goroutine succeeded
-		latest := s.snapshot.Load()
-		if latest != nil && time.Now().Before(latest.LeaseUntil) {
-			s.mu.Unlock()
-			return latest, nil
+	// Singleflight pattern: join in-flight refresh generation
+	if s.refreshing {
+		waitGen := s.refreshGen
+		for s.refreshing && s.refreshGen == waitGen {
+			s.refreshCond.Wait()
 		}
-		st, _ := s.state.Load().(string)
-		if st == StateRevoked {
-			s.mu.Unlock()
-			return nil, ErrNodeUnauthorized
-		}
+		res, err := s.lastResult, s.lastErr
+		s.mu.Unlock()
+		return res, err
 	}
 
-	// Double check lease after acquiring lock
+	// Double check state and lease after acquiring lock
+	if st, _ := s.state.Load().(string); st == StateRevoked {
+		s.mu.Unlock()
+		return nil, ErrNodeUnauthorized
+	}
 	currentSnap = s.snapshot.Load()
 	if !forceRefresh && currentSnap != nil && time.Now().Before(currentSnap.LeaseUntil) {
 		s.mu.Unlock()
@@ -193,19 +197,27 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 	}
 
 	s.refreshing = true
+	s.refreshGen++
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
+		s.lastResult = retSnap
+		s.lastErr = retErr
 		s.refreshing = false
 		s.lastRefresh = time.Now()
 		s.refreshCond.Broadcast()
 		s.mu.Unlock()
 	}()
 
+	// Detach Hub fetch context from Caller #1's request context so Caller #1
+	// disconnecting never cancels the shared Hub fetch for concurrent waiters.
+	syncCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
 	// Perform HTTP request to hub
 	url := s.hubURL + "/api/node/config"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	req, err := http.NewRequestWithContext(syncCtx, http.MethodPost, url, nil)
 	if err != nil {
 		return s.handleSyncError(err, currentSnap)
 	}
@@ -235,21 +247,27 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 
 	switch resp.StatusCode {
 	case http.StatusNotModified: // 304
-		// Extend lease directly from header without JSON parsing
+		// Extend lease via copy-on-write snapshot without mutating currentSnap in place
 		leaseUntil := parseLeaseHeader(resp.Header.Get("X-Lease-Until"), DefaultLeaseDuration)
 		graceUntil := parseLeaseHeader(resp.Header.Get("X-Grace-Until"), DefaultGraceDuration)
 
 		if currentSnap != nil {
-			currentSnap.LeaseUntil = leaseUntil
-			currentSnap.GraceUntil = graceUntil
-			s.snapshot.Store(currentSnap)
+			updatedSnap := &types.RuntimeSnapshot{
+				Config:     currentSnap.Config,
+				ETag:       currentSnap.ETag,
+				LeaseUntil: leaseUntil,
+				GraceUntil: graceUntil,
+				LoadedAt:   currentSnap.LoadedAt,
+			}
+			s.snapshot.Store(updatedSnap)
 			s.state.Store(StateReady)
-			return currentSnap, nil
+			return updatedSnap, nil
 		}
+		s.state.Store(StateError)
 		return nil, ErrSourceUnavailable
 
 	case http.StatusOK: // 200
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, MaxHubPayloadBytes))
 		if err != nil {
 			return s.handleSyncError(err, currentSnap)
 		}
@@ -310,18 +328,16 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 			LoadedAt:   time.Now(),
 		}
 
-		oldSnap := s.snapshot.Swap(newSnap)
-		if oldSnap != nil {
-			// Zero old secret bytes in memory
-			oldSnap.PurgeSecrets()
-		}
+		// Atomically publish newSnap without mutating oldSnap in-place so in-flight
+		// Dispatch goroutines reading KeyEntry.Key never race; GC reclaims oldSnap cleanly.
+		s.snapshot.Store(newSnap)
 
 		s.state.Store(StateReady)
 		s.notifyCallbacks(newSnap.Config)
 		return newSnap, nil
 
 	case http.StatusUnauthorized, http.StatusForbidden: // 401 / 403
-		// Node revoked! Purge memory keys immediately and set revoked
+		// Node revoked! Purge memory keys immediately and set permanent StateRevoked
 		s.purgeAndRevoke()
 		return nil, ErrNodeUnauthorized
 
@@ -336,9 +352,10 @@ func (s *HubSource) purgeAndRevoke() {
 		snap.PurgeSecrets()
 	}
 	s.state.Store(StateRevoked)
+	runtime.GC()
 }
 
-func (s *HubSource) handleSyncError(err error, currentSnap *types.RuntimeSnapshot) (*types.RuntimeSnapshot, error) {
+func (s *HubSource) handleSyncError(_ error, currentSnap *types.RuntimeSnapshot) (*types.RuntimeSnapshot, error) {
 	now := time.Now()
 	// Check grace period
 	if currentSnap != nil && now.Before(currentSnap.GraceUntil) {
@@ -346,8 +363,13 @@ func (s *HubSource) handleSyncError(err error, currentSnap *types.RuntimeSnapsho
 		return currentSnap, nil
 	}
 
-	// Grace period expired or never had a snapshot: purge and fail
-	s.purgeAndRevoke()
+	// Cold start (currentSnap == nil) or grace period expired on transient error:
+	// Drop snapshot reference (let GC reclaim after in-flight requests finish) and set
+	// recoverable StateError (NOT StateRevoked) so node automatically heals when Hub recovers.
+	if currentSnap != nil {
+		s.snapshot.Store(nil)
+	}
+	s.state.Store(StateError)
 	return nil, ErrSourceUnavailable
 }
 

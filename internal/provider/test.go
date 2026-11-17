@@ -70,7 +70,7 @@ func TestEndpoint(ctx context.Context, client *http.Client, req TestRequest) []P
 	}
 
 	if client == nil {
-		client = upstream.DefaultClient(timeout, true)
+		client = upstream.DefaultClient(timeout, false)
 	}
 
 	var protos []string
@@ -213,7 +213,7 @@ func BatchTestKeys(ctx context.Context, client *http.Client, provider *types.Pro
 	}
 
 	if client == nil {
-		client = upstream.DefaultClient(15*time.Second, true)
+		client = upstream.DefaultClient(15*time.Second, false)
 	}
 
 	proto := ProtoChat
