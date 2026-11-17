@@ -1,6 +1,9 @@
-// Package kb provides KB (Knowledge Base) pipeline processing:
-// pre-read concurrency semaphore for OCR, 20MB body buffering, failover routing,
-// Vision ChatCompletion transformation, MIME magic bytes detection, and embedding/rerank/chat dispatch.
+// Package kb provides specialized protocol adapters for fixed high-concurrency
+// KB/RAG pipelines (/v1/ocr, /v1/embeddings, /v1/rerank, and KB chat):
+// pre-read OOM semaphore guard for OCR, 20MB body limit, Vision ChatCompletion <->
+// Native OCR translation, MIME magic bytes detection, while delegating all
+// candidate ordering (round_robin/weighted/least_busy/fast), cooldowns, RPM,
+// lane tracking, OAuth, and observability to the unified Scheduler.
 package kb
 
 import (
@@ -13,12 +16,10 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/khc8655/llmproxy2/internal/obs"
+	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
 	"github.com/khc8655/llmproxy2/internal/upstream"
 )
@@ -35,19 +36,20 @@ var (
 	ErrNoCandidate      = errors.New("kb: no enabled candidate found for kb category")
 )
 
-// Pipeline manages KB mode traffic and resource semaphores.
+// Pipeline adapts /v1/ocr, /v1/embeddings, /v1/rerank, and legacy KB chat payloads
+// and delegates execution/failover/cooldowns to the unified Scheduler.
 type Pipeline struct {
-	mu            sync.Mutex
-	configSrc     types.ConfigSource
-	ocrSem        chan struct{}
-	globalSem     chan struct{}
-	httpClient    *http.Client
-	ocrMaxLimit   int
-	obsSink       types.ObservabilitySink
-	adapterEngine types.AdapterEngine
+	mu          sync.Mutex
+	configSrc   types.ConfigSource
+	sched       *scheduler.Scheduler
+	ocrSem      chan struct{}
+	globalSem   chan struct{}
+	ocrMaxLimit int
+	globalLimit int
 }
 
-// NewPipeline creates a new KB Pipeline.
+// NewPipeline creates a KB Pipeline backed by an internal unified Scheduler
+// (can be shared with the main Agent Scheduler via SetScheduler).
 func NewPipeline(cfgSrc types.ConfigSource, maxOCR, maxGlobal int, allowPrivate bool) *Pipeline {
 	if maxOCR <= 0 {
 		maxOCR = DefaultMaxOCR
@@ -58,32 +60,88 @@ func NewPipeline(cfgSrc types.ConfigSource, maxOCR, maxGlobal int, allowPrivate 
 
 	return &Pipeline{
 		configSrc:   cfgSrc,
+		sched:       scheduler.NewScheduler(cfgSrc, nil, allowPrivate),
 		ocrSem:      make(chan struct{}, maxOCR),
 		globalSem:   make(chan struct{}, maxGlobal),
-		httpClient:  upstream.DefaultClient(120*time.Second, allowPrivate),
 		ocrMaxLimit: maxOCR,
+		globalLimit: maxGlobal,
 	}
 }
 
-// SetObservabilitySink sets the observability sink for recording request traces.
-func (p *Pipeline) SetObservabilitySink(sink types.ObservabilitySink) {
+// SetScheduler attaches the shared unified Scheduler instance.
+func (p *Pipeline) SetScheduler(s *scheduler.Scheduler) {
+	if s == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.obsSink = sink
+	p.sched = s
+}
+
+// SetObservabilitySink sets the observability sink on the underlying Scheduler.
+func (p *Pipeline) SetObservabilitySink(sink types.ObservabilitySink) {
+	p.mu.Lock()
+	s := p.sched
+	p.mu.Unlock()
+	if s != nil {
+		s.SetObservabilitySink(sink)
+	}
 }
 
 // SetHTTPClient overrides the default HTTP client (useful for unit testing).
 func (p *Pipeline) SetHTTPClient(client *http.Client) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.httpClient = client
+	s := p.sched
+	p.mu.Unlock()
+	if s != nil {
+		s.SetHTTPClient(client)
+	}
 }
 
 // SetAdapterEngine sets the adapter engine for request/response mutation.
 func (p *Pipeline) SetAdapterEngine(engine types.AdapterEngine) {
 	p.mu.Lock()
+	s := p.sched
+	p.mu.Unlock()
+	if s != nil {
+		s.SetEngineForTest(engine)
+	}
+}
+
+func (p *Pipeline) getScheduler() *scheduler.Scheduler {
+	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.adapterEngine = engine
+	return p.sched
+}
+
+func (p *Pipeline) acquireGlobalSem(r *http.Request) (func(), bool) {
+	p.mu.Lock()
+	gSem := p.globalSem
+	p.mu.Unlock()
+
+	select {
+	case gSem <- struct{}{}:
+		return func() { <-gSem }, true
+	case <-r.Context().Done():
+		return nil, false
+	}
+}
+
+func (p *Pipeline) syncDynamicLimits(snap *types.RuntimeSnapshot) {
+	if snap == nil || snap.Config == nil {
+		return
+	}
+	s := snap.Config.Settings
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if s.OCRMaxInflight > 0 && s.OCRMaxInflight != p.ocrMaxLimit && len(p.ocrSem) == 0 {
+		p.ocrSem = make(chan struct{}, s.OCRMaxInflight)
+		p.ocrMaxLimit = s.OCRMaxInflight
+	}
+	if s.KBGlobalMaxConcurrency > 0 && s.KBGlobalMaxConcurrency != p.globalLimit && len(p.globalSem) == 0 {
+		p.globalSem = make(chan struct{}, s.KBGlobalMaxConcurrency)
+		p.globalLimit = s.KBGlobalMaxConcurrency
+	}
 }
 
 // DetectImageMIME detects image MIME type from raw base64 or magic bytes cleanly without panicking.
@@ -105,7 +163,6 @@ func DetectImageMIME(b64 string, explicitMime string) string {
 		}
 	}
 
-	// Try decoding prefix to check binary magic bytes
 	prefix := trimmed
 	if len(prefix) > 64 {
 		prefix = prefix[:64]
@@ -123,33 +180,26 @@ func DetectImageMIME(b64 string, explicitMime string) string {
 	}
 
 	if err == nil && len(decoded) >= 2 {
-		// PNG: \x89PNG (\x89\x50\x4e\x47)
 		if len(decoded) >= 4 && bytes.Equal(decoded[:4], []byte{0x89, 'P', 'N', 'G'}) {
 			return "image/png"
 		}
-		// JPEG: \xff\xd8\xff
 		if len(decoded) >= 3 && bytes.Equal(decoded[:3], []byte{0xff, 0xd8, 0xff}) {
 			return "image/jpeg"
 		}
-		// WebP: RIFF....WEBP (bytes 0..3 "RIFF", bytes 8..11 "WEBP")
 		if len(decoded) >= 12 && bytes.Equal(decoded[:4], []byte("RIFF")) && bytes.Equal(decoded[8:12], []byte("WEBP")) {
 			return "image/webp"
 		}
-		// GIF: GIF87a or GIF89a
 		if len(decoded) >= 6 && (bytes.Equal(decoded[:6], []byte("GIF87a")) || bytes.Equal(decoded[:6], []byte("GIF89a"))) {
 			return "image/gif"
 		}
-		// BMP: BM
 		if len(decoded) >= 2 && bytes.Equal(decoded[:2], []byte("BM")) {
 			return "image/bmp"
 		}
-		// TIFF: II*\x00 (little endian) or MM\x00* (big endian)
 		if len(decoded) >= 4 && (bytes.Equal(decoded[:4], []byte{0x49, 0x49, 0x2a, 0x00}) || bytes.Equal(decoded[:4], []byte{0x4d, 0x4d, 0x00, 0x2a})) {
 			return "image/tiff"
 		}
 	}
 
-	// Fallback to base64 string prefix matching (matches v1 proxy_routes.py)
 	if strings.HasPrefix(trimmed, "/9j/") {
 		return "image/jpeg"
 	}
@@ -241,8 +291,7 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 					return nil, fmt.Errorf("reading file part: %w", err)
 				}
 				partMime := part.Header.Get("Content-Type")
-				detected := DetectImageMIMEFromBytes(partBytes, partMime)
-				req.MIMEType = detected
+				req.MIMEType = DetectImageMIMEFromBytes(partBytes, partMime)
 				req.ImageBase64 = base64.StdEncoding.EncodeToString(partBytes)
 			} else {
 				val, err := io.ReadAll(part)
@@ -269,7 +318,6 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 		return req, nil
 	}
 
-	// JSON parsing
 	var jsonBody map[string]any
 	if err := json.Unmarshal(bodyBytes, &jsonBody); err != nil {
 		return nil, fmt.Errorf("invalid json body: %w", err)
@@ -278,7 +326,6 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 	if s, ok := jsonBody["image_base64"].(string); ok && strings.TrimSpace(s) != "" {
 		req.ImageBase64 = strings.TrimSpace(s)
 	}
-
 	if req.ImageBase64 == "" {
 		if s, ok := jsonBody["image"].(string); ok && strings.TrimSpace(s) != "" {
 			s = strings.TrimSpace(s)
@@ -289,7 +336,6 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 			}
 		}
 	}
-
 	if u, ok := jsonBody["image_url"].(string); ok && strings.TrimSpace(u) != "" {
 		req.ImageURL = strings.TrimSpace(u)
 	} else if uMap, ok := jsonBody["image_url"].(map[string]any); ok {
@@ -297,23 +343,18 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 			req.ImageURL = strings.TrimSpace(u)
 		}
 	}
-
 	if p, ok := jsonBody["prompt"].(string); ok && strings.TrimSpace(p) != "" {
 		req.Prompt = strings.TrimSpace(p)
 	}
-
 	if m, ok := jsonBody["mime_type"].(string); ok && strings.TrimSpace(m) != "" {
 		req.MIMEType = strings.TrimSpace(m)
 	}
-
 	if m, ok := jsonBody["model"].(string); ok && strings.TrimSpace(m) != "" {
 		req.Model = strings.TrimSpace(m)
 	}
-
 	if mt, ok := jsonBody["max_tokens"].(float64); ok && mt > 0 {
 		req.MaxTokens = int(mt)
 	}
-
 	if msgs, ok := jsonBody["messages"].([]any); ok && len(msgs) > 0 {
 		req.Messages = msgs
 		if req.ImageBase64 == "" && req.ImageURL == "" {
@@ -350,7 +391,7 @@ func parseOCRRequest(r *http.Request, bodyBytes []byte) (*parsedOCRRequest, erro
 	return req, nil
 }
 
-func isNativeOCR(cand *types.KBCandidate, prov *types.ProviderConfig, reqModel string) bool {
+func isNativeOCR(targetModel string, prov *types.ProviderConfig, reqModel string) bool {
 	if prov != nil {
 		if strings.EqualFold(prov.APIType, "ocr") || strings.EqualFold(prov.APIType, "native_ocr") || strings.EqualFold(prov.APIType, "native") {
 			return true
@@ -361,13 +402,11 @@ func isNativeOCR(cand *types.KBCandidate, prov *types.ProviderConfig, reqModel s
 			}
 		}
 	}
-	if cand != nil {
-		if strings.EqualFold(cand.Model, "ocr") || strings.EqualFold(cand.Model, "native_ocr") || strings.EqualFold(cand.Model, "native") {
-			return true
-		}
-		if cand.Model == "" && (reqModel == "" || reqModel == "ocr") {
-			return true
-		}
+	if strings.EqualFold(targetModel, "ocr") || strings.EqualFold(targetModel, "native_ocr") || strings.EqualFold(targetModel, "native") {
+		return true
+	}
+	if targetModel == "" && (reqModel == "" || reqModel == "ocr") {
+		return true
 	}
 	return false
 }
@@ -401,67 +440,17 @@ func extractAssistantText(respData map[string]any) string {
 	return ""
 }
 
-func applyAdapterRules(engine types.AdapterEngine, endpoint string, reqBytes []byte, prov *types.ProviderConfig, targetModel string) ([]byte, map[string]string, error) {
-	if engine != nil {
-		mutated, extraHeaders, _, err := engine.PrepareRequest(endpoint, reqBytes, prov, targetModel, false)
-		return mutated, extraHeaders, err
-	}
-
-	extraHeaders := make(map[string]string)
-	if prov == nil || prov.AdapterRules == nil {
-		return reqBytes, extraHeaders, nil
-	}
-
-	rules := prov.AdapterRules
-	if rules.ExtraHeaders != nil {
-		for k, v := range rules.ExtraHeaders {
-			extraHeaders[k] = v
-		}
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(reqBytes, &data); err != nil {
-		return reqBytes, extraHeaders, nil
-	}
-
-	for _, param := range rules.StripParams {
-		delete(data, param)
-	}
-
-	if rules.StripReasoningEnabled {
-		if rObj, ok := data["reasoning"].(map[string]any); ok {
-			delete(rObj, "enabled")
-			if len(rObj) == 0 {
-				delete(data, "reasoning")
-			}
-		}
-		delete(data, "reasoning_effort")
-	}
-
-	for oldKey, newKey := range rules.RenameParams {
-		if val, exists := data[oldKey]; exists {
-			data[newKey] = val
-			delete(data, oldKey)
-		}
-	}
-
-	for k, v := range rules.OverrideParams {
-		data[k] = v
-	}
-
-	mutated, err := json.Marshal(data)
-	if err != nil {
-		return reqBytes, extraHeaders, nil
-	}
-	return mutated, extraHeaders, nil
-}
-
-// HandleOCR handles /v1/ocr with pre-read semaphore guard to prevent 20MB OOM.
+// HandleOCR handles /v1/ocr with pre-read semaphore guard to prevent 20MB OOM
+// and delegates candidate scheduling, cooldowns, RPM, and tracing to Scheduler.
 func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 	// Pre-read semaphore acquisition: REJECT WITH 429 BEFORE READING BODY!
+	p.mu.Lock()
+	sem := p.ocrSem
+	p.mu.Unlock()
+
 	select {
-	case p.ocrSem <- struct{}{}:
-		defer func() { <-p.ocrSem }()
+	case sem <- struct{}{}:
+		defer func() { <-sem }()
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "1")
@@ -476,181 +465,79 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Global concurrency semaphore
-	select {
-	case p.globalSem <- struct{}{}:
-		defer func() { <-p.globalSem }()
-	case <-r.Context().Done():
+	releaseGlobal, ok := p.acquireGlobalSem(r)
+	if !ok {
 		return
 	}
+	defer releaseGlobal()
 
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes+1))
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-
 	if len(bodyBytes) > MaxBodyBytes {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": "payload exceeds 20MB limit",
-				"type":    "invalid_request_error",
-			},
-		})
+		writePayloadTooLarge(w)
 		return
 	}
 
 	parsed, err := parseOCRRequest(r, bodyBytes)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": err.Error(),
-				"type":    "invalid_request_error",
-			},
-		})
+		writeBadRequest(w, err.Error(), "")
 		return
 	}
-
 	if parsed.ImageBase64 == "" && parsed.ImageURL == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": "Must provide image_base64 or image_url",
-				"type":    "invalid_request_error",
-				"code":    "missing_image",
-			},
-		})
+		writeBadRequest(w, "Must provide image_base64 or image_url", "missing_image")
 		return
 	}
-
-	snap, err := p.configSrc.Current(r.Context(), false)
-	if err != nil || snap == nil || snap.Config == nil {
-		http.Error(w, "configuration unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	candidates := snap.Config.KBModels["ocr"]
-	var enabledCandidates []*types.KBCandidate
-	for _, c := range candidates {
-		if c != nil && c.Enabled {
-			enabledCandidates = append(enabledCandidates, c)
-		}
-	}
-
-	if len(enabledCandidates) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": "no enabled candidate configured for kb ocr",
-				"type":    "invalid_request_error",
-			},
-		})
-		return
-	}
-
-	startTime := time.Now()
-	trace := types.RequestTrace{
-		ID:        fmt.Sprintf("kb_%x", time.Now().UnixNano()),
-		Timestamp: startTime.Unix(),
-		Mode:      "kb",
-		Endpoint:  "/v1/ocr",
-		ReqModel:  "ocr",
-		Tries:     make([]types.Try, 0, len(enabledCandidates)),
-	}
-
-	p.mu.Lock()
-	sink := p.obsSink
-	client := p.httpClient
-	engine := p.adapterEngine
-	p.mu.Unlock()
-
-	var lastStatus int = http.StatusBadGateway
-	var lastErrSnippet string = "all candidates failed"
 
 	detectedMime := DetectImageMIME(parsed.ImageBase64, parsed.MIMEType)
+	sched := p.getScheduler()
+	engine := sched.Engine()
 
-	for _, cand := range enabledCandidates {
-		prov, ok := snap.Config.Providers[cand.Provider]
-		if !ok || !prov.Enabled {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				Model:        cand.Model,
-				Status:       http.StatusServiceUnavailable,
-				Millis:       0,
-				Reason:       "provider_disabled",
-				ErrorSnippet: "provider not found or disabled",
-			})
-			continue
-		}
+	if snap, sErr := p.configSrc.Current(r.Context(), false); sErr == nil {
+		p.syncDynamicLimits(snap)
+	}
 
-		var apiKey string
-		var keyLabel string
-		for _, k := range prov.APIKeys {
-			if k.Enabled && (cand.KeyLabel == "" || k.Label == cand.KeyLabel || k.ID == cand.KeyLabel) {
-				apiKey = k.Key
-				keyLabel = k.Label
-				if keyLabel == "" {
-					keyLabel = k.ID
+	spec := scheduler.EndpointRequestSpec{
+		Endpoint:      "/v1/ocr",
+		Category:      "ocr",
+		ReqModel:      "ocr",
+		TraceMode:     "kb",
+		RawBody:       bodyBytes,
+		ForceStrategy: "round_robin",
+		TimeoutSec:    60,
+		BuildRequest: func(cand *scheduler.CandidateKey) (string, []byte, map[string]string, error) {
+			if isNativeOCR(cand.TargetModel, cand.Provider, parsed.Model) {
+				targetModel := cand.TargetModel
+				if targetModel == "" {
+					targetModel = "ocr"
 				}
-				break
-			}
-		}
-
-		if apiKey == "" {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				Model:        cand.Model,
-				Status:       http.StatusUnauthorized,
-				Millis:       0,
-				Reason:       "auth_error",
-				ErrorSnippet: "no matching enabled api key for candidate",
-			})
-			continue
-		}
-
-		isNative := isNativeOCR(cand, prov, parsed.Model)
-
-		var targetModel string
-		var targetURL string
-		var reqPayloadBytes []byte
-		var extraHeaders map[string]string
-
-		if isNative {
-			targetModel = cand.Model
-			if targetModel == "" {
-				targetModel = "ocr"
-			}
-			targetURL = upstream.JoinUpstream(prov.BaseURL, "ocr")
-			reqPayloadBytes = bodyBytes
-			if cand.Model != "" && cand.Model != "ocr" {
-				var parsedBody map[string]any
-				if err := json.Unmarshal(bodyBytes, &parsedBody); err == nil {
-					parsedBody["model"] = cand.Model
-					if mutated, err := json.Marshal(parsedBody); err == nil {
-						reqPayloadBytes = mutated
+				targetURL := upstream.JoinUpstream(cand.Provider.BaseURL, "ocr")
+				reqPayloadBytes := bodyBytes
+				if cand.TargetModel != "" && cand.TargetModel != "ocr" {
+					var parsedBody map[string]any
+					if json.Unmarshal(bodyBytes, &parsedBody) == nil {
+						parsedBody["model"] = cand.TargetModel
+						if mutated, mErr := json.Marshal(parsedBody); mErr == nil {
+							reqPayloadBytes = mutated
+						}
 					}
 				}
+				return targetURL, reqPayloadBytes, nil, nil
 			}
-		} else {
+
 			// Vision ChatCompletion dispatch
-			targetModel = cand.Model
+			targetModel := cand.TargetModel
 			if targetModel == "" || targetModel == "ocr" {
 				if parsed.Model != "" && parsed.Model != "ocr" {
 					targetModel = parsed.Model
 				} else {
 					targetModel = "gpt-4o"
 				}
+				cand.TargetModel = targetModel
 			}
-
-			targetURL = upstream.JoinUpstream(prov.BaseURL, "chat/completions")
+			targetURL := upstream.JoinUpstream(cand.Provider.BaseURL, "chat/completions")
 
 			dataURL := parsed.ImageURL
 			if dataURL == "" && parsed.ImageBase64 != "" {
@@ -661,10 +548,8 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			var msgs []any
-			if len(parsed.Messages) > 0 {
-				msgs = parsed.Messages
-			} else {
+			msgs := parsed.Messages
+			if len(msgs) == 0 {
 				msgs = []any{
 					map[string]any{
 						"role": "user",
@@ -675,143 +560,36 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 					},
 				}
 			}
-
 			maxTokens := parsed.MaxTokens
 			if maxTokens <= 0 {
 				maxTokens = 4096
 			}
-
-			chatBody := map[string]any{
+			rawChatBytes, err := json.Marshal(map[string]any{
 				"model":      targetModel,
 				"messages":   msgs,
 				"max_tokens": maxTokens,
 				"stream":     false,
-			}
-			// Suppress thinking/reasoning parameters
-			delete(chatBody, "reasoning_effort")
-			delete(chatBody, "thinking")
-			delete(chatBody, "reasoning")
-			delete(chatBody, "thinking_config")
-
-			rawChatBytes, err := json.Marshal(chatBody)
+			})
 			if err != nil {
-				continue
+				return "", nil, nil, err
 			}
-
-			mutated, extra, err := applyAdapterRules(engine, "/v1/chat/completions", rawChatBytes, prov, targetModel)
-			if err != nil {
-				reqPayloadBytes = rawChatBytes
-			} else {
-				reqPayloadBytes = mutated
-				extraHeaders = extra
-			}
-		}
-
-		upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(reqPayloadBytes))
-		if err != nil {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       http.StatusInternalServerError,
-				Millis:       0,
-				Reason:       "internal_error",
-				ErrorSnippet: obs.ScrubString(err.Error()),
-			})
-			continue
-		}
-
-		authHeader := "Authorization"
-		authPrefix := "Bearer "
-		if prov.AdapterRules != nil {
-			if prov.AdapterRules.AuthHeader != "" {
-				authHeader = prov.AdapterRules.AuthHeader
-			}
-			if prov.AdapterRules.AuthPrefix != "" {
-				authPrefix = prov.AdapterRules.AuthPrefix
-			}
-		}
-		upReq.Header.Set(authHeader, authPrefix+apiKey)
-		upReq.Header.Set("Content-Type", "application/json")
-		for k, v := range extraHeaders {
-			upReq.Header.Set(k, v)
-		}
-
-		startTry := time.Now()
-		resp, err := client.Do(upReq)
-		elapsed := time.Since(startTry).Milliseconds()
-
-		if err != nil {
-			lastStatus = http.StatusBadGateway
-			lastErrSnippet = err.Error()
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       http.StatusBadGateway,
-				Millis:       elapsed,
-				Reason:       "network_error",
-				ErrorSnippet: obs.ScrubString(err.Error()),
-			})
-			continue
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			snipBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 240))
-			_ = resp.Body.Close()
-
-			lastStatus = resp.StatusCode
-			lastErrSnippet = string(snipBytes)
-			reason := "server_error"
-			if resp.StatusCode == http.StatusTooManyRequests {
-				reason = "rate_limit"
-			}
-
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       resp.StatusCode,
-				Millis:       elapsed,
-				Reason:       reason,
-				ErrorSnippet: obs.ScrubString(string(snipBytes)),
-			})
-			continue
-		}
-
-		respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes))
-		_ = resp.Body.Close()
-
-		trace.Tries = append(trace.Tries, types.Try{
-			Attempt:  len(trace.Tries) + 1,
-			Provider: cand.Provider,
-			KeyID:    keyLabel,
-			Model:    targetModel,
-			Status:   resp.StatusCode,
-			Millis:   elapsed,
-		})
-		trace.WinnerProvider = cand.Provider
-		trace.WinnerKey = keyLabel
-		trace.ServedModel = targetModel
-		trace.Status = resp.StatusCode
-		trace.TotalMillis = time.Since(startTime).Milliseconds()
-		trace.UpBytes = len(reqPayloadBytes)
-		trace.DownBytes = len(respBodyBytes)
-
-		if resp.StatusCode == http.StatusOK {
 			if engine != nil {
-				if transformed, err := engine.TransformNonStreamResponse("/v1/chat/completions", respBodyBytes, prov, targetModel); err == nil {
+				mutated, extra, _, prepErr := engine.PrepareRequest("/v1/chat/completions", rawChatBytes, cand.Provider, targetModel, false)
+				if prepErr == nil {
+					return targetURL, mutated, extra, nil
+				}
+			}
+			return targetURL, rawChatBytes, nil, nil
+		},
+		TransformBody: func(cand *scheduler.CandidateKey, respBodyBytes []byte) []byte {
+			if engine != nil {
+				if transformed, err := engine.TransformNonStreamResponse("/v1/chat/completions", respBodyBytes, cand.Provider, cand.TargetModel); err == nil {
 					respBodyBytes = transformed
 				}
 			}
-
 			var respData map[string]any
-			if err := json.Unmarshal(respBodyBytes, &respData); err == nil {
-				extracted := extractAssistantText(respData)
-				if extracted != "" {
+			if json.Unmarshal(respBodyBytes, &respData) == nil {
+				if extracted := extractAssistantText(respData); extracted != "" {
 					if _, ok := respData["text"]; !ok {
 						respData["text"] = extracted
 					}
@@ -819,72 +597,38 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 						respData["content"] = extracted
 					}
 				}
-				if usage, ok := respData["usage"].(map[string]any); ok {
-					if pt, ok := usage["prompt_tokens"].(float64); ok {
-						trace.InTokens = int(pt)
-					}
-					if ct, ok := usage["completion_tokens"].(float64); ok {
-						trace.OutTokens = int(ct)
-					}
-				}
 				if mutated, err := json.Marshal(respData); err == nil {
-					respBodyBytes = mutated
+					return mutated
 				}
 			}
-		}
-
-		if sink != nil {
-			sink.RecordRequest(trace)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Routed-Via", cand.Provider)
-		w.Header().Set("X-Fallback-Attempts", strconv.Itoa(len(trace.Tries)))
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(respBodyBytes)
-		return
-	}
-
-	// All candidates failed
-	trace.Status = lastStatus
-	trace.TotalMillis = time.Since(startTime).Milliseconds()
-	if sink != nil {
-		sink.RecordRequest(trace)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(lastStatus)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{
-			"message": "all kb upstream candidates failed: " + obs.ScrubString(lastErrSnippet),
-			"type":    "upstream_error",
+			return respBodyBytes
 		},
-	})
+	}
+
+	_ = sched.ExecuteEndpoint(r.Context(), spec, w, r)
 }
 
-// HandleEmbeddings handles /v1/embeddings.
+// HandleEmbeddings handles /v1/embeddings through unified Scheduler routing.
 func (p *Pipeline) HandleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	p.dispatchKBRequest("embedding", "/v1/embeddings", w, r, nil)
 }
 
-// HandleRerank handles /v1/rerank.
+// HandleRerank handles /v1/rerank through unified Scheduler routing.
 func (p *Pipeline) HandleRerank(w http.ResponseWriter, r *http.Request) {
 	p.dispatchKBRequest("reranker", "/v1/rerank", w, r, nil)
 }
 
-// HandleChat handles /v1/chat/completions for KB mode (category="chat", stream=false).
+// HandleChat handles /v1/chat/completions for KB chat pipeline through unified Scheduler routing.
 func (p *Pipeline) HandleChat(w http.ResponseWriter, r *http.Request, bodyBytes []byte) {
 	p.dispatchKBRequest("chat", "/v1/chat/completions", w, r, bodyBytes)
 }
 
 func (p *Pipeline) dispatchKBRequest(category, endpoint string, w http.ResponseWriter, r *http.Request, preReadBody []byte) {
-	// Global concurrency semaphore
-	select {
-	case p.globalSem <- struct{}{}:
-		defer func() { <-p.globalSem }()
-	case <-r.Context().Done():
+	releaseGlobal, ok := p.acquireGlobalSem(r)
+	if !ok {
 		return
 	}
+	defer releaseGlobal()
 
 	var bodyBytes []byte
 	if preReadBody != nil {
@@ -897,267 +641,111 @@ func (p *Pipeline) dispatchKBRequest(category, endpoint string, w http.ResponseW
 			return
 		}
 	}
-
 	if len(bodyBytes) > MaxBodyBytes {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": "payload exceeds 20MB limit",
-				"type":    "invalid_request_error",
-			},
-		})
+		writePayloadTooLarge(w)
 		return
 	}
 
-	snap, err := p.configSrc.Current(r.Context(), false)
-	if err != nil || snap == nil || snap.Config == nil {
-		http.Error(w, "configuration unavailable", http.StatusServiceUnavailable)
-		return
+	if snap, sErr := p.configSrc.Current(r.Context(), false); sErr == nil {
+		p.syncDynamicLimits(snap)
 	}
 
-	candidates := snap.Config.KBModels[category]
-	var enabledCandidates []*types.KBCandidate
-	for _, c := range candidates {
-		if c != nil && c.Enabled {
-			enabledCandidates = append(enabledCandidates, c)
-		}
+	var probe struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(bodyBytes, &probe)
+	reqModel := strings.TrimSpace(probe.Model)
+	if reqModel == "" {
+		reqModel = category
 	}
 
-	if len(enabledCandidates) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{
-				"message": fmt.Sprintf("no enabled candidate configured for kb %s", category),
-				"type":    "invalid_request_error",
-			},
-		})
-		return
+	sched := p.getScheduler()
+	engine := sched.Engine()
+	upPath := strings.TrimPrefix(endpoint, "/v1/")
+	timeoutSec := 20
+	if category == "chat" {
+		timeoutSec = 60
 	}
 
-	startTime := time.Now()
-	trace := types.RequestTrace{
-		ID:        fmt.Sprintf("kb_%x", time.Now().UnixNano()),
-		Timestamp: startTime.Unix(),
-		Mode:      "kb",
-		Endpoint:  endpoint,
-		ReqModel:  category,
-		Tries:     make([]types.Try, 0, len(enabledCandidates)),
-	}
-
-	p.mu.Lock()
-	sink := p.obsSink
-	client := p.httpClient
-	engine := p.adapterEngine
-	p.mu.Unlock()
-
-	var lastStatus int = http.StatusBadGateway
-	var lastErrSnippet string = "all candidates failed"
-
-	for _, cand := range enabledCandidates {
-		prov, ok := snap.Config.Providers[cand.Provider]
-		if !ok || !prov.Enabled {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				Model:        cand.Model,
-				Status:       http.StatusServiceUnavailable,
-				Millis:       0,
-				Reason:       "provider_disabled",
-				ErrorSnippet: "provider not found or disabled",
-			})
-			continue
-		}
-
-		var apiKey string
-		var keyLabel string
-		for _, k := range prov.APIKeys {
-			if k.Enabled && (cand.KeyLabel == "" || k.Label == cand.KeyLabel || k.ID == cand.KeyLabel) {
-				apiKey = k.Key
-				keyLabel = k.Label
-				if keyLabel == "" {
-					keyLabel = k.ID
-				}
-				break
+	spec := scheduler.EndpointRequestSpec{
+		Endpoint:      endpoint,
+		Category:      category,
+		ReqModel:      reqModel,
+		TraceMode:     "kb",
+		RawBody:       bodyBytes,
+		ForceStrategy: "round_robin",
+		TimeoutSec:    timeoutSec,
+		BuildRequest: func(cand *scheduler.CandidateKey) (string, []byte, map[string]string, error) {
+			reqBytes := bodyBytes
+			targetModel := cand.TargetModel
+			if targetModel == "" {
+				targetModel = reqModel
 			}
-		}
-
-		if apiKey == "" {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				Model:        cand.Model,
-				Status:       http.StatusUnauthorized,
-				Millis:       0,
-				Reason:       "auth_error",
-				ErrorSnippet: "no matching enabled api key for candidate",
-			})
-			continue
-		}
-
-		targetModel := cand.Model
-		if targetModel == "" {
-			targetModel = category
-		}
-
-		reqBytes := bodyBytes
-		if cand.Model != "" && cand.Model != category {
 			var parsed map[string]any
-			if err := json.Unmarshal(bodyBytes, &parsed); err == nil {
-				parsed["model"] = cand.Model
-				if mutated, err := json.Marshal(parsed); err == nil {
-					reqBytes = mutated
+			if json.Unmarshal(bodyBytes, &parsed) == nil {
+				mutatedFlag := false
+				if cand.TargetModel != "" && cand.TargetModel != category && parsed["model"] != cand.TargetModel {
+					parsed["model"] = cand.TargetModel
+					mutatedFlag = true
+				}
+				if category == "chat" {
+					for _, k := range []string{"reasoning_effort", "thinking", "reasoning", "thinking_config"} {
+						if _, has := parsed[k]; has {
+							delete(parsed, k)
+							mutatedFlag = true
+						}
+					}
+					if st, ok := parsed["stream"].(bool); ok && st {
+						parsed["stream"] = false
+						mutatedFlag = true
+					}
+				}
+				if mutatedFlag {
+					if mBytes, err := json.Marshal(parsed); err == nil {
+						reqBytes = mBytes
+					}
 				}
 			}
-		}
 
-		mutated, extraHeaders, err := applyAdapterRules(engine, endpoint, reqBytes, prov, targetModel)
-		if err == nil {
-			reqBytes = mutated
-		}
-
-		targetURL := upstream.JoinUpstream(prov.BaseURL, endpoint)
-		upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBytes))
-		if err != nil {
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       http.StatusInternalServerError,
-				Millis:       0,
-				Reason:       "internal_error",
-				ErrorSnippet: obs.ScrubString(err.Error()),
-			})
-			continue
-		}
-
-		authHeader := "Authorization"
-		authPrefix := "Bearer "
-		if prov.AdapterRules != nil {
-			if prov.AdapterRules.AuthHeader != "" {
-				authHeader = prov.AdapterRules.AuthHeader
-			}
-			if prov.AdapterRules.AuthPrefix != "" {
-				authPrefix = prov.AdapterRules.AuthPrefix
-			}
-		}
-		upReq.Header.Set(authHeader, authPrefix+apiKey)
-		upReq.Header.Set("Content-Type", "application/json")
-		for k, v := range extraHeaders {
-			upReq.Header.Set(k, v)
-		}
-
-		startTry := time.Now()
-		resp, err := client.Do(upReq)
-		elapsed := time.Since(startTry).Milliseconds()
-
-		if err != nil {
-			lastStatus = http.StatusBadGateway
-			lastErrSnippet = err.Error()
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       http.StatusBadGateway,
-				Millis:       elapsed,
-				Reason:       "network_error",
-				ErrorSnippet: obs.ScrubString(err.Error()),
-			})
-			continue
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			snipBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 240))
-			_ = resp.Body.Close()
-
-			lastStatus = resp.StatusCode
-			lastErrSnippet = string(snipBytes)
-			reason := "server_error"
-			if resp.StatusCode == http.StatusTooManyRequests {
-				reason = "rate_limit"
-			}
-
-			trace.Tries = append(trace.Tries, types.Try{
-				Attempt:      len(trace.Tries) + 1,
-				Provider:     cand.Provider,
-				KeyID:        keyLabel,
-				Model:        targetModel,
-				Status:       resp.StatusCode,
-				Millis:       elapsed,
-				Reason:       reason,
-				ErrorSnippet: obs.ScrubString(string(snipBytes)),
-			})
-			continue
-		}
-
-		respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes))
-		_ = resp.Body.Close()
-
-		trace.Tries = append(trace.Tries, types.Try{
-			Attempt:  len(trace.Tries) + 1,
-			Provider: cand.Provider,
-			KeyID:    keyLabel,
-			Model:    targetModel,
-			Status:   resp.StatusCode,
-			Millis:   elapsed,
-		})
-		trace.WinnerProvider = cand.Provider
-		trace.WinnerKey = keyLabel
-		trace.ServedModel = targetModel
-		trace.Status = resp.StatusCode
-		trace.TotalMillis = time.Since(startTime).Milliseconds()
-		trace.UpBytes = len(reqBytes)
-		trace.DownBytes = len(respBodyBytes)
-
-		if resp.StatusCode == http.StatusOK {
+			var extraHeaders map[string]string
 			if engine != nil {
-				if transformed, err := engine.TransformNonStreamResponse(endpoint, respBodyBytes, prov, targetModel); err == nil {
-					respBodyBytes = transformed
+				if mBytes, extra, _, err := engine.PrepareRequest(endpoint, reqBytes, cand.Provider, targetModel, false); err == nil {
+					reqBytes = mBytes
+					extraHeaders = extra
 				}
 			}
-			var respData map[string]any
-			if err := json.Unmarshal(respBodyBytes, &respData); err == nil {
-				if usage, ok := respData["usage"].(map[string]any); ok {
-					if pt, ok := usage["prompt_tokens"].(float64); ok {
-						trace.InTokens = int(pt)
-					}
-					if ct, ok := usage["completion_tokens"].(float64); ok {
-						trace.OutTokens = int(ct)
-					}
+			return upstream.JoinUpstream(cand.Provider.BaseURL, upPath), reqBytes, extraHeaders, nil
+		},
+		TransformBody: func(cand *scheduler.CandidateKey, respBody []byte) []byte {
+			if engine != nil {
+				if transformed, err := engine.TransformNonStreamResponse(endpoint, respBody, cand.Provider, cand.TargetModel); err == nil {
+					return transformed
 				}
 			}
-		}
-
-		if sink != nil {
-			sink.RecordRequest(trace)
-		}
-
-		for k, vv := range resp.Header {
-			for _, v := range vv {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-		_, _ = w.Write(respBodyBytes)
-		return
+			return respBody
+		},
 	}
 
-	// All candidates failed
-	trace.Status = lastStatus
-	trace.TotalMillis = time.Since(startTime).Milliseconds()
-	if sink != nil {
-		sink.RecordRequest(trace)
-	}
+	_ = sched.ExecuteEndpoint(r.Context(), spec, w, r)
+}
 
+func writePayloadTooLarge(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(lastStatus)
+	w.WriteHeader(http.StatusRequestEntityTooLarge)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{
-			"message": "all kb upstream candidates failed: " + obs.ScrubString(lastErrSnippet),
-			"type":    "upstream_error",
+			"message": "payload exceeds 20MB limit",
+			"type":    "invalid_request_error",
 		},
 	})
+}
+
+func writeBadRequest(w http.ResponseWriter, msg, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	errObj := map[string]any{"message": msg, "type": "invalid_request_error"}
+	if code != "" {
+		errObj["code"] = code
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": errObj})
 }

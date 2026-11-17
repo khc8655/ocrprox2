@@ -78,21 +78,24 @@ type OAuthMeta struct {
 	ClientID     string `json:"client_id,omitempty"`
 }
 
-// AgentModelRoute Agent 模式下的模型路由绑定（100% 兼容 1 代 agent_models）
+// AgentModelRoute Agent/统一路由模式下的模型路由绑定（100% 兼容 1 代 agent_models 与固定 4 KB 模型槽位）
 type AgentModelRoute struct {
 	Enabled         bool              `json:"enabled"`
 	ActiveKey       string            `json:"active_key,omitempty"`       // 格式: "{provider}:{key_label}"（sticky_failover 首选粘性 Key）
-	RoutingStrategy string            `json:"routing_strategy,omitempty"` // 覆盖全局: "sticky_failover" | "round_robin" | "manual"
+	RoutingStrategy string            `json:"routing_strategy,omitempty"` // 覆盖全局: "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
+	NoReasoning     bool              `json:"no_reasoning,omitempty"`     // 强制剥离思考/推理参数（KB RAG chat 推荐开启）
+	ForceNonStream  bool              `json:"force_non_stream,omitempty"` // 强制改写 stream=false 非流式输出
 	Candidates      []*RouteCandidate `json:"candidates"`
 }
 
 // RouteCandidate 模型候选池条目
 type RouteCandidate struct {
 	Provider    string `json:"provider"`
-	KeyLabel    string `json:"key_label"`              // 对应 KeyEntry.Label
-	TargetModel string `json:"target_model,omitempty"` // 显式指定上游真实模型名（为空则走 ModelAliases 或原名）
+	KeyLabel    string `json:"key_label"`                  // 对应 KeyEntry.Label（为空表示展开该供应商下全部启用 Key）
+	TargetModel string `json:"target_model,omitempty"`     // 显式指定上游真实模型名（为空则走 ModelAliases 或原名）
 	Enabled     bool   `json:"enabled"`
-	Weight      int    `json:"weight,omitempty"`
+	Weight      int    `json:"weight,omitempty"`           // weighted 策略权重（默认 1）
+	MaxConc     int    `json:"max_concurrency,omitempty"`  // 单候选软并发阈值（0 表示不限，超限优先分流到其他空闲候选）
 }
 
 // KBCandidate 知识库模式四分类（chat / embedding / reranker / ocr）候选条目

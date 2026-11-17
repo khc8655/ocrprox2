@@ -17,7 +17,7 @@
     cooldowns: {},
     activeTab: 'activity',
     activeEditorKey: null,
-    modelSubMode: 'agent',
+    modelSubMode: 'all',
     providerQuery: '',
     providerFilter: 'all',
     searchQuery: '',
@@ -122,6 +122,39 @@
     return `${Math.round(n / 86400)}d`;
   }
 
+  const FIXED_SLOT_META = {
+    chat: { path: '/v1/chat/completions', desc: '固定 RAG 对话高并发通道' },
+    embedding: { path: '/v1/embeddings', desc: '固定文档向量化高并发通道' },
+    reranker: { path: '/v1/rerank', desc: '固定语义重排高并发通道' },
+    ocr: { path: '/v1/ocr', desc: '固定多模态 OCR 高并发通道' },
+  };
+  const FIXED_SLOT_IDS = ['chat', 'embedding', 'reranker', 'ocr'];
+
+  function ensureUnifiedFixedRoutes(cfg) {
+    if (!cfg || typeof cfg !== 'object') return;
+    cfg.agent_models = cfg.agent_models || {};
+    const kb = cfg.kb_models || {};
+    for (const cat of FIXED_SLOT_IDS) {
+      const kbList = Array.isArray(kb[cat]) ? kb[cat] : [];
+      if (!cfg.agent_models[cat] && kbList.length > 0) {
+        cfg.agent_models[cat] = {
+          enabled: true,
+          routing_strategy: 'round_robin',
+          no_reasoning: cat === 'chat',
+          force_non_stream: cat === 'chat',
+          candidates: kbList.filter(Boolean).map((kc) => ({
+            provider: kc.provider || '',
+            key_label: kc.key_label || kc.key || '',
+            target_model: kc.model || '',
+            enabled: kc.enabled !== false,
+            weight: 1,
+            max_concurrency: Number(kc.max_concurrency || kc.max_conc || 0) || 0,
+          })),
+        };
+      }
+    }
+  }
+
   // Which routes reference this provider/key pair? Used to warn before a key is
   // disabled or deleted, since candidates bind to an explicit provider:key_label.
   function routesUsingKey(providerId, keyLabel) {
@@ -130,13 +163,14 @@
     for (const [model, route] of Object.entries(agentModels)) {
       const cands = (route && route.candidates) || [];
       if (cands.some((c) => c && c.provider === providerId && (c.key_label === keyLabel) && c.enabled !== false)) {
-        refs.push(`Agent 模型 ${model}`);
+        refs.push(`模型路由 ${model}`);
       }
     }
     const kbModels = (state.config && state.config.kb_models) || {};
     for (const [kind, list] of Object.entries(kbModels)) {
+      if (agentModels[kind]) continue;
       if ((list || []).some((c) => c && c.provider === providerId && c.key_label === keyLabel)) {
-        refs.push(`KB 流水线 ${kind}`);
+        refs.push(`固定通道 ${kind}`);
       }
     }
     return refs;
@@ -244,7 +278,6 @@
     const navNodes = $('navNodes');
     const navActivity = $('navActivity');
     const topVersionBox = $('topVersionBox');
-    const modeSwitchBox = $('modeSwitchBox');
     const vaultSyncBar = $('vaultSyncBar');
     const cfgVaultLinkBox = $('cfgVaultLinkBox');
     const hubOverviewBox = $('hubOverviewBox');
@@ -255,7 +288,6 @@
     if (navNodes) navNodes.hidden = !caps.nodeManager;
     if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
-    if (modeSwitchBox) modeSwitchBox.hidden = !caps.runModes;
     if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
     if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
     if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
@@ -423,13 +455,6 @@
         window.HOST.setToken('');
         window.HOST.showLogin();
       });
-    }
-
-    const modeBtnAgent = $('modeBtnAgent');
-    const modeBtnKB = $('modeBtnKB');
-    if (modeBtnAgent && modeBtnKB) {
-      clk(modeBtnAgent, () => switchRunMode('agent'));
-      clk(modeBtnKB, () => switchRunMode('kb'));
     }
 
     const btnIssueNode = $('btnIssueNode');
@@ -666,7 +691,7 @@
     if (modelSubSeg) {
       modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
         clk(btn, () => {
-          const m = btn.getAttribute('data-submode') || 'agent';
+          const m = btn.getAttribute('data-submode') || 'all';
           state.modelSubMode = m;
           modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
             b.classList.toggle('active', b.getAttribute('data-submode') === m);
@@ -912,54 +937,14 @@
     }
   }
 
-  async function switchRunMode(mode) {
-    if (!window.HOST.capabilities.runModes) return;
-    try {
-      const res = await window.HOST.switchMode(mode);
-      if (res && res.ok) {
-        toast(`已切换至 ${mode === 'agent' ? 'Agent 模式' : 'KB 知识库模式'}`, 'ok');
-        if (state.config && state.config.settings) {
-          state.config.settings.run_mode = mode;
-        }
-        state.modelSubMode = mode;
-        updateRunModeUI(mode);
-        renderModelsList();
-      } else {
-        toast(res.error || '切换模式失败', 'err');
-      }
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  }
-
-  function updateRunModeUI(mode) {
-    const isAgent = mode === 'agent';
-    const btnAgent = $('modeBtnAgent');
-    const btnKB = $('modeBtnKB');
-    if (btnAgent && btnKB) {
-      btnAgent.classList.toggle('active', isAgent);
-      btnKB.classList.toggle('active', !isAgent);
-    }
-    const modelSubSeg = $('modelPipelineSeg');
-    if (modelSubSeg) {
-      modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
-        b.classList.toggle('active', b.getAttribute('data-submode') === mode);
-      });
-    }
-  }
-
   async function loadData() {
     try {
       const cfgResp = await window.HOST.getConfig();
       if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
+        ensureUnifiedFixedRoutes(cfgResp);
         state.config = cfgResp;
         const verEl = $('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
-
-        if (state.config.settings && state.config.settings.run_mode) {
-          state.modelSubMode = state.config.settings.run_mode;
-          updateRunModeUI(state.config.settings.run_mode);
-        }
 
         renderProvidersList();
         renderModelsList();
@@ -1963,36 +1948,43 @@
     }
   }
 
-  // --- View: Models & KB Pipeline Visual Editor (U1, U5, M16) ---
+  // --- View: Unified Model Routing & Fixed 4 High-Concurrency Channels (U1, U5, M16) ---
   function renderModelsList() {
     const container = $('modelsList');
     if (!container) return;
     container.innerHTML = '';
 
-    const isAgent = (state.modelSubMode || 'agent') === 'agent';
     const btnAddModel = $('btnAddModel');
     if (btnAddModel) {
-      btnAddModel.hidden = !isAgent;
-      btnAddModel.classList.toggle('hidden', !isAgent);
+      btnAddModel.hidden = false;
+      btnAddModel.classList.remove('hidden');
     }
-    if (isAgent) {
-      renderAgentModels(container);
-    } else {
-      renderKBPipelines(container);
-    }
-  }
 
-  function renderAgentModels(container) {
+    ensureUnifiedFixedRoutes(state.config);
     const models = state.config?.agent_models || {};
     const q = state.modelQuery || '';
-    const mKeys = Object.keys(models).sort().filter((mName) => {
+    const sub = state.modelSubMode || 'all';
+
+    // Always list built-in fixed channels first, followed by custom models sorted alphabetically
+    const customKeys = Object.keys(models).filter((k) => !FIXED_SLOT_META[k]).sort();
+    let orderedKeys = [];
+    if (sub === 'fixed') {
+      orderedKeys = [...FIXED_SLOT_IDS];
+    } else if (sub === 'custom') {
+      orderedKeys = customKeys;
+    } else {
+      orderedKeys = [...FIXED_SLOT_IDS, ...customKeys];
+    }
+
+    orderedKeys = orderedKeys.filter((mName) => {
       if (!q) return true;
       const m = models[mName] || {};
+      const meta = FIXED_SLOT_META[mName];
       const cands = (m.candidates || []).map((c) => `${c.provider} ${c.target_model}`).join(' ');
-      return `${mName} ${cands}`.toLowerCase().includes(q);
+      return `${mName} ${meta?.path || ''} ${cands}`.toLowerCase().includes(q);
     });
 
-    if (mKeys.length === 0) {
+    if (orderedKeys.length === 0) {
       const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
       emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
@@ -2000,56 +1992,93 @@
       return;
     }
 
-    for (const mName of mKeys) {
-      const m = models[mName] || {};
+    const stratLabels = {
+      sticky_failover: '多路会话粘性',
+      round_robin: '空闲优先轮询',
+      weighted: '权重分摊',
+      least_busy: '最少并发优先',
+      fast: '低延迟优先',
+      manual: '手动直通',
+    };
+
+    for (const mName of orderedKeys) {
+      const meta = FIXED_SLOT_META[mName];
+      const isFixed = Boolean(meta);
+      const m = models[mName] || {
+        enabled: true,
+        routing_strategy: isFixed ? 'round_robin' : 'sticky_failover',
+        no_reasoning: mName === 'chat',
+        force_non_stream: mName === 'chat',
+        candidates: [],
+      };
       const cCount = (m.candidates || []).length;
       const isExpanded = state.activeEditorKey === `m_${mName}`;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
+      const defaultStrat = isFixed ? 'round_robin' : 'sticky_failover';
+      const strat = m.routing_strategy || defaultStrat;
 
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
       const dot = ce('span');
-      dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}`;
+      dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : (isFixed ? 'dot--warn' : 'dot--err')}`;
 
       const who = ce('div');
       who.className = 'who';
+      const subDesc = isFixed
+        ? `${meta.path} · ${meta.desc}`
+        : `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${eh(mName)}</span>
-          <span class="pill pill--accent">${eh(m.routing_strategy || 'sticky_failover')}</span>
+          ${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
+          <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
           ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
         </div>
-        <div class="sub">首选 Key: ${eh(m.active_key || '未指定')} · 候选池: ${cCount} 个</div>
+        <div class="sub">${eh(subDesc)}</div>
       `;
 
       const fields = ce('div');
       fields.className = 'fields';
+      const canTest = window.HOST.capabilities.runModes && cCount > 0;
       fields.innerHTML = `
-        <button class="btn btn--sm btn_test_agent_m" data-model="${eh(mName)}" type="button">测试路由</button>
+        ${canTest ? `<button class="btn btn--sm btn_test_agent_m" data-model="${eh(mName)}" type="button">测试路由</button>` : ''}
         <span class="pill">${cCount} 候选</span>
         <span class="caret">▾</span>
       `;
 
-      // Agent Model Route Test Button (U5)
-      clk(fields.querySelector('.btn_test_agent_m'), async (e) => {
-        e.stopPropagation();
-        toast(`正在测试模型 ${mName} 路由...`, 'info');
-        try {
-          const res = await window.HOST.testAgentModel({ model: mName });
-          if (res && res.ok) {
-            const lat = res.latency_ms || res.ms || 0;
-            m._lastTestLatency = lat;
-            toast(`测试通过！耗时: ${lat}ms (优胜: ${res.winner_provider || '直连'})`, 'ok');
-            renderAgentModels(container);
-          } else {
-            toast(`测试失败: ${res?.error || '路由无响应'}`, 'err');
+      const testBtn = fields.querySelector('.btn_test_agent_m');
+      if (testBtn) {
+        clk(testBtn, async (e) => {
+          e.stopPropagation();
+          toast(`正在测试 ${mName} 路由...`, 'info');
+          try {
+            let res;
+            if (mName === 'embedding' || mName === 'reranker' || mName === 'ocr') {
+              const first = (m.candidates || []).find((c) => c && c.enabled !== false) || m.candidates[0];
+              res = await window.HOST.testCandidate({
+                provider: first.provider,
+                key_label: first.key_label,
+                model: first.target_model || mName,
+                type: mName,
+              });
+            } else {
+              res = await window.HOST.testAgentModel({ model: mName });
+            }
+            if (res && res.ok) {
+              const lat = res.latency_ms || res.ms || 0;
+              m._lastTestLatency = lat;
+              toast(`测试通过！耗时: ${lat}ms${res.winner_provider ? ` (优胜: ${res.winner_provider})` : ''}`, 'ok');
+              renderModelsList();
+            } else {
+              toast(`测试失败: ${res?.error || '路由无响应'}`, 'err');
+            }
+          } catch (err) {
+            toast(`测试异常: ${err.message}`, 'err');
           }
-        } catch (err) {
-          toast(`测试异常: ${err.message}`, 'err');
-        }
-      });
+        });
+      }
 
       row.appendChild(dot);
       row.appendChild(who);
@@ -2066,30 +2095,47 @@
       if (isExpanded) {
         const editor = ce('div');
         editor.className = 'editor';
-        editor.appendChild(buildModelEditor(mName, m));
+        editor.appendChild(buildModelEditor(mName, m, isFixed));
         container.appendChild(editor);
       }
     }
   }
 
-  function buildModelEditor(mName, m) {
+  function buildModelEditor(mName, m, isFixed = false) {
     const wrap = ce('div');
     const q = (s) => wrap.querySelector(s);
-    const candidates = m.candidates || [];
+    m.candidates = m.candidates || [];
+    const candidates = m.candidates;
+    const strat = m.routing_strategy || (isFixed ? 'round_robin' : 'sticky_failover');
 
     wrap.innerHTML = `
       <div class="form-grid form-grid--2">
         <div class="form-group">
-          <label class="form-label">路由策略覆盖</label>
+          <label class="form-label">路由策略</label>
           <select class="select" id="ed_m_strat_${mName}">
-            <option value="sticky_failover" ${m.routing_strategy === 'sticky_failover' ? 'selected' : ''}>粘性故障转移 (推荐)</option>
-            <option value="round_robin" ${m.routing_strategy === 'round_robin' ? 'selected' : ''}>标准轮询 (Round Robin)</option>
-            <option value="manual" ${m.routing_strategy === 'manual' ? 'selected' : ''}>手动严格直通</option>
+            <option value="sticky_failover" ${strat === 'sticky_failover' ? 'selected' : ''}>多路会话粘性优先 (sticky_failover)</option>
+            <option value="round_robin" ${strat === 'round_robin' ? 'selected' : ''}>空闲优先轮询 (round_robin)</option>
+            <option value="weighted" ${strat === 'weighted' ? 'selected' : ''}>按权重比例分摊 (weighted)</option>
+            <option value="least_busy" ${strat === 'least_busy' ? 'selected' : ''}>最少并发优先 (least_busy)</option>
+            <option value="fast" ${strat === 'fast' ? 'selected' : ''}>动态低延迟优先 (fast)</option>
+            <option value="manual" ${strat === 'manual' ? 'selected' : ''}>手动严格直通 (manual)</option>
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">首选粘性 Key (active_key)</label>
+          <label class="form-label">首选/指定 Key (sticky/manual 可选)</label>
           <input class="input" id="ed_m_act_${mName}" value="${eh(m.active_key || '')}" placeholder="格式: provider:key_label">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="ed_m_noreas_${mName}" ${m.no_reasoning ? 'checked' : ''}>
+            <span>剥离思考/推理参数 (RAG/KB 推荐)</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="ed_m_nonstream_${mName}" ${m.force_non_stream ? 'checked' : ''}>
+            <span>强制非流式响应 (stream=false)</span>
+          </label>
         </div>
       </div>
 
@@ -2102,10 +2148,12 @@
           <table class="data-table">
             <thead>
               <tr>
+                <th>启用</th>
                 <th>供应商</th>
                 <th>Key 标签</th>
                 <th>目标模型</th>
                 <th>权重</th>
+                <th>并发上限</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -2119,10 +2167,16 @@
           <input class="input" id="new_c_prov_${mName}" placeholder="供应商 ID (如 minimax)">
         </div>
         <div class="form-group">
-          <input class="input" id="new_c_lbl_${mName}" placeholder="Key 标签 (如 pool-01)">
+          <input class="input" id="new_c_lbl_${mName}" placeholder="Key 标签 (留空=全部启用Key)">
         </div>
         <div class="form-group">
           <input class="input" id="new_c_target_${mName}" placeholder="上游真实模型 (留空同名)">
+        </div>
+        <div class="form-group">
+          <input class="input tabular" id="new_c_weight_${mName}" type="number" min="1" value="1" placeholder="权重 (1)">
+        </div>
+        <div class="form-group">
+          <input class="input tabular" id="new_c_conc_${mName}" type="number" min="0" value="0" placeholder="并发上限 (0=不限)">
         </div>
       </div>
       <div class="section-bar mt-2 flex-end">
@@ -2131,7 +2185,7 @@
 
       <div class="form-actions form-actions--split">
         <div class="form-actions-group">
-          <button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>
+          ${isFixed ? '' : `<button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>`}
         </div>
         <div class="form-actions-group">
           <button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button>
@@ -2144,14 +2198,19 @@
       const tr = ce('tr');
       const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
       tr.innerHTML = `
+        <td><input type="checkbox" class="m_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td>
         <td>${brandIco}<strong>${eh(c.provider)}</strong></td>
-        <td><span class="pill">${eh(c.key_label)}</span></td>
+        <td><span class="pill">${eh(c.key_label || '* (全部Key)')}</span></td>
         <td><span class="tabular">${eh(c.target_model || '原名')}</span></td>
         <td><span class="tabular">${c.weight || 1}</span></td>
+        <td><span class="tabular">${c.max_concurrency ? c.max_concurrency : '不限'}</span></td>
         <td>
           <button class="btn btn--sm btn--danger btn_del_cand" data-idx="${idx}" type="button">移除</button>
         </td>
       `;
+      tr.querySelector('.m_c_en').addEventListener('change', (e) => {
+        c.enabled = e.target.checked;
+      });
       clk(tr.querySelector('.btn_del_cand'), () => {
         candidates.splice(idx, 1);
         renderModelsList();
@@ -2163,212 +2222,47 @@
       const prov = q(`#new_c_prov_${mName}`).value.trim();
       const lbl = q(`#new_c_lbl_${mName}`).value.trim();
       const target = q(`#new_c_target_${mName}`).value.trim();
-      if (!prov || !lbl) return toast('请填写供应商和 Key 标签', 'warn');
+      const weight = Math.max(1, Number(q(`#new_c_weight_${mName}`)?.value) || 1);
+      const conc = Math.max(0, Number(q(`#new_c_conc_${mName}`)?.value) || 0);
+      if (!prov) return toast('请填写供应商 ID', 'warn');
       candidates.push({
         provider: prov,
         key_label: lbl,
         target_model: target || '',
         enabled: true,
-        weight: 1,
+        weight,
+        max_concurrency: conc,
       });
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.agent_models = state.config.agent_models || {};
+      state.config.agent_models[mName] = m;
       renderModelsList();
     });
 
     clk(q(`#btn_save_model_${mName}`), async () => {
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.agent_models = state.config.agent_models || {};
+      m.enabled = true;
       m.routing_strategy = q(`#ed_m_strat_${mName}`).value;
       m.active_key = q(`#ed_m_act_${mName}`).value.trim();
+      m.no_reasoning = Boolean(q(`#ed_m_noreas_${mName}`)?.checked);
+      m.force_non_stream = Boolean(q(`#ed_m_nonstream_${mName}`)?.checked);
+      state.config.agent_models[mName] = m;
+      if (state.config.kb_models && state.config.kb_models[mName]) {
+        delete state.config.kb_models[mName];
+      }
       await persistConfig('模型配置保存成功');
     });
 
-    clk(q(`#btn_del_model_${mName}`), async () => {
-      if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
-      delete state.config.agent_models[mName];
-      state.activeEditorKey = null;
-      await persistConfig('模型已删除');
-    });
-
-    return wrap;
-  }
-
-  // KB 4-Pipeline Visual Editor (U1, M16)
-  function renderKBPipelines(container) {
-    const pipelines = [
-      { id: 'chat', name: '对话流水线', path: '/v1/chat/completions', desc: 'RAG 生成对话专用高并发通道' },
-      { id: 'embedding', name: '向量嵌入流水线', path: '/v1/embeddings', desc: '文档分块高吞吐向量化' },
-      { id: 'reranker', name: '重排流水线', path: '/v1/rerank', desc: '多候选语义重排打分' },
-      { id: 'ocr', name: '图文解析流水线', path: '/v1/ocr', desc: '文档图像多模态 OCR 提取' },
-    ];
-
-    state.config.kb_models = state.config.kb_models || {};
-
-    pipelines.forEach((pl) => {
-      const cands = state.config.kb_models[pl.id] || [];
-      const isExpanded = state.activeEditorKey === `kb_${pl.id}`;
-
-      const row = ce('div');
-      row.className = `row ${isExpanded ? 'expanded' : ''}`;
-
-      const dot = ce('span');
-      dot.className = `dot ${cands.length > 0 ? 'dot--ok' : 'dot--warn'}`;
-
-      const who = ce('div');
-      who.className = 'who';
-      who.innerHTML = `
-        <div class="name">
-          <span>${pl.path}</span>
-          <span class="pill pill--accent">${pl.name}</span>
-          <span class="pill">${cands.length} 候选实例</span>
-        </div>
-        <div class="sub">${pl.desc}</div>
-      `;
-
-      const fields = ce('div');
-      fields.className = 'fields';
-      fields.innerHTML = `
-        <span class="caret">▾</span>
-      `;
-
-      row.appendChild(dot);
-      row.appendChild(who);
-      row.appendChild(fields);
-
-      clk(row, (ev) => {
-        if (ev.target.closest('button') || ev.target.closest('input')) return;
-        state.activeEditorKey = isExpanded ? null : `kb_${pl.id}`;
-        renderModelsList();
+    const delBtn = q(`#btn_del_model_${mName}`);
+    if (delBtn) {
+      clk(delBtn, async () => {
+        if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
+        delete state.config.agent_models[mName];
+        state.activeEditorKey = null;
+        await persistConfig('模型已删除');
       });
-
-      container.appendChild(row);
-
-      if (isExpanded) {
-        const editor = ce('div');
-        editor.className = 'editor';
-        editor.appendChild(buildKBPipelineEditor(pl.id, pl, cands));
-        container.appendChild(editor);
-      }
-    });
-  }
-
-  function buildKBPipelineEditor(cat, pl, cands) {
-    const wrap = ce('div');
-    const q = (s) => wrap.querySelector(s);
-
-    wrap.innerHTML = `
-      <div class="section-bar">
-        <span class="form-label">${pl.name} (${pl.path}) 候选池列表</span>
-      </div>
-
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>启用</th>
-                <th>供应商</th>
-                <th>Key 标签</th>
-                <th>目标模型 ID</th>
-                <th>并发限制</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="kb_cands_tbody_${cat}"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="form-grid mt-3">
-        <div class="form-group">
-          <input class="input" id="new_kb_prov_${cat}" placeholder="供应商 ID">
-        </div>
-        <div class="form-group">
-          <input class="input" id="new_kb_key_${cat}" placeholder="Key 标签">
-        </div>
-        <div class="form-group">
-          <input class="input" id="new_kb_model_${cat}" placeholder="上游真实模型 ID">
-        </div>
-        <div class="form-group">
-          <input class="input tabular" id="new_kb_conc_${cat}" type="number" placeholder="最大并发 (默认 4)" value="4">
-        </div>
-        <div class="form-group flex-end">
-          <button class="btn" id="btn_add_kb_cand_${cat}" type="button">添加候选</button>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button class="btn btn--primary" id="btn_save_kb_${cat}" type="button">保存流水线配置</button>
-      </div>
-    `;
-
-    const tbody = q(`#kb_cands_tbody_${cat}`);
-    cands.forEach((c, idx) => {
-      const tr = ce('tr');
-      const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
-      tr.innerHTML = `
-        <td><input type="checkbox" class="kb_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td>
-        <td>${brandIco}<strong>${eh(c.provider)}</strong></td>
-        <td><span class="pill">${eh(c.key_label || c.key)}</span></td>
-        <td><span class="tabular">${eh(c.model)}</span></td>
-        <td><span class="tabular">${c.max_concurrency || c.max_conc || 4}</span></td>
-        <td>
-          <button class="btn btn--sm btn_test_kb_cand" data-idx="${idx}" type="button">测试管道</button>
-          <button class="btn btn--sm btn--danger btn_del_kb_cand" data-idx="${idx}" type="button">移除</button>
-        </td>
-      `;
-
-      tr.querySelector('.kb_c_en').addEventListener('change', (e) => {
-        c.enabled = e.target.checked;
-      });
-
-      // Test candidate endpoint (POST /api/admin/test-candidate)
-      clk(tr.querySelector('.btn_test_kb_cand'), async () => {
-        toast(`正在烟雾测试 [${cat}] 候选 ${c.provider}/${c.model}...`, 'info');
-        try {
-          const res = await window.HOST.testCandidate({
-            provider: c.provider,
-            key_label: c.key_label || c.key,
-            model: c.model,
-            type: cat,
-          });
-          if (res && res.ok) {
-            toast(`管道测试通过！延迟: ${res.latency_ms || res.ms || 0}ms`, 'ok');
-          } else {
-            toast(`测试失败: ${res?.error || '无响应'}`, 'err');
-          }
-        } catch (e) {
-          toast(`测试异常: ${e.message}`, 'err');
-        }
-      });
-
-      clk(tr.querySelector('.btn_del_kb_cand'), () => {
-        cands.splice(idx, 1);
-        renderModelsList();
-      });
-
-      tbody.appendChild(tr);
-    });
-
-    clk(q(`#btn_add_kb_cand_${cat}`), () => {
-      const prov = q(`#new_kb_prov_${cat}`).value.trim();
-      const kLbl = q(`#new_kb_key_${cat}`).value.trim();
-      const mdl = q(`#new_kb_model_${cat}`).value.trim();
-      const conc = Number(q(`#new_kb_conc_${cat}`).value) || 4;
-
-      if (!prov || !mdl) return toast('请填写供应商与模型 ID', 'warn');
-      cands.push({
-        provider: prov,
-        key_label: kLbl,
-        model: mdl,
-        max_concurrency: conc,
-        enabled: true,
-      });
-      state.config.kb_models[cat] = cands;
-      renderModelsList();
-    });
-
-    clk(q(`#btn_save_kb_${cat}`), async () => {
-      state.config.kb_models[cat] = cands;
-      await persistConfig('知识库流水线配置保存成功');
-    });
+    }
 
     return wrap;
   }
@@ -2526,12 +2420,6 @@
         };
       }
 
-      // Mode Schedule (U4)
-      const schedEnabled = $('cfgModeSchedEnabled');
-      if (schedEnabled) schedEnabled.checked = !!s.mode_schedule_enabled;
-      setVal('cfgModeSchedWindow', s.mode_schedule_agent_window || '08:30-22:30');
-      setVal('cfgModeSchedTz', s.mode_schedule_timezone || 'Asia/Shanghai');
-      setVal('cfgModeSchedWebhook', s.mode_schedule_webhook_url || '');
       setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
       setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
@@ -2566,10 +2454,6 @@
         s.cooldown_auth_error_sec = Math.max(0, Number($('cfgCooldownAuth').value) || 0);
 
         if (isFull) {
-          s.mode_schedule_enabled = !!$('cfgModeSchedEnabled')?.checked;
-          s.mode_schedule_agent_window = $('cfgModeSchedWindow')?.value.trim() || '08:30-22:30';
-          s.mode_schedule_timezone = $('cfgModeSchedTz')?.value.trim() || 'Asia/Shanghai';
-          s.mode_schedule_webhook_url = $('cfgModeSchedWebhook')?.value.trim() || '';
           s.ocr_max_inflight = Number($('cfgOcrInflight')?.value) || 4;
           s.kb_global_max_concurrency = Number($('cfgKbConcurrency')?.value) || 16;
         }

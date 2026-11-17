@@ -55,8 +55,8 @@
     },
     "run_mode": {
       "group": "routing",
-      "label": "当前运行模式",
-      "hint": "agent 模式提供对话代理服务；kb 模式提供知识库流水线服务",
+      "label": "兼容运行模式标记 (已统一常驻)",
+      "hint": "全端口已统一常驻可用，该字段仅作旧版配置兼容保留",
       "type": "string",
       "enum": ["agent", "kb"],
       "default": "agent",
@@ -64,10 +64,10 @@
     },
     "agent_routing_strategy": {
       "group": "routing",
-      "label": "智能体 Key 调度策略",
-      "hint": "sticky_failover: 粘性首选，遇故障顺延切换；round_robin: 轮询分摊；manual: 固定首个候选不切换",
+      "label": "全局默认路由策略",
+      "hint": "sticky_failover: 多路会话粘性优先；round_robin: 空闲优先轮询；weighted: 按权重比例分摊；least_busy: 最少在途并发优先；fast: 动态低延迟优先；manual: 固定直通",
       "type": "string",
-      "enum": ["sticky_failover", "round_robin", "manual"],
+      "enum": ["sticky_failover", "round_robin", "weighted", "least_busy", "fast", "manual"],
       "default": "sticky_failover",
       "roles": ["hub", "lite", "full"]
     },

@@ -421,6 +421,21 @@ describe('T3 Blackbox End-to-End Suite', () => {
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
+        if (req.url.endsWith('/messages')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              id: 'msg_mock_full',
+              type: 'message',
+              role: 'assistant',
+              model: 'gpt-4o',
+              content: [{ type: 'text', text: 'messages response ok' }],
+              usage: { input_tokens: 10, output_tokens: 5 },
+            })
+          );
+          return;
+        }
+
         if (req.url.endsWith('/chat/completions')) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
@@ -603,7 +618,7 @@ describe('T3 Blackbox End-to-End Suite', () => {
       assert.strictEqual(guardRes.statusCode, 200);
       assert.strictEqual(guardRes.json._version, 2);
 
-      // 8. Test Agent mode behavior
+      // 8. Unified routing behavior (no mode lockout: Agent + fixed 4 KB endpoints always active simultaneously)
       // Request /v1/chat/completions succeeds (200 OK) and verifies Kernel Guard retained raw key
       const agentChatRes = await httpRequest(
         `http://127.0.0.1:${fullPort}/v1/chat/completions`,
@@ -626,53 +641,42 @@ describe('T3 Blackbox End-to-End Suite', () => {
         'full mode chat response'
       );
 
-      // In agent mode, /v1/ocr is strictly disabled (404)
-      const agentOcrRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/ocr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${clientKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: { image: 'sample' },
-      });
-      assert.strictEqual(agentOcrRes.statusCode, 404, '/v1/ocr must be disabled in agent mode');
-
-      // 9. Switch mode to KB mode via POST /api/admin/mode
-      const modeSwitchRes = await httpRequest(`http://127.0.0.1:${fullPort}/api/admin/mode`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${adminPassword}`,
-          'Content-Type': 'application/json',
-        },
-        body: { mode: 'kb' },
-      });
-
-      assert.strictEqual(modeSwitchRes.statusCode, 200);
-      assert.strictEqual(modeSwitchRes.json.ok, true);
-      assert.strictEqual(modeSwitchRes.json.mode, 'kb');
-
-      // 10. Test KB mode behavior
-      // /v1/messages is disabled in KB mode (404)
-      const kbMessagesRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${clientKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: { model: 'chat', messages: [] },
-      });
-      assert.strictEqual(kbMessagesRes.statusCode, 404, '/v1/messages must return 404 in kb mode');
-
-      // GET /v1/models returns the 4 KB models
-      const kbModelsRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/models`, {
+      // GET /v1/models returns both Agent models and fixed 4 KB models simultaneously
+      const unifiedModelsRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/models`, {
         headers: { Authorization: `Bearer ${clientKey}` },
       });
-      assert.strictEqual(kbModelsRes.statusCode, 200);
-      assert.strictEqual(kbModelsRes.json.data.length, 4);
-      const modelIds = kbModelsRes.json.data.map((m) => m.id).sort();
-      assert.deepStrictEqual(modelIds, ['chat', 'embedding', 'ocr', 'reranker']);
+      assert.strictEqual(unifiedModelsRes.statusCode, 200);
+      assert.strictEqual(unifiedModelsRes.json.data.length, 5);
+      const modelIds = unifiedModelsRes.json.data.map((m) => m.id).sort();
+      assert.deepStrictEqual(modelIds, ['chat', 'embedding', 'gpt-4o', 'ocr', 'reranker']);
 
-      // /v1/ocr succeeds (200 OK)
+      // POST /v1/chat/completions with model="chat" & stream=true auto-coerces cleanly (1st gen KB chat parity)
+      const kbChatRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${clientKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: {
+          model: 'chat',
+          stream: true,
+          messages: [{ role: 'user', content: 'rag query' }],
+        },
+      });
+      assert.strictEqual(kbChatRes.statusCode, 200);
+
+      // /v1/messages also stays available regardless of run_mode setting
+      const messagesRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${clientKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
+      });
+      assert.strictEqual(messagesRes.statusCode, 200, '/v1/messages must stay enabled alongside KB endpoints');
+
+      // /v1/ocr succeeds (200 OK) without needing any mode switch
       const kbOcrRes = await httpRequest(`http://127.0.0.1:${fullPort}/v1/ocr`, {
         method: 'POST',
         headers: {

@@ -26,10 +26,6 @@
       </nav>
 
       <div class="header-actions">
-        <div class="seg" id="modeSwitchBox" hidden>
-          <button class="seg-btn" id="modeBtnAgent" type="button">Agent</button>
-          <button class="seg-btn" id="modeBtnKB" type="button">KB</button>
-        </div>
         <span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span>
         <button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button>
         <button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button>
@@ -283,20 +279,21 @@
     <section id="viewModels" hidden>
       <div class="view-header">
         <div>
-          <h1 class="view-title">模型路由与流水线</h1>
-          <p class="view-sub" id="modelsSubtitle">配置 Agent 逻辑模型映射及知识库 (KB) 高并发候选流水线</p>
+          <h1 class="view-title">统一模型路由与内置通道</h1>
+          <p class="view-sub" id="modelsSubtitle">内置 4 条固定高并发通道 (chat / embedding / reranker / ocr) 与大模型逻辑路由，支持会话粘性及轮询/权重/最闲/低延迟并发策略</p>
         </div>
         <div class="view-actions">
           <div class="seg" id="modelPipelineSeg">
-            <button class="seg-btn active" data-submode="agent" type="button">Agent 路由</button>
-            <button class="seg-btn" data-submode="kb" type="button">KB 流水线</button>
+            <button class="seg-btn active" data-submode="all" type="button">全部</button>
+            <button class="seg-btn" data-submode="fixed" type="button">固定 4 通道</button>
+            <button class="seg-btn" data-submode="custom" type="button">自定义模型</button>
           </div>
           <button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button>
         </div>
       </div>
 
       <div class="card card-pad" id="addModelForm" hidden>
-        <h2 class="card-title mb-3">新增 Agent 逻辑模型</h2>
+        <h2 class="card-title mb-3">新增逻辑模型路由</h2>
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label">对外模型名</label>
@@ -446,8 +443,11 @@
           <div class="form-group">
             <label class="form-label">默认路由策略</label>
             <select class="select" id="cfgRoutingStrategy">
-              <option value="sticky_failover">粘性故障转移</option>
-              <option value="round_robin">标准轮询</option>
+              <option value="sticky_failover">多路会话粘性优先</option>
+              <option value="round_robin">空闲优先轮询</option>
+              <option value="weighted">按权重比例分摊</option>
+              <option value="least_busy">最少并发优先</option>
+              <option value="fast">动态低延迟优先</option>
               <option value="manual">手动直通</option>
             </select>
           </div>
@@ -474,35 +474,19 @@
         </div>
       </div>
 
-      <!-- 3. Mode Schedule & Concurrency (Full) -->
+      <!-- 3. High-Concurrency Guards (Full) -->
       <div class="card card-pad" id="modeScheduleBox" hidden>
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">3</span>运行模式定时调度与并发保护</h2>
-          <label class="form-label">
-            <input type="checkbox" id="cfgModeSchedEnabled">
-            <span>启用自动时段切换</span>
-          </label>
+          <h2 class="card-title"><span class="step-num">3</span>高并发护栏与 OCR 过载保护</h2>
         </div>
-        <div class="form-grid">
+        <div class="form-grid form-grid--2">
           <div class="form-group">
-            <label class="form-label">Agent 模式时段</label>
-            <input class="input input--code" id="cfgModeSchedWindow" placeholder="08:30-22:30">
+            <label class="form-label">OCR 预读并发上限 (防大图 OOM)</label>
+            <input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="32" placeholder="4">
           </div>
           <div class="form-group">
-            <label class="form-label">时区</label>
-            <input class="input input--code" id="cfgModeSchedTz" placeholder="Asia/Shanghai">
-          </div>
-          <div class="form-group">
-            <label class="form-label">状态变更 Webhook</label>
-            <input class="input input--code" id="cfgModeSchedWebhook" placeholder="https://...">
-          </div>
-          <div class="form-group">
-            <label class="form-label">OCR 最大并发数</label>
-            <input class="input tabular" id="cfgOcrInflight" type="number" placeholder="4">
-          </div>
-          <div class="form-group">
-            <label class="form-label">KB 全局并发上限</label>
-            <input class="input tabular" id="cfgKbConcurrency" type="number" placeholder="16">
+            <label class="form-label">固定通道全局并发上限</label>
+            <input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="128" placeholder="16">
           </div>
         </div>
       </div>

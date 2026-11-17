@@ -48,6 +48,8 @@ type Scheduler struct {
 	lanes          *LaneTracker
 	rpmLimiter     *RPMLimiter
 	rrIndex        map[string]int
+	swrrCurrent    map[string]map[string]int
+	latency        *LatencyTracker
 	sessionSticky  *SessionStickyCache
 	oauthRefresher OAuthRefresher
 }
@@ -69,6 +71,8 @@ func NewScheduler(
 		lanes:         NewLaneTracker(),
 		rpmLimiter:    NewRPMLimiter(60 * time.Second),
 		rrIndex:       make(map[string]int),
+		swrrCurrent:   make(map[string]map[string]int),
+		latency:       NewLatencyTracker(),
 		sessionSticky: NewSessionStickyCache(defaultSessionStickyTTL, defaultSessionStickyMaxSize),
 	}
 }
@@ -153,6 +157,8 @@ type CandidateKey struct {
 	KeyEntry    *types.KeyEntry
 	TargetModel string
 	KeyTag      string // e.g. "minimax:hk-01"
+	Weight      int    // routing weight (default 1)
+	MaxConc     int    // soft concurrency cap per candidate (0 = unlimited)
 }
 
 // DescribeRouteCandidates explains, per configured candidate, why it cannot be
@@ -261,6 +267,8 @@ func (s *Scheduler) OrderCandidatesForSession(
 				KeyEntry:    k,
 				TargetModel: targetModel,
 				KeyTag:      cand.Provider + ":" + k.Label,
+				Weight:      cand.Weight,
+				MaxConc:     cand.MaxConc,
 			})
 		}
 	}
@@ -290,17 +298,16 @@ func (s *Scheduler) OrderCandidatesForSession(
 		return candidates
 
 	case "round_robin":
-		s.mu.Lock()
-		idx := s.rrIndex[reqModel]
-		s.rrIndex[reqModel] = (idx + 1) % len(candidates)
-		s.mu.Unlock()
+		return s.orderRoundRobin(candidates, reqModel)
 
-		n := len(candidates)
-		reordered := make([]*CandidateKey, n)
-		for i := 0; i < n; i++ {
-			reordered[i] = candidates[(idx+i)%n]
-		}
-		return reordered
+	case "weighted":
+		return s.orderWeighted(candidates, reqModel)
+
+	case "least_busy":
+		return s.orderLeastBusy(candidates, reqModel)
+
+	case "fast":
+		return s.orderFast(candidates)
 
 	case "sticky_failover":
 		fallthrough
@@ -439,7 +446,11 @@ func (s *Scheduler) Dispatch(
 		return err
 	}
 
-	route, exists := snap.Config.AgentModels[reqModel]
+	category := ""
+	if reqModel == "chat" {
+		category = "chat"
+	}
+	route, exists := ResolveRoute(snap.Config, category, reqModel)
 	if !exists || !route.Enabled {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -450,6 +461,15 @@ func (s *Scheduler) Dispatch(
 			},
 		})
 		return fmt.Errorf("model %s not found", reqModel)
+	}
+
+	if route.NoReasoning || route.ForceNonStream {
+		if normBody, changed := applyRouteNormalization(reqBody, route.NoReasoning, route.ForceNonStream); changed {
+			reqBody = normBody
+		}
+		if route.ForceNonStream {
+			clientStream = false
+		}
 	}
 
 	sessionKey := ExtractSessionKey(r, reqBody)
@@ -783,6 +803,7 @@ func (s *Scheduler) Dispatch(
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(aggBytes)
+				s.latency.Record(cand.KeyTag, tryElapsed)
 				s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 
 				usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
@@ -908,6 +929,7 @@ func (s *Scheduler) Dispatch(
 				ownMillis = 0
 			}
 
+			s.latency.Record(cand.KeyTag, tryTTFT)
 			s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 			tries = append(tries, types.Try{
 				Attempt:     i + 1,
@@ -975,6 +997,7 @@ func (s *Scheduler) Dispatch(
 		}
 		usageTracker.Finish()
 
+		s.latency.Record(cand.KeyTag, tryElapsed)
 		s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 		totalMillis := time.Since(reqStart).Milliseconds()
 		ownMillis := totalMillis - (sentMillis + tryElapsed)
@@ -1093,7 +1116,10 @@ func (s *Scheduler) updateStickyKey(reqModel, sessionKey string, route *types.Ag
 }
 
 func (s *Scheduler) recordFinalTrace(trace types.RequestTrace) {
-	if s.obsSink != nil {
-		s.obsSink.RecordRequest(trace)
+	s.mu.Lock()
+	sink := s.obsSink
+	s.mu.Unlock()
+	if sink != nil {
+		sink.RecordRequest(trace)
 	}
 }

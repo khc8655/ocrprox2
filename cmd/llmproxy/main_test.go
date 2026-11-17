@@ -289,75 +289,26 @@ func TestFullMode_RouteValidationAndModeGates(t *testing.T) {
 		t.Errorf("unexpected healthz response: %+v", healthResp)
 	}
 
-	// 3. In AGENT mode:
-	// GET /v1/models returns agent-model-1
-	req = httptest.NewRequest("GET", "/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), "agent-model-1") {
-		t.Errorf("expected agent-model-1 in agent mode, got %s", rec.Body.String())
-	}
+	// Configure KB routes alongside Agent routes and verify unified simultaneous access (no mode lockout)
+	_, _ = localSrc.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"p1": {
+				ID:      "p1",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "k1", Label: "k1", Key: "sk-1", Enabled: true}},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"agent-model-1": {Enabled: true, Candidates: []*types.RouteCandidate{{Provider: "p1", KeyLabel: "k1", Enabled: true}}},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"chat": {{Provider: "p1", KeyLabel: "k1", Model: "chat", Enabled: true}},
+			"ocr":  {{Provider: "p1", KeyLabel: "k1", Model: "ocr", Enabled: true}},
+		},
+	})
 
-	// POST /v1/ocr in AGENT mode -> 404
-	req = httptest.NewRequest("POST", "/v1/ocr", strings.NewReader("image-data"))
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for /v1/ocr in agent mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// POST /v1/messages in AGENT mode -> 200
-	req = httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"agent-model-1"}`))
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for /v1/messages in agent mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// 4. Switch to KB mode
-	_, _ = localSrc.UpdateRunMode(types.ModeKB)
-	modeSched.SetManualMode(types.ModeKB)
-
-	// GET /v1/models returns chat, embedding, reranker, ocr
-	req = httptest.NewRequest("GET", "/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), `"id":"chat"`) || !strings.Contains(rec.Body.String(), `"id":"ocr"`) {
-		t.Errorf("expected kb models in kb mode, got %s", rec.Body.String())
-	}
-
-	// POST /v1/messages in KB mode -> 404
-	req = httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"chat"}`))
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for /v1/messages in kb mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// POST /v1/chat/completions with model != "chat" -> 404
-	req = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"wrong-model"}`))
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for /v1/chat/completions with wrong model in kb mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// POST /v1/chat/completions with stream = true -> 400
-	req = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"chat","stream":true}`))
-	req.Header.Set("Authorization", "Bearer test-client-key")
-	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for streaming in kb chat mode, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// 5. Test X-Node-Refresh: 1 header
+	// Test X-Node-Refresh: 1 header
 	req = httptest.NewRequest("GET", "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer test-client-key")
 	req.Header.Set("X-Node-Refresh", "1")

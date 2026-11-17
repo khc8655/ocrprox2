@@ -760,3 +760,55 @@ func TestPipeline_OCR_MultipartAndNative(t *testing.T) {
 		t.Errorf("unexpected native content: %v", nativeResp["content"])
 	}
 }
+
+func TestPipeline_Embeddings_RoundRobin_UnifiedModelAndFilter(t *testing.T) {
+	var hitK1, hitK2 atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if strings.Contains(auth, "sk-k1") {
+			hitK1.Add(1)
+		} else if strings.Contains(auth, "sk-k2") {
+			hitK2.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2]}]}`))
+	}))
+	defer ts.Close()
+
+	cfg := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"p1": {
+				ID:      "p1",
+				BaseURL: ts.URL,
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "k1", Label: "k1", Key: "sk-k1", Enabled: true},
+					{ID: "k2", Label: "k2", Key: "sk-k2", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"embedding": {
+				Enabled:         true,
+				RoutingStrategy: "round_robin",
+				Candidates: []*types.RouteCandidate{
+					{Provider: "p1", KeyLabel: "k1", TargetModel: "bge-m3", Enabled: true},
+					{Provider: "p1", KeyLabel: "k2", TargetModel: "bge-m3", Enabled: true},
+				},
+			},
+		},
+	}
+
+	pipe := NewPipeline(&mockKBSource{config: cfg}, 4, 16, true)
+	for i := 0; i < 4; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"bge-m3","input":"hello"}`))
+		pipe.HandleEmbeddings(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("embedding request %d failed: %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if hitK1.Load() != 2 || hitK2.Load() != 2 {
+		t.Errorf("expected round_robin 2/2 split across k1/k2, got k1=%d k2=%d", hitK1.Load(), hitK2.Load())
+	}
+}

@@ -61,12 +61,15 @@ if (!c || !c.enabled) return false;
 return Boolean(projectedProviders[c.provider]);
 });
 if (validCandidates.length > 0) {
-projectedModels[mName] = {
+const projectedRoute = {
 enabled: true,
 active_key: mRoute.active_key || '',
 routing_strategy: mRoute.routing_strategy || '',
 candidates: validCandidates,
 };
+if (mRoute.no_reasoning) projectedRoute.no_reasoning = true;
+if (mRoute.force_non_stream) projectedRoute.force_non_stream = true;
+projectedModels[mName] = projectedRoute;
 }
 }
 return {

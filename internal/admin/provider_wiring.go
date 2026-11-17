@@ -474,24 +474,27 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 		"/v1/messages",
 		"/v1/responses",
 		"/v1/models",
-	}
-	if mode == types.ModeKB {
-		endpoints = append(endpoints, "/v1/ocr", "/v1/embeddings", "/v1/rerank")
+		"/v1/ocr",
+		"/v1/embeddings",
+		"/v1/rerank",
 	}
 
-	var models []string
+	modelSet := make(map[string]bool)
 	if s.localSrc != nil {
 		if snap, _ := s.localSrc.Current(r.Context(), false); snap != nil && snap.Config != nil {
-			if mode == types.ModeAgent {
-				for m := range snap.Config.AgentModels {
-					models = append(models, m)
-				}
-			} else {
-				for cat := range snap.Config.KBModels {
-					models = append(models, cat)
+			for m := range snap.Config.AgentModels {
+				modelSet[m] = true
+			}
+			for cat, list := range snap.Config.KBModels {
+				if len(list) > 0 {
+					modelSet[cat] = true
 				}
 			}
 		}
+	}
+	var models []string
+	for m := range modelSet {
+		models = append(models, m)
 	}
 	sort.Strings(models)
 	if models == nil {

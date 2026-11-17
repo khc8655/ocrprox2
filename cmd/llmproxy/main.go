@@ -235,9 +235,7 @@ func main() {
 		sched.SetOAuthRefresher(oauthMgr)
 
 		kbPipeline = kb.NewPipeline(configSrc, kb.DefaultMaxOCR, kb.DefaultMaxGlobal, *allowPrivateFlag)
-		if obsMgr != nil {
-			kbPipeline.SetObservabilitySink(obsMgr)
-		}
+		kbPipeline.SetScheduler(sched)
 
 		initialMode := types.ModeAgent
 		if localSrc != nil {
@@ -254,26 +252,6 @@ func main() {
 			}
 			return snap.Config.Settings, nil
 		}, nil)
-	}
-
-	// Helper function to get current effective RunMode
-	getEffectiveMode := func(ctx context.Context) types.RunMode {
-		if role == types.RoleLite {
-			return types.ModeAgent
-		}
-		snap, err := configSrc.Current(ctx, false)
-		if err == nil && snap != nil && snap.Config != nil {
-			if snap.Config.Settings.ModeScheduleEnabled && modeSched != nil {
-				return modeSched.CurrentMode()
-			}
-			if snap.Config.Settings.RunMode != "" {
-				return snap.Config.Settings.RunMode
-			}
-		}
-		if modeSched != nil {
-			return modeSched.CurrentMode()
-		}
-		return types.ModeAgent
 	}
 
 	// Build HTTP Route Mux
@@ -317,27 +295,12 @@ func main() {
 		}
 	}
 
-	// 3. /v1/models (with X-Node-Refresh: 1 and Mode Gating)
+	// 3. /v1/models (with X-Node-Refresh: 1; unified Agent + built-in KB 4 slots)
 	handleModels := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 		forceRefresh := r.Header.Get("X-Node-Refresh") == "1"
 		snap, err := configSrc.Current(r.Context(), forceRefresh)
 		if err != nil || snap == nil || snap.Config == nil {
 			http.Error(w, "config unavailable", http.StatusServiceUnavailable)
-			return
-		}
-
-		mode := getEffectiveMode(r.Context())
-		if mode == types.ModeKB {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"object": "list",
-				"data": []map[string]any{
-					{"id": "chat", "object": "model", "created": snap.LoadedAt.Unix(), "owned_by": "llmproxy-kb"},
-					{"id": "embedding", "object": "model", "created": snap.LoadedAt.Unix(), "owned_by": "llmproxy-kb"},
-					{"id": "reranker", "object": "model", "created": snap.LoadedAt.Unix(), "owned_by": "llmproxy-kb"},
-					{"id": "ocr", "object": "model", "created": snap.LoadedAt.Unix(), "owned_by": "llmproxy-kb"},
-				},
-			})
 			return
 		}
 
@@ -348,14 +311,41 @@ func main() {
 			OwnedBy string `json:"owned_by"`
 		}
 
+		seen := make(map[string]bool)
 		var list []ModelItem
 		for mID, route := range snap.Config.AgentModels {
 			if route != nil && route.Enabled {
+				seen[mID] = true
 				list = append(list, ModelItem{
 					ID:      mID,
 					Object:  "model",
 					Created: snap.LoadedAt.Unix(),
 					OwnedBy: "llmproxy",
+				})
+			}
+		}
+
+		// Surface legacy KBModels slots (chat/embedding/reranker/ocr) if configured and not yet in AgentModels
+		fixedCategories := []string{"chat", "embedding", "reranker", "ocr"}
+		for _, cat := range fixedCategories {
+			if seen[cat] {
+				continue
+			}
+			cands := snap.Config.KBModels[cat]
+			hasEnabled := false
+			for _, c := range cands {
+				if c != nil && c.Enabled {
+					hasEnabled = true
+					break
+				}
+			}
+			if hasEnabled && (cat == "chat" || role == types.RoleFull) {
+				seen[cat] = true
+				list = append(list, ModelItem{
+					ID:      cat,
+					Object:  "model",
+					Created: snap.LoadedAt.Unix(),
+					OwnedBy: "llmproxy-kb",
 				})
 			}
 		}
@@ -381,22 +371,6 @@ func main() {
 		if modeSched != nil {
 			modeSched.IncInflight()
 			defer modeSched.DecInflight()
-		}
-
-		effectiveMode := getEffectiveMode(r.Context())
-
-		// Mode gate: /v1/messages and /v1/responses are strictly disabled in kb mode
-		isMessagesOrResponses := strings.HasSuffix(r.URL.Path, "/messages") || strings.HasSuffix(r.URL.Path, "/responses")
-		if effectiveMode == types.ModeKB && isMessagesOrResponses {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]any{
-					"message": "endpoint disabled in kb mode",
-					"type":    "invalid_request_error",
-				},
-			})
-			return
 		}
 
 		var bodyBytes []byte
@@ -456,38 +430,6 @@ func main() {
 		reqModel := q.Model
 		clientStream := q.Stream
 
-		// Mode gate: in kb mode for /v1/chat/completions, only model="chat" and stream=false are permitted
-		if effectiveMode == types.ModeKB {
-			if reqModel != "chat" {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error": map[string]any{
-						"message": "only model 'chat' is supported in kb mode",
-						"type":    "invalid_request_error",
-					},
-				})
-				return
-			}
-			if clientStream {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error": map[string]any{
-						"message": "streaming is not supported in kb chat mode",
-						"type":    "invalid_request_error",
-					},
-				})
-				return
-			}
-			if kbPipeline != nil {
-				kbPipeline.HandleChat(w, r, bodyBytes)
-				return
-			}
-			http.Error(w, "kb pipeline unavailable", http.StatusServiceUnavailable)
-			return
-		}
-
 		_ = sched.Dispatch(r.Context(), r.URL.Path, bodyBytes, reqModel, clientStream, w, r)
 		if isLarge {
 			bodyBytes = nil
@@ -501,37 +443,25 @@ func main() {
 	mux.HandleFunc("POST /v1/responses", handleInference)
 	mux.HandleFunc("POST /api/v1/responses", handleInference)
 
-	// 5. Full Mode: KB endpoints & Admin management
+	// 5. Full Mode: Specialized KB/RAG endpoints (/v1/ocr, /v1/embeddings, /v1/rerank) always active & Admin management
 	if role == types.RoleFull {
-		wrapKBMode := func(handler http.HandlerFunc) http.HandlerFunc {
+		wrapKBRoute := func(handler http.HandlerFunc) http.HandlerFunc {
 			return wrapAuth(func(w http.ResponseWriter, r *http.Request) {
 				if r.ContentLength > maxRequestBodySize {
 					writePayloadTooLarge(w)
 					return
 				}
 				r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-				mode := getEffectiveMode(r.Context())
-				if mode == types.ModeAgent {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusNotFound)
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"error": map[string]any{
-							"message": "kb endpoint disabled in agent mode",
-							"type":    "invalid_request_error",
-						},
-					})
-					return
-				}
 				handler(w, r)
 			})
 		}
 
-		mux.HandleFunc("POST /v1/ocr", wrapKBMode(kbPipeline.HandleOCR))
-		mux.HandleFunc("POST /api/v1/ocr", wrapKBMode(kbPipeline.HandleOCR))
-		mux.HandleFunc("POST /v1/embeddings", wrapKBMode(kbPipeline.HandleEmbeddings))
-		mux.HandleFunc("POST /api/v1/embeddings", wrapKBMode(kbPipeline.HandleEmbeddings))
-		mux.HandleFunc("POST /v1/rerank", wrapKBMode(kbPipeline.HandleRerank))
-		mux.HandleFunc("POST /api/v1/rerank", wrapKBMode(kbPipeline.HandleRerank))
+		mux.HandleFunc("POST /v1/ocr", wrapKBRoute(kbPipeline.HandleOCR))
+		mux.HandleFunc("POST /api/v1/ocr", wrapKBRoute(kbPipeline.HandleOCR))
+		mux.HandleFunc("POST /v1/embeddings", wrapKBRoute(kbPipeline.HandleEmbeddings))
+		mux.HandleFunc("POST /api/v1/embeddings", wrapKBRoute(kbPipeline.HandleEmbeddings))
+		mux.HandleFunc("POST /v1/rerank", wrapKBRoute(kbPipeline.HandleRerank))
+		mux.HandleFunc("POST /api/v1/rerank", wrapKBRoute(kbPipeline.HandleRerank))
 
 		adminSrv := admin.NewServer(authMgr, localSrc, obsMgr, sched)
 		adminSrv.SetModeScheduler(modeSched)
