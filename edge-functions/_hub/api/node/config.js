@@ -49,7 +49,8 @@ request.headers.get('x-forwarded-for') ||
 '')
 .split(',')[0]
 .trim() || null;
-touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp }).catch(() => {});
+const binaryVersion = (request.headers.get('x-node-version') || '').trim();
+touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, binaryVersion }).catch(() => {});
 const responseHeaders = {
 'ETag': etag,
 'Cache-Control': 'no-store',

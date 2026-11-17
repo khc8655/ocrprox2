@@ -179,6 +179,9 @@ node.hit_304_count = (Number(node.hit_304_count) || 0) + 1;
 if (meta && meta.ip) {
 node.last_ip = String(meta.ip);
 }
+if (meta && meta.binaryVersion) {
+node.last_binary_version = String(meta.binaryVersion).slice(0, 32);
+}
 const nowIso = new Date(now).toISOString();
 if (lastTime > 0 && meta?.is304 && now - lastTime < 60_000) return;
 node.last_seen = nowIso;

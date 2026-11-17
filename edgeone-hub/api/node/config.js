@@ -64,8 +64,9 @@ export async function handleNodeConfigRequest(request, env, kv) {
       .split(',')[0]
       .trim() || null;
 
-  // Touch node's last_seen and sync counters
-  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp }).catch(() => {});
+  // Touch node's last_seen and sync counters (plus the real binary version the node reports)
+  const binaryVersion = (request.headers.get('x-node-version') || '').trim();
+  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, binaryVersion }).catch(() => {});
 
   const responseHeaders = {
     'ETag': etag,

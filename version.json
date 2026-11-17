@@ -1,13 +1,14 @@
 {
-  "version": "v20261117-01",
-  "semver": "2.3.0",
+  "version": "v20261117-02",
+  "semver": "2.3.1",
   "release_date": "2026-11-17",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.3.0 — KB 流水线统一调度、多路径粘性路由与纯 LLM 代理收敛",
+  "title": "LLMProxy2 (OCRProxy v2) 2.3.1 — Vault 节点鉴权、容器部署兼容与节点版本遥测",
   "changelog": [
-    "KB 四类流水线统一接入 Agent 调度器：embedding/rerank/ocr 复用候选池、冷却与故障转移，新增 Magpie 风格高并发策略",
-    "调度器新增会话级多路径粘性路由（multi-path sticky）与全局策略回退",
-    "收敛为纯 LLM 代理：移除 MCP / 搜索扩展服务与 Extension Services 视图，供应商预设移除 exa 之外的搜索类条目并新增 exa 预设",
-    "节点永久分类：llm/mcp service_type 隔离；/api/node/config 信封与租约头对齐 node-config-projection 契约"
+    "Hub Vault 同步鉴权：/api/vault/* 接受有效 NODE_TOKEN（只读、仅 vault origin），full 节点无需在本地保存 Hub 管理员密码",
+    "LXD/容器部署兼容：install.sh 识别容器环境后改用静态低权用户并跳过 mount-namespace 类 hardening，lite 不再 226/NAMESPACE 无限重启",
+    "节点版本遥测：lite 每次 /api/node/config 携带 X-Node-Version，Hub 记录真实 last_binary_version；Hub /healthz 返回 version/semver/release_date",
+    "模型路由新增 allow_key_fallback：候选 Key 被禁用/删除时可回退同供应商其它启用 Key（默认关闭，控制台可勾选）",
+    "无配置状态错误脱敏：不再向调用方泄露 proxy_config.enc 绝对路径"
   ]
 }

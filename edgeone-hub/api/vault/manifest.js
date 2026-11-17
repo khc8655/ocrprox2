@@ -1,8 +1,9 @@
-import { loadConfig, checkAdminAuth, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 
 export async function handleVaultManifestRequest(request, env, kv) {
-  const authErr = checkAdminAuth(request, env);
+  const authErr = await checkVaultAuth(request, env, kv);
   if (authErr) return authErr;
 
   const config = await loadConfig(kv);

@@ -229,6 +229,9 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
   if (meta && meta.ip) {
     node.last_ip = String(meta.ip);
   }
+  if (meta && meta.binaryVersion) {
+    node.last_binary_version = String(meta.binaryVersion).slice(0, 32);
+  }
   const nowIso = new Date(now).toISOString();
 
   // Throttle repeated 304 writes to once every 60s unless first sync or full 200 pull

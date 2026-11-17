@@ -4,6 +4,21 @@
 
 ---
 
+## [v20261117-02] - 2026-11-17
+
+### Fixed
+- **Hub Vault 同步鉴权**：`/api/vault/manifest`、`/api/vault/fetch` 现在同时接受 Hub 管理员凭据与节点 `NODE_TOKEN`（只读、仅 `origin=vault`）。此前 full 节点的 UI 提示填写 `NODE_TOKEN`，实际只有填 Hub 管理员密码才能同步——既必然 401，又把全局凭据塞进每个节点。
+- **LXD/容器部署兼容**：`install.sh` 检测容器环境（`/.dockerenv`、`systemd-detect-virt --container`、`/proc/1/environ`）后改用静态低权用户（`nobody`）并跳过 `ProtectSystem/ProtectHome/PrivateTmp` 等 mount-namespace 类 hardening。此前 lite 在非特权 LXD 中 `226/NAMESPACE` 无限重启。
+- **无配置错误脱敏**：`proxy_config.enc` 缺失时不再回显绝对路径，统一返回 `configuration not initialized: upload or sync a config before serving requests`。
+- **节点版本遥测**：lite 每次 `POST /api/node/config` 携带 `X-Node-Version`，Hub 写入真实 `last_binary_version`，不再恒为签发默认值。
+
+### Added
+- **模型路由 `allow_key_fallback`**（默认 `false`）：候选引用的 Key 被禁用/删除时，可回退到同供应商其它启用 Key；控制台模型编辑器提供勾选项。
+- **Hub `/healthz` 版本字段**：返回 `version` / `semver` / `release_date`，用于发现线上 Hub 部署落后。
+
+### Notes
+- 线上 EdgeOne Hub 需重新发布到本版本后，Vault 节点鉴权、304 遥测、`PATCH /api/admin/nodes/:id` 与版本字段才会生效。
+
 ## [v20261117-01] - 2026-11-17
 
 ### Added

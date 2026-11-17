@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/khc8655/llmproxy2/internal/adapters"
+	"github.com/khc8655/llmproxy2/internal/config"
 	"github.com/khc8655/llmproxy2/internal/obs"
 	"github.com/khc8655/llmproxy2/internal/types"
 	"github.com/khc8655/llmproxy2/internal/upstream"
@@ -273,6 +274,60 @@ func (s *Scheduler) OrderCandidatesForSession(
 		}
 	}
 
+	// Optional fallback: a candidate pinned to a key_label that is disabled or
+	// removed can borrow another enabled key from the same provider. Off by default
+	// so explicit key bindings keep their exact semantics.
+	if route.AllowKeyFallback {
+		added := make(map[string]bool, len(candidates))
+		for _, c := range candidates {
+			added[c.KeyTag] = true
+		}
+		for _, cand := range route.Candidates {
+			if !cand.Enabled || cand.KeyLabel == "" {
+				continue
+			}
+			p, exists := providers[cand.Provider]
+			if !exists || p == nil || !p.Enabled {
+				continue
+			}
+			refUsable := false
+			for _, c := range candidates {
+				if c.Provider == p && c.KeyEntry != nil && c.KeyEntry.Label == cand.KeyLabel {
+					refUsable = true
+					break
+				}
+			}
+			if refUsable {
+				continue
+			}
+			for _, k := range p.APIKeys {
+				if k == nil || !k.Enabled || k.Key == "" {
+					continue
+				}
+				tag := cand.Provider + ":" + k.Label
+				if added[tag] {
+					continue
+				}
+				targetModel := cand.TargetModel
+				if targetModel == "" && p.ModelAliases != nil {
+					targetModel = p.ModelAliases[reqModel]
+				}
+				if targetModel == "" {
+					targetModel = reqModel
+				}
+				candidates = append(candidates, &CandidateKey{
+					Provider:    p,
+					KeyEntry:    k,
+					TargetModel: targetModel,
+					KeyTag:      tag,
+					Weight:      cand.Weight,
+					MaxConc:     cand.MaxConc,
+				})
+				added[tag] = true
+			}
+		}
+	}
+
 	strategy := route.RoutingStrategy
 	if strategy == "" {
 		strategy = globalStrategy
@@ -465,9 +520,14 @@ func (s *Scheduler) Dispatch(
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
+		msg := err.Error()
+		if errors.Is(err, config.ErrConfigNotInitialized) {
+			// Never echo the config file path to callers.
+			msg = "configuration not initialized: upload or sync a config before serving requests"
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{
-				"message": err.Error(),
+				"message": msg,
 				"type":    "service_unavailable",
 			},
 		})

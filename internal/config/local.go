@@ -45,6 +45,11 @@ func (e *VersionConflictError) Is(target error) bool {
 
 const ConfigFileName = "proxy_config.enc"
 
+// ErrConfigNotInitialized is returned when no configuration file exists yet.
+// Callers must map it to a generic user-facing message instead of echoing the
+// underlying filesystem path.
+var ErrConfigNotInitialized = errors.New("config: not initialized")
+
 // LocalSource implements types.ConfigSource for Full mode.
 type LocalSource struct {
 	mu         sync.Mutex
@@ -615,6 +620,9 @@ func (s *LocalSource) loadFromDisk() (*types.RuntimeSnapshot, error) {
 	if err != nil {
 		raw, err = steady.ReadFile(s.configPath)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) {
+				return nil, ErrConfigNotInitialized
+			}
 			return nil, err
 		}
 	}

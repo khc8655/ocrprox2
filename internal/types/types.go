@@ -46,11 +46,11 @@ type ProviderConfig struct {
 	Origin           string            `json:"origin,omitempty"` // "vault" (中枢共享) | "local" (仅本端私有，Hub绝不下发)
 	RuleHash         string            `json:"rule_hash,omitempty"`
 	RPMPerKey        int               `json:"rpm_per_key,omitempty"`
-	QuotaResetAt     string            `json:"quota_reset_at,omitempty"`  // Magpie 每日配额重置时间，如 "00:00+08:00"
-	RefreshEvery     string            `json:"refresh_every,omitempty"`   // Magpie 模型列表定时刷新周期，如 "6h"
-	AutoInclude      string            `json:"auto_include,omitempty"`    // Magpie 新模型自动纳管正则
-	BalanceURL       string            `json:"balance_url,omitempty"`     // 自定义余额查询 URL
-	BalancePath      string            `json:"balance_path,omitempty"`    // 自定义余额 JSONPath 提取表达式
+	QuotaResetAt     string            `json:"quota_reset_at,omitempty"` // Magpie 每日配额重置时间，如 "00:00+08:00"
+	RefreshEvery     string            `json:"refresh_every,omitempty"`  // Magpie 模型列表定时刷新周期，如 "6h"
+	AutoInclude      string            `json:"auto_include,omitempty"`   // Magpie 新模型自动纳管正则
+	BalanceURL       string            `json:"balance_url,omitempty"`    // 自定义余额查询 URL
+	BalancePath      string            `json:"balance_path,omitempty"`   // 自定义余额 JSONPath 提取表达式
 	APIKeys          []*KeyEntry       `json:"api_keys"`
 	ModelAliases     map[string]string `json:"model_aliases,omitempty"`
 	AdapterRules     *AdapterRules     `json:"adapter_rules,omitempty"`
@@ -58,9 +58,9 @@ type ProviderConfig struct {
 
 // KeyEntry 单把 API Key 或 OAuth 凭证条目
 type KeyEntry struct {
-	ID        string     `json:"id,omitempty"`    // 稳定短 ID（如未指定则取 label 或 key 指纹前 8 位）
-	Label     string     `json:"label"`           // 1 代兼容标签名（如 "hk-pool-01"）
-	Key       string     `json:"key"`             // 明文 API Key 或 OAuth AccessToken（Lite 销毁时需原地清零字节）
+	ID        string     `json:"id,omitempty"` // 稳定短 ID（如未指定则取 label 或 key 指纹前 8 位）
+	Label     string     `json:"label"`        // 1 代兼容标签名（如 "hk-pool-01"）
+	Key       string     `json:"key"`          // 明文 API Key 或 OAuth AccessToken（Lite 销毁时需原地清零字节）
 	Enabled   bool       `json:"enabled"`
 	Remark    string     `json:"remark,omitempty"`
 	Weight    int        `json:"weight,omitempty"`
@@ -80,22 +80,24 @@ type OAuthMeta struct {
 
 // AgentModelRoute Agent/统一路由模式下的模型路由绑定（100% 兼容 1 代 agent_models 与固定 4 KB 模型槽位）
 type AgentModelRoute struct {
-	Enabled         bool              `json:"enabled"`
-	ActiveKey       string            `json:"active_key,omitempty"`       // 格式: "{provider}:{key_label}"（sticky_failover 首选粘性 Key）
-	RoutingStrategy string            `json:"routing_strategy,omitempty"` // 覆盖全局: "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
-	NoReasoning     bool              `json:"no_reasoning,omitempty"`     // 强制剥离思考/推理参数（KB RAG chat 推荐开启）
-	ForceNonStream  bool              `json:"force_non_stream,omitempty"` // 强制改写 stream=false 非流式输出
-	Candidates      []*RouteCandidate `json:"candidates"`
+	Enabled         bool   `json:"enabled"`
+	ActiveKey       string `json:"active_key,omitempty"`       // 格式: "{provider}:{key_label}"（sticky_failover 首选粘性 Key）
+	RoutingStrategy string `json:"routing_strategy,omitempty"` // 覆盖全局: "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
+	NoReasoning     bool   `json:"no_reasoning,omitempty"`     // 强制剥离思考/推理参数（KB RAG chat 推荐开启）
+	ForceNonStream  bool   `json:"force_non_stream,omitempty"` // 强制改写 stream=false 非流式输出
+	// AllowKeyFallback: 当候选引用的 key_label 被禁用/删除时，回退到同供应商其它启用 Key（默认关闭，保持精确绑定语义）。
+	AllowKeyFallback bool              `json:"allow_key_fallback,omitempty"`
+	Candidates       []*RouteCandidate `json:"candidates"`
 }
 
 // RouteCandidate 模型候选池条目
 type RouteCandidate struct {
 	Provider    string `json:"provider"`
-	KeyLabel    string `json:"key_label"`                  // 对应 KeyEntry.Label（为空表示展开该供应商下全部启用 Key）
-	TargetModel string `json:"target_model,omitempty"`     // 显式指定上游真实模型名（为空则走 ModelAliases 或原名）
+	KeyLabel    string `json:"key_label"`              // 对应 KeyEntry.Label（为空表示展开该供应商下全部启用 Key）
+	TargetModel string `json:"target_model,omitempty"` // 显式指定上游真实模型名（为空则走 ModelAliases 或原名）
 	Enabled     bool   `json:"enabled"`
-	Weight      int    `json:"weight,omitempty"`           // weighted 策略权重（默认 1）
-	MaxConc     int    `json:"max_concurrency,omitempty"`  // 单候选软并发阈值（0 表示不限，超限优先分流到其他空闲候选）
+	Weight      int    `json:"weight,omitempty"`          // weighted 策略权重（默认 1）
+	MaxConc     int    `json:"max_concurrency,omitempty"` // 单候选软并发阈值（0 表示不限，超限优先分流到其他空闲候选）
 }
 
 // KBCandidate 知识库模式四分类（chat / embedding / reranker / ocr）候选条目
@@ -110,23 +112,23 @@ type KBCandidate struct {
 
 // RuntimeSettings 与 shared/config/settings.schema.json 一一对齐的规范化设置项
 type RuntimeSettings struct {
-	RunMode                     RunMode  `json:"run_mode"`                        // "agent" | "kb"
-	ClientKey                   string   `json:"client_key,omitempty"`            // 客户端鉴权密钥 (等同 PROXY_API_KEY)
-	ProxyAPIKey                 string   `json:"proxy_api_key,omitempty"`         // 1 代兼容字段名
-	ProxyKeys                   []string `json:"proxy_keys,omitempty"`            // 多客户端鉴权密钥列表
-	AgentRoutingStrategy        string   `json:"agent_routing_strategy"`          // "sticky_failover" | "round_robin" | "manual"
-	AgentFirstByteTimeoutSec    int      `json:"agent_first_byte_timeout_sec"`    // 默认 120
-	CooldownRateLimitSec        int      `json:"cooldown_rate_limit_sec"`         // 429 模型级冷却秒数，默认 15
-	CooldownServerErrorSec      int      `json:"cooldown_server_error_sec"`       // 5xx 模型级冷却秒数，默认 30
-	CooldownNetworkErrorSec     int      `json:"cooldown_network_error_sec"`      // 网络超时冷却秒数，默认 15
-	CooldownAuthErrorSec        int      `json:"cooldown_auth_error_sec"`         // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
-	OCRMaxInflight              int      `json:"ocr_max_inflight"`                // KB OCR 预读信号量上限，默认 4
-	KBGlobalMaxConcurrency      int      `json:"kb_global_max_concurrency"`       // KB 全局并发上限，默认 16
-	ModeScheduleEnabled         bool     `json:"mode_schedule_enabled"`           // 是否开启时段自动切换
-	ModeScheduleAgentWindow     string   `json:"mode_schedule_agent_window"`      // 如 "08:30-22:30"
-	ModeScheduleTimezone        string   `json:"mode_schedule_timezone"`          // 如 "Asia/Shanghai"
-	ModeScheduleWebhookURL      string   `json:"mode_schedule_webhook_url,omitempty"`
-	ModeScheduleWebhookSecret   string   `json:"mode_schedule_webhook_secret,omitempty"`
+	RunMode                   RunMode  `json:"run_mode"`                     // "agent" | "kb"
+	ClientKey                 string   `json:"client_key,omitempty"`         // 客户端鉴权密钥 (等同 PROXY_API_KEY)
+	ProxyAPIKey               string   `json:"proxy_api_key,omitempty"`      // 1 代兼容字段名
+	ProxyKeys                 []string `json:"proxy_keys,omitempty"`         // 多客户端鉴权密钥列表
+	AgentRoutingStrategy      string   `json:"agent_routing_strategy"`       // "sticky_failover" | "round_robin" | "manual"
+	AgentFirstByteTimeoutSec  int      `json:"agent_first_byte_timeout_sec"` // 默认 120
+	CooldownRateLimitSec      int      `json:"cooldown_rate_limit_sec"`      // 429 模型级冷却秒数，默认 15
+	CooldownServerErrorSec    int      `json:"cooldown_server_error_sec"`    // 5xx 模型级冷却秒数，默认 30
+	CooldownNetworkErrorSec   int      `json:"cooldown_network_error_sec"`   // 网络超时冷却秒数，默认 15
+	CooldownAuthErrorSec      int      `json:"cooldown_auth_error_sec"`      // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
+	OCRMaxInflight            int      `json:"ocr_max_inflight"`             // KB OCR 预读信号量上限，默认 4
+	KBGlobalMaxConcurrency    int      `json:"kb_global_max_concurrency"`    // KB 全局并发上限，默认 16
+	ModeScheduleEnabled       bool     `json:"mode_schedule_enabled"`        // 是否开启时段自动切换
+	ModeScheduleAgentWindow   string   `json:"mode_schedule_agent_window"`   // 如 "08:30-22:30"
+	ModeScheduleTimezone      string   `json:"mode_schedule_timezone"`       // 如 "Asia/Shanghai"
+	ModeScheduleWebhookURL    string   `json:"mode_schedule_webhook_url,omitempty"`
+	ModeScheduleWebhookSecret string   `json:"mode_schedule_webhook_secret,omitempty"`
 }
 
 // VaultClientConfig Full 节点连接 EdgeOne Hub 的客户端配置
@@ -137,33 +139,33 @@ type VaultClientConfig struct {
 
 // AdapterRules 声明式适配规则（与 shared/presets/*.json 100% 对应，严禁硬编码 if provider == xxx）
 type AdapterRules struct {
-	AuthHeader             string            `json:"auth_header,omitempty"`              // 默认 "Authorization"
-	AuthPrefix             string            `json:"auth_prefix,omitempty"`              // 默认 "Bearer "
-	ExtraHeaders           map[string]string `json:"extra_headers,omitempty"`            // 静态注入头
-	StripParams            []string          `json:"strip_params,omitempty"`             // 剥离顶层参数
-	RenameParams           map[string]string `json:"rename_params,omitempty"`            // 重命名参数
-	OverrideParams         map[string]any    `json:"override_params,omitempty"`          // 强制覆盖参数
-	StreamOnly             bool              `json:"stream_only,omitempty"`              // 上游仅支持 stream=true，非流请求需网关聚合成 JSON
-	RescueFromText         bool              `json:"rescue_from_text,omitempty"`         // 从文本块挽救 tool_calls
-	UnwrapRoot             string            `json:"unwrap_root,omitempty"`              // 解包非标响应外层字段
-	StripReasoningEnabled  bool              `json:"strip_reasoning_enabled,omitempty"`  // AMD 等特例剥离字段
-	GeminiCompat           bool              `json:"gemini_compat,omitempty"`            // 启用 Gemini 2.5/3.x Thinking/Signature/Schema 兼容层
-	ThoughtTagMarker       string            `json:"thought_tag_marker,omitempty"`       // Vertex AI "<thought>" 流式状态机切分标记
-	AnthropicStrictSig     bool              `json:"anthropic_strict_signature,omitempty"`
-	AnthropicPassbackReq   bool              `json:"anthropic_passback_required,omitempty"`
-	DenyDeveloperRole      bool              `json:"deny_developer_role,omitempty"`      // 1 代兼容：developer 角色自动转为 system
-	MergeSystem            bool              `json:"merge_system,omitempty"`             // 1 代兼容：合并多条 system 消息
-	StripEmpty             bool              `json:"strip_empty,omitempty"`              // 1 代兼容：剥离空文本消息
-	ThinkingPolicy         string            `json:"thinking_policy,omitempty"`          // "strip" | "strict_signature" | "passback_required"
+	AuthHeader            string            `json:"auth_header,omitempty"`             // 默认 "Authorization"
+	AuthPrefix            string            `json:"auth_prefix,omitempty"`             // 默认 "Bearer "
+	ExtraHeaders          map[string]string `json:"extra_headers,omitempty"`           // 静态注入头
+	StripParams           []string          `json:"strip_params,omitempty"`            // 剥离顶层参数
+	RenameParams          map[string]string `json:"rename_params,omitempty"`           // 重命名参数
+	OverrideParams        map[string]any    `json:"override_params,omitempty"`         // 强制覆盖参数
+	StreamOnly            bool              `json:"stream_only,omitempty"`             // 上游仅支持 stream=true，非流请求需网关聚合成 JSON
+	RescueFromText        bool              `json:"rescue_from_text,omitempty"`        // 从文本块挽救 tool_calls
+	UnwrapRoot            string            `json:"unwrap_root,omitempty"`             // 解包非标响应外层字段
+	StripReasoningEnabled bool              `json:"strip_reasoning_enabled,omitempty"` // AMD 等特例剥离字段
+	GeminiCompat          bool              `json:"gemini_compat,omitempty"`           // 启用 Gemini 2.5/3.x Thinking/Signature/Schema 兼容层
+	ThoughtTagMarker      string            `json:"thought_tag_marker,omitempty"`      // Vertex AI "<thought>" 流式状态机切分标记
+	AnthropicStrictSig    bool              `json:"anthropic_strict_signature,omitempty"`
+	AnthropicPassbackReq  bool              `json:"anthropic_passback_required,omitempty"`
+	DenyDeveloperRole     bool              `json:"deny_developer_role,omitempty"` // 1 代兼容：developer 角色自动转为 system
+	MergeSystem           bool              `json:"merge_system,omitempty"`        // 1 代兼容：合并多条 system 消息
+	StripEmpty            bool              `json:"strip_empty,omitempty"`         // 1 代兼容：剥离空文本消息
+	ThinkingPolicy        string            `json:"thinking_policy,omitempty"`     // "strip" | "strict_signature" | "passback_required"
 }
 
 // RuntimeSnapshot 不可变内存快照（由 atomic.Pointer[RuntimeSnapshot] 持有，支持零锁并发读取）
 type RuntimeSnapshot struct {
-	Config      *ProxyConfig
-	ETag        string
-	LeaseUntil  time.Time // Lite 模式：当前租约到期时间
-	GraceUntil  time.Time // Lite 模式：断网宽限期截止时间
-	LoadedAt    time.Time
+	Config     *ProxyConfig
+	ETag       string
+	LeaseUntil time.Time // Lite 模式：当前租约到期时间
+	GraceUntil time.Time // Lite 模式：断网宽限期截止时间
+	LoadedAt   time.Time
 }
 
 // PurgeSecrets 显式用 0x00 覆写快照内所有明文 API Key 字节（Lite 模式收到 401 或吊销时强制调用）
@@ -234,10 +236,10 @@ type RequestTrace struct {
 	CacheWrite1hTokens int               `json:"cache_write_1h_tokens,omitempty"`
 	ReasoningTokens    int               `json:"reasoning_tokens,omitempty"`
 	TTFTMillis         int64             `json:"ttft_ms"`
-	FlowMillis         int64             `json:"flow_ms,omitempty"`    // 首字到达至流结束的纯生成时间（用于计算真实 tok/s TPS）
-	OwnMillis          int64             `json:"own_ms,omitempty"`     // 网关内部开销耗时
-	QueuedMillis       int64             `json:"queued_ms,omitempty"`  // 并发排队等待耗时
-	SentMillis         int64             `json:"sent_ms,omitempty"`    // 建连与发送耗时
+	FlowMillis         int64             `json:"flow_ms,omitempty"`   // 首字到达至流结束的纯生成时间（用于计算真实 tok/s TPS）
+	OwnMillis          int64             `json:"own_ms,omitempty"`    // 网关内部开销耗时
+	QueuedMillis       int64             `json:"queued_ms,omitempty"` // 并发排队等待耗时
+	SentMillis         int64             `json:"sent_ms,omitempty"`   // 建连与发送耗时
 	TotalMillis        int64             `json:"total_ms"`
 	RetriedMillis      int64             `json:"retried_ms,omitempty"`
 	UpBytes            int               `json:"up_bytes,omitempty"`   // 上行字节数

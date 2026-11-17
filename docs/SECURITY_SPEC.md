@@ -47,6 +47,7 @@
    - 当条件拉取收到中枢返回的 `401`/`403`（节点被吊销）或宽限期（`grace_ttl`）耗尽时，立即执行 `PurgeMemory()`：先遍历旧 `Snapshot` 将全部 API Key 字节数组用 `0x00` 覆写清零，再将 `atomic.Pointer` 置为 `nil` 并触发 `runtime.GC()`。
 4. **物理级只读路由守卫（复用 Magpie `internal/router/readonly.go`）**：
    - `lite` 模式在编译运行期根本不注册 `/api/admin/*` 路由处理器；运行时对 `/admin`、`/api/config`、`/api/admin/*` 等管理路径统一返回 **`403 Forbidden`**（`{"ok":false,"error":"lite_mode_forbidden"}`），不泄露任何配置内容；
+   - **Vault 同步最小权限**：Hub 的 `/api/vault/manifest`、`/api/vault/fetch` 接受 Hub 管理员凭据或节点 `NODE_TOKEN`（只读、仅 `origin=vault`）；节点侧配置只保存自己的 `NODE_TOKEN`，严禁把 Hub 管理员密码写入节点。
    - 同时在顶层 `http.Handler` 包裹 `readOnlyGuard` 与 `routeMux`，任何未在 `allowedLiteRoutes` 白名单登记的路由或方法在单元测试阶段直接报错。
 5. **全链路自动脱敏（复用 Magpie `internal/obs/applog.go` 的 `scrub` + 1 代 Header 掩码）**：
    - 所有日志输出、崩溃栈、最近 60 条轨迹回放（`trace.go`）、`/healthz` 状态均经过 `applog.Scrub` 与 `MaskKey` 过滤，自动剥离 `Authorization`、`x-api-key`、`x-goog-api-key`、URL 中的 `?key=` 以及符合 `sk-*` / `AIza*` / `eyJ*` 特征的令牌字符串（统一打码为 `***` 或 `前4位...后4位`）。

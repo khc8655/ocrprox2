@@ -1078,3 +1078,97 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
     });
   });
 });
+
+describe('9. Vault node-token auth & node binary version', () => {
+  test('vault manifest/fetch accept a valid node token; invalid tokens and local providers stay blocked', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {
+          openrouter: {
+            name: 'OR',
+            enabled: true,
+            api_keys: [{ id: 'k1', label: 'pool', key: 'sk-or-1', enabled: true }],
+          },
+          priv: {
+            name: 'P',
+            origin: 'local',
+            enabled: true,
+            api_keys: [{ id: 'kp', label: 'p', key: 'sk-loc-1', enabled: true }],
+          },
+        },
+      }),
+      TEST_ENV,
+      kv
+    );
+
+    const issueData = await (
+      await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_vault', role: 'full', lease_ttl: 600 }),
+        TEST_ENV,
+        kv
+      )
+    ).json();
+    const token = issueData.node_token;
+    assert.ok(token.startsWith('stk_node_'));
+
+    // 1. Manifest with node token
+    const mfReq = new Request('https://hub.example.com/api/vault/manifest', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const mfResp = await handleVaultManifestRequest(mfReq, TEST_ENV, kv);
+    assert.equal(mfResp.status, 200, 'node token must be accepted for vault manifest');
+    const mf = await mfResp.json();
+    assert.ok(mf.providers.openrouter);
+    assert.equal(mf.providers.priv, undefined, 'local provider must never be exposed to nodes');
+
+    // 2. Fetch with node token
+    const ftReq = new Request('https://hub.example.com/api/vault/fetch', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openrouter' }),
+    });
+    const ftResp = await handleVaultFetchRequest(ftReq, TEST_ENV, kv);
+    assert.equal(ftResp.status, 200, 'node token must be accepted for vault fetch');
+    const ft = await ftResp.json();
+    assert.equal(ft.provider_config.keys.pool, 'sk-or-1');
+
+    // 3. Invalid node token -> 401
+    const badReq = new Request('https://hub.example.com/api/vault/manifest', {
+      headers: { authorization: `Bearer stk_node_${'0'.repeat(48)}` },
+    });
+    assert.equal((await handleVaultManifestRequest(badReq, TEST_ENV, kv)).status, 401);
+
+    // 4. Admin credential keeps working
+    assert.equal(
+      (await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)).status,
+      200
+    );
+
+    // 5. Disabled node loses vault access
+    await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${issueData.node.id}`, { enabled: false }), TEST_ENV, kv);
+    assert.equal((await handleVaultManifestRequest(mfReq, TEST_ENV, kv)).status, 401);
+  });
+
+  test('X-Node-Version header updates last_binary_version', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(makeAdminReq('POST', '/api/config', { _version: 1, providers: {} }), TEST_ENV, kv);
+    const issueData = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_ver', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+
+    const req = new Request('https://hub.example.com/api/node/config', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${issueData.node_token}`, 'x-node-version': 'v20261117-02' },
+    });
+    await handleNodeConfigRequest(req, TEST_ENV, kv);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const list = await (
+      await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)
+    ).json();
+    const node = list.nodes.find((n) => n.id === issueData.node.id);
+    assert.equal(node.last_binary_version, 'v20261117-02');
+  });
+});

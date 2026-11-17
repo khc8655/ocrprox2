@@ -389,6 +389,18 @@
 }
 ```
 
+### 7.3.1 Vault 同步的鉴权（`/api/vault/manifest`、`/api/vault/fetch`）
+- 同时接受两种凭据：Hub **管理员密码**（控制台/人工同步）与节点 **`NODE_TOKEN`**（full 节点自助同步）。
+- 节点 Token 只读，且只暴露 `origin="vault"` 的供应商与 Key；`origin="local"` 一律物理阻断。
+- 禁止把 Hub 管理员密码写入节点配置：节点只需要自己的 `NODE_TOKEN`（最小权限）。
+
+### 7.3.2 `GET /healthz`（Hub）版本可观测
+- 返回 `version` / `semver` / `release_date`，用于判断线上 Hub 部署是否落后于仓库/节点版本。
+
+### 7.3.3 模型路由 `allow_key_fallback`
+- `agent_models.<model>.allow_key_fallback`（默认 `false`）：当候选引用的 `key_label` 被禁用或删除时，允许回退到**同供应商**其它启用 Key。
+- 默认关闭以保持「候选按 provider+key_label 精确绑定」的语义；控制台模型编辑器可勾选开启。
+
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
 - `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。

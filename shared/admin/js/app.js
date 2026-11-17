@@ -2463,6 +2463,12 @@
             <span>强制非流式响应 (stream=false)</span>
           </label>
         </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="ed_m_keyfb_${mName}" ${m.allow_key_fallback ? 'checked' : ''}>
+            <span>候选 Key 不可用时回退同供应商其它 Key</span>
+          </label>
+        </div>
       </div>
 
       <div class="section-bar mt-4">
@@ -2603,6 +2609,7 @@
       m.active_key = q(`#ed_m_act_${mName}`).value.trim();
       m.no_reasoning = Boolean(q(`#ed_m_noreas_${mName}`)?.checked);
       m.force_non_stream = Boolean(q(`#ed_m_nonstream_${mName}`)?.checked);
+      m.allow_key_fallback = Boolean(q(`#ed_m_keyfb_${mName}`)?.checked);
       state.config.agent_models[mName] = m;
       if (state.config.kb_models && state.config.kb_models[mName]) {
         delete state.config.kb_models[mName];

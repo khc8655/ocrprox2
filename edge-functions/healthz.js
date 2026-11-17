@@ -1,4 +1,5 @@
 import { resolveKvBinding } from './_hub/lib/config.js';
+import { VERSION, SEMVER, RELEASE_DATE } from './_hub/lib/generated-version.js';
 
 export function handleHealthRequest(context) {
   const kv = resolveKvBinding(context);
@@ -7,6 +8,9 @@ export function handleHealthRequest(context) {
       status: 'ok',
       role: 'hub',
       kv_bound: Boolean(kv),
+      version: VERSION,
+      semver: SEMVER,
+      release_date: RELEASE_DATE,
       timestamp: new Date().toISOString(),
     }),
     {

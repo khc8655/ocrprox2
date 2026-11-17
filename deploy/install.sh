@@ -1113,6 +1113,33 @@ else
     RUN_AS_USER="$CURRENT_USER"
 fi
 
+# 检测是否运行在容器内（LXC/LXD/Docker 等非特权容器无法创建 mount namespace，
+# 需要降级 systemd hardening 指令，否则服务会以 226/NAMESPACE 无限重启）
+IS_CONTAINER=0
+if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+    IS_CONTAINER=1
+elif command -v systemd-detect-virt >/dev/null 2>&1 && systemd-detect-virt --container --quiet >/dev/null 2>&1; then
+    IS_CONTAINER=1
+elif grep -qa 'container=' /proc/1/environ 2>/dev/null; then
+    IS_CONTAINER=1
+fi
+
+LITE_USER_BLOCK='DynamicUser=yes'
+LITE_HARDENING=""
+if [ "$IS_CONTAINER" -eq 0 ]; then
+    LITE_HARDENING='ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes'
+else
+    # DynamicUser also requires a mount namespace; use a static unprivileged account.
+    LITE_USER_BLOCK='User=nobody
+Group=nogroup'
+    LITE_HARDENING='# container detected: namespace-based hardening (ProtectSystem/ProtectHome/PrivateTmp) skipped
+NoNewPrivileges=yes'
+fi
+
 # 写入配置与服务单元
 if [[ "$FINAL_ROLE" == "full" ]]; then
     CONFIG_DIR="$FINAL_CONFIG_DIR"
@@ -1172,7 +1199,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-DynamicUser=yes
+${LITE_USER_BLOCK}
 Environment="LLMPROXY_ROLE=lite"
 Environment="LLMPROXY_ADDR=[::]:${FINAL_PORT}"
 Environment="LLMPROXY_HUB_URL=${FINAL_HUB_URL}"
@@ -1184,11 +1211,7 @@ Restart=always
 RestartSec=3
 
 LimitCORE=0
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-NoNewPrivileges=yes
-MemoryDenyWriteExecute=yes
+${LITE_HARDENING}
 
 [Install]
 WantedBy=multi-user.target

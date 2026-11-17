@@ -42,6 +42,7 @@ const (
 type HubSource struct {
 	hubURL      string
 	nodeToken   string
+	nodeVersion string
 	client      *http.Client
 	snapshot    atomic.Pointer[types.RuntimeSnapshot]
 	state       atomic.Value // holds string
@@ -51,6 +52,11 @@ type HubSource struct {
 	lastRefresh time.Time
 	cbMu        sync.RWMutex
 	callbacks   []func(*types.ProxyConfig)
+}
+
+// SetNodeVersion sets the binary version reported to the hub on every sync request.
+func (s *HubSource) SetNodeVersion(v string) {
+	s.nodeVersion = strings.TrimSpace(v)
 }
 
 // OnConfigChange registers a callback invoked whenever Hub delivers an updated config snapshot.
@@ -197,6 +203,11 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 	}
 
 	req.Header.Set("Authorization", "Bearer "+s.nodeToken)
+	if s.nodeVersion != "" {
+		// Lets the hub record the real binary version (last_binary_version) instead
+		// of the issuance-time default.
+		req.Header.Set("X-Node-Version", s.nodeVersion)
+	}
 	if currentSnap != nil && currentSnap.ETag != "" {
 		req.Header.Set("If-None-Match", currentSnap.ETag)
 	}
