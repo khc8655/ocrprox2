@@ -39,7 +39,7 @@ var (
 	// in sync with version.json (guarded by npm run verify:release).
 	version    = "v20261117-02"
 	commit     = "dev"
-	AppVersion = "2.3.1"
+	AppVersion = "2.4.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
