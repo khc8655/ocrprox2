@@ -511,6 +511,63 @@
         return { ok: res.ok, status: res.status };
       }
     },
+
+    async logout() {
+      if (hostKind === 'full') {
+        try {
+          await fetch('/api/admin/auth/logout', { method: 'POST' });
+        } catch (_) {}
+      }
+      HOST.setToken('');
+    },
+
+    async testProvider(data) {
+      const res = await HOST.request('/api/admin/test-provider', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async getSystemVersion() {
+      const res = await HOST.request('/api/admin/system/version');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false };
+      }
+    },
+
+    async checkSystemUpdate() {
+      const res = await HOST.request('/api/admin/system/check-update');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false };
+      }
+    },
+
+    async upgradeSystem() {
+      const res = await HOST.request('/api/admin/system/upgrade', { method: 'POST' });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    async restartService() {
+      const res = await HOST.request('/api/admin/restart', { method: 'POST' });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
   };
 
   HOST.api = HOST;

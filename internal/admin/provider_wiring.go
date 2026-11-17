@@ -524,8 +524,9 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		ClientKey string `json:"client_key"`
-		Generate  bool   `json:"generate"`
+		ClientKey string   `json:"client_key"`
+		ProxyKeys []string `json:"proxy_keys"`
+		Generate  bool     `json:"generate"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -545,6 +546,16 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(raw, &clonedCfg)
 		}
 		clonedCfg.Settings.ClientKey = newKey
+		clonedCfg.Settings.ProxyAPIKey = newKey
+		if req.ProxyKeys != nil {
+			cleaned := make([]string, 0, len(req.ProxyKeys))
+			for _, pk := range req.ProxyKeys {
+				if t := strings.TrimSpace(pk); t != "" {
+					cleaned = append(cleaned, t)
+				}
+			}
+			clonedCfg.Settings.ProxyKeys = cleaned
+		}
 		extraKeys = clonedCfg.Settings.ProxyKeys
 		if _, err := s.localSrc.SaveConfig(&clonedCfg); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

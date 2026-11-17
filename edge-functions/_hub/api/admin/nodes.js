@@ -1,4 +1,4 @@
-import { checkAdminAuth, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { checkAdminAuth, loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import {
 listNodes,
 issueNode,
@@ -33,7 +33,9 @@ try {
 body = await request.json();
 } catch (_) {}
 try {
-const res = await issueNode(body, kv, hubUrl);
+const cfg = await loadConfig(kv);
+const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
+const res = await issueNode(body, kv, hubUrl, clientKey);
 return new Response(
 JSON.stringify({
 ok: true,
@@ -54,7 +56,9 @@ throw err;
 }
 }
 if (method === 'POST' && targetId && isRotate) {
-const res = await rotateNodeToken(targetId, kv, hubUrl);
+const cfg = await loadConfig(kv);
+const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
+const res = await rotateNodeToken(targetId, kv, hubUrl, clientKey);
 if (!res) {
 return new Response(
 JSON.stringify({ ok: false, error: 'node_not_found' }),

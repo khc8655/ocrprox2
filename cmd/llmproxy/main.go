@@ -37,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261115-06"
+	version    = "v20261117-01"
 	commit     = "dev"
-	AppVersion = "2.2.1"
+	AppVersion = "2.3.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -108,12 +108,19 @@ func main() {
 	}
 	_, _ = obs.InitAppLog(role, logDir, AppVersion)
 
-	// Initialize Observability Sink
-	obsMgr, err := obs.NewManager(role, logDir)
-	if err != nil {
-		log.Printf("warn: obs manager init: %v", err)
+	// Initialize Observability Sink (zero allocation & zero trace/usage RAM in Lite mode)
+	var obsMgr *obs.Manager
+	var obsSink types.ObservabilitySink
+	if role == types.RoleFull {
+		var err error
+		obsMgr, err = obs.NewManager(role, logDir)
+		if err != nil {
+			log.Printf("warn: obs manager init: %v", err)
+		} else {
+			obsSink = obsMgr
+			defer obsMgr.Close()
+		}
 	}
-	defer obsMgr.Close()
 
 	// Initialize Authenticator (D6: supports hot-reload & multi-keys)
 	cliClientKey := *clientKeyFlag
@@ -152,12 +159,14 @@ func main() {
 
 	if role == types.RoleLite {
 		hubSrc = hubsync.NewHubSource(*hubURLFlag, *nodeTokenFlag, *allowPrivateFlag)
+		hubSrc.OnConfigChange(updateAuthFromSettings)
 		configSrc = hubSrc
 	} else {
 		passphrase := *encryptKeyFlag
 		if passphrase == "" {
 			passphrase = *adminPassFlag
 		}
+		var err error
 		localSrc, err = config.NewLocalSource(*configDirFlag, passphrase)
 		if err != nil {
 			log.Fatalf("local config source error: %v", err)
@@ -172,7 +181,7 @@ func main() {
 	}
 
 	// Initialize Core Scheduler
-	sched := scheduler.NewScheduler(configSrc, obsMgr, *allowPrivateFlag)
+	sched := scheduler.NewScheduler(configSrc, obsSink, *allowPrivateFlag)
 	if role == types.RoleFull {
 		if err := sched.InitBans(role, *configDirFlag); err != nil {
 			log.Printf("warn: failed to initialize persistent key bans: %v", err)
@@ -279,6 +288,14 @@ func main() {
 	// 2. Client Key Enforcement Wrapper for Data Plane
 	wrapAuth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			if !authMgr.VerifyClientKey(r) {
+				// In Lite mode, client_key/proxy_keys can be projected from EdgeOne Hub.
+				// If a request carries a client token before the first lazy Hub sync (or after
+				// X-Node-Refresh: 1), pull/refresh the snapshot once and re-verify.
+				if role == types.RoleLite && hubSrc != nil && auth.ExtractToken(r) != "" {
+					_, _ = configSrc.Current(r.Context(), r.Header.Get("X-Node-Refresh") == "1")
+				}
+			}
 			if !authMgr.VerifyClientKey(r) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
@@ -467,6 +484,7 @@ func main() {
 		adminSrv.SetModeScheduler(modeSched)
 		adminSrv.SetOAuthManager(oauthMgr)
 		adminSrv.SetRefreshManager(refreshMgr)
+		adminSrv.SetBuildInfo(version, AppVersion, commit)
 		adminSrv.SetAdminPassword(*adminPassFlag)
 		adminSrv.RegisterRoutes(mux)
 	}

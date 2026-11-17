@@ -22,8 +22,16 @@ providers: Array.isArray(scope.providers) ? scope.providers : ['*'],
 };
 return copy;
 }
-function buildBootstrapEnv(node, rawToken, hubUrl) {
-return `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
+function buildBootstrapEnv(node, rawToken, hubUrl, clientKey = '') {
+const parts = [
+`LLMPROXY_ROLE=${node.role}`,
+`LLMPROXY_HUB_URL=${hubUrl}`,
+`LLMPROXY_NODE_TOKEN=${rawToken}`,
+];
+if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
+parts.push(`LLMPROXY_CLIENT_KEY=${clientKey.trim()}`);
+}
+return parts.join(' ');
 }
 export async function loadNodes(kv) {
 let raw = null;
@@ -57,7 +65,7 @@ export async function listNodes(kv) {
 const nodes = await loadNodes(kv);
 return nodes.map(sanitizeNode);
 }
-export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') {
+export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
 const nodes = await loadNodes(kv);
 const rawToken = generateNodeToken();
 const tokenSha = hashToken(rawToken);
@@ -87,7 +95,7 @@ hit_304_count: 0,
 };
 nodes.push(node);
 await saveNodes(nodes, kv);
-const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
+const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
 return {
 node: sanitizeNode(node),
 node_token: rawToken,
@@ -100,6 +108,9 @@ const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
 const node = nodes[idx];
 if (patch.name !== undefined) node.name = String(patch.name);
+if (patch.role === 'full' || patch.role === 'lite') {
+node.role = patch.role;
+}
 if (patch.enabled !== undefined) {
 node.enabled = Boolean(patch.enabled);
 }
@@ -116,7 +127,7 @@ nodes[idx] = node;
 await saveNodes(nodes, kv);
 return sanitizeNode(node);
 }
-export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com') {
+export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
 const nodes = await loadNodes(kv);
 const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
@@ -131,7 +142,7 @@ delete node.status_url;
 delete node.cached_status;
 nodes[idx] = node;
 await saveNodes(nodes, kv);
-const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
+const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
 return {
 node_token: rawToken,
 bootstrap_env: bootstrapEnv,

@@ -45,32 +45,48 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     }
 
     // Clone provider data safely
-    projectedProviders[pId] = {
+    const projectedProvider = {
       id: pData.id || pId,
       name: pData.name || pId,
       preset_id: pData.preset_id || '',
+      api_type: pData.api_type || '',
       base_url: pData.base_url || '',
       anthropic_base_url: pData.anthropic_base_url || '',
       enabled: Boolean(pData.enabled),
       origin: 'vault',
       rule_hash: pData.rule_hash || '',
-      api_keys: validKeys.map((k) => ({
-        id: k.id || k.label,
-        label: k.label,
-        key: k.key,
-        enabled: true,
-        origin: 'vault',
-        auth_type: k.auth_type || 'api_key',
-      })),
+      api_keys: validKeys.map((k) => {
+        const keyOut = {
+          id: k.id || k.label,
+          label: k.label,
+          key: k.key,
+          enabled: true,
+          origin: 'vault',
+          auth_type: k.auth_type || 'api_key',
+        };
+        if (k.weight) keyOut.weight = k.weight;
+        if (k.max_rpm) keyOut.max_rpm = k.max_rpm;
+        if (k.remark) keyOut.remark = k.remark;
+        return keyOut;
+      }),
       model_aliases: pData.model_aliases || {},
     };
+    if (pData.rpm_per_key) projectedProvider.rpm_per_key = pData.rpm_per_key;
+    if (pData.quota_reset_at) projectedProvider.quota_reset_at = pData.quota_reset_at;
+    if (pData.refresh_every) projectedProvider.refresh_every = pData.refresh_every;
+    if (pData.auto_include) projectedProvider.auto_include = pData.auto_include;
 
-    // Attach adapter rules
+    // Attach adapter rules directly on ProviderConfig (for Go ProxyConfig deserialization)
+    // and keep top-level adapter_rules map for backward compatibility.
     if (pData.adapter_rules && Object.keys(pData.adapter_rules).length > 0) {
+      projectedProvider.adapter_rules = pData.adapter_rules;
       projectedAdapterRules[pId] = pData.adapter_rules;
     } else if (pData.preset_id && presetsMap[pData.preset_id]?.adapter_rules) {
+      projectedProvider.adapter_rules = presetsMap[pData.preset_id].adapter_rules;
       projectedAdapterRules[pId] = presetsMap[pData.preset_id].adapter_rules;
     }
+
+    projectedProviders[pId] = projectedProvider;
   }
 
   // Filter agent_models by scope

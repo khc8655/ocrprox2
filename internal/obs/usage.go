@@ -106,7 +106,6 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 	m := &Manager{
 		role:        role,
 		traceBuffer: NewTraceBuffer(),
-		memRecords:  make([]UsageRecord, 0, 500),
 	}
 
 	if role == types.RoleFull && dataDir != "" {
@@ -126,6 +125,8 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 		m.doneChan = make(chan struct{})
 
 		go m.backgroundWriter()
+	} else {
+		m.memRecords = make([]UsageRecord, 0, 128)
 	}
 
 	return m, nil
@@ -209,7 +210,12 @@ func (m *Manager) Flush() error {
 // RecordRequest records a request trace and appends to usage ledger.
 // Operates with zero blocking disk I/O on the hot request path.
 func (m *Manager) RecordRequest(trace types.RequestTrace) {
-	m.traceBuffer.Record(trace)
+	if m == nil {
+		return
+	}
+	if m.traceBuffer != nil {
+		m.traceBuffer.Record(trace)
+	}
 
 	rec := UsageRecord{
 		Timestamp:          trace.Timestamp,
@@ -253,26 +259,32 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 		})
 	}
 
-	m.mu.Lock()
-	if len(m.memRecords) >= 1000 {
-		m.memRecords = append(m.memRecords[1:], rec)
-	} else {
-		m.memRecords = append(m.memRecords, rec)
-	}
-	m.mu.Unlock()
-
-	// Non-blocking async channel dispatch
 	if m.recordChan != nil && !m.closed.Load() {
 		select {
 		case m.recordChan <- rec:
 		default:
 			// Buffer full: drop rather than block hot path
 		}
+		return
+	}
+
+	// Only retain in-memory slice when running without a disk ledger (e.g. unit tests)
+	if m.ledgerPath == "" {
+		m.mu.Lock()
+		if len(m.memRecords) >= 1000 {
+			m.memRecords = append(m.memRecords[1:], rec)
+		} else {
+			m.memRecords = append(m.memRecords, rec)
+		}
+		m.mu.Unlock()
 	}
 }
 
 // RecentTraces returns recent traces.
 func (m *Manager) RecentTraces(onlyFailedOrRetried bool) []types.RequestTrace {
+	if m == nil || m.traceBuffer == nil {
+		return nil
+	}
 	return m.traceBuffer.Recent(onlyFailedOrRetried)
 }
 
@@ -307,28 +319,30 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		cutoff = 0
 	}
 
-	records := m.loadRecordsSince(cutoff)
-
 	type ModelStats struct {
-		Model            string  `json:"model,omitempty"`
-		Requests         int     `json:"requests"`
-		Successes        int     `json:"successes"`
-		Failed           int     `json:"failed"`
-		SuccessRate      float64 `json:"success_rate,omitempty"`
-		InTokens         int     `json:"in_tokens"`
-		OutTokens        int     `json:"out_tokens"`
-		CacheReadTokens  int     `json:"cache_read_tokens"`
-		CacheWriteTokens int     `json:"cache_write_tokens"`
-		CacheHitRate     float64 `json:"cache_hit_rate"`
-		ReasoningTokens  int     `json:"reasoning_tokens"`
-		TotalMillis      int64   `json:"total_ms"`
-		AvgTTFTMillis    int64   `json:"avg_ttft_ms,omitempty"`
-		AvgTotalMillis   int64   `json:"avg_total_ms,omitempty"`
-		TPS              float64 `json:"tps"`
-		ttftSum          int64
-		ttftCount        int
-		flowSum          int64
-		flowOutSum       int
+		Model              string  `json:"model,omitempty"`
+		Requests           int     `json:"requests"`
+		Successes          int     `json:"successes"`
+		Failed             int     `json:"failed"`
+		Retried            int     `json:"retried"`
+		SuccessRate        float64 `json:"success_rate,omitempty"`
+		InTokens           int     `json:"in_tokens"`
+		OutTokens          int     `json:"out_tokens"`
+		CacheReadTokens    int     `json:"cache_read_tokens"`
+		CacheWriteTokens   int     `json:"cache_write_tokens"`
+		CacheWrite1hTokens int     `json:"cache_write_1h_tokens,omitempty"`
+		CacheHitRate       float64 `json:"cache_hit_rate"`
+		ReasoningTokens    int     `json:"reasoning_tokens"`
+		UpBytes            int     `json:"up_bytes,omitempty"`
+		DownBytes          int     `json:"down_bytes,omitempty"`
+		TotalMillis        int64   `json:"total_ms"`
+		AvgTTFTMillis      int64   `json:"avg_ttft_ms,omitempty"`
+		AvgTotalMillis     int64   `json:"avg_total_ms,omitempty"`
+		TPS                float64 `json:"tps"`
+		ttftSum            int64
+		ttftCount          int
+		flowSum            int64
+		flowOutSum         int
 	}
 
 	type KeyStats struct {
@@ -337,11 +351,16 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		Requests         int     `json:"requests"`
 		Successes        int     `json:"successes"`
 		Failed           int     `json:"failed"`
+		Retried          int     `json:"retried"`
+		SuccessRate      float64 `json:"success_rate,omitempty"`
 		InTokens         int     `json:"in_tokens"`
 		OutTokens        int     `json:"out_tokens"`
 		CacheReadTokens  int     `json:"cache_read_tokens"`
 		CacheWriteTokens int     `json:"cache_write_tokens"`
 		CacheHitRate     float64 `json:"cache_hit_rate"`
+		ReasoningTokens  int     `json:"reasoning_tokens"`
+		UpBytes          int     `json:"up_bytes,omitempty"`
+		DownBytes        int     `json:"down_bytes,omitempty"`
 		AvgTTFTMillis    int64   `json:"avg_ttft_ms,omitempty"`
 		AvgTotalMillis   int64   `json:"avg_total_ms,omitempty"`
 		TPS              float64 `json:"tps"`
@@ -357,11 +376,16 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		Requests         int            `json:"requests"`
 		Successes        int            `json:"successes"`
 		Failed           int            `json:"failed"`
+		Retried          int            `json:"retried"`
+		SuccessRate      float64        `json:"success_rate,omitempty"`
 		InTokens         int            `json:"in_tokens"`
 		OutTokens        int            `json:"out_tokens"`
 		CacheReadTokens  int            `json:"cache_read_tokens"`
 		CacheWriteTokens int            `json:"cache_write_tokens"`
 		CacheHitRate     float64        `json:"cache_hit_rate"`
+		ReasoningTokens  int            `json:"reasoning_tokens"`
+		UpBytes          int            `json:"up_bytes,omitempty"`
+		DownBytes        int            `json:"down_bytes,omitempty"`
 		TPS              float64        `json:"tps"`
 		AvgTTFTMillis    int64          `json:"avg_ttft_ms,omitempty"`
 		AvgTotalMillis   int64          `json:"avg_total_ms,omitempty"`
@@ -373,9 +397,39 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		flowOutSum       int
 	}
 
+	type EndpointStats struct {
+		Endpoint         string  `json:"endpoint"`
+		Mode             string  `json:"mode,omitempty"`
+		Requests         int     `json:"requests"`
+		Successes        int     `json:"successes"`
+		Failed           int     `json:"failed"`
+		Retried          int     `json:"retried"`
+		SuccessRate      float64 `json:"success_rate,omitempty"`
+		InTokens         int     `json:"in_tokens"`
+		OutTokens        int     `json:"out_tokens"`
+		CacheReadTokens  int     `json:"cache_read_tokens"`
+		CacheWriteTokens int     `json:"cache_write_tokens"`
+		CacheHitRate     float64 `json:"cache_hit_rate"`
+		ReasoningTokens  int     `json:"reasoning_tokens"`
+		UpBytes          int     `json:"up_bytes,omitempty"`
+		DownBytes        int     `json:"down_bytes,omitempty"`
+		TPS              float64 `json:"tps"`
+		AvgTTFTMillis    int64   `json:"avg_ttft_ms,omitempty"`
+		AvgTotalMillis   int64   `json:"avg_total_ms,omitempty"`
+		ttftSum          int64
+		ttftCount        int
+		totalMsSum       int64
+		flowSum          int64
+		flowOutSum       int
+	}
+
 	modelMap := make(map[string]*ModelStats)
 	provMap := make(map[string]*ProviderStats)
 	keyMap := make(map[string]*KeyStats)
+	epMap := make(map[string]*EndpointStats)
+	statusCounts := map[string]int{"2xx": 0, "429": 0, "4xx": 0, "5xx": 0, "err": 0}
+	stopReasons := make(map[string]int)
+	channelCounts := map[string]int{"agent": 0, "kb": 0}
 
 	totalReqs := 0
 	totalSuccess := 0
@@ -400,17 +454,59 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 	var sumSent int64
 	var sentCount int
 
-	for _, r := range records {
-		if r.Timestamp < cutoff {
-			continue
+	type bucketAccum struct {
+		requests   int
+		successes  int
+		failed     int
+		inTok      int
+		outTok     int
+		cRead      int
+		cWrite     int
+		ttftSum    int64
+		ttftCount  int
+		flowSum    int64
+		flowOutSum int
+	}
+	hourBuckets := make([]bucketAccum, 24)
+	dayBuckets := make(map[string]*bucketAccum)
+
+	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	weekdayOffset := (int(todayMidnight.Weekday()) + 6) % 7 // Monday = 0
+	mondayThisWeek := todayMidnight.AddDate(0, 0, -weekdayOffset)
+	startMonday := mondayThisWeek.AddDate(0, 0, -7*(53-1))
+	heatmapCutoff := startMonday.Unix()
+	heatDayMap := make(map[string]*HeatmapDay)
+	var earliestTs int64
+
+	m.forEachRecordSince(cutoff, func(r UsageRecord) {
+		if earliestTs == 0 || r.Timestamp < earliestTs {
+			earliestTs = r.Timestamp
 		}
 		totalReqs++
 		isSuccess := r.Status >= 200 && r.Status < 300
 		if isSuccess {
 			totalSuccess++
+			statusCounts["2xx"]++
+		} else if r.Status == 429 {
+			statusCounts["429"]++
+		} else if r.Status >= 400 && r.Status < 500 {
+			statusCounts["4xx"]++
+		} else if r.Status >= 500 {
+			statusCounts["5xx"]++
+		} else {
+			statusCounts["err"]++
 		}
-		if r.Tries > 1 || r.RetriedMillis > 0 {
+		isRetried := r.Tries > 1 || r.RetriedMillis > 0
+		if isRetried {
 			totalRetried++
+		}
+		if r.Mode == "kb" {
+			channelCounts["kb"]++
+		} else {
+			channelCounts["agent"]++
+		}
+		if r.StopReason != "" {
+			stopReasons[r.StopReason]++
 		}
 		totalIn += r.InTokens
 		totalOut += r.OutTokens
@@ -470,11 +566,17 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		} else {
 			ms.Failed++
 		}
+		if isRetried {
+			ms.Retried++
+		}
 		ms.InTokens += r.InTokens
 		ms.OutTokens += r.OutTokens
 		ms.CacheReadTokens += r.CacheReadTokens
 		ms.CacheWriteTokens += r.CacheWriteTokens
+		ms.CacheWrite1hTokens += r.CacheWrite1hTokens
 		ms.ReasoningTokens += r.ReasoningTokens
+		ms.UpBytes += r.UpBytes
+		ms.DownBytes += r.DownBytes
 		ms.TotalMillis += r.Millis
 		if r.TTFTMillis > 0 {
 			ms.ttftSum += r.TTFTMillis
@@ -483,6 +585,42 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		if effFlow > 0 && r.OutTokens > 0 {
 			ms.flowSum += effFlow
 			ms.flowOutSum += r.OutTokens
+		}
+
+		// Endpoint / Channel aggregate
+		epKey := r.Endpoint
+		if epKey == "" {
+			epKey = "/v1/chat/completions"
+		}
+		eps, ok := epMap[epKey]
+		if !ok {
+			eps = &EndpointStats{Endpoint: epKey, Mode: r.Mode}
+			epMap[epKey] = eps
+		}
+		eps.Requests++
+		if isSuccess {
+			eps.Successes++
+		} else {
+			eps.Failed++
+		}
+		if isRetried {
+			eps.Retried++
+		}
+		eps.InTokens += r.InTokens
+		eps.OutTokens += r.OutTokens
+		eps.CacheReadTokens += r.CacheReadTokens
+		eps.CacheWriteTokens += r.CacheWriteTokens
+		eps.ReasoningTokens += r.ReasoningTokens
+		eps.UpBytes += r.UpBytes
+		eps.DownBytes += r.DownBytes
+		eps.totalMsSum += r.Millis
+		if r.TTFTMillis > 0 {
+			eps.ttftSum += r.TTFTMillis
+			eps.ttftCount++
+		}
+		if effFlow > 0 && r.OutTokens > 0 {
+			eps.flowSum += effFlow
+			eps.flowOutSum += r.OutTokens
 		}
 
 		// Provider aggregate
@@ -501,10 +639,16 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			} else {
 				ps.Failed++
 			}
+			if isRetried {
+				ps.Retried++
+			}
 			ps.InTokens += r.InTokens
 			ps.OutTokens += r.OutTokens
 			ps.CacheReadTokens += r.CacheReadTokens
 			ps.CacheWriteTokens += r.CacheWriteTokens
+			ps.ReasoningTokens += r.ReasoningTokens
+			ps.UpBytes += r.UpBytes
+			ps.DownBytes += r.DownBytes
 			ps.totalMsSum += r.Millis
 			if r.TTFTMillis > 0 {
 				ps.ttftSum += r.TTFTMillis
@@ -533,10 +677,16 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			} else {
 				ks.Failed++
 			}
+			if isRetried {
+				ks.Retried++
+			}
 			ks.InTokens += r.InTokens
 			ks.OutTokens += r.OutTokens
 			ks.CacheReadTokens += r.CacheReadTokens
 			ks.CacheWriteTokens += r.CacheWriteTokens
+			ks.ReasoningTokens += r.ReasoningTokens
+			ks.UpBytes += r.UpBytes
+			ks.DownBytes += r.DownBytes
 			ks.totalMsSum += r.Millis
 			if r.TTFTMillis > 0 {
 				ks.ttftSum += r.TTFTMillis
@@ -564,7 +714,72 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			fks.Requests++
 			fks.Failed++
 		}
-	}
+
+		// Single-pass series + heatmap accumulation (zero O(days * records) loop)
+		t := time.Unix(r.Timestamp, 0).In(loc)
+		if period == "today" {
+			if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+				h := t.Hour()
+				if h >= 0 && h < 24 {
+					b := &hourBuckets[h]
+					b.requests++
+					if isSuccess {
+						b.successes++
+					} else {
+						b.failed++
+					}
+					b.inTok += r.InTokens
+					b.outTok += r.OutTokens
+					b.cRead += r.CacheReadTokens
+					b.cWrite += r.CacheWriteTokens
+					if r.TTFTMillis > 0 {
+						b.ttftSum += r.TTFTMillis
+						b.ttftCount++
+					}
+					if effFlow > 0 && r.OutTokens > 0 {
+						b.flowSum += effFlow
+						b.flowOutSum += r.OutTokens
+					}
+				}
+			}
+		} else {
+			dayKey := t.Format("2006-01-02")
+			b, ok := dayBuckets[dayKey]
+			if !ok {
+				b = &bucketAccum{}
+				dayBuckets[dayKey] = b
+			}
+			b.requests++
+			if isSuccess {
+				b.successes++
+			} else {
+				b.failed++
+			}
+			b.inTok += r.InTokens
+			b.outTok += r.OutTokens
+			b.cRead += r.CacheReadTokens
+			b.cWrite += r.CacheWriteTokens
+			if r.TTFTMillis > 0 {
+				b.ttftSum += r.TTFTMillis
+				b.ttftCount++
+			}
+			if effFlow > 0 && r.OutTokens > 0 {
+				b.flowSum += effFlow
+				b.flowOutSum += r.OutTokens
+			}
+		}
+
+		if r.Timestamp >= heatmapCutoff {
+			dayKey := t.Format("2006-01-02")
+			d, ok := heatDayMap[dayKey]
+			if !ok {
+				d = &HeatmapDay{Date: dayKey}
+				heatDayMap[dayKey] = d
+			}
+			d.Calls++
+			d.Tokens += r.InTokens + r.OutTokens + r.CacheReadTokens + r.CacheWriteTokens
+		}
+	})
 
 	var avgTTFT int64
 	if ttftCount > 0 {
@@ -617,6 +832,7 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 
 	for _, ps := range provMap {
 		if ps.Requests > 0 {
+			ps.SuccessRate = float64(ps.Successes) / float64(ps.Requests)
 			ps.AvgTotalMillis = ps.totalMsSum / int64(ps.Requests)
 		}
 		if ps.ttftCount > 0 {
@@ -633,6 +849,7 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 	var keyList []*KeyStats
 	for _, ks := range keyMap {
 		if ks.Requests > 0 {
+			ks.SuccessRate = float64(ks.Successes) / float64(ks.Requests)
 			ks.AvgTotalMillis = ks.totalMsSum / int64(ks.Requests)
 		}
 		if ks.ttftCount > 0 {
@@ -647,11 +864,130 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		keyList = append(keyList, ks)
 	}
 
-	// 1. Time-series interactive buckets ("today" hourly vs "7d"/"30d" daily)
-	bucketName, seriesPoints := buildSeries(records, period, loc, now)
+	var endpointList []*EndpointStats
+	for _, eps := range epMap {
+		if eps.Requests > 0 {
+			eps.SuccessRate = float64(eps.Successes) / float64(eps.Requests)
+			eps.AvgTotalMillis = eps.totalMsSum / int64(eps.Requests)
+		}
+		if eps.ttftCount > 0 {
+			eps.AvgTTFTMillis = eps.ttftSum / int64(eps.ttftCount)
+		}
+		if eps.flowSum > 0 && eps.flowOutSum > 0 {
+			eps.TPS = math.Round((float64(eps.flowOutSum)/(float64(eps.flowSum)/1000.0))*100) / 100
+		}
+		if eps.InTokens+eps.CacheReadTokens > 0 {
+			eps.CacheHitRate = math.Round((float64(eps.CacheReadTokens)/float64(eps.InTokens+eps.CacheReadTokens))*10000) / 10000
+		}
+		endpointList = append(endpointList, eps)
+	}
+	sort.Slice(endpointList, func(i, j int) bool {
+		if endpointList[i].Requests != endpointList[j].Requests {
+			return endpointList[i].Requests > endpointList[j].Requests
+		}
+		return endpointList[i].Endpoint < endpointList[j].Endpoint
+	})
 
-	// 2. 53-week Heatmap data
-	heatmap := buildHeatmap(records, loc, now)
+	// 1. Time-series interactive buckets built directly in O(days) from single-pass accumulators
+	var bucketName string
+	var seriesPoints []SeriesPoint
+	if period == "today" {
+		bucketName = "hour"
+		seriesPoints = make([]SeriesPoint, 24)
+		for h := 0; h < 24; h++ {
+			b := &hourBuckets[h]
+			var avgTTFT int64
+			if b.ttftCount > 0 {
+				avgTTFT = b.ttftSum / int64(b.ttftCount)
+			}
+			var tps float64
+			if b.flowSum > 0 && b.flowOutSum > 0 {
+				tps = math.Round((float64(b.flowOutSum)/(float64(b.flowSum)/1000.0))*100) / 100
+			}
+			seriesPoints[h] = SeriesPoint{
+				Label:            fmt.Sprintf("%02d:00", h),
+				Timestamp:        todayMidnight.Add(time.Duration(h) * time.Hour).Unix(),
+				Requests:         b.requests,
+				Calls:            b.requests,
+				Successes:        b.successes,
+				Failed:           b.failed,
+				InputTokens:      b.inTok,
+				OutputTokens:     b.outTok,
+				CacheReadTokens:  b.cRead,
+				CacheWriteTokens: b.cWrite,
+				TPS:              tps,
+				AvgTTFTMillis:    avgTTFT,
+			}
+		}
+	} else {
+		bucketName = "day"
+		dayCount := 7
+		if period == "30d" {
+			dayCount = 30
+		} else if period == "all" {
+			dayCount = 30
+			if earliestTs > 0 {
+				earliest := time.Unix(earliestTs, 0).In(loc)
+				diffDays := int(now.Sub(earliest).Hours()/24) + 1
+				if diffDays > dayCount {
+					dayCount = diffDays
+				}
+			}
+		}
+		seriesPoints = make([]SeriesPoint, dayCount)
+		for i := 0; i < dayCount; i++ {
+			dayOffset := (dayCount - 1) - i
+			targetDate := todayMidnight.AddDate(0, 0, -dayOffset)
+			label := targetDate.Format("2006-01-02")
+			var pt SeriesPoint
+			pt.Label = label
+			pt.Timestamp = targetDate.Unix()
+			if b, ok := dayBuckets[label]; ok {
+				var avgTTFT int64
+				if b.ttftCount > 0 {
+					avgTTFT = b.ttftSum / int64(b.ttftCount)
+				}
+				var tps float64
+				if b.flowSum > 0 && b.flowOutSum > 0 {
+					tps = math.Round((float64(b.flowOutSum)/(float64(b.flowSum)/1000.0))*100) / 100
+				}
+				pt.Requests = b.requests
+				pt.Calls = b.requests
+				pt.Successes = b.successes
+				pt.Failed = b.failed
+				pt.InputTokens = b.inTok
+				pt.OutputTokens = b.outTok
+				pt.CacheReadTokens = b.cRead
+				pt.CacheWriteTokens = b.cWrite
+				pt.TPS = tps
+				pt.AvgTTFTMillis = avgTTFT
+			}
+			seriesPoints[i] = pt
+		}
+	}
+
+	// 2. 53-week Heatmap summary built directly from heatDayMap
+	heatDays := make([]HeatmapDay, 0, len(heatDayMap))
+	yearCalls := 0
+	yearTokens := 0
+	for _, d := range heatDayMap {
+		heatDays = append(heatDays, *d)
+		yearCalls += d.Calls
+		yearTokens += d.Tokens
+	}
+	sort.Slice(heatDays, func(i, j int) bool {
+		return heatDays[i].Date < heatDays[j].Date
+	})
+	heatmap := Heatmap{
+		From: startMonday.Format("2006-01-02"),
+		To:   now.Format("2006-01-02"),
+		Days: heatDays,
+	}
+	var successRate, retryRate float64
+	if totalReqs > 0 {
+		successRate = math.Round((float64(totalSuccess)/float64(totalReqs))*10000) / 10000
+		retryRate = math.Round((float64(totalRetried)/float64(totalReqs))*10000) / 10000
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -664,7 +1000,9 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			"requests":              totalReqs,
 			"success":               totalSuccess,
 			"failed":                totalReqs - totalSuccess,
+			"success_rate":          successRate,
 			"retried_requests":      totalRetried,
+			"retry_rate":            retryRate,
 			"input_tokens":          totalIn,
 			"output_tokens":         totalOut,
 			"cache_read_tokens":     totalCacheRead,
@@ -681,6 +1019,12 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 			"avg_own_ms":            avgOwn,
 			"avg_queued_ms":         avgQueued,
 			"avg_sent_ms":           avgSent,
+			"status_counts":         statusCounts,
+			"stop_reasons":          stopReasons,
+			"channels":              channelCounts,
+			"active_days":           len(heatmap.Days),
+			"year_calls":            yearCalls,
+			"year_tokens":           yearTokens,
 		},
 		"summary": map[string]any{
 			"total_requests":   totalReqs,
@@ -692,255 +1036,49 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		"model_list": modelList,
 		"providers":  provMap,
 		"keys":       keyList,
+		"endpoints":  endpointList,
 	}, nil
 }
 
-func buildSeries(records []UsageRecord, period string, loc *time.Location, now time.Time) (string, []SeriesPoint) {
-	if period == "today" {
-		// 24 hourly buckets
-		bucket := "hour"
-		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-		points := make([]SeriesPoint, 24)
-
-		type hourAccum struct {
-			requests   int
-			successes  int
-			failed     int
-			inTok      int
-			outTok     int
-			cRead      int
-			cWrite     int
-			ttftSum    int64
-			ttftCount  int
-			flowSum    int64
-			flowOutSum int
-		}
-		hours := make([]hourAccum, 24)
-
-		for _, r := range records {
-			t := time.Unix(r.Timestamp, 0).In(loc)
-			if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
-				h := t.Hour()
-				if h >= 0 && h < 24 {
-					hours[h].requests++
-					if r.Status >= 200 && r.Status < 300 {
-						hours[h].successes++
-					} else {
-						hours[h].failed++
-					}
-					hours[h].inTok += r.InTokens
-					hours[h].outTok += r.OutTokens
-					hours[h].cRead += r.CacheReadTokens
-					hours[h].cWrite += r.CacheWriteTokens
-					if r.TTFTMillis > 0 {
-						hours[h].ttftSum += r.TTFTMillis
-						hours[h].ttftCount++
-					}
-					effFlow := r.FlowMillis
-					if effFlow <= 0 && r.Millis > r.TTFTMillis && r.TTFTMillis > 0 {
-						effFlow = r.Millis - r.TTFTMillis
-					}
-					if effFlow > 0 && r.OutTokens > 0 {
-						hours[h].flowSum += effFlow
-						hours[h].flowOutSum += r.OutTokens
-					}
-				}
-			}
-		}
-
-		for h := 0; h < 24; h++ {
-			ptTime := midnight.Add(time.Duration(h) * time.Hour)
-			var avgTTFT int64
-			if hours[h].ttftCount > 0 {
-				avgTTFT = hours[h].ttftSum / int64(hours[h].ttftCount)
-			}
-			var tps float64
-			if hours[h].flowSum > 0 && hours[h].flowOutSum > 0 {
-				tps = math.Round((float64(hours[h].flowOutSum)/(float64(hours[h].flowSum)/1000.0))*100) / 100
-			}
-
-			points[h] = SeriesPoint{
-				Label:            fmt.Sprintf("%02d:00", h),
-				Timestamp:        ptTime.Unix(),
-				Requests:         hours[h].requests,
-				Calls:            hours[h].requests,
-				Successes:        hours[h].successes,
-				Failed:           hours[h].failed,
-				InputTokens:      hours[h].inTok,
-				OutputTokens:     hours[h].outTok,
-				CacheReadTokens:  hours[h].cRead,
-				CacheWriteTokens: hours[h].cWrite,
-				TPS:              tps,
-				AvgTTFTMillis:    avgTTFT,
-			}
-		}
-		return bucket, points
+func (m *Manager) forEachRecordSince(cutoff int64, fn func(UsageRecord)) {
+	if m == nil {
+		return
 	}
-
-	// Daily buckets for "7d", "30d", or "all"
-	bucket := "day"
-	dayCount := 7
-	if period == "30d" {
-		dayCount = 30
-	} else if period == "all" {
-		dayCount = 30
-		if len(records) > 0 {
-			earliest := time.Unix(records[0].Timestamp, 0).In(loc)
-			diffDays := int(now.Sub(earliest).Hours()/24) + 1
-			if diffDays > dayCount {
-				dayCount = diffDays
-			}
-		}
-	}
-
-	points := make([]SeriesPoint, dayCount)
-	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-
-	for i := 0; i < dayCount; i++ {
-		dayOffset := (dayCount - 1) - i
-		targetDate := todayMidnight.AddDate(0, 0, -dayOffset)
-		startSec := targetDate.Unix()
-		endSec := targetDate.AddDate(0, 0, 1).Unix()
-
-		var reqs, succ, fail, inT, outT, cR, cW int
-		var ttftSum, flowSum, flowOutSum int64
-		var ttftCount int
-
-		for _, r := range records {
-			if r.Timestamp >= startSec && r.Timestamp < endSec {
-				reqs++
-				if r.Status >= 200 && r.Status < 300 {
-					succ++
-				} else {
-					fail++
-				}
-				inT += r.InTokens
-				outT += r.OutTokens
-				cR += r.CacheReadTokens
-				cW += r.CacheWriteTokens
-				if r.TTFTMillis > 0 {
-					ttftSum += r.TTFTMillis
-					ttftCount++
-				}
-				effFlow := r.FlowMillis
-				if effFlow <= 0 && r.Millis > r.TTFTMillis && r.TTFTMillis > 0 {
-					effFlow = r.Millis - r.TTFTMillis
-				}
-				if effFlow > 0 && r.OutTokens > 0 {
-					flowSum += effFlow
-					flowOutSum += int64(r.OutTokens)
-				}
-			}
-		}
-
-		var avgTTFT int64
-		if ttftCount > 0 {
-			avgTTFT = ttftSum / int64(ttftCount)
-		}
-		var tps float64
-		if flowSum > 0 && flowOutSum > 0 {
-			tps = math.Round((float64(flowOutSum)/(float64(flowSum)/1000.0))*100) / 100
-		}
-
-		points[i] = SeriesPoint{
-			Label:            targetDate.Format("2006-01-02"),
-			Timestamp:        startSec,
-			Requests:         reqs,
-			Calls:            reqs,
-			Successes:        succ,
-			Failed:           fail,
-			InputTokens:      inT,
-			OutputTokens:     outT,
-			CacheReadTokens:  cR,
-			CacheWriteTokens: cW,
-			TPS:              tps,
-			AvgTTFTMillis:    avgTTFT,
-		}
-	}
-
-	return bucket, points
-}
-
-func buildHeatmap(records []UsageRecord, loc *time.Location, now time.Time) Heatmap {
-	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	weekdayOffset := (int(todayMidnight.Weekday()) + 6) % 7 // Monday = 0
-	mondayThisWeek := todayMidnight.AddDate(0, 0, -weekdayOffset)
-	startMonday := mondayThisWeek.AddDate(0, 0, -7*(53-1))
-
-	startCutoff := startMonday.Unix()
-	dayMap := make(map[string]*HeatmapDay)
-
-	for _, r := range records {
-		if r.Timestamp < startCutoff {
-			continue
-		}
-		dayKey := time.Unix(r.Timestamp, 0).In(loc).Format("2006-01-02")
-		d, ok := dayMap[dayKey]
-		if !ok {
-			d = &HeatmapDay{Date: dayKey}
-			dayMap[dayKey] = d
-		}
-		d.Calls++
-		d.Tokens += (r.InTokens + r.OutTokens + r.CacheReadTokens + r.CacheWriteTokens)
-	}
-
-	days := make([]HeatmapDay, 0, len(dayMap))
-	for _, d := range dayMap {
-		days = append(days, *d)
-	}
-	sort.Slice(days, func(i, j int) bool {
-		return days[i].Date < days[j].Date
-	})
-
-	return Heatmap{
-		From: startMonday.Format("2006-01-02"),
-		To:   now.Format("2006-01-02"),
-		Days: days,
-	}
-}
-
-func (m *Manager) loadRecordsSince(cutoff int64) []UsageRecord {
 	// Flush any in-flight buffered writes so usage.jsonl is 100% current
 	_ = m.Flush()
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// If no ledger file (e.g. lite mode or no dataDir), return in-memory records
 	if m.ledgerPath == "" {
-		out := make([]UsageRecord, 0, len(m.memRecords))
-		for _, r := range m.memRecords {
+		m.mu.Lock()
+		snapshot := make([]UsageRecord, len(m.memRecords))
+		copy(snapshot, m.memRecords)
+		m.mu.Unlock()
+		for _, r := range snapshot {
 			if r.Timestamp >= cutoff {
-				out = append(out, r)
+				fn(r)
 			}
 		}
-		return out
+		return
 	}
 
-	// Read from usage.jsonl
+	m.mu.Lock()
 	f, err := os.Open(m.ledgerPath)
+	m.mu.Unlock()
 	if err != nil {
-		out := make([]UsageRecord, 0, len(m.memRecords))
-		for _, r := range m.memRecords {
-			if r.Timestamp >= cutoff {
-				out = append(out, r)
-			}
-		}
-		return out
+		return
 	}
 	defer f.Close()
 
-	var records []UsageRecord
 	sc := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 1024*1024)
 	for sc.Scan() {
 		var r UsageRecord
 		if err := json.Unmarshal(sc.Bytes(), &r); err == nil {
 			if r.Timestamp >= cutoff {
-				records = append(records, r)
+				fn(r)
 			}
 		}
 	}
-	return records
 }
 
 // Close gracefully flushes pending records and closes the underlying ledger file.

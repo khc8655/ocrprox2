@@ -395,7 +395,7 @@ func (s *Scheduler) isCandidateAvailableAndIdle(c *CandidateKey) bool {
 
 // sanitizeHeaders redacts sensitive auth tokens and cleans up headers for observability.
 func sanitizeHeaders(h http.Header) map[string]string {
-	if h == nil {
+	if h == nil || len(h) == 0 {
 		return nil
 	}
 	res := make(map[string]string, len(h))
@@ -403,16 +403,37 @@ func sanitizeHeaders(h http.Header) map[string]string {
 		if len(vals) == 0 {
 			continue
 		}
-		joined := strings.Join(vals, ", ")
-		lk := strings.ToLower(k)
-		if lk == "authorization" || lk == "proxy-authorization" || lk == "x-api-key" || lk == "cookie" || lk == "set-cookie" || strings.Contains(lk, "token") || strings.Contains(lk, "secret") {
+		joined := vals[0]
+		if len(vals) > 1 {
+			joined = strings.Join(vals, ", ")
+		}
+		if strings.EqualFold(k, "Authorization") ||
+			strings.EqualFold(k, "Proxy-Authorization") ||
+			strings.EqualFold(k, "X-Api-Key") ||
+			strings.EqualFold(k, "Cookie") ||
+			strings.EqualFold(k, "Set-Cookie") ||
+			strings.Contains(strings.ToLower(k), "token") ||
+			strings.Contains(strings.ToLower(k), "secret") {
 			joined = "[REDACTED]"
-		} else {
+		} else if !isBenignStandardHeader(k) {
 			joined = obs.ScrubString(joined)
 		}
 		res[k] = joined
 	}
 	return res
+}
+
+func isBenignStandardHeader(k string) bool {
+	return strings.EqualFold(k, "Content-Type") ||
+		strings.EqualFold(k, "Content-Length") ||
+		strings.EqualFold(k, "Accept") ||
+		strings.EqualFold(k, "Accept-Encoding") ||
+		strings.EqualFold(k, "Connection") ||
+		strings.EqualFold(k, "Cache-Control") ||
+		strings.EqualFold(k, "Date") ||
+		strings.EqualFold(k, "Server") ||
+		strings.EqualFold(k, "Transfer-Encoding") ||
+		strings.EqualFold(k, "User-Agent")
 }
 
 // Dispatch executes the scheduled request with 300s budget, failover, peek, and forbiddenAlike.
@@ -426,8 +447,15 @@ func (s *Scheduler) Dispatch(
 	r *http.Request,
 ) error {
 	reqStart := time.Now()
-	traceID := fmt.Sprintf("req-%d", reqStart.UnixNano())
-	reqHeaders := sanitizeHeaders(r.Header)
+	hasObs := s.hasObs()
+	var traceID string
+	var reqHeaders map[string]string
+	if hasObs {
+		traceID = fmt.Sprintf("req-%d", reqStart.UnixNano())
+		if r != nil {
+			reqHeaders = sanitizeHeaders(r.Header)
+		}
+	}
 
 	// Hard total budget: 300s
 	budgetCtx, cancel := context.WithTimeout(ctx, HardBudgetTimeout)
@@ -666,7 +694,10 @@ func (s *Scheduler) Dispatch(
 		}
 
 		lastStatus = resp.StatusCode
-		tryRespHeaders := sanitizeHeaders(resp.Header)
+		var tryRespHeaders map[string]string
+		if hasObs {
+			tryRespHeaders = sanitizeHeaders(resp.Header)
+		}
 
 		if resp.StatusCode != http.StatusOK {
 			errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -806,57 +837,62 @@ func (s *Scheduler) Dispatch(
 				s.latency.Record(cand.KeyTag, tryElapsed)
 				s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 
-				usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
-				var aggMap map[string]any
-				if json.Unmarshal(aggBytes, &aggMap) == nil {
-					usageTracker.ParseJSON(aggMap)
+				var usageTracker *StreamUsageTracker
+				if hasObs {
+					usageTracker = NewStreamUsageTracker(reqStart, ttftMillis)
+					var aggMap map[string]any
+					if json.Unmarshal(aggBytes, &aggMap) == nil {
+						usageTracker.ParseJSON(aggMap)
+					}
+					usageTracker.Finish()
 				}
-				usageTracker.Finish()
 
 				totalMillis := time.Since(reqStart).Milliseconds()
-				ownMillis := totalMillis - (sentMillis + tryElapsed)
-				if ownMillis < 0 {
-					ownMillis = 0
+				if hasObs {
+					ownMillis := totalMillis - (sentMillis + tryElapsed)
+					if ownMillis < 0 {
+						ownMillis = 0
+					}
+					tries = append(tries, types.Try{
+						Attempt:     i + 1,
+						Provider:    cand.Provider.ID,
+						KeyID:       cand.KeyEntry.Label,
+						Model:       cand.TargetModel,
+						Status:      200,
+						Millis:      tryElapsed,
+						TTFTMillis:  tryTTFT,
+						RespHeaders: tryRespHeaders,
+					})
+					s.recordFinalTrace(types.RequestTrace{
+						ID:                 traceID,
+						Timestamp:          time.Now().Unix(),
+						Mode:               "agent",
+						Endpoint:           endpoint,
+						ReqModel:           reqModel,
+						ServedModel:        cand.TargetModel,
+						WinnerProvider:     cand.Provider.ID,
+						WinnerKey:          cand.KeyEntry.Label,
+						Status:             200,
+						Stream:             clientStream,
+						InTokens:           usageTracker.InTokens,
+						OutTokens:          usageTracker.OutTokens,
+						CacheReadTokens:    usageTracker.CacheReadTokens,
+						CacheWriteTokens:   usageTracker.CacheWriteTokens,
+						CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+						ReasoningTokens:    usageTracker.ReasoningTokens,
+						StopReason:         usageTracker.StopReason,
+						TTFTMillis:         ttftMillis,
+						FlowMillis:         0,
+						OwnMillis:          ownMillis,
+						QueuedMillis:       queuedMillis,
+						SentMillis:         sentMillis,
+						TotalMillis:        totalMillis,
+						UpBytes:            len(mutatedBody),
+						DownBytes:          len(aggBytes),
+						ReqHeaders:         reqHeaders,
+						Tries:              tries,
+					})
 				}
-				tries = append(tries, types.Try{
-					Attempt:     i + 1,
-					Provider:    cand.Provider.ID,
-					KeyID:       cand.KeyEntry.Label,
-					Model:       cand.TargetModel,
-					Status:      200,
-					Millis:      tryElapsed,
-					TTFTMillis:  tryTTFT,
-					RespHeaders: tryRespHeaders,
-				})
-				s.recordFinalTrace(types.RequestTrace{
-					ID:                 traceID,
-					Timestamp:          time.Now().Unix(),
-					Mode:               "agent",
-					Endpoint:           endpoint,
-					ReqModel:           reqModel,
-					ServedModel:        cand.TargetModel,
-					WinnerProvider:     cand.Provider.ID,
-					WinnerKey:          cand.KeyEntry.Label,
-					Status:             200,
-					Stream:             clientStream,
-					InTokens:           usageTracker.InTokens,
-					OutTokens:          usageTracker.OutTokens,
-					CacheReadTokens:    usageTracker.CacheReadTokens,
-					CacheWriteTokens:   usageTracker.CacheWriteTokens,
-					CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
-					ReasoningTokens:    usageTracker.ReasoningTokens,
-					StopReason:         usageTracker.StopReason,
-					TTFTMillis:         ttftMillis,
-					FlowMillis:         0,
-					OwnMillis:          ownMillis,
-					QueuedMillis:       queuedMillis,
-					SentMillis:         sentMillis,
-					TotalMillis:        totalMillis,
-					UpBytes:            len(mutatedBody),
-					DownBytes:          len(aggBytes),
-					ReqHeaders:         reqHeaders,
-					Tries:              tries,
-				})
 				return nil
 			}
 
@@ -878,8 +914,11 @@ func (s *Scheduler) Dispatch(
 				streamFilter = adapters.NewStreamFilterFromRules(cand.Provider.AdapterRules)
 			}
 
-			// Real-Time SSE Usage & StopReason Tracker
-			usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
+			// Real-Time SSE Usage & StopReason Tracker (only when obsSink attached)
+			var usageTracker *StreamUsageTracker
+			if hasObs {
+				usageTracker = NewStreamUsageTracker(reqStart, ttftMillis)
+			}
 
 			downBytes := 0
 			// Pipe stream
@@ -888,7 +927,9 @@ func (s *Scheduler) Dispatch(
 				n, readErr := peekRes.CombinedBody.Read(buf)
 				if n > 0 {
 					rawChunk := buf[:n]
-					usageTracker.FeedChunk(rawChunk)
+					if usageTracker != nil {
+						usageTracker.FeedChunk(rawChunk)
+					}
 
 					writeBytes := rawChunk
 					if streamFilter != nil {
@@ -920,56 +961,57 @@ func (s *Scheduler) Dispatch(
 			resp.Body.Close()
 			rel()
 
-			usageTracker.Finish()
-
-			flowMillis := usageTracker.FlowMillis
-			totalMillis := time.Since(reqStart).Milliseconds()
-			ownMillis := totalMillis - (sentMillis + flowMillis)
-			if ownMillis < 0 {
-				ownMillis = 0
-			}
-
 			s.latency.Record(cand.KeyTag, tryTTFT)
 			s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
-			tries = append(tries, types.Try{
-				Attempt:     i + 1,
-				Provider:    cand.Provider.ID,
-				KeyID:       cand.KeyEntry.Label,
-				Model:       cand.TargetModel,
-				Status:      200,
-				Millis:      time.Since(tryStart).Milliseconds(),
-				TTFTMillis:  tryTTFT,
-				RespHeaders: tryRespHeaders,
-			})
-			s.recordFinalTrace(types.RequestTrace{
-				ID:                 traceID,
-				Timestamp:          time.Now().Unix(),
-				Mode:               "agent",
-				Endpoint:           endpoint,
-				ReqModel:           reqModel,
-				ServedModel:        cand.TargetModel,
-				WinnerProvider:     cand.Provider.ID,
-				WinnerKey:          cand.KeyEntry.Label,
-				Status:             200,
-				Stream:             clientStream,
-				InTokens:           usageTracker.InTokens,
-				OutTokens:          usageTracker.OutTokens,
-				CacheReadTokens:    usageTracker.CacheReadTokens,
-				CacheWriteTokens:   usageTracker.CacheWriteTokens,
-				CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
-				ReasoningTokens:    usageTracker.ReasoningTokens,
-				StopReason:         usageTracker.StopReason,
-				TTFTMillis:         ttftMillis,
-				FlowMillis:         flowMillis,
-				OwnMillis:          ownMillis,
-				QueuedMillis:       queuedMillis,
-				SentMillis:         sentMillis,
-				TotalMillis:        totalMillis,
-				UpBytes:            len(mutatedBody),
-				DownBytes:          downBytes,
-				ReqHeaders:         reqHeaders,
-				Tries:              tries,
-			})
+
+			if usageTracker != nil {
+				usageTracker.Finish()
+				flowMillis := usageTracker.FlowMillis
+				totalMillis := time.Since(reqStart).Milliseconds()
+				ownMillis := totalMillis - (sentMillis + flowMillis)
+				if ownMillis < 0 {
+					ownMillis = 0
+				}
+				tries = append(tries, types.Try{
+					Attempt:     i + 1,
+					Provider:    cand.Provider.ID,
+					KeyID:       cand.KeyEntry.Label,
+					Model:       cand.TargetModel,
+					Status:      200,
+					Millis:      time.Since(tryStart).Milliseconds(),
+					TTFTMillis:  tryTTFT,
+					RespHeaders: tryRespHeaders,
+				})
+				s.recordFinalTrace(types.RequestTrace{
+					ID:                 traceID,
+					Timestamp:          time.Now().Unix(),
+					Mode:               "agent",
+					Endpoint:           endpoint,
+					ReqModel:           reqModel,
+					ServedModel:        cand.TargetModel,
+					WinnerProvider:     cand.Provider.ID,
+					WinnerKey:          cand.KeyEntry.Label,
+					Status:             200,
+					Stream:             clientStream,
+					InTokens:           usageTracker.InTokens,
+					OutTokens:          usageTracker.OutTokens,
+					CacheReadTokens:    usageTracker.CacheReadTokens,
+					CacheWriteTokens:   usageTracker.CacheWriteTokens,
+					CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+					ReasoningTokens:    usageTracker.ReasoningTokens,
+					StopReason:         usageTracker.StopReason,
+					TTFTMillis:         ttftMillis,
+					FlowMillis:         flowMillis,
+					OwnMillis:          ownMillis,
+					QueuedMillis:       queuedMillis,
+					SentMillis:         sentMillis,
+					TotalMillis:        totalMillis,
+					UpBytes:            len(mutatedBody),
+					DownBytes:          downBytes,
+					ReqHeaders:         reqHeaders,
+					Tries:              tries,
+				})
+			}
 			return nil
 		}
 
@@ -990,59 +1032,61 @@ func (s *Scheduler) Dispatch(
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(respBody)
 
-		usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
-		var respMap map[string]any
-		if json.Unmarshal(respBody, &respMap) == nil {
-			usageTracker.ParseJSON(respMap)
-		}
-		usageTracker.Finish()
-
 		s.latency.Record(cand.KeyTag, tryElapsed)
 		s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
-		totalMillis := time.Since(reqStart).Milliseconds()
-		ownMillis := totalMillis - (sentMillis + tryElapsed)
-		if ownMillis < 0 {
-			ownMillis = 0
+		if hasObs {
+			usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
+			var respMap map[string]any
+			if json.Unmarshal(respBody, &respMap) == nil {
+				usageTracker.ParseJSON(respMap)
+			}
+			usageTracker.Finish()
+
+			totalMillis := time.Since(reqStart).Milliseconds()
+			ownMillis := totalMillis - (sentMillis + tryElapsed)
+			if ownMillis < 0 {
+				ownMillis = 0
+			}
+			tries = append(tries, types.Try{
+				Attempt:     i + 1,
+				Provider:    cand.Provider.ID,
+				KeyID:       cand.KeyEntry.Label,
+				Model:       cand.TargetModel,
+				Status:      200,
+				Millis:      tryElapsed,
+				TTFTMillis:  tryElapsed,
+				RespHeaders: tryRespHeaders,
+			})
+			s.recordFinalTrace(types.RequestTrace{
+				ID:                 traceID,
+				Timestamp:          time.Now().Unix(),
+				Mode:               "agent",
+				Endpoint:           endpoint,
+				ReqModel:           reqModel,
+				ServedModel:        cand.TargetModel,
+				WinnerProvider:     cand.Provider.ID,
+				WinnerKey:          cand.KeyEntry.Label,
+				Status:             200,
+				Stream:             clientStream,
+				InTokens:           usageTracker.InTokens,
+				OutTokens:          usageTracker.OutTokens,
+				CacheReadTokens:    usageTracker.CacheReadTokens,
+				CacheWriteTokens:   usageTracker.CacheWriteTokens,
+				CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
+				ReasoningTokens:    usageTracker.ReasoningTokens,
+				StopReason:         usageTracker.StopReason,
+				TTFTMillis:         tryElapsed,
+				FlowMillis:         0,
+				OwnMillis:          ownMillis,
+				QueuedMillis:       queuedMillis,
+				SentMillis:         sentMillis,
+				TotalMillis:        totalMillis,
+				UpBytes:            len(mutatedBody),
+				DownBytes:          len(respBody),
+				ReqHeaders:         reqHeaders,
+				Tries:              tries,
+			})
 		}
-		tries = append(tries, types.Try{
-			Attempt:     i + 1,
-			Provider:    cand.Provider.ID,
-			KeyID:       cand.KeyEntry.Label,
-			Model:       cand.TargetModel,
-			Status:      200,
-			Millis:      tryElapsed,
-			TTFTMillis:  tryElapsed,
-			RespHeaders: tryRespHeaders,
-		})
-		s.recordFinalTrace(types.RequestTrace{
-			ID:                 traceID,
-			Timestamp:          time.Now().Unix(),
-			Mode:               "agent",
-			Endpoint:           endpoint,
-			ReqModel:           reqModel,
-			ServedModel:        cand.TargetModel,
-			WinnerProvider:     cand.Provider.ID,
-			WinnerKey:          cand.KeyEntry.Label,
-			Status:             200,
-			Stream:             clientStream,
-			InTokens:           usageTracker.InTokens,
-			OutTokens:          usageTracker.OutTokens,
-			CacheReadTokens:    usageTracker.CacheReadTokens,
-			CacheWriteTokens:   usageTracker.CacheWriteTokens,
-			CacheWrite1hTokens: usageTracker.CacheWrite1hTokens,
-			ReasoningTokens:    usageTracker.ReasoningTokens,
-			StopReason:         usageTracker.StopReason,
-			TTFTMillis:         tryElapsed,
-			FlowMillis:         0,
-			OwnMillis:          ownMillis,
-			QueuedMillis:       queuedMillis,
-			SentMillis:         sentMillis,
-			TotalMillis:        totalMillis,
-			UpBytes:            len(mutatedBody),
-			DownBytes:          len(respBody),
-			ReqHeaders:         reqHeaders,
-			Tries:              tries,
-		})
 		return nil
 	}
 
@@ -1113,6 +1157,16 @@ func (s *Scheduler) updateStickyKey(reqModel, sessionKey string, route *types.Ag
 		return
 	}
 	s.sessionSticky.SetModelFallback(reqModel, cand.KeyTag)
+}
+
+func (s *Scheduler) hasObs() bool {
+	s.mu.Lock()
+	sink := s.obsSink
+	s.mu.Unlock()
+	if sink == nil {
+		return false
+	}
+	return true
 }
 
 func (s *Scheduler) recordFinalTrace(trace types.RequestTrace) {

@@ -25,8 +25,16 @@ function sanitizeNode(n) {
   return copy;
 }
 
-function buildBootstrapEnv(node, rawToken, hubUrl) {
-  return `LLMPROXY_ROLE=${node.role} LLMPROXY_HUB_URL=${hubUrl} LLMPROXY_NODE_TOKEN=${rawToken}`;
+function buildBootstrapEnv(node, rawToken, hubUrl, clientKey = '') {
+  const parts = [
+    `LLMPROXY_ROLE=${node.role}`,
+    `LLMPROXY_HUB_URL=${hubUrl}`,
+    `LLMPROXY_NODE_TOKEN=${rawToken}`,
+  ];
+  if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
+    parts.push(`LLMPROXY_CLIENT_KEY=${clientKey.trim()}`);
+  }
+  return parts.join(' ');
 }
 
 export async function loadNodes(kv) {
@@ -72,7 +80,7 @@ export async function listNodes(kv) {
 /**
  * Issue a new node token and save node.
  */
-export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') {
+export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
   const nodes = await loadNodes(kv);
 
   const rawToken = generateNodeToken();
@@ -107,7 +115,7 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com') 
   nodes.push(node);
   await saveNodes(nodes, kv);
 
-  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
+  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
 
   return {
     node: sanitizeNode(node),
@@ -126,6 +134,9 @@ export async function patchNode(nodeId, patch, kv) {
 
   const node = nodes[idx];
   if (patch.name !== undefined) node.name = String(patch.name);
+  if (patch.role === 'full' || patch.role === 'lite') {
+    node.role = patch.role;
+  }
   if (patch.enabled !== undefined) {
     node.enabled = Boolean(patch.enabled);
   }
@@ -148,7 +159,7 @@ export async function patchNode(nodeId, patch, kv) {
 /**
  * Rotate token for an existing node.
  */
-export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com') {
+export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
   const nodes = await loadNodes(kv);
   const idx = nodes.findIndex((n) => n.id === nodeId);
   if (idx === -1) return null;
@@ -166,7 +177,7 @@ export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.
   nodes[idx] = node;
   await saveNodes(nodes, kv);
 
-  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl);
+  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
 
   return {
     node_token: rawToken,

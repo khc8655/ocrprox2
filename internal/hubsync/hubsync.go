@@ -40,15 +40,42 @@ const (
 
 // HubSource coordinates fetching and caching configuration from EdgeOne Hub.
 type HubSource struct {
-	hubURL     string
-	nodeToken  string
-	client     *http.Client
-	snapshot   atomic.Pointer[types.RuntimeSnapshot]
-	state      atomic.Value // holds string
-	mu         sync.Mutex   // protects refresh coordination
-	refreshing bool
+	hubURL      string
+	nodeToken   string
+	client      *http.Client
+	snapshot    atomic.Pointer[types.RuntimeSnapshot]
+	state       atomic.Value // holds string
+	mu          sync.Mutex   // protects refresh coordination
+	refreshing  bool
 	refreshCond *sync.Cond
 	lastRefresh time.Time
+	cbMu        sync.RWMutex
+	callbacks   []func(*types.ProxyConfig)
+}
+
+// OnConfigChange registers a callback invoked whenever Hub delivers an updated config snapshot.
+func (s *HubSource) OnConfigChange(fn func(*types.ProxyConfig)) {
+	if fn == nil {
+		return
+	}
+	s.cbMu.Lock()
+	s.callbacks = append(s.callbacks, fn)
+	s.cbMu.Unlock()
+}
+
+func (s *HubSource) notifyCallbacks(cfg *types.ProxyConfig) {
+	if cfg == nil {
+		return
+	}
+	s.cbMu.RLock()
+	cbs := make([]func(*types.ProxyConfig), len(s.callbacks))
+	copy(cbs, s.callbacks)
+	s.cbMu.RUnlock()
+	for _, fn := range cbs {
+		if fn != nil {
+			fn(cfg)
+		}
+	}
 }
 
 // NewHubSource creates a new HubSource. Zero network calls occur during creation.
@@ -264,6 +291,7 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 		}
 
 		s.state.Store(StateReady)
+		s.notifyCallbacks(newSnap.Config)
 		return newSnap, nil
 
 	case http.StatusUnauthorized, http.StatusForbidden: // 401 / 403

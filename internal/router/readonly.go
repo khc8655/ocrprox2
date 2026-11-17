@@ -106,10 +106,18 @@ var FullOnlyRoutes = map[string]bool{
 	"POST /api/admin/access-key":      true,
 	"/api/admin/client-key":           true,
 	"POST /api/admin/client-key":      true,
-	"/api/admin/auth/login":           true,
-	"POST /api/admin/auth/login":      true,
-	"/api/admin/auth/logout":          true,
-	"POST /api/admin/auth/logout":     true,
+	"/api/admin/auth/login":             true,
+	"POST /api/admin/auth/login":        true,
+	"/api/admin/auth/logout":            true,
+	"POST /api/admin/auth/logout":       true,
+	"/api/admin/system/version":         true,
+	"GET /api/admin/system/version":     true,
+	"/api/admin/system/check-update":    true,
+	"GET /api/admin/system/check-update": true,
+	"/api/admin/system/upgrade":         true,
+	"POST /api/admin/system/upgrade":    true,
+	"/api/admin/restart":                true,
+	"POST /api/admin/restart":           true,
 }
 
 // ValidateRegisteredRoutes checks that all given route patterns are explicitly registered

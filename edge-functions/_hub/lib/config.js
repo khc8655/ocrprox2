@@ -98,6 +98,8 @@ providers: {},
 agent_models: {},
 settings: {
 run_mode: 'agent',
+client_key: '',
+proxy_keys: [],
 agent_routing_strategy: 'sticky_failover',
 agent_first_byte_timeout_sec: 120,
 cooldown_rate_limit_sec: 15,

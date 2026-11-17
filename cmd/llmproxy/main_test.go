@@ -12,10 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/khc8655/llmproxy2/internal/admin"
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
+	"github.com/khc8655/llmproxy2/internal/hubsync"
 	"github.com/khc8655/llmproxy2/internal/kb"
 	"github.com/khc8655/llmproxy2/internal/modesched"
 	"github.com/khc8655/llmproxy2/internal/oauth"
@@ -789,5 +791,53 @@ func TestFullMode_ZeroAuthCooldownDoesNotBan(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tmpDir, "key_bans.json")); err == nil {
 		t.Fatalf("cooldown_auth_error_sec=0 must not persist key_bans.json")
+	}
+}
+
+func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
+	mockHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Lease-Until", time.Now().Add(1*time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":             true,
+			"config_version": 3,
+			"payload": types.ProxyConfig{
+				Version: 3,
+				Settings: types.RuntimeSettings{
+					ClientKey: "sk-hub-synced-primary",
+					ProxyKeys: []string{"sk-hub-synced-extra"},
+				},
+			},
+		})
+	}))
+	defer mockHub.Close()
+
+	hubSrc := hubsync.NewHubSource(mockHub.URL, "stk_node_abc", true)
+	authMgr := auth.NewAuthenticator("", "")
+	hubSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
+		if cfg != nil {
+			authMgr.UpdateClientKeys(cfg.Settings.ClientKey, cfg.Settings.ProxyKeys)
+		}
+	})
+
+	// Before first request: unknown key fails auth, so lazy sync is triggered
+	req1 := httptest.NewRequest("GET", "/v1/models", nil)
+	req1.Header.Set("Authorization", "Bearer sk-hub-synced-primary")
+	if authMgr.VerifyClientKey(req1) {
+		t.Fatalf("expected authMgr empty before first hub sync")
+	}
+
+	if _, err := hubSrc.Current(context.Background(), false); err != nil {
+		t.Fatalf("hubSrc.Current err: %v", err)
+	}
+
+	if !authMgr.VerifyClientKey(req1) {
+		t.Fatalf("expected Hub-synced primary client_key to authenticate")
+	}
+
+	req2 := httptest.NewRequest("GET", "/v1/models", nil)
+	req2.Header.Set("Authorization", "Bearer sk-hub-synced-extra")
+	if !authMgr.VerifyClientKey(req2) {
+		t.Fatalf("expected Hub-synced proxy_keys to authenticate")
 	}
 }

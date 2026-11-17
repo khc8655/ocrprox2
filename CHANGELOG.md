@@ -4,6 +4,22 @@
 
 ---
 
+## [v20261117-01] - 2026-11-17
+
+### Added
+- **KB 流水线统一调度**：embedding / rerank / ocr 四类 KB 流水线统一接入 Agent 调度器，复用候选池、冷却与故障转移；新增 Magpie 风格高并发路由策略。
+- **会话级多路径粘性路由**：调度器支持 per-session multi-path sticky routing 与全局策略回退。
+- **节点永久分类**：节点签发区分 `llm` / `mcp` `service_type`，配置投影按类型隔离。
+
+### Changed
+- **收敛为纯 LLM 代理**：移除 MCP / 搜索扩展服务与 Extension Services 视图；`/api/node/config` 信封与租约头对齐 `node-config-projection.json` 契约（closes #1）。
+- 供应商多 Key 池支持、Hub origin 范围调整与 exa 预设。
+
+### Removed
+- MCP / 搜索扩展服务（含 `docs/mcp-*` 指南），恢复纯 LLM 代理定位。
+
+---
+
 ## [v20261115-06] - 2026-11-15
 
 ### Fixed

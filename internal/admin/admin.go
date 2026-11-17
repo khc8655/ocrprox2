@@ -55,6 +55,10 @@ type Server struct {
 	httpClient    *http.Client
 	adminPassword string
 	refreshMgr    *provider.RefreshManager
+	buildVersion  string
+	buildSemver   string
+	buildCommit   string
+	updateAPIBase string
 }
 
 // NewServer creates a new admin Server.
@@ -92,6 +96,13 @@ func (s *Server) SetModeScheduler(ms *modesched.ModeScheduler) {
 // SetOAuthManager connects the OAuth manager to the admin server.
 func (s *Server) SetOAuthManager(om *oauth.Manager) {
 	s.oauthMgr = om
+}
+
+// SetBuildInfo sets the running binary's version, semver, and commit metadata.
+func (s *Server) SetBuildInfo(version, semver, commit string) {
+	s.buildVersion = version
+	s.buildSemver = semver
+	s.buildCommit = commit
 }
 
 // SetHTTPClient overrides the internal HTTP client (useful for unit testing).
@@ -152,6 +163,10 @@ func (s *Server) RegisterRoutes(r any) {
 	register("POST /api/admin/client-key", s.handleAccessKey)
 	register("POST /api/admin/auth/login", s.handleAuthLogin)
 	register("POST /api/admin/auth/logout", s.handleAuthLogout)
+	register("GET /api/admin/system/version", s.handleSystemVersion)
+	register("GET /api/admin/system/check-update", s.handleSystemCheckUpdate)
+	register("POST /api/admin/system/upgrade", s.handleSystemUpgrade)
+	register("POST /api/admin/restart", s.handleSystemRestart)
 }
 
 func (s *Server) checkAuth(w http.ResponseWriter, r *http.Request) bool {

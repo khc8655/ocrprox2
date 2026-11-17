@@ -240,4 +240,55 @@ func TestUsage_TPS_CacheHitRate_Series_Heatmap(t *testing.T) {
 			t.Errorf("did not find today %s in heatmap days: %+v", todayStr, heatmap.Days)
 		}
 	}
+
+	// 4. Verify endpoint, channel, status_counts, and rate fields
+	mgr.RecordRequest(types.RequestTrace{
+		ID:             "req-kb-ocr",
+		Timestamp:      now.Unix(),
+		Mode:           "kb",
+		Endpoint:       "/v1/ocr",
+		ReqModel:       "ocr",
+		ServedModel:    "qwen-vl-ocr",
+		WinnerProvider: "alibaba",
+		WinnerKey:      "k-ocr",
+		Status:         200,
+		InTokens:       500,
+		OutTokens:      80,
+		TTFTMillis:     350,
+		TotalMillis:    450,
+		Tries: []types.Try{
+			{Attempt: 1, Provider: "alibaba", KeyID: "k-bad", Status: 429},
+			{Attempt: 2, Provider: "alibaba", KeyID: "k-ocr", Status: 200},
+		},
+	})
+	mgr.RecordRequest(types.RequestTrace{
+		ID:          "req-429-fail",
+		Timestamp:   now.Unix(),
+		Mode:        "agent",
+		Endpoint:    "/v1/messages",
+		ReqModel:    "claude-sonnet-4",
+		Status:      429,
+		TotalMillis: 120,
+	})
+
+	fullStats, err := mgr.QueryUsage("today", "UTC")
+	if err != nil {
+		t.Fatalf("QueryUsage err: %v", err)
+	}
+	fullTotals := fullStats["totals"].(map[string]any)
+	channels := fullTotals["channels"].(map[string]int)
+	if channels["agent"] != 3 || channels["kb"] != 1 {
+		t.Errorf("unexpected channels breakdown: %+v", channels)
+	}
+	sc := fullTotals["status_counts"].(map[string]int)
+	if sc["2xx"] != 3 || sc["429"] != 1 {
+		t.Errorf("unexpected status_counts: %+v", sc)
+	}
+	if fullTotals["retried_requests"] != 1 {
+		t.Errorf("expected retried_requests=1, got %v", fullTotals["retried_requests"])
+	}
+	eps, ok := fullStats["endpoints"]
+	if !ok || eps == nil {
+		t.Fatalf("expected endpoints slice in QueryUsage result")
+	}
 }

@@ -978,9 +978,103 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.strictEqual(constantTimeCompare('short', 'longer_string'), false);
       assert.strictEqual(constantTimeCompare(null, 'test'), false);
 
-      // ETag computation
+      // ETag
       const etag = computeEtag({ key: 'val' });
       assert.match(etag, /^"[0-9a-f]{16}"$/, 'ETag must be 16 hex chars wrapped in quotes');
+    });
+  });
+
+  describe('10. Hub Lite Projection & Bootstrap Closure', () => {
+    test('client_key unmasked in GET/bootstrap_env, provider adapter_rules embedded, grace_ttl & role editable', async () => {
+      // 1. Save Hub config with client_key, proxy_keys, and provider with custom adapter_rules & preset_id
+      const saveResp = await handleConfigRequest(
+        makeAdminReq('POST', '/api/config', {
+          _version: 1,
+          providers: {
+            deepseek: {
+              name: 'DeepSeek',
+              preset_id: 'deepseek',
+              origin: 'vault',
+              enabled: true,
+              base_url: 'https://api.deepseek.com/v1',
+              rpm_per_key: 60,
+              refresh_every: '6h',
+              adapter_rules: { auth_header: 'X-Custom-Auth', auth_prefix: 'Token ' },
+              api_keys: [
+                { id: 'k1', label: 'ds-01', key: 'sk-ds-secret-123456', weight: 3, max_rpm: 30, enabled: true, origin: 'vault' },
+              ],
+            },
+          },
+          agent_models: {
+            'deepseek-chat': {
+              enabled: true,
+              candidates: [{ provider: 'deepseek', key_label: 'ds-01', enabled: true }],
+            },
+          },
+          settings: {
+            client_key: 'sk-lite-hub-primary',
+            proxy_keys: ['sk-lite-extra-01'],
+          },
+        }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(saveResp.status, 200);
+
+      // GET /api/config exposes settings.client_key unmasked for admin copy
+      const getData = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv)).json();
+      assert.equal(getData.settings.client_key, 'sk-lite-hub-primary');
+      assert.deepEqual(getData.settings.proxy_keys, ['sk-lite-extra-01']);
+
+      // 2. Issue Lite node -> bootstrap_env includes LLMPROXY_CLIENT_KEY
+      const issueData = await (
+        await handleNodesRequest(
+          makeAdminReq('POST', '/api/admin/nodes', {
+            name: 'NAT Lite 01',
+            role: 'lite',
+            lease_ttl: 43200,
+            grace_ttl: 7200,
+            scope: { providers: ['*'], models: ['*'] },
+          }),
+          TEST_ENV,
+          kv
+        )
+      ).json();
+      assert.equal(issueData.ok, true);
+      assert.equal(issueData.node.grace_ttl, 7200);
+      assert.match(issueData.bootstrap_env, /LLMPROXY_ROLE=lite/);
+      assert.match(issueData.bootstrap_env, /LLMPROXY_CLIENT_KEY=sk-lite-hub-primary/);
+
+      // 3. Patch node role & grace_ttl
+      const patchData = await (
+        await handleNodesRequest(
+          makeAdminReq('PATCH', `/api/admin/nodes/${issueData.node.id}`, {
+            role: 'full',
+            grace_ttl: 1800,
+          }),
+          TEST_ENV,
+          kv
+        )
+      ).json();
+      assert.equal(patchData.node.role, 'full');
+      assert.equal(patchData.node.grace_ttl, 1800);
+
+      // 4. Node pulls config -> adapter_rules embedded directly on provider + settings.client_key present
+      const pullResp = await handleNodeConfigRequest(
+        makeNodeReq('POST', '/api/node/config', issueData.node_token),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(pullResp.status, 200);
+      const pullData = await pullResp.json();
+      assert.equal(pullData.payload.settings.client_key, 'sk-lite-hub-primary');
+      assert.deepEqual(pullData.payload.settings.proxy_keys, ['sk-lite-extra-01']);
+      const ds = pullData.payload.providers.deepseek;
+      assert.equal(ds.rpm_per_key, 60);
+      assert.equal(ds.refresh_every, '6h');
+      assert.equal(ds.api_keys[0].weight, 3);
+      assert.equal(ds.api_keys[0].max_rpm, 30);
+      assert.deepEqual(ds.adapter_rules, { auth_header: 'X-Custom-Auth', auth_prefix: 'Token ' });
     });
   });
 });

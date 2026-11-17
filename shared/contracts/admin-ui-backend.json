@@ -410,6 +410,38 @@
       "response": {
         "ok": true
       }
+    },
+    "system_version": {
+      "method": "GET",
+      "path": "/api/admin/system/version",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ]
+    },
+    "system_check_update": {
+      "method": "GET",
+      "path": "/api/admin/system/check-update",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ]
+    },
+    "system_upgrade": {
+      "method": "POST",
+      "path": "/api/admin/system/upgrade",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ]
+    },
+    "system_restart": {
+      "method": "POST",
+      "path": "/api/admin/restart",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ]
     }
   },
   "auth_semantics": {

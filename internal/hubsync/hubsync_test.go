@@ -276,3 +276,59 @@ func TestHubSource_EnvelopeResponseParsing(t *testing.T) {
 		t.Errorf("expected inner _version 42 to take precedence, got %d", snap2.Config.Version)
 	}
 }
+
+func TestHubSource_OnConfigChangeAndAdapterRules(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Lease-Until", time.Now().Add(1*time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"config_version": 7,
+			"payload": {
+				"providers": {
+					"custom": {
+						"id": "custom",
+						"base_url": "https://api.example.com/v1",
+						"enabled": true,
+						"adapter_rules": {"auth_header": "X-API-Key", "auth_prefix": ""},
+						"api_keys": [{"id": "k1", "label": "k1", "key": "sk-123456", "enabled": true}]
+					}
+				},
+				"settings": {
+					"client_key": "sk-hub-client-01",
+					"proxy_keys": ["sk-hub-extra-02"]
+				}
+			}
+		}`))
+	}))
+	defer ts.Close()
+
+	src := NewHubSource(ts.URL, "stk_node_test", true)
+	var called int32
+	var gotClientKey string
+	var gotExtraLen int
+	var gotAuthHeader string
+
+	src.OnConfigChange(func(cfg *types.ProxyConfig) {
+		atomic.AddInt32(&called, 1)
+		gotClientKey = cfg.Settings.ClientKey
+		gotExtraLen = len(cfg.Settings.ProxyKeys)
+		if p := cfg.Providers["custom"]; p != nil && p.AdapterRules != nil {
+			gotAuthHeader = p.AdapterRules.AuthHeader
+		}
+	})
+
+	_, err := src.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Current err: %v", err)
+	}
+	if atomic.LoadInt32(&called) != 1 {
+		t.Fatalf("expected callback once, got %d", called)
+	}
+	if gotClientKey != "sk-hub-client-01" || gotExtraLen != 1 {
+		t.Errorf("unexpected synced client keys: primary=%q extras=%d", gotClientKey, gotExtraLen)
+	}
+	if gotAuthHeader != "X-API-Key" {
+		t.Errorf("expected embedded provider adapter_rules auth_header=X-API-Key, got %q", gotAuthHeader)
+	}
+}

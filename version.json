@@ -1,10 +1,13 @@
 {
-  "version": "v20261115-06",
-  "semver": "2.2.1",
-  "release_date": "2026-11-15",
+  "version": "v20261117-01",
+  "semver": "2.3.0",
+  "release_date": "2026-11-17",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.2.1 — 401 清凭据修复（避免旧 token 轮询触发管理端锁定）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.3.0 — KB 流水线统一调度、多路径粘性路由与纯 LLM 代理收敛",
   "changelog": [
-    "修复管理端 401 处理：收到 401 时清除本地存储的过期凭据，避免 3 秒轮询继续使用旧 token 并在 10 分钟内触发防爆破锁定（即使密码正确也被拒）"
+    "KB 四类流水线统一接入 Agent 调度器：embedding/rerank/ocr 复用候选池、冷却与故障转移，新增 Magpie 风格高并发策略",
+    "调度器新增会话级多路径粘性路由（multi-path sticky）与全局策略回退",
+    "收敛为纯 LLM 代理：移除 MCP / 搜索扩展服务与 Extension Services 视图，供应商预设移除 exa 之外的搜索类条目并新增 exa 预设",
+    "节点永久分类：llm/mcp service_type 隔离；/api/node/config 信封与租约头对齐 node-config-projection 契约"
   ]
 }
