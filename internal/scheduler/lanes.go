@@ -90,6 +90,17 @@ func (lt *LaneTracker) cleanupLocked(who string, st *laneState) {
 	}
 }
 
+// ActiveCount returns busy + waiting request count for a lane.
+func (lt *LaneTracker) ActiveCount(who string) int {
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
+	st, ok := lt.lanes[who]
+	if !ok || st == nil {
+		return 0
+	}
+	return st.busy + st.waiting
+}
+
 // Snapshot returns a copy of all current lanes with non-zero activity or limits.
 func (lt *LaneTracker) Snapshot() map[string]Lane {
 	lt.mu.RLock()

@@ -48,6 +48,7 @@ type Scheduler struct {
 	lanes          *LaneTracker
 	rpmLimiter     *RPMLimiter
 	rrIndex        map[string]int
+	sessionSticky  *SessionStickyCache
 	oauthRefresher OAuthRefresher
 }
 
@@ -58,17 +59,23 @@ func NewScheduler(
 	allowPrivate bool,
 ) *Scheduler {
 	return &Scheduler{
-		configSource: cfgSrc,
-		engine:       adapters.NewDefaultEngine(),
-		cooldowns:    NewCooldownManager(),
-		obsSink:      obsSink,
-		httpClient:   upstream.UpstreamClient(120*time.Second, allowPrivate),
-		allowPrivate: allowPrivate,
-		clients:      make(map[int]*http.Client),
-		lanes:        NewLaneTracker(),
-		rpmLimiter:   NewRPMLimiter(60 * time.Second),
-		rrIndex:      make(map[string]int),
+		configSource:  cfgSrc,
+		engine:        adapters.NewDefaultEngine(),
+		cooldowns:     NewCooldownManager(),
+		obsSink:       obsSink,
+		httpClient:    upstream.UpstreamClient(120*time.Second, allowPrivate),
+		allowPrivate:  allowPrivate,
+		clients:       make(map[int]*http.Client),
+		lanes:         NewLaneTracker(),
+		rpmLimiter:    NewRPMLimiter(60 * time.Second),
+		rrIndex:       make(map[string]int),
+		sessionSticky: NewSessionStickyCache(defaultSessionStickyTTL, defaultSessionStickyMaxSize),
 	}
+}
+
+// SessionSticky returns the per-session sticky cache (for inspection/tests).
+func (s *Scheduler) SessionSticky() *SessionStickyCache {
+	return s.sessionSticky
 }
 
 // SetOAuthRefresher registers an OAuth token refresher callback. Thread-safe.
@@ -209,6 +216,19 @@ func (s *Scheduler) OrderCandidates(
 	providers map[string]*types.ProviderConfig,
 	reqModel string,
 ) []*CandidateKey {
+	return s.OrderCandidatesForSession(route, providers, reqModel, "", "")
+}
+
+// OrderCandidatesForSession sorts candidate keys using per-session sticky affinity,
+// falling back to globalStrategy -> route.ActiveKey / model sticky fallback, and spreading
+// concurrent unbound sessions across healthy idle keys of the primary provider.
+func (s *Scheduler) OrderCandidatesForSession(
+	route *types.AgentModelRoute,
+	providers map[string]*types.ProviderConfig,
+	reqModel string,
+	globalStrategy string,
+	sessionKey string,
+) []*CandidateKey {
 	var candidates []*CandidateKey
 
 	for _, cand := range route.Candidates {
@@ -247,6 +267,9 @@ func (s *Scheduler) OrderCandidates(
 
 	strategy := route.RoutingStrategy
 	if strategy == "" {
+		strategy = globalStrategy
+	}
+	if strategy == "" {
 		strategy = "sticky_failover"
 	}
 
@@ -282,23 +305,85 @@ func (s *Scheduler) OrderCandidates(
 	case "sticky_failover":
 		fallthrough
 	default:
-		// Place active key first if available
-		if route.ActiveKey != "" {
-			var active *CandidateKey
-			var others []*CandidateKey
-			for _, c := range candidates {
-				if c.KeyTag == route.ActiveKey && active == nil {
-					active = c
-				} else {
-					others = append(others, c)
+		// 1. Per-session sticky affinity takes highest precedence so concurrent sessions never stomp each other
+		if sessionKey != "" && s.sessionSticky != nil {
+			if boundTag, ok := s.sessionSticky.Get(reqModel, sessionKey); ok {
+				if reordered, moved := moveCandidateFirst(candidates, boundTag); moved {
+					return reordered
 				}
 			}
-			if active != nil {
-				return append([]*CandidateKey{active}, others...)
+		}
+
+		// 2. Explicit route.ActiveKey (config-pinned) or sessionless model fallback
+		preferred := route.ActiveKey
+		if preferred == "" && sessionKey == "" && s.sessionSticky != nil {
+			preferred = s.sessionSticky.GetModelFallback(reqModel)
+		}
+		if preferred != "" {
+			if reordered, moved := moveCandidateFirst(candidates, preferred); moved {
+				return reordered
 			}
 		}
+
+		// 3. New unbound session with multiple keys on the primary provider:
+		//    if candidates[0] is currently busy/cooled/over-RPM, prefer an idle healthy sibling key
+		//    on the same provider so concurrent multi-path sessions warm separate caches.
+		if sessionKey != "" && !s.isCandidateAvailableAndIdle(candidates[0]) {
+			primaryProv := candidates[0].Provider.ID
+			for _, c := range candidates[1:] {
+				if c.Provider.ID == primaryProv && s.isCandidateAvailableAndIdle(c) {
+					if reordered, moved := moveCandidateFirst(candidates, c.KeyTag); moved {
+						return reordered
+					}
+				}
+			}
+		}
+
 		return candidates
 	}
+}
+
+func moveCandidateFirst(candidates []*CandidateKey, keyTag string) ([]*CandidateKey, bool) {
+	if keyTag == "" {
+		return candidates, false
+	}
+	var active *CandidateKey
+	var others []*CandidateKey
+	for _, c := range candidates {
+		if c.KeyTag == keyTag && active == nil {
+			active = c
+		} else {
+			others = append(others, c)
+		}
+	}
+	if active == nil {
+		return candidates, false
+	}
+	return append([]*CandidateKey{active}, others...), true
+}
+
+func (s *Scheduler) isCandidateAvailableAndIdle(c *CandidateKey) bool {
+	if c == nil || c.Provider == nil || c.KeyEntry == nil {
+		return false
+	}
+	keyID := c.KeyEntry.ID
+	if keyID == "" {
+		keyID = c.KeyEntry.Label
+	}
+	if s.cooldowns != nil && s.cooldowns.IsCooledDown(c.Provider.ID, c.TargetModel, keyID) {
+		return false
+	}
+	rpmLimit := c.KeyEntry.MaxRPM
+	if rpmLimit <= 0 {
+		rpmLimit = c.Provider.RPMPerKey
+	}
+	if rpmLimit > 0 && s.rpmLimiter != nil && !s.rpmLimiter.Allow(c.KeyTag, rpmLimit) {
+		return false
+	}
+	if s.lanes != nil && s.lanes.ActiveCount(c.KeyTag) > 0 {
+		return false
+	}
+	return true
 }
 
 // sanitizeHeaders redacts sensitive auth tokens and cleans up headers for observability.
@@ -367,7 +452,9 @@ func (s *Scheduler) Dispatch(
 		return fmt.Errorf("model %s not found", reqModel)
 	}
 
-	candidates := s.OrderCandidates(route, snap.Config.Providers, reqModel)
+	sessionKey := ExtractSessionKey(r, reqBody)
+	globalStrategy := snap.Config.Settings.AgentRoutingStrategy
+	candidates := s.OrderCandidatesForSession(route, snap.Config.Providers, reqModel, globalStrategy, sessionKey)
 	if len(candidates) == 0 {
 		msg := fmt.Sprintf("no candidate keys available for model %q", reqModel)
 		if notes := DescribeRouteCandidates(route, snap.Config.Providers); len(notes) > 0 {
@@ -696,7 +783,7 @@ func (s *Scheduler) Dispatch(
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(aggBytes)
-				s.updateStickyKey(route, cand)
+				s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 
 				usageTracker := NewStreamUsageTracker(reqStart, ttftMillis)
 				var aggMap map[string]any
@@ -821,7 +908,7 @@ func (s *Scheduler) Dispatch(
 				ownMillis = 0
 			}
 
-			s.updateStickyKey(route, cand)
+			s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 			tries = append(tries, types.Try{
 				Attempt:     i + 1,
 				Provider:    cand.Provider.ID,
@@ -888,7 +975,7 @@ func (s *Scheduler) Dispatch(
 		}
 		usageTracker.Finish()
 
-		s.updateStickyKey(route, cand)
+		s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
 		totalMillis := time.Since(reqStart).Milliseconds()
 		ownMillis := totalMillis - (sentMillis + tryElapsed)
 		if ownMillis < 0 {
@@ -984,10 +1071,25 @@ func (s *Scheduler) Dispatch(
 	return ErrAllRetriesExhausted
 }
 
-func (s *Scheduler) updateStickyKey(route *types.AgentModelRoute, cand *CandidateKey) {
-	if route != nil && (route.RoutingStrategy == "sticky_failover" || route.RoutingStrategy == "") {
-		route.ActiveKey = cand.KeyTag
+func (s *Scheduler) updateStickyKey(reqModel, sessionKey string, route *types.AgentModelRoute, globalStrategy string, cand *CandidateKey) {
+	if route == nil || cand == nil || s.sessionSticky == nil {
+		return
 	}
+	strategy := route.RoutingStrategy
+	if strategy == "" {
+		strategy = globalStrategy
+	}
+	if strategy == "" {
+		strategy = "sticky_failover"
+	}
+	if strategy != "sticky_failover" {
+		return
+	}
+	if sessionKey != "" {
+		s.sessionSticky.Set(reqModel, sessionKey, cand.KeyTag)
+		return
+	}
+	s.sessionSticky.SetModelFallback(reqModel, cand.KeyTag)
 }
 
 func (s *Scheduler) recordFinalTrace(trace types.RequestTrace) {

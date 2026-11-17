@@ -200,8 +200,9 @@ internal/
   adapters/                        [1:1 移植自 1代 proxy_routes.py + gemini_compat.py + Magpie gemini_schema.go]
     rules.go                       16 家厂商声明式 adapter_rules 流水线 (stream_only 聚合、rescue_from_text、unwrap_root 等)
     gemini.go                      Gemini 2.5/3.x Thinking 矩阵、<thought> 流式拆分、{id}:::{sig} 签名保持、Schema 递归清洗
-  scheduler/                       [1:1 移植自 1代 scheduler.py + 吸收 Magpie forbiddenAlike 思想]
-    scheduler.go                   300s 硬预算、sticky_failover / round_robin / manual、单 Key 信号量与滑动窗口 RPM
+  scheduler/                       [1:1 移植自 1代 scheduler.py + 吸收 Magpie forbiddenAlike 与多路会话粘性思想]
+    scheduler.go                   300s 硬预算、sticky_failover / round_robin / manual（含全局策略继承）、单 Key 信号量与滑动窗口 RPM
+    session_sticky.go              按请求头 / prompt_cache_key / metadata / Prompt 前缀哈希提取会话键的多路并发粘性缓存（15m 滑动 TTL + LRU）
     cooldown.go                    三级冷却 (模型级 / Key级 24h / 410 Gone) + key_bans.json + forbiddenAlike 双Key同错免误封
     peek.go                        流式首包 _peek_until_payload (拦截 200 流内错误与空流) + 45s 预提交保活
   kb/                              [1:1 移植自 1代 proxy_routes.py (Full 专属)] 预读信号量 + 20MB 零拷贝分片流式 OCR + Emb/Rerank
