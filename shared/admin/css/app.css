@@ -1516,9 +1516,8 @@ input[type="checkbox"] {
 }
 
 /* Initial-letter avatar (replaces vendor brand logos).
- * Uses existing semantic tokens only — no hardcoded colors, so both themes follow
- * automatically. Accent variants map to the design-system status palette instead of
- * an ad-hoc rainbow, keeping the console visually coherent. */
+ * Neutral by design: the previous per-name colour hash implied a status meaning it
+ * did not have. Uses surface/text tokens so both themes follow automatically. */
 .avatar-initial {
   display: inline-flex;
   align-items: center;
@@ -1526,6 +1525,7 @@ input[type="checkbox"] {
   width: 20px;
   height: 20px;
   flex: 0 0 20px;
+  margin-right: 6px;
   border-radius: 50%;
   background: var(--khc-surface-muted);
   color: var(--khc-text-2);
@@ -1533,26 +1533,17 @@ input[type="checkbox"] {
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
-  text-transform: uppercase;
   user-select: none;
 }
-.avatar-initial[data-tone="accent"] {
-  background: var(--khc-primary-50);
-  color: var(--khc-primary-600);
-  border-color: var(--khc-primary-100);
+
+/* Inline checkbox label: .form-label is flex + space-between, so a checkbox and its
+ * text were pushed to opposite ends of the row. This class keeps them adjacent. */
+.form-label--check {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
 }
-.avatar-initial[data-tone="success"] {
-  background: var(--khc-success-bg);
-  color: var(--khc-success-text);
-  border-color: var(--khc-success-500);
-}
-.avatar-initial[data-tone="warning"] {
-  background: var(--khc-warning-bg);
-  color: var(--khc-warning-text);
-  border-color: var(--khc-warning-500);
-}
-.avatar-initial[data-tone="danger"] {
-  background: var(--khc-danger-bg);
-  color: var(--khc-danger-text);
-  border-color: var(--khc-danger-500);
-}
+.key-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+

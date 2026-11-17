@@ -4,6 +4,21 @@
 
 ---
 
+## [v20261117-05] - 2026-11-17
+
+### Fixed
+- **「签发新节点」点击无反应（P1）**：`toggle()` 定义在 `setupCreationForms()` 内部，而按钮绑定在 `setupNavigation()`，跨作用域不可达并抛 `ReferenceError`；同时该调用传的是字符串 id 而非元素（在字符串上赋值 `.hidden` 静默无效）。`toggle()` 提升到模块作用域并支持 id 字符串，实测表单可正常展开/收起。
+- **「自动探测协议」只显示"未知错误"**：全部协议探测失败时 `protocols` 为 null，前端无从显示原因。现在逐个透出真实失败状态与上游消息（如 `chat HTTP 401 (未认证或登录已过期)`）。
+- **Hub 端看不到完整 Key**：服务端已返回明文，但前端对 Key 单元格无差别二次掩码。现按来源区分——Hub 与节点本地 Key 提供「显示/隐藏」切换，中枢下发的 Key 保持短掩码且只读。
+- **复选框与标签错位**：`.form-label` 为 `display:flex; justify-content: space-between`，把开关与说明文字推到行两端。新增 `.form-label--check`（`flex-start` + 8px 间距）并应用到所有内嵌 checkbox 的标签。
+
+### Changed
+- **首字母徽标中性化**：移除按名称哈希分配到 accent/success/warning/danger 的随机上色——它会让健康供应商显示为警告色而并不携带任何状态含义。现统一使用中性 surface 令牌；拉丁字母转大写，中文取首字原样。
+- **路由策略收敛展示**：默认只列「会话粘性优先（推荐）」「空闲优先轮询」，其余 4 种（weighted / least_busy / fast / manual）归入「高级策略」optgroup，并补充选择指引。6 种策略实现与后端行为完全不变。
+
+### Notes
+- `/v1/responses` 维持**透传**语义（不转换 Responses API 请求体）；协议下拉不暴露该选项。Magpie 的 `responses.go`（MIT，2638 行）经评估可低成本移植，但因当前无真实 Responses 流量，本轮不做。
+
 ## [v20261117-04] - 2026-11-17
 
 ### Fixed

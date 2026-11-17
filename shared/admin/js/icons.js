@@ -71,31 +71,21 @@
     return ICONS[key] || ICONS.generic;
   }
 
-  // Initial-letter avatar instead of vendor logos: keeps the list scannable across
-  // providers/models without shipping or maintaining brand SVGs. Tones come from the
-  // design-system status tokens (accent/success/warning/danger) rather than raw hex,
-  // so light and dark themes stay consistent and contrast-safe.
-  const AVATAR_TONES = ['neutral', 'accent', 'success', 'warning', 'danger'];
-
+  // Initial-letter avatar instead of vendor logos. Deliberately neutral: colour used
+  // to be assigned by a name hash, which looked meaningful (red/yellow dot next to a
+  // healthy provider) while carrying no information at all. One neutral token only.
   function initialOf(idOrName) {
     const raw = String(idOrName || '').trim();
     if (!raw) return '?';
-    return Array.from(raw)[0].toUpperCase();
-  }
-
-  function avatarTone(idOrName) {
-    const raw = String(idOrName || '');
-    let h = 0;
-    for (let i = 0; i < raw.length; i += 1) h = (h * 31 + raw.charCodeAt(i)) % 100000;
-    return AVATAR_TONES[h % AVATAR_TONES.length];
+    // Latin → uppercase first letter; CJK → first character as-is.
+    const first = Array.from(raw)[0];
+    return /[a-zA-Z]/.test(first) ? first.toUpperCase() : first;
   }
 
   function renderBrandIcon(idOrName) {
     const letter = initialOf(idOrName);
-    const tone = avatarTone(idOrName);
     const safe = letter.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const aria = ` aria-hidden="true"`;
-    return `<span class="avatar-initial" data-tone="${tone}"${aria}>${safe}</span>`;
+    return `<span class="avatar-initial" aria-hidden="true">${safe}</span>`;
   }
 
   const UI_ICONS = {

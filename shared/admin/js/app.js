@@ -121,6 +121,25 @@
     return `${head}-...${s.slice(-4)}`;
   }
 
+  // Key cell visibility rules:
+  //  - Hub (authoritative): full plaintext, editable.
+  //  - Node, locally added key: full plaintext, editable.
+  //  - Node, key synced from the hub vault: short hint only, read-only.
+  function renderKeyCell(k, vaultKey, idx) {
+    const raw = String(k.key || '');
+    if (vaultKey) {
+      return `<span class="tabular text-muted" title="中枢下发的 Key，仅显示首尾">${eh(maskKeyForDisplay(raw))}</span>`;
+    }
+    const cellId = `k_val_${idx}_${Math.random().toString(36).slice(2, 8)}`;
+    const masked = maskKeyForDisplay(raw);
+    const safeFull = eh(raw);
+    const safeMask = eh(masked);
+    return `<span class="key-cell">`
+      + `<code class="tabular" id="${cellId}" data-full="${safeFull}" data-mask="${safeMask}" data-masked="1">${safeMask}</code>`
+      + `<button class="btn btn--sm btn_reveal_key" type="button" data-target="${cellId}" aria-label="显示或隐藏完整密钥">显示</button>`
+      + `</span>`;
+  }
+
   // Short human duration for cooldown pills: 45s / 12m / 3h / 1d.
   function formatCooldown(sec) {
     const n = Number(sec) || 0;
@@ -138,6 +157,19 @@
     ocr: { path: '/v1/ocr', desc: '固定多模态 OCR 高并发通道' },
   };
   const FIXED_SLOT_IDS = ['chat', 'embedding', 'reranker', 'ocr'];
+
+  // Only two strategies are surfaced by default; the rest stay available but are
+  // grouped under "高级策略" because they need operator judgement (weights, latency
+  // profiles, pinned keys) that the common case does not.
+  const ADVANCED_STRATEGIES = ['weighted', 'least_busy', 'fast', 'manual'];
+  const STRATEGY_LABELS = {
+    sticky_failover: '多路会话粘性',
+    round_robin: '空闲优先轮询',
+    weighted: '按权重比例分摊',
+    least_busy: '最少并发优先',
+    fast: '动态低延迟优先',
+    manual: '手动严格直通',
+  };
 
   function ensureUnifiedFixedRoutes(cfg) {
     if (!cfg || typeof cfg !== 'object') return;
@@ -193,6 +225,19 @@
   function cssId(value) {
     const s = String(value == null ? '' : value);
     return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
+  }
+
+  // Shared show/hide helper. Must live at module scope: the node-issue button is
+  // wired in setupNavigation while the creation forms are wired later, so a
+  // function-local definition caused "toggle is not defined" at runtime.
+  function toggle(target, show) {
+    // Accepts an element or an element id: the node-issue button passes a string,
+    // and assigning .hidden on a string silently does nothing (that was the reason
+    // the issue form never opened).
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!el) return;
+    el.hidden = show !== undefined ? !show : !el.hidden;
+    el.classList.toggle('hidden', el.hidden);
   }
 
   function escapeHtml(str) {
@@ -462,10 +507,21 @@
         });
         if (res && res.ok) {
           const protocols = Array.isArray(res.protocols) ? res.protocols.join(' / ') : '';
-          toast(`协议探测成功${protocols ? `: ${protocols}` : ''}`, 'ok');
-          if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
+          if (protocols) {
+            toast(`协议探测成功: ${protocols}`, 'ok');
+            if (baseEl && res.normalized_base_url) baseEl.value = res.normalized_base_url;
+          } else {
+            // Every protocol failed: surface the real per-protocol reason instead of
+            // the old opaque "未知错误".
+            const parts = Object.values(res.results || {}).map((r) => {
+              const why = r && (r.status ? `HTTP ${r.status}` : '');
+              const msg = r && r.error ? String(r.error) : '';
+              return `${r.protocol}${why ? ` ${why}` : ''}${msg ? ` (${msg})` : ''}`;
+            });
+            toast(`协议探测失败：${parts.join('；') || '所有协议均无响应'}`, 'err');
+          }
         } else {
-          toast(`协议探测失败: ${(res && res.error) || '未知错误'}`, 'err');
+          toast(`协议探测失败: ${(res && res.error) || '请求未成功（检查登录态或网络）'}`, 'err');
         }
       } catch (err) {
         toast(`协议探测失败: ${err.message}`, 'err');
@@ -970,11 +1026,7 @@
     populatePresetDropdown();
     const pForm = $('addProviderForm');
     const mForm = $('addModelForm');
-    const toggle = (el, show) => {
-      if (!el) return;
-      el.hidden = show !== undefined ? !show : !el.hidden;
-      el.classList.toggle('hidden', el.hidden);
-    };
+
 
     clk($('btnAddProvider'), () => toggle(pForm));
     clk($('btnCancelAddProvider'), () => toggle(pForm, false));
@@ -1771,7 +1823,7 @@
       fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button></div>`),
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
       fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
-      `<div class="form-group form-group--span2"><label class="form-label"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端名称（脱敏：开启后不向该供应商透传客户端 User-Agent，默认关闭）</span></label></div>`,
+      `<div class="form-group form-group--span2"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端名称（脱敏：开启后不向该供应商透传客户端 User-Agent，默认关闭）</span></label></div>`,
     ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (自动刷新/纳管、模型别名、适配器规则与余额查询)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
@@ -1782,6 +1834,32 @@
     ].join('')}</div><div class="section-bar mt-2 flex-end"><button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button></div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
+    // Reveal/hide plaintext for editable keys (Hub + locally added node keys).
+    if (tbody && !tbody.dataset.revealWired) {
+      tbody.dataset.revealWired = '1';
+      tbody.addEventListener('click', (ev) => {
+        const btn = ev.target instanceof Element ? ev.target.closest('.btn_reveal_key') : null;
+        if (!btn) return;
+        ev.stopPropagation();
+        const code = tbody.querySelector('#' + btn.dataset.target);
+        if (!code) return;
+        const masked = code.dataset.masked === '1';
+        const full = btn.dataset.full || '';
+        if (masked && full) {
+          code.textContent = full;
+          code.dataset.masked = '0';
+          btn.textContent = '隐藏';
+        } else if (masked) {
+          code.textContent = code.dataset.full || code.textContent;
+          code.dataset.masked = '0';
+          btn.textContent = '隐藏';
+        } else {
+          code.textContent = code.dataset.mask || code.textContent;
+          code.dataset.masked = '1';
+          btn.textContent = '显示';
+        }
+      });
+    }
     keys.forEach((k, idx) => {
       const tr = ce('tr');
       const keyLabel = k.label || k.id || `key-${idx}`;
@@ -1802,7 +1880,7 @@
       tr.innerHTML = `
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
         <td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td>
-        <td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td>
+        <td>${renderKeyCell(k, vaultKey, idx)}</td>
         <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM" ${vaultKey ? 'disabled' : ''}></div></td>
         ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
         <td>${statusHtml}</td>
@@ -2281,7 +2359,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">交互方式</label>
-          <label class="form-label">
+          <label class="form-label form-label--check">
             <input type="checkbox" data-cmd-yes checked>
             <span>无人值守 (-y)，取消可交互确认</span>
           </label>
@@ -2513,14 +2591,7 @@
       return;
     }
 
-    const stratLabels = {
-      sticky_failover: '多路会话粘性',
-      round_robin: '空闲优先轮询',
-      weighted: '权重分摊',
-      least_busy: '最少并发优先',
-      fast: '低延迟优先',
-      manual: '手动直通',
-    };
+    const stratLabels = STRATEGY_LABELS;
 
     for (const mName of orderedKeys) {
       const meta = FIXED_SLOT_META[mName];
@@ -2657,32 +2728,33 @@
         <div class="form-group">
           <label class="form-label">路由策略</label>
           <select class="select" id="ed_m_strat_${mName}">
-            <option value="sticky_failover" ${strat === 'sticky_failover' ? 'selected' : ''}>多路会话粘性优先 (sticky_failover)</option>
-            <option value="round_robin" ${strat === 'round_robin' ? 'selected' : ''}>空闲优先轮询 (round_robin)</option>
-            <option value="weighted" ${strat === 'weighted' ? 'selected' : ''}>按权重比例分摊 (weighted)</option>
-            <option value="least_busy" ${strat === 'least_busy' ? 'selected' : ''}>最少并发优先 (least_busy)</option>
-            <option value="fast" ${strat === 'fast' ? 'selected' : ''}>动态低延迟优先 (fast)</option>
-            <option value="manual" ${strat === 'manual' ? 'selected' : ''}>手动严格直通 (manual)</option>
+            <option value="sticky_failover" ${strat === 'sticky_failover' ? 'selected' : ''}>会话粘性优先（推荐）</option>
+            <option value="round_robin" ${strat === 'round_robin' ? 'selected' : ''}>空闲优先轮询</option>
+            ${ADVANCED_STRATEGIES.includes(strat) ? `<option value="${strat}" selected>${STRATEGY_LABELS[strat]}（高级）</option>` : ''}
+            <optgroup label="高级策略">
+              ${ADVANCED_STRATEGIES.map((k) => `<option value="${k}" ${strat === k ? 'selected' : ''}>${STRATEGY_LABELS[k]}</option>`).join('')}
+            </optgroup>
           </select>
+          <div class="text-xs text-muted mt-1">会话粘性：同一会话固定走同一 Key，命中缓存最省。轮询：优先分给空闲 Key。高级策略仅在明确需要时使用。</div>
         </div>
         <div class="form-group">
           <label class="form-label">首选/指定 Key (sticky/manual 可选)</label>
           <input class="input" id="ed_m_act_${mName}" value="${eh(m.active_key || '')}" placeholder="格式: provider:key_label">
         </div>
         <div class="form-group">
-          <label class="form-label">
+          <label class="form-label form-label--check">
             <input type="checkbox" id="ed_m_noreas_${mName}" ${m.no_reasoning ? 'checked' : ''}>
             <span>剥离思考/推理参数 (RAG/KB 推荐)</span>
           </label>
         </div>
         <div class="form-group">
-          <label class="form-label">
+          <label class="form-label form-label--check">
             <input type="checkbox" id="ed_m_nonstream_${mName}" ${m.force_non_stream ? 'checked' : ''}>
             <span>强制非流式响应 (stream=false)</span>
           </label>
         </div>
         <div class="form-group">
-          <label class="form-label">
+          <label class="form-label form-label--check">
             <input type="checkbox" id="ed_m_keyfb_${mName}" ${m.allow_key_fallback ? 'checked' : ''}>
             <span>候选 Key 不可用时回退同供应商其它 Key</span>
           </label>
