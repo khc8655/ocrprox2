@@ -148,7 +148,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       modelsCount = models.length;
     } catch (_) {}
 
-    await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
+    const savedVer = await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
       valid: true,
       status: resp.status,
       latency_ms,
@@ -162,6 +162,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
         status: resp.status,
         latency_ms,
         models_count: modelsCount,
+        ...(typeof savedVer === 'number' ? { _version: savedVer } : {}),
       }),
       { status: 200, headers: { 'content-type': 'application/json' } }
     );
@@ -187,7 +188,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
     } catch (_) {}
   }
 
-  await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
+  const savedVer = await persistProviderKeyHealth(env, 'providers', provider, keyLabel, {
     valid: false,
     status: resp.status,
     latency_ms,
@@ -200,6 +201,7 @@ export async function handleVerifyKey(request, env, fetchImplOrOpts) {
       status: resp.status,
       latency_ms,
       error: scrubSecrets(errorMsg, [cleanKey]),
+      ...(typeof savedVer === 'number' ? { _version: savedVer } : {}),
     }),
     { status: 200, headers: { 'content-type': 'application/json' } }
   );

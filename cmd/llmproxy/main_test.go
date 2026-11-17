@@ -459,109 +459,100 @@ func (p *patternReader) Read(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
-func TestFullMode_AuthHotReloadAndMultiKeys(t *testing.T) {
+func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *testing.T) {
 	tmpDir := t.TempDir()
-	cliKey := "cli-primary-key"
+	cliKey := "sk-llmproxy-env-initial-key"
 	authMgr := auth.NewAuthenticator(cliKey, "admin-pass")
 
 	localSrc, err := config.NewLocalSource(tmpDir, "pass")
 	if err != nil {
 		t.Fatalf("NewLocalSource err: %v", err)
 	}
+	localSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
+		syncAuthKeysForRole(types.RoleFull, cliKey, cfg, authMgr)
+	})
 
-	// Wire auth update from settings (matching main.go logic)
-	updateAuthFromSettings := func(cfg *types.ProxyConfig) {
-		if cfg == nil {
-			return
-		}
-		primary := cliKey
-		var extras []string
-		if primary == "" {
-			if cfg.Settings.ClientKey != "" {
-				primary = cfg.Settings.ClientKey
-			} else if cfg.Settings.ProxyAPIKey != "" {
-				primary = cfg.Settings.ProxyAPIKey
-			}
-			extras = cfg.Settings.ProxyKeys
-		} else {
-			if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
-				extras = append(extras, cfg.Settings.ClientKey)
-			}
-			if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
-				extras = append(extras, cfg.Settings.ProxyAPIKey)
-			}
-			extras = append(extras, cfg.Settings.ProxyKeys...)
-		}
-		authMgr.UpdateClientKeys(primary, extras)
+	// 1. Cold start on Full mode: _version stays 0, cliKey authenticates, and adminSrv displays defaultClientKey!
+	adminSrv := admin.NewServer(authMgr, localSrc, nil, nil)
+	adminSrv.SetAdminPassword("admin-pass")
+	adminSrv.SetDefaultClientKey(cliKey)
+
+	cfgReq := httptest.NewRequest("GET", "/api/config", nil)
+	cfgReq.Header.Set("Authorization", "Bearer admin-pass")
+	cfgRec := httptest.NewRecorder()
+	mux := router.NewRouteMux()
+	adminSrv.RegisterRoutes(mux)
+	mux.ServeHTTP(cfgRec, cfgReq)
+	var cfgBody map[string]any
+	_ = json.Unmarshal(cfgRec.Body.Bytes(), &cfgBody)
+	if int(cfgBody["_version"].(float64)) != 0 {
+		t.Fatalf("expected cold-start _version 0, got %v", cfgBody["_version"])
 	}
-	localSrc.OnConfigChange(updateAuthFromSettings)
+	stMap, _ := cfgBody["settings"].(map[string]any)
+	if stMap["client_key"] != cliKey {
+		t.Fatalf("expected cold-start GET /api/config settings.client_key=%q, got %v", cliKey, stMap["client_key"])
+	}
 
-	// Save initial config with ProxyKeys
+	rCLI := httptest.NewRequest("GET", "/v1/models", nil)
+	rCLI.Header.Set("Authorization", "Bearer "+cliKey)
+	if !authMgr.VerifyClientKey(rCLI) {
+		t.Fatalf("expected initial cliKey to authenticate")
+	}
+
+	// 2. Rotate key in Full Web UI -> MUST revoke old .env cliKey!
+	rotatedKey := "sk-llmproxy-rotated-in-webui-999"
 	_, err = localSrc.SaveConfig(&types.ProxyConfig{
-		Version: 1,
-		Providers: map[string]*types.ProviderConfig{
-			"p1": {ID: "p1", BaseURL: "https://mock.api", Enabled: true},
-		},
+		Version: 0,
 		Settings: types.RuntimeSettings{
-			ClientKey: "settings-client-key",
+			ClientKey: rotatedKey,
 			ProxyKeys: []string{"extra-token-1", "extra-token-2"},
 		},
 	})
 	if err != nil {
-		t.Fatalf("SaveConfig err: %v", err)
+		t.Fatalf("SaveConfig rotate err: %v", err)
 	}
 
-	// Verify CLI key takes primary precedence
-	rCLI := httptest.NewRequest("GET", "/v1/models", nil)
-	rCLI.Header.Set("Authorization", "Bearer cli-primary-key")
-	if !authMgr.VerifyClientKey(rCLI) {
-		t.Errorf("expected cli-primary-key to authenticate")
+	if authMgr.VerifyClientKey(rCLI) {
+		t.Fatalf("P0-04 / FULL-04 violation: old .env cliKey STILL authenticated after rotating key in Full Web UI!")
 	}
 
-	// Verify extra keys from settings authenticate
+	rRotated := httptest.NewRequest("GET", "/v1/models", nil)
+	rRotated.Header.Set("Authorization", "Bearer "+rotatedKey)
+	if !authMgr.VerifyClientKey(rRotated) {
+		t.Fatalf("expected rotated key to authenticate")
+	}
+
 	rExtra1 := httptest.NewRequest("GET", "/v1/models", nil)
 	rExtra1.Header.Set("Authorization", "Bearer extra-token-1")
 	if !authMgr.VerifyClientKey(rExtra1) {
-		t.Errorf("expected extra-token-1 to authenticate")
+		t.Fatalf("expected extra-token-1 to authenticate")
 	}
 
-	rExtra2 := httptest.NewRequest("GET", "/v1/models", nil)
-	rExtra2.Header.Set("Authorization", "Bearer extra-token-2")
-	if !authMgr.VerifyClientKey(rExtra2) {
-		t.Errorf("expected extra-token-2 to authenticate")
+	// Simulate restart: syncAuthKeysForRole must NOT resurrect old cliKey once Settings.ClientKey is set!
+	snapAfterRestart, _ := localSrc.Current(context.Background(), true)
+	syncAuthKeysForRole(types.RoleFull, cliKey, snapAfterRestart.Config, authMgr)
+	if authMgr.VerifyClientKey(rCLI) {
+		t.Fatalf("old .env cliKey resurrected on restart!")
+	}
+	if !authMgr.VerifyClientKey(rRotated) {
+		t.Fatalf("rotatedKey stopped working after restart!")
 	}
 
-	// Verify settings-client-key also authenticates as extra
-	rSettings := httptest.NewRequest("GET", "/v1/models", nil)
-	rSettings.Header.Set("Authorization", "Bearer settings-client-key")
-	if !authMgr.VerifyClientKey(rSettings) {
-		t.Errorf("expected settings-client-key to authenticate")
-	}
-
-	// Dynamic update: reload with changed ProxyKeys (pass current version 1 for CAS)
-	_, err = localSrc.SaveConfig(&types.ProxyConfig{
-		Version: 1,
-		Providers: map[string]*types.ProviderConfig{
-			"p1": {ID: "p1", BaseURL: "https://mock.api", Enabled: true},
-		},
+	// 3. Verify RoleLite preserves BOTH cliKey and Hub-projected Settings keys
+	liteAuth := auth.NewAuthenticator(cliKey, "")
+	syncAuthKeysForRole(types.RoleLite, cliKey, &types.ProxyConfig{
 		Settings: types.RuntimeSettings{
-			ProxyKeys: []string{"extra-token-3"},
+			ClientKey: "sk-hub-primary",
+			ProxyKeys: []string{"sk-hub-extra"},
 		},
-	})
-	if err != nil {
-		t.Fatalf("SaveConfig v2 err: %v", err)
+	}, liteAuth)
+	if !liteAuth.VerifyClientKey(rCLI) {
+		t.Fatalf("Lite mode should keep cliKey valid")
 	}
-
-	// extra-token-3 now works
-	rExtra3 := httptest.NewRequest("GET", "/v1/models", nil)
-	rExtra3.Header.Set("Authorization", "Bearer extra-token-3")
-	if !authMgr.VerifyClientKey(rExtra3) {
-		t.Errorf("expected extra-token-3 to authenticate after hot reload")
-	}
-
-	// extra-token-1 should now fail
-	if authMgr.VerifyClientKey(rExtra1) {
-		t.Errorf("expected extra-token-1 to fail after being removed in hot reload")
+	rHub := httptest.NewRequest("GET", "/v1/models", nil)
+	rHub.Header.Set("Authorization", "Bearer sk-hub-primary")
+	if !liteAuth.VerifyClientKey(rHub) {
+		t.Fatalf("Lite mode should accept Hub-projected ClientKey")
 	}
 }
 

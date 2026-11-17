@@ -54,9 +54,10 @@ type Server struct {
 	adminPassword string
 	buildVersion  string
 	buildSemver   string
-	buildCommit   string
-	updateAPIBase string
-	defaultVault  *types.VaultClientConfig
+	buildCommit      string
+	updateAPIBase    string
+	defaultVault     *types.VaultClientConfig
+	defaultClientKey string
 }
 
 // NewServer creates a new admin Server.
@@ -112,6 +113,11 @@ func (s *Server) SetDefaultVault(hubURL, nodeToken string) {
 		URL:       hubURL,
 		NodeToken: nodeToken,
 	}
+}
+
+// SetDefaultClientKey configures fallback client API key supplied via CLI/env for Full mode UI display.
+func (s *Server) SetDefaultClientKey(clientKey string) {
+	s.defaultClientKey = strings.TrimSpace(clientKey)
 }
 
 func (s *Server) effectiveVault(cfgVault *types.VaultClientConfig) *types.VaultClientConfig {
@@ -215,6 +221,7 @@ func (s *Server) RegisterRoutes(r any) {
 	register("POST /api/admin/probe-models", s.handleProbeModels)
 	register("GET /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/fetch", s.handleVaultFetch)
+	register("POST /api/vault/sync", s.handleVaultSync)
 	register("POST /api/admin/oauth/start", s.handleOAuthStart)
 	register("GET /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/oauth/poll", s.handleOAuthPoll)
@@ -328,6 +335,41 @@ func (s *Server) maskedEffectiveVault(cfgVault *types.VaultClientConfig) *types.
 	return &out
 }
 
+func validateAndNormalizeSettings(st *types.RuntimeSettings) error {
+	if st == nil {
+		return nil
+	}
+	if st.CooldownRateLimitSec < 0 ||
+		st.CooldownServerErrorSec < 0 ||
+		st.CooldownNetworkErrorSec < 0 ||
+		st.CooldownAuthErrorSec < 0 {
+		return errors.New("cooldown settings must be >= 0")
+	}
+	if st.AgentFirstByteTimeoutSec < 0 || (st.AgentFirstByteTimeoutSec > 0 && (st.AgentFirstByteTimeoutSec < 5 || st.AgentFirstByteTimeoutSec > 600)) {
+		return errors.New("agent_first_byte_timeout_sec must be between 5 and 600")
+	}
+	if st.OCRMaxInflight < 0 || st.OCRMaxInflight > 64 {
+		return errors.New("ocr_max_inflight must be between 1 and 64")
+	}
+	if st.KBGlobalMaxConcurrency < 0 || st.KBGlobalMaxConcurrency > 256 {
+		return errors.New("kb_global_max_concurrency must be between 1 and 256")
+	}
+
+	if st.AgentRoutingStrategy == "" {
+		st.AgentRoutingStrategy = "sticky_failover"
+	}
+	if st.AgentFirstByteTimeoutSec == 0 {
+		st.AgentFirstByteTimeoutSec = 120
+	}
+	if st.OCRMaxInflight == 0 {
+		st.OCRMaxInflight = 4
+	}
+	if st.KBGlobalMaxConcurrency == 0 {
+		st.KBGlobalMaxConcurrency = 16
+	}
+	return nil
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -343,6 +385,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			if dv := s.maskedEffectiveVault(nil); dv != nil {
 				vaultVal = dv
 			}
+			defSettings := config.DefaultRuntimeSettings()
+			if s.defaultClientKey != "" {
+				defSettings.ClientKey = s.defaultClientKey
+			}
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":           true,
@@ -350,13 +396,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				"providers":    map[string]any{},
 				"agent_models": map[string]any{},
 				"kb_models":    map[string]any{},
-				"settings":     map[string]any{},
+				"settings":     defSettings,
 				"vault":        vaultVal,
 			})
 			return
 		}
 
 		masked := maskConfigSecrets(snap.Config)
+		if masked.Settings.ClientKey == "" && masked.Settings.ProxyAPIKey == "" && len(masked.Settings.ProxyKeys) == 0 && s.defaultClientKey != "" {
+			masked.Settings.ClientKey = s.defaultClientKey
+		}
 		if dv := s.maskedEffectiveVault(snap.Config.Vault); dv != nil {
 			masked.Vault = dv
 		}
@@ -379,6 +428,18 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				"ok": false,
 				"error": map[string]any{
 					"message": "invalid JSON configuration",
+					"type":    "invalid_request_error",
+				},
+			})
+			return
+		}
+
+		if err := validateAndNormalizeSettings(&newCfg.Settings); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": false,
+				"error": map[string]any{
+					"message": err.Error(),
 					"type":    "invalid_request_error",
 				},
 			})
@@ -456,14 +517,19 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deep copy and strip all Vault-originated providers/keys and Vault.NodeToken (SEC-06 / local-only export rule).
+	// Deep copy and strip all Vault-originated providers/keys, Vault route candidates, and Vault.NodeToken (SEC-06 / local-only export rule).
 	raw, _ := json.Marshal(snap.Config)
 	var copyCfg types.ProxyConfig
 	_ = json.Unmarshal(raw, &copyCfg)
 
+	vaultProvIDs := make(map[string]bool)
 	localProviders := make(map[string]*types.ProviderConfig)
 	for pID, p := range copyCfg.Providers {
-		if p == nil || p.Origin == "vault" {
+		if p == nil {
+			continue
+		}
+		if p.Origin == "vault" {
+			vaultProvIDs[pID] = true
 			continue
 		}
 		localKeys := make([]*types.KeyEntry, 0, len(p.APIKeys))
@@ -477,13 +543,49 @@ func (s *Server) handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		localProviders[pID] = p
 	}
 
+	localAgentModels := make(map[string]*types.AgentModelRoute)
+	for mID, route := range copyCfg.AgentModels {
+		if route == nil {
+			continue
+		}
+		keptCands := make([]*types.RouteCandidate, 0, len(route.Candidates))
+		for _, c := range route.Candidates {
+			if c == nil || vaultProvIDs[c.Provider] {
+				continue
+			}
+			keptCands = append(keptCands, c)
+		}
+		if route.Origin == "vault" && len(keptCands) == 0 {
+			continue
+		}
+		if route.Origin == "vault" {
+			route.Origin = "local"
+		}
+		route.Candidates = keptCands
+		localAgentModels[mID] = route
+	}
+
+	localKBModels := make(map[string][]*types.KBCandidate)
+	for cat, list := range copyCfg.KBModels {
+		var kept []*types.KBCandidate
+		for _, c := range list {
+			if c == nil || vaultProvIDs[c.Provider] {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		if len(kept) > 0 {
+			localKBModels[cat] = kept
+		}
+	}
+
 	exportData := map[string]any{
 		"ok":           true,
 		"_version":     copyCfg.Version,
 		"_exported_at": time.Now().Format("2006-01-02 15:04:05"),
 		"providers":    localProviders,
-		"agent_models": copyCfg.AgentModels,
-		"kb_models":    copyCfg.KBModels,
+		"agent_models": localAgentModels,
+		"kb_models":    localKBModels,
 		"settings":     copyCfg.Settings,
 	}
 	if copyCfg.Vault != nil {
@@ -799,25 +901,31 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	providerName := req.Provider
-	keyLabel := req.Key
+	providerName := strings.TrimSpace(req.Provider)
+	keyLabel := strings.TrimSpace(req.Key)
 	if keyLabel == "" {
-		keyLabel = req.KeyLabel
+		keyLabel = strings.TrimSpace(req.KeyLabel)
 	}
-	model := req.Model
+	model := strings.TrimSpace(req.Model)
 	if model == "" {
-		model = req.ModelName
+		model = strings.TrimSpace(req.ModelName)
 	}
-	candType := strings.ToLower(req.Type)
+	if model == "" {
+		model = strings.TrimSpace(req.AgentModel)
+	}
+	candType := strings.ToLower(strings.TrimSpace(req.Type))
+	if candType == "" {
+		candType = strings.ToLower(strings.TrimSpace(req.Category))
+	}
 	if candType == "" {
 		candType = "chat"
 	}
 
-	if providerName == "" || keyLabel == "" || model == "" {
+	if providerName == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":    false,
-			"error": "missing provider, key, or model",
+			"error": "missing provider",
 		})
 		return
 	}
@@ -843,15 +951,47 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var apiKey string
-	for _, k := range prov.APIKeys {
-		if k != nil && (k.Label == keyLabel || k.ID == keyLabel || k.Key == keyLabel) {
-			apiKey = k.Key
-			break
+	resolvedKeyLabel := keyLabel
+	if keyLabel != "" {
+		for _, k := range prov.APIKeys {
+			if k != nil && (k.Label == keyLabel || k.ID == keyLabel || k.Key == keyLabel) {
+				apiKey = k.Key
+				if k.Label != "" {
+					resolvedKeyLabel = k.Label
+				} else if k.ID != "" {
+					resolvedKeyLabel = k.ID
+				}
+				break
+			}
 		}
-	}
-	if apiKey == "" {
-		if !config.IsMaskedSecret(keyLabel) && len(keyLabel) > 5 {
+		if apiKey == "" && !config.IsMaskedSecret(keyLabel) && len(keyLabel) > 5 {
 			apiKey = keyLabel
+		}
+	} else {
+		// P0-06: key_label == "" ("留空=全部启用Key") -> automatically pick first enabled non-empty key
+		for _, k := range prov.APIKeys {
+			if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+				apiKey = k.Key
+				if k.Label != "" {
+					resolvedKeyLabel = k.Label
+				} else {
+					resolvedKeyLabel = k.ID
+				}
+				break
+			}
+		}
+		if apiKey == "" {
+			for _, k := range prov.APIKeys {
+				if k != nil && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+					apiKey = k.Key
+					if k.Label != "" {
+						resolvedKeyLabel = k.Label
+					} else {
+						resolvedKeyLabel = k.ID
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -864,7 +1004,33 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := prov.BaseURL
+	// P0-06: If model is empty on a KB candidate, resolve from configured KBModels, provider aliases, or candType
+	if model == "" {
+		for _, kbCand := range snap.Config.KBModels[candType] {
+			if kbCand != nil && kbCand.Provider == providerName && strings.TrimSpace(kbCand.Model) != "" {
+				model = strings.TrimSpace(kbCand.Model)
+				break
+			}
+		}
+	}
+	if model == "" && len(prov.ModelAliases) > 0 {
+		aliasKeys := make([]string, 0, len(prov.ModelAliases))
+		for k := range prov.ModelAliases {
+			aliasKeys = append(aliasKeys, k)
+		}
+		sort.Strings(aliasKeys)
+		for _, k := range aliasKeys {
+			if v := strings.TrimSpace(prov.ModelAliases[k]); v != "" {
+				model = v
+				break
+			}
+		}
+	}
+	if model == "" {
+		model = candType
+	}
+
+	baseURL, probeHeaders, isAnthropic := resolveProbeTargetAndHeaders("", "", apiKey, prov)
 	if baseURL == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -909,15 +1075,26 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 			"stream":     false,
 		})
 	default: // chat
-		targetURL = upstream.JoinUpstream(baseURL, "chat/completions")
-		reqBodyBytes, _ = json.Marshal(map[string]any{
-			"model": model,
-			"messages": []map[string]any{
-				{"role": "user", "content": "Hi"},
-			},
-			"max_tokens": 16,
-			"stream":     false,
-		})
+		if isAnthropic {
+			targetURL = upstream.JoinUpstream(baseURL, "messages")
+			reqBodyBytes, _ = json.Marshal(map[string]any{
+				"model": model,
+				"messages": []map[string]any{
+					{"role": "user", "content": "Hi"},
+				},
+				"max_tokens": 16,
+			})
+		} else {
+			targetURL = upstream.JoinUpstream(baseURL, "chat/completions")
+			reqBodyBytes, _ = json.Marshal(map[string]any{
+				"model": model,
+				"messages": []map[string]any{
+					{"role": "user", "content": "Hi"},
+				},
+				"max_tokens": 16,
+				"stream":     false,
+			})
+		}
 	}
 
 	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBodyBytes))
@@ -930,13 +1107,12 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upReq.Header.Set("Content-Type", "application/json")
-
-	if prov.AdapterRules != nil && prov.AdapterRules.AuthHeader != "" && prov.AdapterRules.AuthPrefix != "" {
-		upReq.Header.Set(prov.AdapterRules.AuthHeader, prov.AdapterRules.AuthPrefix+apiKey)
-	} else if strings.EqualFold(providerName, "vertex") || strings.Contains(strings.ToLower(baseURL), "aiplatform.googleapis.com") {
+	for hk, hv := range probeHeaders {
+		upReq.Header.Set(hk, hv)
+	}
+	if strings.EqualFold(providerName, "vertex") && probeHeaders["x-goog-api-key"] == "" && prov.AdapterRules == nil {
+		upReq.Header.Del("Authorization")
 		upReq.Header.Set("x-goog-api-key", apiKey)
-	} else {
-		upReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	client := s.outboundClient(20 * time.Second)
@@ -962,10 +1138,8 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	isOK := resp.StatusCode >= 200 && resp.StatusCode < 300
 
-	if isOK {
-		if s.scheduler != nil {
-			s.scheduler.Cooldowns().ClearKey(providerName, keyLabel)
-		}
+	if isOK && s.scheduler != nil && resolvedKeyLabel != "" {
+		s.scheduler.Cooldowns().ClearKey(providerName, resolvedKeyLabel)
 	}
 
 	textSnippet := ""
@@ -1111,16 +1285,45 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 			}
 
 			var apiKey string
-			for _, k := range prov.APIKeys {
-				if k != nil && (k.Label == cand.KeyLabel || k.ID == cand.KeyLabel) {
-					apiKey = k.Key
-					break
+			resolvedKey := cand.KeyLabel
+			if cand.KeyLabel != "" {
+				for _, k := range prov.APIKeys {
+					if k != nil && (k.Label == cand.KeyLabel || k.ID == cand.KeyLabel) {
+						apiKey = k.Key
+						break
+					}
+				}
+			} else {
+				// P0-06: cand.KeyLabel == "" ("留空=全部启用Key") -> pick first enabled non-empty key
+				for _, k := range prov.APIKeys {
+					if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+						apiKey = k.Key
+						if k.Label != "" {
+							resolvedKey = k.Label
+						} else {
+							resolvedKey = k.ID
+						}
+						break
+					}
+				}
+				if apiKey == "" {
+					for _, k := range prov.APIKeys {
+						if k != nil && k.Key != "" && !config.IsMaskedSecret(k.Key) {
+							apiKey = k.Key
+							if k.Label != "" {
+								resolvedKey = k.Label
+							} else {
+								resolvedKey = k.ID
+							}
+							break
+						}
+					}
 				}
 			}
 			if apiKey == "" || config.IsMaskedSecret(apiKey) {
 				results[idx] = ProbeResult{
 					Provider: cand.Provider,
-					Key:      cand.KeyLabel,
+					Key:      resolvedKey,
 					Model:    modelName,
 					OK:       false,
 					Error:    "api key unresolvable or masked",
@@ -1132,22 +1335,35 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 			if targetModel == "" {
 				targetModel = modelName
 			}
-			targetURL := upstream.JoinUpstream(prov.BaseURL, "chat/completions")
-
-			testBody, _ := json.Marshal(map[string]any{
-				"model": targetModel,
-				"messages": []map[string]any{
-					{"role": "user", "content": "Hi"},
-				},
-				"max_tokens": 16,
-				"stream":     false,
-			})
+			pBaseURL, probeHeaders, isAnthropic := resolveProbeTargetAndHeaders("", "", apiKey, prov)
+			var targetURL string
+			var testBody []byte
+			if isAnthropic {
+				targetURL = upstream.JoinUpstream(pBaseURL, "messages")
+				testBody, _ = json.Marshal(map[string]any{
+					"model": targetModel,
+					"messages": []map[string]any{
+						{"role": "user", "content": "Hi"},
+					},
+					"max_tokens": 16,
+				})
+			} else {
+				targetURL = upstream.JoinUpstream(pBaseURL, "chat/completions")
+				testBody, _ = json.Marshal(map[string]any{
+					"model": targetModel,
+					"messages": []map[string]any{
+						{"role": "user", "content": "Hi"},
+					},
+					"max_tokens": 16,
+					"stream":     false,
+				})
+			}
 
 			upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(testBody))
 			if err != nil {
 				results[idx] = ProbeResult{
 					Provider: cand.Provider,
-					Key:      cand.KeyLabel,
+					Key:      resolvedKey,
 					Model:    targetModel,
 					OK:       false,
 					Error:    err.Error(),
@@ -1155,12 +1371,12 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			upReq.Header.Set("Content-Type", "application/json")
-			if prov.AdapterRules != nil && prov.AdapterRules.AuthHeader != "" && prov.AdapterRules.AuthPrefix != "" {
-				upReq.Header.Set(prov.AdapterRules.AuthHeader, prov.AdapterRules.AuthPrefix+apiKey)
-			} else if strings.EqualFold(cand.Provider, "vertex") || strings.Contains(strings.ToLower(prov.BaseURL), "aiplatform.googleapis.com") {
+			for hk, hv := range probeHeaders {
+				upReq.Header.Set(hk, hv)
+			}
+			if strings.EqualFold(cand.Provider, "vertex") && probeHeaders["x-goog-api-key"] == "" && prov.AdapterRules == nil {
+				upReq.Header.Del("Authorization")
 				upReq.Header.Set("x-goog-api-key", apiKey)
-			} else {
-				upReq.Header.Set("Authorization", "Bearer "+apiKey)
 			}
 
 			client := s.outboundClient(15 * time.Second)
@@ -1172,7 +1388,7 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				results[idx] = ProbeResult{
 					Provider:  cand.Provider,
-					Key:       cand.KeyLabel,
+					Key:       resolvedKey,
 					Model:     targetModel,
 					OK:        false,
 					LatencyMS: lat,
@@ -1194,14 +1410,14 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 					errStr = fmt.Sprintf("HTTP %d", resp.StatusCode)
 				}
 			} else {
-				if s.scheduler != nil {
-					s.scheduler.Cooldowns().ClearKey(cand.Provider, cand.KeyLabel)
+				if s.scheduler != nil && resolvedKey != "" {
+					s.scheduler.Cooldowns().ClearKey(cand.Provider, resolvedKey)
 				}
 			}
 
 			results[idx] = ProbeResult{
 				Provider:  cand.Provider,
-				Key:       cand.KeyLabel,
+				Key:       resolvedKey,
 				Model:     targetModel,
 				OK:        isOK,
 				Status:    resp.StatusCode,
@@ -1367,6 +1583,61 @@ func matchesStoredProviderBaseURL(reqURL string, p *types.ProviderConfig) bool {
 	return false
 }
 
+func resolveProbeTargetAndHeaders(reqBaseURL, reqAPIType, rawKey string, prov *types.ProviderConfig) (string, map[string]string, bool) {
+	apiType := strings.ToLower(strings.TrimSpace(reqAPIType))
+	if apiType == "" && prov != nil {
+		apiType = strings.ToLower(strings.TrimSpace(prov.APIType))
+		if apiType == "" && len(prov.Protocols) > 0 {
+			hasAnthropic := false
+			hasOpenAI := false
+			for _, proto := range prov.Protocols {
+				pl := strings.ToLower(strings.TrimSpace(proto))
+				if pl == "anthropic" || pl == "messages" || pl == "anthropic-messages" {
+					hasAnthropic = true
+				}
+				if pl == "openai" || pl == "chat" || pl == "responses" {
+					hasOpenAI = true
+				}
+			}
+			if hasAnthropic && !hasOpenAI {
+				apiType = "anthropic"
+			}
+		}
+	}
+
+	explicitAnthropic := apiType == "anthropic" || apiType == "anthropic-messages" || apiType == "messages"
+	baseURL := strings.TrimSpace(reqBaseURL)
+	if baseURL == "" && prov != nil {
+		if (explicitAnthropic || strings.HasPrefix(rawKey, "sk-ant-")) && strings.TrimSpace(prov.AnthropicBaseURL) != "" {
+			baseURL = strings.TrimSpace(prov.AnthropicBaseURL)
+		} else if strings.TrimSpace(prov.BaseURL) != "" {
+			baseURL = strings.TrimSpace(prov.BaseURL)
+		} else if strings.TrimSpace(prov.AnthropicBaseURL) != "" {
+			baseURL = strings.TrimSpace(prov.AnthropicBaseURL)
+		}
+	}
+
+	lowerURL := strings.ToLower(baseURL)
+	matchesAnthBase := prov != nil && strings.TrimSpace(prov.AnthropicBaseURL) != "" &&
+		strings.EqualFold(strings.TrimRight(baseURL, "/"), strings.TrimRight(strings.TrimSpace(prov.AnthropicBaseURL), "/"))
+
+	isAnthropic := explicitAnthropic || matchesAnthBase || strings.Contains(lowerURL, "anthropic") ||
+		(apiType == "" && strings.HasPrefix(rawKey, "sk-ant-"))
+
+	headers := make(map[string]string)
+	if isAnthropic {
+		headers["x-api-key"] = rawKey
+		headers["anthropic-version"] = "2023-06-01"
+	} else if prov != nil && prov.AdapterRules != nil && strings.TrimSpace(prov.AdapterRules.AuthHeader) != "" {
+		headers[strings.TrimSpace(prov.AdapterRules.AuthHeader)] = prov.AdapterRules.AuthPrefix + rawKey
+	} else if strings.Contains(lowerURL, "aiplatform.googleapis.com") {
+		headers["x-goog-api-key"] = rawKey
+	} else {
+		headers["Authorization"] = "Bearer " + rawKey
+	}
+	return baseURL, headers, isAnthropic
+}
+
 func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -1377,6 +1648,7 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		BaseURL  string `json:"base_url"`
 		APIKey   string `json:"api_key"`
+		APIType  string `json:"api_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1384,9 +1656,11 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var storedProv *types.ProviderConfig
 	snap, _ := s.localSrc.Current(r.Context(), false)
 	if snap != nil && snap.Config != nil {
 		if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
+			storedProv = p
 			if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
 				for _, k := range p.APIKeys {
 					if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
@@ -1405,9 +1679,6 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			if req.BaseURL == "" {
-				req.BaseURL = p.BaseURL
-			}
 		}
 	}
 
@@ -1420,7 +1691,9 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if req.BaseURL == "" {
+
+	resolvedBaseURL, probeHeaders, _ := resolveProbeTargetAndHeaders(req.BaseURL, req.APIType, req.APIKey, storedProv)
+	if resolvedBaseURL == "" {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":     true,
 			"valid":  false,
@@ -1430,7 +1703,7 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetURL := upstream.JoinUpstream(req.BaseURL, "models")
+	targetURL := upstream.JoinUpstream(resolvedBaseURL, "models")
 	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1441,7 +1714,9 @@ func (s *Server) handleVerifyKey(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	upReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	for hk, hv := range probeHeaders {
+		upReq.Header.Set(hk, hv)
+	}
 
 	client := s.outboundClient(15 * time.Second)
 
@@ -1500,6 +1775,7 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		BaseURL  string `json:"base_url"`
 		APIKey   string `json:"api_key"`
+		APIType  string `json:"api_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1507,9 +1783,11 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var storedProv *types.ProviderConfig
 	snap, _ := s.localSrc.Current(r.Context(), false)
 	if snap != nil && snap.Config != nil {
 		if p, ok := snap.Config.Providers[req.Provider]; ok && p != nil {
+			storedProv = p
 			if req.APIKey == "" || config.IsMaskedSecret(req.APIKey) {
 				for _, k := range p.APIKeys {
 					if k != nil && k.Enabled && k.Key != "" && !config.IsMaskedSecret(k.Key) {
@@ -1526,9 +1804,6 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			if req.BaseURL == "" {
-				req.BaseURL = p.BaseURL
-			}
 		}
 	}
 
@@ -1537,20 +1812,24 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "api key is empty or unresolvable"})
 		return
 	}
-	if req.BaseURL == "" {
+
+	resolvedBaseURL, probeHeaders, _ := resolveProbeTargetAndHeaders(req.BaseURL, req.APIType, req.APIKey, storedProv)
+	if resolvedBaseURL == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "base_url is required"})
 		return
 	}
 
-	targetURL := upstream.JoinUpstream(req.BaseURL, "models")
+	targetURL := upstream.JoinUpstream(resolvedBaseURL, "models")
 	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	upReq.Header.Set("Authorization", "Bearer "+req.APIKey)
+	for hk, hv := range probeHeaders {
+		upReq.Header.Set(hk, hv)
+	}
 
 	client := s.outboundClient(15 * time.Second)
 
@@ -1812,6 +2091,137 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(respBytes)
+}
+
+func (s *Server) handleVaultSync(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	var reqBody struct {
+		HubURL    string `json:"hub_url"`
+		NodeToken string `json:"node_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil && !errors.Is(err, io.EOF) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid json"})
+		return
+	}
+
+	snap, _ := s.localSrc.Current(r.Context(), false)
+	hubURL, nodeToken := s.resolveVaultCredentials(snap, reqBody.HubURL, reqBody.NodeToken)
+	if hubURL == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "vault hub url not configured"})
+		return
+	}
+	if nodeToken == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "vault node token not configured"})
+		return
+	}
+
+	target := strings.TrimRight(hubURL, "/") + "/api/node/config"
+	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, strings.NewReader("{}"))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("Authorization", "Bearer "+nodeToken)
+	appVer, _, _ := s.systemBuildInfo()
+	upReq.Header.Set("X-Node-Version", appVer)
+
+	client := s.outboundClient(15 * time.Second)
+	resp, err := client.Do(upReq)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		w.WriteHeader(resp.StatusCode)
+		if len(respBytes) > 0 {
+			_, _ = w.Write(respBytes)
+		} else {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": fmt.Sprintf("hub returned HTTP %d", resp.StatusCode)})
+		}
+		return
+	}
+
+	var hubResp struct {
+		OK            bool            `json:"ok"`
+		ConfigVersion int64           `json:"config_version"`
+		PayloadRaw    json.RawMessage `json:"payload"`
+		Error         any             `json:"error"`
+	}
+	if err := json.Unmarshal(respBytes, &hubResp); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid hub response JSON"})
+		return
+	}
+	if !hubResp.OK || len(hubResp.PayloadRaw) == 0 || string(hubResp.PayloadRaw) == "null" {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "hub returned empty sync payload"})
+		return
+	}
+
+	var payload types.ProxyConfig
+	if err := json.Unmarshal(hubResp.PayloadRaw, &payload); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid hub payload structure: " + err.Error()})
+		return
+	}
+	// Support optional providers.<id>.keys map[string]string if Hub emitted legacy keys map alongside/instead of api_keys
+	var rawPayload struct {
+		Providers map[string]json.RawMessage `json:"providers"`
+	}
+	if err := json.Unmarshal(hubResp.PayloadRaw, &rawPayload); err == nil && len(rawPayload.Providers) > 0 {
+		if payload.Providers == nil {
+			payload.Providers = make(map[string]*types.ProviderConfig, len(rawPayload.Providers))
+		}
+		for pID, rawP := range rawPayload.Providers {
+			if pc, decErr := decodeVaultProviderConfig(pID, rawP); decErr == nil && pc != nil {
+				payload.Providers[pID] = pc
+			}
+		}
+	}
+
+	merged, err := s.localSrc.MergeHubSync(&payload)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
+	masked := maskConfigSecrets(merged)
+	if dv := s.maskedEffectiveVault(merged.Vault); dv != nil {
+		masked.Vault = dv
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":               true,
+		"_version":         merged.Version,
+		"config_version":   hubResp.ConfigVersion,
+		"synced_providers": len(payload.Providers),
+		"synced_models":    len(payload.AgentModels),
+		"config":           masked,
+	})
 }
 
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {

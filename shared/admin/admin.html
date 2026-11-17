@@ -240,8 +240,7 @@
         </div>
         <div class="view-actions">
           <div class="fields" id="vaultSyncBar" hidden>
-            <button class="btn" id="btnSyncManifest" type="button">拉取中枢清单</button>
-            <button class="btn" id="btnSyncKeys" type="button">从 Vault 同步密钥</button>
+            <button class="btn" id="btnSyncVault" type="button">从中枢同步</button>
           </div>
           <button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button>
         </div>
@@ -261,6 +260,7 @@
           <div class="form-group">
             <label class="form-label">快速预设</label>
             <select class="select" id="newProvPreset"></select>
+            <span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span>
           </div>
           <div class="form-group">
             <label class="form-label">供应商 ID</label>
@@ -280,9 +280,10 @@
           <div class="form-group">
             <label class="form-label">上游协议类型</label>
             <select class="select" id="newProvApiType">
-              <option value="openai-completions">OpenAI Chat Completions</option>
-              <option value="anthropic-messages">Anthropic Messages</option>
-              <option value="gemini">Google Gemini</option>
+              <option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option>
+              <option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option>
+              <option value="gemini">Gemini 兼容</option>
+              <option value="ocr">原生 OCR 接口 (/v1/ocr)</option>
             </select>
           </div>
           <div class="form-group">
@@ -321,8 +322,8 @@
     <section id="viewModels" hidden>
       <div class="view-header">
         <div>
-          <h1 class="view-title">模型路由模板（下发编排）</h1>
-          <p class="view-sub" id="modelsSubtitle">中枢只做编排与下发模板，不参与中转。节点拉取后可在本地自由调整路由与候选，中枢不会覆盖或限制节点自己的编排。</p>
+          <h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1>
+          <p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由、多密钥故障转移及固定 4 通道并发编排</p>
         </div>
         <div class="view-actions">
           <div class="seg" id="modelPipelineSeg">
@@ -402,11 +403,11 @@
           </div>
           <div class="form-group">
             <label class="form-label">允许 LLM 供应商 (* 全量)</label>
-            <input class="input input--code" id="issueNodeProvs" value="*" placeholder="* 或 minimax,deepseek">
+            <input class="input input--code" id="issueNodeProvs" list="datalistProviders" value="*" placeholder="* 或 minimax,deepseek">
           </div>
           <div class="form-group form-group--span2">
             <label class="form-label">允许 LLM 模型 (* 全量)</label>
-            <input class="input input--code" id="issueNodeModels" value="*" placeholder="* 或 gpt-4o,claude-sonnet-4">
+            <input class="input input--code" id="issueNodeModels" list="datalistModels" value="*" placeholder="* 或 gpt-4o,claude-sonnet-4">
           </div>
         </div>
         <div class="form-actions">
@@ -495,10 +496,12 @@
       </div>
 
       <!-- 2. Routing & Cooldown Policy -->
-      <div class="card card-pad">
+      <div class="card card-pad" id="routingPolicyBox">
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">2</span>下发模板默认值与冷却策略</h2>
-          <div class="card-sub">中枢不做中转；这些值作为节点首次拉取时的默认策略，节点可在本地覆盖</div>
+          <div>
+            <h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2>
+            <div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div>
+          </div>
           <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
         </div>
         <div class="form-grid">
@@ -514,20 +517,20 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">首字超时 (秒)</label>
-            <input class="input tabular" id="cfgFirstByteTimeout" type="number" placeholder="120">
+            <label class="form-label">首字超时 (秒，5~600)</label>
+            <input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120">
           </div>
           <div class="form-group">
             <label class="form-label">429 限流冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown429" type="number" placeholder="15">
+            <input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15">
           </div>
           <div class="form-group">
             <label class="form-label">5xx 服务端异常冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown5xx" type="number" placeholder="30">
+            <input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30">
           </div>
           <div class="form-group">
             <label class="form-label">网络超时冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldownNet" type="number" placeholder="15">
+            <input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15">
           </div>
           <div class="form-group">
             <label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label>
@@ -536,19 +539,22 @@
         </div>
       </div>
 
-      <!-- 3. High-Concurrency & Multimodal Guards (Full) -->
-      <div class="card card-pad" id="concurrencyGuardBox" hidden>
+      <!-- 3. High-Concurrency & Multimodal Guards -->
+      <div class="card card-pad" id="concurrencyGuardBox">
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">3</span>高并发与多模态护栏</h2>
+          <div>
+            <h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2>
+            <div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div>
+          </div>
         </div>
         <div class="form-grid form-grid--2">
           <div class="form-group">
-            <label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (防大图 OOM)</label>
-            <input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="32" placeholder="4">
+            <label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label>
+            <input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4">
           </div>
           <div class="form-group">
-            <label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限</label>
-            <input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="128" placeholder="16">
+            <label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label>
+            <input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16">
           </div>
         </div>
       </div>
@@ -557,6 +563,7 @@
       <div class="card card-pad" id="cfgVaultLinkBox" hidden>
         <div class="section-bar">
           <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
+          <button class="btn btn--sm" id="btnSyncVaultFromSettings" type="button">从中枢同步</button>
         </div>
         <div class="form-grid form-grid--2">
           <div class="form-group" id="cfgVaultUrlGroup">
@@ -621,6 +628,8 @@
         </div>
         <div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div>
       </div>
+      <datalist id="datalistProviders"></datalist>
+      <datalist id="datalistModels"></datalist>
     </section>
   </main>
 

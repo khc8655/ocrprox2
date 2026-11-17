@@ -41,6 +41,7 @@ JSON.stringify({
 ok: true,
 node: res.node,
 node_token: res.node_token,
+client_key: res.client_key,
 bootstrap_env: res.bootstrap_env,
 install_command: res.install_command,
 }),
@@ -70,6 +71,7 @@ return new Response(
 JSON.stringify({
 ok: true,
 node_token: res.node_token,
+client_key: res.client_key,
 bootstrap_env: res.bootstrap_env,
 install_command: res.install_command,
 }),

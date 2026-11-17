@@ -34,7 +34,124 @@
     oauthPollTimer: null,
     oauthExpireTimer: null,
     batchVerifying: false,
+    probedModelsByProvider: {},
+    probeFilterByProvider: {},
   };
+
+  function byIdIn(root, id) {
+    if (!root || !id) return null;
+    const rawId = String(id);
+    if (root.id === rawId) return root;
+    const escaped = rawId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const local = root.querySelector(`[id="${escaped}"]`);
+    if (local) return local;
+    if (root.ownerDocument) {
+      const hit = root.ownerDocument.getElementById(rawId);
+      if (hit && (hit === root || root.contains(hit))) return hit;
+    }
+    return null;
+  }
+
+  function makeScopedQuery(wrap) {
+    return (s) => {
+      const sel = String(s || '');
+      if (sel.startsWith('#') && !/[>+~\[\],]/.test(sel) && !sel.slice(1).includes(' .') && !sel.slice(1).includes(' #')) {
+        return byIdIn(wrap, sel.slice(1));
+      }
+      try {
+        return wrap.querySelector(sel);
+      } catch (_) {
+        return null;
+      }
+    };
+  }
+
+  function syncVersionFromRes(res) {
+    if (res && typeof res._version === 'number' && state.config) {
+      state.config._version = res._version;
+      const verEl = $('configVersionDisplay');
+      if (verEl) verEl.textContent = `v${res._version}`;
+    }
+  }
+
+  function generateRandomAlphaNum(len = 20) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const bytes = new Uint8Array(len);
+    if (globalThis.crypto?.getRandomValues) {
+      globalThis.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    let out = '';
+    for (let i = 0; i < len; i++) out += chars[bytes[i] % chars.length];
+    return out;
+  }
+
+  function generateClientSecretKey() {
+    const bytes = new Uint8Array(16);
+    if (globalThis.crypto?.getRandomValues) {
+      globalThis.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+    return `sk-llmproxy-${hex}`;
+  }
+
+  function normalizeApiType(val) {
+    const s = String(val || '').trim().toLowerCase();
+    if (s === 'anthropic' || s === 'anthropic-messages') return 'anthropic-messages';
+    if (s === 'gemini' || s === 'google' || s === 'google_openai') return 'gemini';
+    if (s === 'ocr') return 'ocr';
+    return 'openai-completions';
+  }
+
+  function findKeyCooldown(pId, k, idx) {
+    const cdMap = state.cooldowns || {};
+    const candidates = [k?.id, k?.label, `key-${idx}`].filter(Boolean);
+    let bestTarget = '';
+    let bestSec = 0;
+    for (const idOrLbl of candidates) {
+      const exact = `p:${pId}:k:${idOrLbl}`;
+      if ((cdMap[exact] || 0) > bestSec) {
+        bestSec = cdMap[exact];
+        bestTarget = exact;
+      }
+      const prefix = `${exact}:`;
+      for (const [target, sec] of Object.entries(cdMap)) {
+        if (target.startsWith(prefix) && (sec || 0) > bestSec) {
+          bestSec = sec;
+          bestTarget = target;
+        }
+      }
+    }
+    return { target: bestTarget, sec: bestSec };
+  }
+
+  function refreshDatalists() {
+    const provDl = $('datalistProviders');
+    if (provDl) {
+      const pIds = Object.keys(state.config?.providers || {}).sort();
+      provDl.innerHTML = pIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
+    }
+    const modDl = $('datalistModels');
+    if (modDl) {
+      const mIds = Object.keys(state.config?.agent_models || {}).sort();
+      modDl.innerHTML = mIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
+    }
+  }
+
+  function renumberSettingsSections() {
+    const sec = $('viewSettings');
+    if (!sec) return;
+    let num = 1;
+    sec.querySelectorAll('.card').forEach((card) => {
+      if (card.hidden || card.classList.contains('hidden')) return;
+      const badge = card.querySelector('.step-num');
+      if (badge) badge.textContent = String(num++);
+    });
+  }
 
   function stopOAuthPolling() {
     if (state.oauthPollTimer) {
@@ -120,10 +237,11 @@
   }
 
   function getNodeSyncSnapshotStatus(n) {
-    if (!n || n.enabled === false) return { key: 'revoked', pillCls: 'pill--red', label: '已吊销', leaseText: '已吊销', syncMs: 0 };
-    const r = n.last_seen;
-    const syncMs = r ? (typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : new Date(r).getTime()) : 0;
-    if (!syncMs || Number.isNaN(syncMs)) return { key: 'never', pillCls: 'pill', label: '从未同步', leaseText: '从未同步', syncMs: 0 };
+    const r = n && n.last_seen;
+    const rawSyncMs = r ? (typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : new Date(r).getTime()) : 0;
+    const syncMs = rawSyncMs && !Number.isNaN(rawSyncMs) ? rawSyncMs : 0;
+    if (!n || n.enabled === false) return { key: 'revoked', pillCls: 'pill--red', label: '已吊销', leaseText: '已吊销', syncMs };
+    if (!syncMs) return { key: 'never', pillCls: 'pill', label: '从未同步', leaseText: '从未同步', syncMs: 0 };
     const lease = Number(n.lease_ttl) || 86400, grace = Number(n.grace_ttl) || 3600, age = Math.max(0, Math.floor((Date.now() - syncMs) / 1000));
     if (age > lease + grace) return { key: 'expired', pillCls: 'pill--red', label: '过期 / 离线', leaseText: '租约已过期', syncMs };
     if (age > lease) return { key: 'grace', pillCls: 'pill--amber', label: '宽限期内', leaseText: '宽限期内', syncMs };
@@ -381,9 +499,43 @@
     if (fullOverviewBox) fullOverviewBox.hidden = isHub;
     if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
     const guardBox = $('concurrencyGuardBox');
-    if (guardBox) guardBox.hidden = !caps.kbModels;
+    if (guardBox) guardBox.hidden = false;
     const sysBox = $('systemUpdateBox');
     if (sysBox) sysBox.hidden = !caps.systemUpdate;
+
+    const provSub = $('providersSubtitle');
+    if (provSub) {
+      provSub.textContent = isHub
+        ? '统一维护共享供应商与密钥池，按节点权限范围安全下发至接入的 Full / Lite 节点'
+        : '集中管理本地私有供应商与从中枢同步的共享密钥池';
+    }
+    const modelsTitle = $('modelsTitle');
+    const modelsSub = $('modelsSubtitle');
+    if (modelsTitle) {
+      modelsTitle.textContent = isHub ? '模型路由模板（下发编排）' : '模型路由与高并发通道';
+    }
+    if (modelsSub) {
+      modelsSub.textContent = isHub
+        ? '中枢只做编排与下发模板，不参与流量中转。固定 4 通道（chat / embedding / reranker / ocr）仅对 Full 节点生效，Lite 节点自动忽略。'
+        : '管理当前网关对外暴露的模型路由、多密钥粘性/轮询策略及固定 4 通道并发编排。';
+    }
+    const rpTitle = $('routingPolicyTitle');
+    const rpSub = $('routingPolicySub');
+    if (rpTitle) {
+      rpTitle.textContent = isHub ? '下发模板默认值与冷却策略' : '全局路由与异常冷却策略';
+    }
+    if (rpSub) {
+      rpSub.textContent = isHub
+        ? '作为节点拉取配置时的默认路由与异常冷却策略，节点可在本地覆盖'
+        : '控制当前网关默认路由策略、首字超时及上游异常自动冷却时长';
+    }
+    const cgSub = $('concurrencyGuardSub');
+    if (cgSub) {
+      cgSub.textContent = isHub
+        ? '仅对 Full 节点下发生效 · Lite 节点自动忽略'
+        : '限制 OCR 大图并发预读与固定通道全局并发上限';
+    }
+    renumberSettingsSections();
 
     state.activeTab = 'activity';
     switchTab(state.activeTab);
@@ -600,15 +752,8 @@
       clk(btnCopyIssuedEnv, () => copyToClipboard($('issuedEnvVal')?.value, '环境变量已复制'));
     }
 
-    const btnSyncManifest = $('btnSyncManifest');
-    if (btnSyncManifest) {
-      clk(btnSyncManifest, handleSyncManifest);
-    }
-
-    const btnSyncKeys = $('btnSyncKeys');
-    if (btnSyncKeys) {
-      clk(btnSyncKeys, handleSyncFromVault);
-    }
+    clk($('btnSyncVault'), handleSyncVault);
+    clk($('btnSyncVaultFromSettings'), handleSyncVault);
 
     // Analytics Period Selector
     const periodSeg = $('activityPeriodSeg');
@@ -730,29 +875,33 @@
     }
   }
 
-  // --- 4. Presets & cURL Auto-Parser (M3, M4) ---
+  // --- 4. Canonical Presets (1:1 aligned with shared/presets/*.json) & cURL Parser ---
   const PRESETS_META = {
-    openai: ['openai', 'OpenAI (官方)', 'https://api.openai.com/v1', 'openai-completions'],
-    anthropic: ['anthropic', 'Anthropic (官方)', 'https://api.anthropic.com/v1', 'anthropic-messages'],
-    gemini: ['gemini', 'Google Gemini (OpenAI兼容)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini'],
-    deepseek: ['deepseek', 'DeepSeek (官方)', 'https://api.deepseek.com/v1', 'openai-completions'],
-    openrouter: ['openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions'],
-    groq: ['groq', 'Groq Cloud', 'https://api.groq.com/openai/v1', 'openai-completions'],
-    xai: ['xai', 'xAI', 'https://api.x.ai/v1', 'openai-completions'],
-    'minimax-global': ['minimax', 'MiniMax (Global)', 'https://api.minimaxi.chat/v1', 'openai-completions'],
-    'minimax-cn': ['minimax', 'MiniMax (国内)', 'https://api.minimax.chat/v1', 'openai-completions'],
-    'kimi-cn': ['kimi', 'Kimi / Moonshot (国内)', 'https://api.moonshot.cn/v1', 'openai-completions'],
-    'kimi-global': ['kimi', 'Kimi / Moonshot (Global)', 'https://api.moonshot.ai/v1', 'openai-completions'],
-    zhipu: ['zhipu', '智谱 BigModel (PayG)', 'https://open.bigmodel.cn/api/paas/v4', 'openai-completions'],
-    'zhipu-coding': ['zhipu', '智谱 Coding', 'https://open.bigmodel.cn/api/coding/paas/v4', 'openai-completions'],
-    volcengine: ['volcengine', '火山方舟 Ark (PayG)', 'https://ark.cn-beijing.volces.com/api/v3', 'openai-completions'],
-    'volcengine-coding': ['volcengine', '火山方舟 Coding', 'https://ark.cn-beijing.volces.com/api/coding/v3', 'openai-completions'],
-    'stepfun-cn': ['stepfun', '阶跃星辰 Stepfun (国内)', 'https://api.stepfun.com/v1', 'openai-completions'],
-    'stepfun-global': ['stepfun', '阶跃星辰 Stepfun (Global)', 'https://api.stepfun.ai/v1', 'openai-completions'],
-    alibaba: ['alibaba', '阿里百炼 / DashScope (国内)', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
-    'alibaba-intl': ['alibaba', '阿里百炼 / DashScope (国际)', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'openai-completions'],
-    siliconflow: ['siliconflow', 'SiliconFlow (硅基流动)', 'https://api.siliconflow.cn/v1', 'openai-completions'],
-    ollama: ['ollama', 'Ollama (本地)', 'http://localhost:11434/v1', 'openai-completions'],
+    openai: { id: 'openai', preset_id: 'openai', label: 'OpenAI 官方', base_url: 'https://api.openai.com/v1', api_type: 'openai-completions' },
+    anthropic: { id: 'anthropic', preset_id: 'anthropic', label: 'Anthropic 官方', base_url: 'https://api.anthropic.com/v1', api_type: 'anthropic-messages' },
+    deepseek: { id: 'deepseek', preset_id: 'deepseek', label: 'DeepSeek 官方开放平台', base_url: 'https://api.deepseek.com/v1', api_type: 'openai-completions' },
+    google: { id: 'google', preset_id: 'google', label: 'Google AI Studio (Gemini)', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', api_type: 'gemini' },
+    vertex: {
+      id: 'vertex',
+      preset_id: 'vertex',
+      label: 'Google Vertex AI',
+      base_url: 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi',
+      api_type: 'openai-completions',
+      hint: '请将 URL 中的 {project} 与 {region}（或 global 端点）替换为实际 GCP 项目与区域',
+    },
+    openrouter: { id: 'openrouter', preset_id: 'openrouter', label: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', anthropic_base_url: 'https://openrouter.ai/api/v1', api_type: 'openai-completions' },
+    minimax: { id: 'minimax', preset_id: 'minimax', label: 'MiniMax (国际 api.minimax.io)', base_url: 'https://api.minimax.io/v1', anthropic_base_url: 'https://api.minimax.io/anthropic', api_type: 'openai-completions' },
+    'minimax-cn': { id: 'minimax-cn', preset_id: 'minimax', label: 'MiniMax (国内 api.minimaxi.com)', base_url: 'https://api.minimaxi.com/v1', anthropic_base_url: 'https://api.minimaxi.com/anthropic', api_type: 'openai-completions' },
+    siliconflow: { id: 'siliconflow', preset_id: 'siliconflow', label: '硅基流动 (SiliconFlow)', base_url: 'https://api.siliconflow.cn/v1', api_type: 'openai-completions' },
+    stepfun: { id: 'stepfun', preset_id: 'stepfun', label: '阶跃星辰 (StepFun)', base_url: 'https://api.stepfun.com/step_plan', api_type: 'openai-completions' },
+    sensenova: { id: 'sensenova', preset_id: 'sensenova', label: '商汤日日新 (SenseNova)', base_url: 'https://token.sensenova.cn/v1', anthropic_base_url: 'https://token.sensenova.cn/v1', api_type: 'openai-completions' },
+    nvidia: { id: 'nvidia', preset_id: 'nvidia', label: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', api_type: 'openai-completions' },
+    opencode: { id: 'opencode', preset_id: 'opencode', label: 'OpenCode Zen', base_url: 'https://opencode.ai/zen/v1', api_type: 'openai-completions' },
+    cline: { id: 'cline', preset_id: 'cline', label: 'Cline 官方 API', base_url: 'https://api.cline.bot/api/v1', api_type: 'openai-completions' },
+    amd: { id: 'amd', preset_id: 'amd', label: 'AMD Radeon Cloud', base_url: 'https://developer.amd.com.cn/radeon/api/v1', anthropic_base_url: 'https://developer.amd.com.cn/radeon/api/v1', api_type: 'openai-completions' },
+    agnes: { id: 'agnes', preset_id: 'agnes', label: 'Agnes AI', base_url: 'https://apihub.agnes-ai.com/v1', anthropic_base_url: 'https://apihub.agnes-ai.com/v1', api_type: 'openai-completions' },
+    bai: { id: 'bai', preset_id: 'bai', label: 'B.AI', base_url: 'https://api.b.ai/v1', anthropic_base_url: 'https://api.b.ai/v1', api_type: 'openai-completions' },
+    tokenrhythm: { id: 'tokenrhythm', preset_id: 'tokenrhythm', label: 'TokenRhythm', base_url: 'https://tokenrhythm.studio/v1', api_type: 'openai-completions' },
   };
 
   // Robust cURL Command Parser (M3)
@@ -841,19 +990,27 @@
     const sel = $('newProvPreset');
     if (!sel) return;
     sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
-    const seen = new Set();
+    const seenIds = new Set(['gemini']);
     for (const [key, meta] of Object.entries(PRESETS_META)) {
-      seen.add(key);
+      seenIds.add(key);
+      if (meta.preset_id) seenIds.add(meta.preset_id);
       const opt = ce('option');
       opt.value = key;
-      opt.textContent = meta[1];
+      opt.textContent = meta.label;
       sel.appendChild(opt);
     }
     if (Array.isArray(extraPresets)) {
       for (const p of extraPresets) {
-        if (!p || !p.id || seen.has(p.id)) continue;
-        PRESETS_META[p.id] = [p.id, p.name || p.id, p.base_url || '', p.protocol || 'openai-completions'];
-        seen.add(p.id);
+        if (!p || !p.id || seenIds.has(p.id)) continue;
+        PRESETS_META[p.id] = {
+          id: p.id,
+          preset_id: p.id,
+          label: p.name || p.id,
+          base_url: p.base_url || '',
+          anthropic_base_url: p.anthropic_base_url || '',
+          api_type: normalizeApiType(p.protocol),
+        };
+        seenIds.add(p.id);
         const opt = ce('option');
         opt.value = p.id;
         opt.textContent = p.name || p.id;
@@ -1139,11 +1296,21 @@
 
     $('newProvPreset')?.addEventListener('change', (e) => {
       const m = PRESETS_META[e.target.value];
+      const hintEl = $('newProvPresetHint');
       if (m) {
-        $('newProvId').value = m[0];
-        $('newProvName').value = m[1];
-        $('newProvBaseUrl').value = m[2];
-        $('newProvApiType').value = m[3];
+        $('newProvId').value = m.id;
+        $('newProvName').value = m.label;
+        $('newProvBaseUrl').value = m.base_url;
+        $('newProvApiType').value = normalizeApiType(m.api_type);
+        if (hintEl) {
+          hintEl.textContent = m.hint || '';
+          hintEl.hidden = !m.hint;
+          hintEl.classList.toggle('hidden', !m.hint);
+        }
+      } else if (hintEl) {
+        hintEl.textContent = '';
+        hintEl.hidden = true;
+        hintEl.classList.add('hidden');
       }
     });
 
@@ -1151,9 +1318,14 @@
       const id = ($('newProvId')?.value || '').trim();
       const name = ($('newProvName')?.value || '').trim() || id;
       const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
-      const apiType = $('newProvApiType')?.value || 'openai-completions';
+      const apiType = normalizeApiType($('newProvApiType')?.value);
       const keyAlias = ($('newProvKeyAlias')?.value || '').trim() || 'k1';
       const apiKey = ($('newProvApiKey')?.value || '').trim();
+      const selectedPresetKey = $('newProvPreset')?.value || '';
+      const selectedMeta = PRESETS_META[selectedPresetKey];
+      const resolvedPresetId = selectedMeta
+        ? (selectedMeta.preset_id || selectedMeta.id)
+        : (PRESETS_META[id]?.preset_id || '');
 
       if (!id) return toast('请输入供应商标识 ID', 'warn');
       if (!baseUrl) return toast('请输入 Base URL', 'warn');
@@ -1165,10 +1337,20 @@
       const defOrigin = isHubMode() ? 'vault' : 'local';
       const parsed = parseMultiApiKeys(apiKey, keyAlias, [], defOrigin);
       if (parsed.error) return toast(parsed.error, 'warn');
-      // id must be written into the object, not only used as the map key: the
-      // scheduler records provider.ID into usage/trace records, and an empty id
-      // silently broke the per-provider and per-key statistics.
-      state.config.providers[id] = { id, name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: defOrigin, api_keys: parsed.keys };
+      const newProv = {
+        id,
+        name,
+        base_url: baseUrl,
+        api_type: apiType,
+        preset_id: resolvedPresetId,
+        enabled: true,
+        origin: defOrigin,
+        api_keys: parsed.keys,
+      };
+      if (selectedMeta?.anthropic_base_url) {
+        newProv.anthropic_base_url = selectedMeta.anthropic_base_url;
+      }
+      state.config.providers[id] = newProv;
       state.activeEditorKey = `p_${id}`;
       toggle(pForm, false);
       await persistConfig('供应商创建成功');
@@ -1190,8 +1372,16 @@
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
 
-      const firstKey = state.config?.providers?.[prov]?.api_keys?.[0];
-      const keyLabel = firstKey?.label || firstKey?.id || 'k1';
+      if (state.config.agent_models[mName]) {
+        state.activeEditorKey = `m_${mName}`;
+        toggle(mForm, false);
+        renderModelsList();
+        return toast('模型已存在，已为您展开编辑', 'info');
+      }
+
+      const provKeys = state.config?.providers?.[prov]?.api_keys || [];
+      const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
+      const keyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
       const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
 
       state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
@@ -1262,6 +1452,7 @@
         const verEl = $('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
 
+        refreshDatalists();
         renderProvidersList();
         renderModelsList();
         renderSettingsView();
@@ -1343,30 +1534,38 @@
 
       const u = n.usage;
       if (!u || typeof u !== 'object') continue;
-      const models = u.models && typeof u.models === 'object' ? u.models : {};
-      for (const [model, count] of Object.entries(models)) {
-        const c = Number(count) || 0;
-        if (c <= 0) continue;
-        let agg = modelUsage.get(model);
-        if (!agg) {
-          agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0 };
-          modelUsage.set(model, agg);
+      const statsMap = u.model_stats && typeof u.model_stats === 'object' ? u.model_stats : null;
+      if (statsMap && Object.keys(statsMap).length > 0) {
+        for (const [model, st] of Object.entries(statsMap)) {
+          if (!st || typeof st !== 'object') continue;
+          const calls = Number(st.calls ?? st.requests) || 0;
+          if (calls <= 0) continue;
+          let agg = modelUsage.get(model);
+          if (!agg) {
+            agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0, hasExactStats: false };
+            modelUsage.set(model, agg);
+          }
+          agg.nodes.add(n.name || n.id);
+          agg.requests += calls;
+          agg.success += Number(st.successes ?? st.success) || 0;
+          agg.failed += Number(st.failed) || 0;
+          agg.inTok += Number(st.in_tokens ?? st.input_tokens) || 0;
+          agg.outTok += Number(st.out_tokens ?? st.output_tokens) || 0;
+          agg.hasExactStats = true;
         }
-        agg.nodes.add(n.name || n.id);
-        agg.requests += c;
-      }
-      // distribute node-level success/token totals proportionally to request counts
-      const nodeReqs = Number(u.requests) || 0;
-      const successRate = nodeReqs > 0 ? (Number(u.successes) || 0) / nodeReqs : 0;
-      const failRate = nodeReqs > 0 ? (Number(u.failed) || 0) / nodeReqs : 0;
-      for (const [model, count] of Object.entries(models)) {
-        const agg = modelUsage.get(model);
-        if (!agg) continue;
-        const c = Number(count) || 0;
-        agg.success += Math.round(c * successRate);
-        agg.failed += Math.round(c * failRate);
-        agg.inTok += Math.round((Number(u.in_tokens) || 0) * (nodeReqs > 0 ? c / nodeReqs : 0));
-        agg.outTok += Math.round((Number(u.out_tokens) || 0) * (nodeReqs > 0 ? c / nodeReqs : 0));
+      } else {
+        const models = u.models && typeof u.models === 'object' ? u.models : {};
+        for (const [model, count] of Object.entries(models)) {
+          const c = Number(count) || 0;
+          if (c <= 0) continue;
+          let agg = modelUsage.get(model);
+          if (!agg) {
+            agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0, hasExactStats: false };
+            modelUsage.set(model, agg);
+          }
+          agg.nodes.add(n.name || n.id);
+          agg.requests += c;
+        }
       }
     }
 
@@ -1419,10 +1618,13 @@
           ? usageModels.slice(0, 3).map((m) => eh(m)).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
           : '<span class="text-muted">未上报</span>';
 
+        const binBadge = n.last_binary_version
+          ? ` <span class="pill tabular">${eh(n.last_binary_version)}</span>`
+          : '';
         const tr = ce('tr');
         tr.innerHTML = `
           <td><strong>${eh(n.name || n.id)}</strong></td>
-          <td><span class="pill pill--accent">${eh(n.role || 'full')}</span></td>
+          <td><span class="pill pill--accent">${eh(n.role || 'full')}</span>${binBadge}</td>
           <td>${statusHtml}</td>
           <td class="text-sm">${modelText}</td>
           <td class="tabular">${eh(`v${n.last_config_version || 1}`)} · ${n.sync_count || 0} 次</td>
@@ -1447,8 +1649,8 @@
         <td><div class="name">${icoHtml}<span>${eh(model)}</span></div></td>
         <td class="tabular">${agg.nodes.size}</td>
         <td class="tabular">${agg.requests}</td>
-        <td class="tabular">${agg.success} / ${agg.failed}</td>
-        <td class="tabular">${agg.inTok} / ${agg.outTok}</td>
+        <td class="tabular">${agg.hasExactStats ? `${agg.success} / ${agg.failed}` : '-'}</td>
+        <td class="tabular">${agg.hasExactStats ? `${agg.inTok} / ${agg.outTok}` : '-'}</td>
         <td class="text-sm">${eh([...agg.nodes].slice(0, 4).join(', '))}${agg.nodes.size > 4 ? ' …' : ''}</td>
       `;
       usageBody.appendChild(tr);
@@ -1472,8 +1674,9 @@
           key: k.key,
           key_label: lbl,
           base_url: p.base_url || '',
-          api_type: p.api_type || 'openai-completions',
+          api_type: normalizeApiType(p.api_type),
         });
+        syncVersionFromRes(r);
         k.last_ok = !!(r && (r.ok || r.valid));
         k.last_status = r?.status || (k.last_ok ? 200 : 0);
         k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
@@ -1516,8 +1719,9 @@
               key: k.key,
               key_label: lbl,
               base_url: p.base_url || '',
-              api_type: p.api_type || 'openai-completions',
+              api_type: normalizeApiType(p.api_type),
             });
+            syncVersionFromRes(r);
             k.last_ok = !!(r && (r.ok || r.valid));
             k.last_status = r?.status || (k.last_ok ? 200 : 0);
             k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
@@ -1573,189 +1777,54 @@
     }
   }
 
-  // --- Vault Hub Sync Handlers (Full Role) ---
-  async function handleSyncManifest() {
-    let hubUrl = (state.config?.vault?.url || '').trim();
-    let nodeToken = (state.config?.vault?.node_token || '').trim();
+  // --- Unified Vault Hub Sync Handler (Full Role, Decision #1) ---
+  async function handleSyncVault() {
+    let hubUrl = (state.config?.vault?.url || ($('cfgVaultUrl')?.value || '')).trim();
+    let nodeToken = (state.config?.vault?.node_token || ($('cfgVaultToken')?.value || '')).trim();
 
     if (!hubUrl) {
       const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
       if (!inputUrl) return;
       hubUrl = inputUrl.trim();
-      const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
+      const inputToken = prompt('请输入 Full 节点专属 NODE_TOKEN:', '') || '';
       nodeToken = inputToken.trim();
-      state.config = state.config || {};
-      state.config.vault = { url: hubUrl, node_token: nodeToken };
     }
 
-    const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
+    const btn = $('btnSyncVault');
+    const btnSettings = $('btnSyncVaultFromSettings');
+    if (btn) btn.disabled = true;
+    if (btnSettings) btnSettings.disabled = true;
 
-    toast('正在连接中枢拉取清单...', 'info');
+    toast('正在从中枢同步供应商与模型路由...', 'info');
     try {
-      const apiFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-      const res = await apiFn(hubUrl, tokenForReq);
-      if (res && (res.ok || res.providers)) {
-        const provs = res.providers || {};
-        const pKeys = Object.keys(provs);
-        state.config.providers = state.config.providers || {};
-
-        for (const [pId, pData] of Object.entries(provs)) {
-          const ep = state.config.providers[pId];
-          if (!ep) {
-            state.config.providers[pId] = {
-              id: pId,
-              name: pData.name || pId,
-              base_url: pData.base_url || '',
-              anthropic_base_url: pData.anthropic_base_url || '',
-              preset_id: pData.preset_id || '',
-              origin: 'vault',
-              enabled: true,
-              api_keys: (pData.keys || []).map((lbl) => ({
-                id: `k_${lbl}`,
-                label: lbl,
-                key: 'sk-●●●●●●●●',
-                origin: 'vault',
-                enabled: true,
-              })),
-            };
-          } else if (ep.origin === 'local') {
-            ep.api_keys = ep.api_keys || [];
-            for (const lbl of pData.keys || []) {
-              const existingKey = ep.api_keys.find((k) => (k.label || k.id) === lbl);
-              if (existingKey) {
-                if (existingKey.origin === 'local') continue;
-              } else {
-                ep.api_keys.push({
-                  id: `k_${lbl}`,
-                  label: lbl,
-                  key: 'sk-●●●●●●●●',
-                  origin: 'vault',
-                  enabled: true,
-                });
-              }
-            }
-          } else {
-            ep.origin = 'vault';
-            if (pData.base_url) ep.base_url = pData.base_url;
-            if (pData.preset_id) ep.preset_id = pData.preset_id;
-            if (pData.anthropic_base_url) ep.anthropic_base_url = pData.anthropic_base_url;
-            ep.api_keys = ep.api_keys || [];
-            for (const lbl of pData.keys || []) {
-              const existingKey = ep.api_keys.find((k) => (k.label || k.id) === lbl);
-              if (!existingKey) {
-                ep.api_keys.push({
-                  id: `k_${lbl}`,
-                  label: lbl,
-                  key: 'sk-●●●●●●●●',
-                  origin: 'vault',
-                  enabled: true,
-                });
-              }
-            }
-          }
+      const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
+      const syncFn = window.HOST.api?.syncFromVault || window.HOST.syncFromVault;
+      const res = await syncFn({ hubUrl, nodeToken: tokenForReq });
+      if (res && res.ok) {
+        if (res.config && typeof res.config === 'object') {
+          ensureUnifiedFixedRoutes(res.config);
+          state.config = res.config;
         }
+        if (typeof res._version === 'number' && state.config) {
+          state.config._version = res._version;
+        }
+        const verEl = $('configVersionDisplay');
+        if (verEl && state.config?._version !== undefined) {
+          verEl.textContent = `v${state.config._version}`;
+        }
+        refreshDatalists();
         renderProvidersList();
-        toast(`成功拉取中枢清单: 共 ${pKeys.length} 个供应商可同步`, 'ok');
+        renderModelsList();
+        renderSettingsView();
+        toast(`已从中枢同步 ${res.synced_providers ?? 0} 个供应商与 ${res.synced_models ?? 0} 个模型路由`, 'ok');
       } else {
-        toast(`拉取清单失败: ${res?.error || '无法连接中枢'}`, 'err');
+        toast(`从中枢同步失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
       }
     } catch (e) {
-      toast(`中枢连接异常: ${e.message}`, 'err');
-    }
-  }
-
-  async function handleSyncFromVault() {
-    let hubUrl = (state.config?.vault?.url || '').trim();
-    let nodeToken = (state.config?.vault?.node_token || '').trim();
-
-    if (!hubUrl) {
-      const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
-      if (!inputUrl) return;
-      hubUrl = inputUrl.trim();
-      const inputToken = prompt('请输入 Hub NODE_TOKEN (若已配置或中枢免鉴权可留空):', '') || '';
-      nodeToken = inputToken.trim();
-      state.config = state.config || {};
-      state.config.vault = { url: hubUrl, node_token: nodeToken };
-    }
-
-    const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
-
-    toast('正在连接 Vault 中枢同步密钥...', 'info');
-    try {
-      const manifestFn = window.HOST.api?.fetchVaultManifest || window.HOST.fetchVaultManifest;
-      const manifestRes = await manifestFn(hubUrl, tokenForReq);
-      if (!manifestRes || (!manifestRes.ok && !manifestRes.providers)) {
-        toast(`拉取 Vault 清单失败: ${manifestRes?.error || '请求未成功'}`, 'err');
-        return;
-      }
-
-      const provs = manifestRes.providers || {};
-      const pKeys = Object.keys(provs);
-      if (pKeys.length === 0) {
-        toast('Vault 中枢暂无可同步的共享供应商', 'warn');
-        return;
-      }
-
-      state.config.providers = state.config.providers || {};
-      let totalSyncedKeys = 0;
-      const credFn = window.HOST.api?.fetchVaultCredentials || window.HOST.fetchVaultCredentials;
-
-      for (const pId of pKeys) {
-        try {
-          const credRes = await credFn(pId, undefined, hubUrl, tokenForReq);
-          if (credRes && (credRes.ok || credRes.provider_config)) {
-            const pCfg = credRes.provider_config || {};
-            if (!state.config.providers[pId]) {
-              state.config.providers[pId] = {
-                id: pId,
-                name: pCfg.name || provs[pId].name || pId,
-                base_url: pCfg.base_url || provs[pId].base_url || '',
-                anthropic_base_url: pCfg.anthropic_base_url || '',
-                preset_id: pCfg.preset_id || provs[pId].preset_id || '',
-                origin: 'vault',
-                enabled: true,
-                api_keys: [],
-              };
-            }
-            const p = state.config.providers[pId];
-            if (p.origin !== 'local') {
-              p.origin = 'vault';
-              if (pCfg.base_url) p.base_url = pCfg.base_url;
-              if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
-              if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
-              if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
-              p.hide_client_name = Boolean(pCfg.hide_client_name);
-            }
-
-            p.api_keys = p.api_keys || [];
-            const keyMap = pCfg.keys || {};
-            for (const [lbl, secret] of Object.entries(keyMap)) {
-              const existing = p.api_keys.find((k) => k.label === lbl || k.id === lbl);
-              if (existing) {
-                if (existing.origin === 'local') continue;
-                existing.key = secret;
-                existing.origin = 'vault';
-                existing.enabled = true;
-              } else {
-                p.api_keys.push({
-                  id: `k_${lbl}`,
-                  label: lbl,
-                  key: secret,
-                  origin: 'vault',
-                  enabled: true,
-                });
-              }
-              totalSyncedKeys++;
-            }
-          }
-        } catch (err) {
-          console.warn(`Fetch credentials for ${pId} failed:`, err);
-        }
-      }
-
-      await persistConfig(`从 Vault 同步成功: 更新了 ${totalSyncedKeys} 把密钥`);
-    } catch (e) {
-      toast(`Vault 同步异常: ${e.message}`, 'err');
+      toast(`从中枢同步异常: ${scrubUiText(e.message)}`, 'err');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnSettings) btnSettings.disabled = false;
     }
   }
 
@@ -1866,33 +1935,98 @@
     }
   }
 
+  function renderProbePillsForProvider(q, pId, p) {
+    const models = state.probedModelsByProvider[pId];
+    const cont = q(`#probe_pills_container_${pId}`);
+    const list = q(`#probe_pills_list_${pId}`);
+    const countEl = q(`#probe_pills_count_${pId}`);
+    const filterEl = q(`#probe_pills_filter_${pId}`);
+    if (!cont || !list) return;
+    if (!Array.isArray(models) || models.length === 0) {
+      cont.hidden = true;
+      cont.classList.add('hidden');
+      return;
+    }
+    cont.hidden = false;
+    cont.classList.remove('hidden');
+    const curFilter = state.probeFilterByProvider[pId] || '';
+    if (filterEl && filterEl.value !== curFilter) {
+      filterEl.value = curFilter;
+    }
+
+    const draw = (rawFilter) => {
+      const f = String(rawFilter || '').trim().toLowerCase();
+      state.probeFilterByProvider[pId] = rawFilter || '';
+      list.innerHTML = '';
+      const matched = f ? models.filter((m) => m.toLowerCase().includes(f)) : models;
+      const visible = matched.slice(0, 200);
+      if (countEl) {
+        countEl.textContent = matched.length > visible.length
+          ? `匹配 ${matched.length} / 共 ${models.length} 个（显示前 ${visible.length} 个），点击一键纳管`
+          : `共 ${matched.length} 个，点击一键纳管（已纳管模型自动标记）`;
+      }
+      visible.forEach((modelName) => {
+        const managed = Boolean(state.config?.agent_models?.[modelName]);
+        const pill = ce('span');
+        pill.className = `probe-pill${managed ? ' probe-pill--managed' : ''}`;
+        pill.textContent = managed ? `${modelName} ✓ 已纳管` : `${modelName} +`;
+        pill.title = managed ? `${modelName} 已在模型路由列表中` : `点击一键纳管 ${modelName} 到模型路由`;
+        clk(pill, async () => {
+          state.config = state.config || { providers: {}, agent_models: {} };
+          state.config.agent_models = state.config.agent_models || {};
+          if (state.config.agent_models[modelName]) {
+            const existingRoute = state.config.agent_models[modelName];
+            existingRoute.candidates = existingRoute.candidates || [];
+            const hasProv = existingRoute.candidates.some((c) => c && c.provider === pId);
+            if (hasProv) {
+              toast(`模型 ${modelName} 已纳管该供应商`, 'info');
+              return;
+            }
+            const provKeys = p.api_keys || [];
+            const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
+            const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
+            existingRoute.candidates.push({
+              provider: pId,
+              key_label: firstKeyLabel,
+              target_model: modelName,
+              enabled: true,
+              weight: 1,
+            });
+            await persistConfig(`已将供应商 ${pId} 追加至模型 ${modelName}`);
+            return;
+          }
+          const provKeys = p.api_keys || [];
+          const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
+          const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
+          state.config.agent_models[modelName] = {
+            routing_strategy: 'sticky_failover',
+            active_key: '',
+            enabled: true,
+            candidates: [
+              { provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
+            ],
+          };
+          await persistConfig(`已成功纳管模型: ${modelName}`);
+        });
+        list.appendChild(pill);
+      });
+    };
+
+    draw(curFilter);
+    if (filterEl && !filterEl.dataset.bound) {
+      filterEl.dataset.bound = '1';
+      filterEl.addEventListener('input', (e) => draw(e.target.value));
+    }
+  }
+
   function buildProviderEditor(pId, p) {
     const wrap = ce('div');
-    const q = (s) => {
-      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
-      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
-      // and abort rendering mid-list. getElementById needs no escaping at all.
-      const sel = String(s);
-      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
-        const id = sel.slice(1);
-        if (wrap.id === id) return wrap;
-        // The element may still be detached (wrap.innerHTML just assigned, not yet
-        // appended), so document.getElementById cannot see it. Query the subtree by
-        // attribute instead, then fall back to the document.
-        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
-        if (local) return local;
-        if (wrap.ownerDocument) {
-          const hit = wrap.ownerDocument.getElementById(id);
-          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
-        }
-      }
-      try {
-        return wrap.querySelector(sel);
-      } catch (_) {
-        return null;
-      }
-    };
+    const q = makeScopedQuery(wrap);
     const keys = p.api_keys || [];
+    const isVaultProv = !isHubMode() && p.origin === 'vault';
+    const curApiType = normalizeApiType(p.api_type);
+    const isMiniMax = String(p.preset_id || pId || '').toLowerCase().startsWith('minimax');
+    const showOAuth = Boolean(window.HOST.capabilities.oauthLogin && !isVaultProv && isMiniMax);
 
     const aliasText = Object.entries(p.model_aliases || {})
       .map(([k, v]) => `${k}=${v}`)
@@ -1901,36 +2035,56 @@
       ? JSON.stringify(p.adapter_rules, null, 2)
       : '';
 
+    const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}">`
+      + `<option value="openai-completions" ${curApiType === 'openai-completions' ? 'selected' : ''}>OpenAI 兼容 (/v1/chat/completions)</option>`
+      + `<option value="anthropic-messages" ${curApiType === 'anthropic-messages' ? 'selected' : ''}>Anthropic 原生 (/v1/messages)</option>`
+      + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
+      + `<option value="ocr" ${curApiType === 'ocr' ? 'selected' : ''}>原生 OCR 接口 (/v1/ocr)</option>`
+      + `</select>`;
+
+    const syncDraftFields = () => {
+      if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
+      if (q(`#ed_p_base_${pId}`)) p.base_url = q(`#ed_p_base_${pId}`).value.trim();
+      if (q(`#ed_p_ant_${pId}`)) p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
+      if (q(`#ed_p_preset_${pId}`)) p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
+      if (q(`#ed_p_type_${pId}`)) p.api_type = normalizeApiType(q(`#ed_p_type_${pId}`).value);
+      if (q(`#ed_p_hide_ua_${pId}`)) {
+        if (q(`#ed_p_hide_ua_${pId}`).checked) p.hide_client_name = true;
+        else delete p.hide_client_name;
+      }
+      if (q(`#ed_p_reset_${pId}`)) p.quota_reset_at = q(`#ed_p_reset_${pId}`).value.trim();
+      if (q(`#ed_p_rpm_${pId}`)) {
+        const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
+        if (rpm > 0) p.rpm_per_key = rpm;
+        else delete p.rpm_per_key;
+      }
+    };
+
     wrap.innerHTML = `<div class="form-grid">${[
       fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">`),
-      fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() ? 'hidden' : ''}>自动探测</button></div>`),
+      fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() ? 'hidden' : ''}>自动探测</button></div>`),
+      fg('上游协议类型', apiTypeSelectHtml),
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
       fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
-      `<div class="form-group form-group--span2"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端名称（脱敏：开启后不向该供应商透传客户端 User-Agent，默认关闭）</span></label></div>`,
+      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端 User-Agent</span></label></div>`,
     ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
       fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
+    ].join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div>${isVaultProv ? '<div class="notice-strip mb-3"><span>中枢下发供应商密钥由中枢统一管理（只读）；如需挂载私有 Key，请点击右上角「添加供应商」新建本地供应商</span></div>' : ''}<div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${isVaultProv ? '' : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
-    // Reveal/hide plaintext for editable keys (Hub + locally added node keys).
     if (tbody && !tbody.dataset.revealWired) {
       tbody.dataset.revealWired = '1';
       tbody.addEventListener('click', (ev) => {
         const btn = ev.target instanceof Element ? ev.target.closest('.btn_reveal_key') : null;
         if (!btn) return;
         ev.stopPropagation();
-        const code = tbody.querySelector('#' + btn.dataset.target);
+        const code = byIdIn(tbody, btn.dataset.target);
         if (!code) return;
         const masked = code.dataset.masked === '1';
-        const full = btn.dataset.full || '';
-        if (masked && full) {
-          code.textContent = full;
-          code.dataset.masked = '0';
-          btn.textContent = '隐藏';
-        } else if (masked) {
+        if (masked) {
           code.textContent = code.dataset.full || code.textContent;
           code.dataset.masked = '0';
           btn.textContent = '隐藏';
@@ -1944,10 +2098,11 @@
     keys.forEach((k, idx) => {
       const tr = ce('tr');
       const keyLabel = k.label || k.id || `key-${idx}`;
-      const cdTarget = `p:${pId}:k:${keyLabel}`;
-      const cooldownSec = state.cooldowns?.[cdTarget] || 0;
+      const cdInfo = findKeyCooldown(pId, k, idx);
+      const cooldownSec = cdInfo.sec;
+      const cdTarget = cdInfo.target;
       let statusHtml = cooldownSec > 0
-        ? `<button class="btn btn--sm btn--danger btn_clear_k_cd tabular" type="button" title="点击解除此 Key 冷却">冷却 ${formatCooldown(cooldownSec)}</button>`
+        ? `<button class="btn btn--sm btn--danger btn_clear_k_cd tabular" type="button" title="点击解除此 Key 冷却">冷却 ${formatCooldown(cooldownSec)} · 解除</button>`
         : '<span class="pill pill--green">就绪</span>';
       if (cooldownSec <= 0 && k.last_ok === true) {
         statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
@@ -1955,9 +2110,7 @@
         statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
       }
 
-      // Keys synced from the hub vault are owned by the hub: the node shows a short
-      // hint and cannot edit or delete them. Locally added keys stay fully editable.
-      const vaultKey = !isHubMode() && k.origin === 'vault';
+      const vaultKey = !isHubMode() && (isVaultProv || k.origin === 'vault');
       tr.innerHTML = `
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
         <td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td>
@@ -2002,8 +2155,8 @@
       });
 
       clk(tr.querySelector('.btn_verify_k'), async () => {
-        const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
-        const keyLabel = k.label || k.id || `key-${idx}`;
+        syncDraftFields();
+        const baseUrl = p.base_url || '';
         toast(`正在校验 Key [${keyLabel}]...`, 'info');
         try {
           const res = await window.HOST.verifyKey({
@@ -2012,9 +2165,10 @@
             key: k.key,
             key_label: keyLabel,
             base_url: baseUrl,
-            api_type: p.api_type || 'openai-completions',
+            api_type: normalizeApiType(p.api_type),
           });
-          if (res && (res.ok || res.valid || res.latency_ms !== undefined)) {
+          syncVersionFromRes(res);
+          if (res && (res.valid === true || (res.ok && res.valid !== false && res.latency_ms !== undefined))) {
             const lat = res.latency_ms ?? res.ms ?? 0;
             k.last_ok = true;
             k.last_latency_ms = lat;
@@ -2032,28 +2186,32 @@
         }
       });
 
-      clk(tr.querySelector('.btn_del_k'), () => {
-        const refs = routesUsingKey(pId, keyLabel);
-        if (refs.length > 0) {
-          const ok = window.confirm(
-            `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n删除后这些路由将没有可用 Key，请求可能返回 503。仍要删除？`
-          );
-          if (!ok) return;
-        }
-        p.api_keys.splice(idx, 1);
-        renderProvidersList();
-      });
+      const delKeyBtn = tr.querySelector('.btn_del_k');
+      if (delKeyBtn) {
+        clk(delKeyBtn, () => {
+          const refs = routesUsingKey(pId, keyLabel);
+          if (refs.length > 0) {
+            const ok = window.confirm(
+              `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n删除后这些路由将没有可用 Key，请求可能返回 503。仍要删除？`
+            );
+            if (!ok) return;
+          }
+          syncDraftFields();
+          p.api_keys.splice(idx, 1);
+          renderProvidersList();
+        });
+      }
 
       tbody.appendChild(tr);
     });
 
-    // (查询余额已移除：无通用上游余额接口，见 #3)
-
     // Batch Test All Keys (via verifyKey)
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
+      syncDraftFields();
       toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
       let succ = 0;
-      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+      const baseUrl = p.base_url || '';
+      const selType = normalizeApiType(p.api_type);
       for (const k of keys) {
         try {
           const r = await window.HOST.verifyKey({
@@ -2061,8 +2219,10 @@
             api_key: k.key,
             base_url: baseUrl,
             key_label: k.label,
+            api_type: selType,
           });
-          if (r && (r.ok || r.valid)) {
+          syncVersionFromRes(r);
+          if (r && (r.valid === true || (r.ok && r.valid !== false))) {
             k.last_ok = true;
             k.last_latency_ms = r.latency_ms ?? r.ms ?? 0;
             succ++;
@@ -2076,74 +2236,80 @@
       renderProvidersList();
     });
 
-    // OAuth Device Flow (U4 — parses nested pollRes.token from /api/admin/oauth/poll)
-    clk(q(`#btn_oauth_start_${pId}`), async () => {
-      stopOAuthPolling();
-      toast('正在发起 OAuth 设备登录请求...', 'info');
-      try {
-        const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
-        if (res && (res.ok || res.device_code)) {
-          const box = q(`#oauth_box_${pId}`);
-          box.hidden = false;
-          box.classList.remove('hidden');
-          const link = q(`#oauth_link_${pId}`);
-          const uri = String(res.verification_uri || 'https://api.minimax.chat').trim();
-          if (/^https?:\/\//i.test(uri)) {
-            link.href = uri;
-          } else {
-            link.removeAttribute('href');
-          }
-          link.textContent = uri || '前往授权页面';
-          q(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
+    // OAuth Device Flow (MiniMax only, non-vault provider)
+    const oauthBtn = q(`#btn_oauth_start_${pId}`);
+    if (oauthBtn && showOAuth) {
+      clk(oauthBtn, async () => {
+        stopOAuthPolling();
+        toast('正在发起 OAuth 设备登录请求...', 'info');
+        try {
+          const res = await window.HOST.startOAuth({ endpoint: 'https://api.minimax.chat/oauth/device/code' });
+          if (res && (res.ok || res.device_code)) {
+            const box = q(`#oauth_box_${pId}`);
+            box.hidden = false;
+            box.classList.remove('hidden');
+            const link = q(`#oauth_link_${pId}`);
+            const uri = String(res.verification_uri || 'https://api.minimax.chat').trim();
+            if (/^https?:\/\//i.test(uri)) {
+              link.href = uri;
+            } else {
+              link.removeAttribute('href');
+            }
+            link.textContent = uri || '前往授权页面';
+            q(`#oauth_code_${pId}`).textContent = res.user_code || res.device_code;
 
-          // Poll OAuth
-          const intervalSec = (res.interval || 5) * 1000;
-          state.oauthPollTimer = setInterval(async () => {
-            try {
-              const pollRes = await window.HOST.pollOAuth({
-                device_code: res.device_code,
-                endpoint: 'https://api.minimax.chat/oauth/token',
-              });
-              const tok = pollRes?.token && typeof pollRes.token === 'object' ? pollRes.token : pollRes;
-              if (pollRes && pollRes.ok && tok && tok.access_token) {
-                stopOAuthPolling();
-                const stEl = q(`#oauth_status_${pId}`);
-                if (stEl) stEl.textContent = '授权成功！';
-                p.api_keys = p.api_keys || [];
-                const expIn = Number(tok.expires_in) || 0;
-                p.api_keys.push({
-                  id: `k_oauth_${Date.now().toString(36)}`,
-                  label: nextKeyLabel(p.api_keys, 'oauth'),
-                  key: tok.access_token,
-                  enabled: true,
-                  origin: 'local',
-                  auth_type: 'oauth_device',
-                  oauth_meta: {
-                    provider: 'minimax',
-                    refresh_token: tok.refresh_token || '',
-                    expires_at: expIn > 0 ? Math.floor(Date.now() / 1000) + expIn : 0,
-                  },
+            const intervalSec = (res.interval || 5) * 1000;
+            state.oauthPollTimer = setInterval(async () => {
+              try {
+                const pollRes = await window.HOST.pollOAuth({
+                  device_code: res.device_code,
+                  endpoint: 'https://api.minimax.chat/oauth/token',
                 });
-                await persistConfig('OAuth 授权成功，密钥已保存');
-              } else if (pollRes && pollRes.status === 'expired') {
-                stopOAuthPolling();
-                const stEl = q(`#oauth_status_${pId}`);
-                if (stEl) stEl.textContent = '授权已过期，请重试';
-              }
-            } catch (_) {}
-          }, intervalSec);
-          state.oauthExpireTimer = setTimeout(() => stopOAuthPolling(), (res.expires_in || 300) * 1000);
-        } else {
-          toast(res?.error || '发起 OAuth 失败', 'err');
+                const tok = pollRes?.token && typeof pollRes.token === 'object' ? pollRes.token : pollRes;
+                if (pollRes && pollRes.ok && tok && tok.access_token) {
+                  stopOAuthPolling();
+                  const stEl = q(`#oauth_status_${pId}`);
+                  if (stEl) stEl.textContent = '授权成功！';
+                  p.api_keys = p.api_keys || [];
+                  const expIn = Number(tok.expires_in) || 0;
+                  p.api_keys.push({
+                    id: `k_oauth_${Date.now().toString(36)}`,
+                    label: nextKeyLabel(p.api_keys, 'oauth'),
+                    key: tok.access_token,
+                    enabled: true,
+                    origin: 'local',
+                    auth_type: 'oauth_device',
+                    oauth_meta: {
+                      provider: 'minimax',
+                      refresh_token: tok.refresh_token || '',
+                      expires_at: expIn > 0 ? Math.floor(Date.now() / 1000) + expIn : 0,
+                    },
+                  });
+                  await persistConfig('OAuth 授权成功，密钥已保存');
+                } else if (pollRes && pollRes.status === 'expired') {
+                  stopOAuthPolling();
+                  const stEl = q(`#oauth_status_${pId}`);
+                  if (stEl) stEl.textContent = '授权已过期，请重试';
+                }
+              } catch (_) {}
+            }, intervalSec);
+            state.oauthExpireTimer = setTimeout(() => stopOAuthPolling(), (res.expires_in || 300) * 1000);
+          } else {
+            toast(res?.error || '发起 OAuth 失败', 'err');
+          }
+        } catch (e) {
+          toast(e.message, 'err');
         }
-      } catch (e) {
-        toast(e.message, 'err');
-      }
-    });
+      });
+    }
 
-    // Probe Models and Clickable Pills (U2)
+    // Restore previously probed models if present
+    renderProbePillsForProvider(q, pId, p);
+
+    // Probe Models and Persistent Clickable Pills (P0-08)
     clk(q(`#btn_probe_prov_${pId}`), async () => {
-      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
+      syncDraftFields();
+      const baseUrl = p.base_url || '';
       const firstKey = p.api_keys?.[0]?.key || '';
       toast(`正在探测供应商 ${pId} 模型...`, 'info');
       try {
@@ -2151,79 +2317,38 @@
           provider: pId,
           base_url: baseUrl,
           api_key: firstKey,
-          api_type: p.api_type || 'openai-completions',
+          api_type: normalizeApiType(p.api_type),
         });
         const models = res?.models || [];
         if (models.length > 0) {
+          state.probedModelsByProvider[pId] = models;
           toast(`探测成功: 发现 ${models.length} 个可用模型`, 'ok');
-          const cont = q(`#probe_pills_container_${pId}`);
-          cont.hidden = false;
-          cont.classList.remove('hidden');
-          const list = q(`#probe_pills_list_${pId}`);
-          list.innerHTML = '';
-          q(`#probe_pills_count_${pId}`).textContent = `共 ${models.length} 个，点击一键纳管`;
-
-          const renderPills = (filter = '') => {
-            list.innerHTML = '';
-            const filtered = models.filter((m) => m.toLowerCase().includes(filter.toLowerCase())).slice(0, 48);
-            filtered.forEach((modelName) => {
-              const pill = ce('span');
-              pill.className = 'probe-pill';
-              pill.textContent = modelName;
-              pill.title = `点击一键纳管 ${modelName} 到 Agent 路由`;
-              clk(pill, async () => {
-                state.config.agent_models = state.config.agent_models || {};
-                const firstKeyLabel = p.api_keys?.[0]?.label || 'k1';
-                state.config.agent_models[modelName] = {
-                  routing_strategy: 'sticky_failover',
-                  active_key: '',
-                  enabled: true,
-                  candidates: [
-                    { provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
-                  ],
-                };
-                await persistConfig(`已成功纳管模型: ${modelName}`);
-              });
-              list.appendChild(pill);
-            });
-          };
-
-          renderPills();
-          q(`#probe_pills_filter_${pId}`).addEventListener('input', (e) => {
-            renderPills(e.target.value);
-          });
+          renderProbePillsForProvider(q, pId, p);
         } else {
-          toast('未探测到可用模型列表', 'warn');
+          toast(res?.error ? `未探测到模型: ${res.error}` : '未探测到可用模型列表', 'warn');
         }
       } catch (e) {
         toast(`探测异常: ${e.message}`, 'err');
       }
     });
 
-    clk(q(`#btn_add_key_${pId}`), () => {
-      const lbl = q(`#new_key_lbl_${pId}`).value.trim();
-      const val = q(`#new_key_val_${pId}`).value.trim();
-      if (!val) return toast('请填写密钥内容', 'warn');
-      // A key typed into this editor is owned locally on a node; only the hub itself
-      // (the authoritative vault) labels its own entries as vault origin.
-      const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'local');
-      if (parsed.error) return toast(parsed.error, 'warn');
-      p.api_keys = p.api_keys || [];
-      p.api_keys.push(...parsed.keys);
-      renderProvidersList();
-    });
+    const addKeyBtn = q(`#btn_add_key_${pId}`);
+    if (addKeyBtn && !isVaultProv) {
+      clk(addKeyBtn, () => {
+        const lbl = q(`#new_key_lbl_${pId}`)?.value.trim() || '';
+        const val = q(`#new_key_val_${pId}`)?.value.trim() || '';
+        if (!val) return toast('请填写密钥内容', 'warn');
+        const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'local');
+        if (parsed.error) return toast(parsed.error, 'warn');
+        syncDraftFields();
+        p.api_keys = p.api_keys || [];
+        p.api_keys.push(...parsed.keys);
+        renderProvidersList();
+      });
+    }
 
     clk(q(`#btn_save_prov_${pId}`), async () => {
-      p.name = q(`#ed_p_name_${pId}`).value.trim();
-      p.base_url = q(`#ed_p_base_${pId}`).value.trim();
-      p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
-      p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
-      if (q(`#ed_p_hide_ua_${pId}`)?.checked) p.hide_client_name = true;
-      else delete p.hide_client_name;
-      p.quota_reset_at = q(`#ed_p_reset_${pId}`).value.trim();
-      const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
-      if (rpm > 0) p.rpm_per_key = rpm;
-      else delete p.rpm_per_key;
+      syncDraftFields();
       delete p.refresh_every;
       delete p.auto_include;
 
@@ -2262,6 +2387,8 @@
     clk(q(`#btn_del_prov_${pId}`), async () => {
       if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
       delete state.config.providers[pId];
+      delete state.probedModelsByProvider[pId];
+      delete state.probeFilterByProvider[pId];
       state.activeEditorKey = null;
       await persistConfig('供应商已删除');
     });
@@ -2310,8 +2437,9 @@
       const modelsScope = formatScopeInput(node.scope?.models);
       const provsScope = formatScopeInput(node.scope?.providers);
       const snap = getNodeSyncSnapshotStatus(node);
+      const binPill = node.last_binary_version ? `<span class="pill tabular">${eh(node.last_binary_version)}</span>` : '';
       const subText = `模型: ${modelsScope} · 供应商: ${provsScope} · Token: ${node.token_prefix}`;
-      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill pill--accent">${eh(node.role || 'full')}</span><span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
+      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill pill--accent">${eh(node.role || 'full')}</span>${binPill}<span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
 
       const fields = ce('div');
       fields.className = 'fields';
@@ -2343,11 +2471,22 @@
     const role = opts.role === 'full' ? 'full' : 'lite';
     const port = Math.max(1, Math.min(65535, Number(opts.port) || 8787));
     const token = String(opts.nodeToken || '').trim();
-    const clientKey = String(opts.clientKey || '').trim().replace(/["$`\\]/g, '');
+    const clientKey = String(opts.clientKey || '').trim().replace(/["'$`\\\s]/g, '');
+    const adminPass = String(opts.adminPass || '').trim().replace(/["'$`\\\s]/g, '');
+
+    if (opts.mode === 'docker') {
+      if (role === 'full') {
+        return `docker run -d --name llmproxy-full --restart unless-stopped -p ${port}:8787 -v "$(pwd)/llmproxy-data:/data" -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data -e ADMIN_PASSWORD="${adminPass}" -e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ghcr.io/khc8655/ocrprox2:latest`;
+      }
+      return `docker run -d --name llmproxy-lite --restart unless-stopped -p ${port}:8787 -e LLMPROXY_ROLE=lite -e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ghcr.io/khc8655/ocrprox2:latest`;
+    }
 
     if (opts.mode === 'binary') {
-      const env = opts.bootstrapEnv || `LLMPROXY_ROLE=${role} LLMPROXY_HUB_URL=${cleanHub} LLMPROXY_NODE_TOKEN=${token}${clientKey ? ` LLMPROXY_CLIENT_KEY=${clientKey}` : ''}`;
-      return `${env} ./llmproxy-linux-amd64 --addr="[::]:${port}"`;
+      const archDetect = `ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')`;
+      if (role === 'full') {
+        return `${archDetect} && mkdir -p ./data && ADMIN_PASSWORD="${adminPass}" CONFIG_DIR="./data" LLMPROXY_ROLE=full LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy-linux-\${ARCH} --addr="[::]:${port}"`;
+      }
+      return `${archDetect} && LLMPROXY_ROLE=lite LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy-linux-\${ARCH} --addr="[::]:${port}"`;
     }
 
     let scriptUrl = `${cleanHub}/install.sh`;
@@ -2362,6 +2501,7 @@
       `--hub-url="${cleanHub}"`,
       `--node-token="${token}"`,
     ];
+    if (role === 'full' && adminPass) flags.push(`--admin-password="${adminPass}"`);
     if (clientKey) flags.push(`--client-key="${clientKey}"`);
     flags.push(`-p ${port}`);
     if (opts.mirror === 'ghfast') flags.push('--mirror="https://ghfast.top"');
@@ -2371,33 +2511,45 @@
 
   function mountNodeCommandPanel(container, payload) {
     if (!container) return;
+    const role = payload.role === 'full' ? 'full' : 'lite';
     const clientKey = payload.clientKey || (state.config?.settings?.client_key || state.config?.settings?.proxy_api_key || '');
     const hubUrl = payload.hubUrl || window.location.origin;
+    const adminPass = role === 'full' ? generateRandomAlphaNum(20) : '';
     const panelState = {
       mode: 'install',
       port: 8787,
       scriptSource: 'hub',
       mirror: 'auto',
       autoYes: true,
+      adminPass,
     };
 
     container.innerHTML = `<div class="snippet-box">
       <div class="snippet-header">
-        <span class="form-label">快速部署命令（对齐 1 代一键安装流程）</span>
+        <span class="form-label">节点快速部署与客户端接入指引</span>
         <div class="fields">
           <div class="seg" data-cmd-seg>
             <button class="seg-btn active" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
+            <button class="seg-btn" data-cmd-mode="docker" type="button">Docker 部署</button>
             <button class="seg-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
           </div>
           <button class="btn btn--sm" data-cmd-copy type="button">复制命令</button>
         </div>
+      </div>
+      ${role === 'full' ? `<div class="notice-strip notice-strip--warn mb-2">
+        <span>Full 节点后台登录密码 (请妥善保存): <strong class="tabular">${eh(adminPass)}</strong></span>
+        <button class="btn btn--sm" data-copy-admin-pass type="button">复制密码</button>
+      </div>` : ''}
+      <div class="notice-strip mb-2">
+        <span>客户端接入信息 — <strong class="tabular" data-client-base-hint></strong> · API Key: <strong class="tabular">${eh(clientKey || '请先在系统设置配置主客户端密钥')}</strong></span>
+        ${clientKey ? '<button class="btn btn--sm" data-copy-client-key type="button">复制 API Key</button>' : ''}
       </div>
       <div class="form-grid mb-2" data-cmd-opts>
         <div class="form-group">
           <label class="form-label">监听端口</label>
           <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
         </div>
-        <div class="form-group">
+        <div class="form-group" data-cmd-source-wrap>
           <label class="form-label">安装脚本源</label>
           <select class="select" data-cmd-source>
             <option value="hub">Hub 同域 /install.sh (推荐)</option>
@@ -2405,14 +2557,14 @@
             <option value="ghraw">GitHub Raw 直连</option>
           </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" data-cmd-mirror-wrap>
           <label class="form-label">二进制下载源</label>
           <select class="select" data-cmd-mirror>
             <option value="auto">GitHub 直连 + 国内自动回退</option>
             <option value="ghfast">优先走 ghfast.top 镜像</option>
           </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" data-cmd-yes-wrap>
           <label class="form-label">交互方式</label>
           <label class="form-label form-label--check">
             <input type="checkbox" data-cmd-yes checked>
@@ -2420,23 +2572,33 @@
           </label>
         </div>
       </div>
-      <textarea class="textarea input--code" data-cmd-output readonly rows="2"></textarea>
+      <textarea class="textarea input--code" data-cmd-output readonly rows="3"></textarea>
     </div>`;
 
     const q = (sel) => container.querySelector(sel);
     const outEl = q('[data-cmd-output]');
-    const optsEl = q('[data-cmd-opts]');
     const portEl = q('[data-cmd-port]');
+    const srcWrap = q('[data-cmd-source-wrap]');
+    const mirrorWrap = q('[data-cmd-mirror-wrap]');
+    const yesWrap = q('[data-cmd-yes-wrap]');
+    const baseHintEl = q('[data-client-base-hint]');
     const srcEl = q('[data-cmd-source]');
     const mirrorEl = q('[data-cmd-mirror]');
     const yesEl = q('[data-cmd-yes]');
 
     const refresh = () => {
-      if (optsEl) optsEl.hidden = panelState.mode !== 'install';
+      const isInstall = panelState.mode === 'install';
+      if (srcWrap) srcWrap.hidden = !isInstall;
+      if (mirrorWrap) mirrorWrap.hidden = !isInstall;
+      if (yesWrap) yesWrap.hidden = !isInstall;
+      const port = Math.max(1, Math.min(65535, Number(panelState.port) || 8787));
+      if (baseHintEl) {
+        baseHintEl.textContent = `API Base URL: http://<VM_IP>:${port}/v1`;
+      }
       if (outEl) {
         outEl.value = buildNodeShellCommands({
           ...panelState,
-          role: payload.role,
+          role,
           hubUrl,
           nodeToken: payload.nodeToken,
           clientKey,
@@ -2460,6 +2622,10 @@
     if (yesEl) yesEl.addEventListener('change', () => { panelState.autoYes = yesEl.checked; refresh(); });
     const copyBtn = q('[data-cmd-copy]');
     if (copyBtn) clk(copyBtn, () => copyToClipboard(outEl?.value, '部署命令已复制'));
+    const copyPassBtn = q('[data-copy-admin-pass]');
+    if (copyPassBtn) clk(copyPassBtn, () => copyToClipboard(adminPass, '后台登录密码已复制'));
+    const copyCkBtn = q('[data-copy-client-key]');
+    if (copyCkBtn) clk(copyCkBtn, () => copyToClipboard(clientKey, '客户端 API Key 已复制'));
     refresh();
   }
 
@@ -2467,38 +2633,15 @@
     const wrap = ce('div');
     const isEnabled = node.enabled;
     const id = node.id;
-    const q = (s) => {
-      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
-      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
-      // and abort rendering mid-list. getElementById needs no escaping at all.
-      const sel = String(s);
-      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
-        const id = sel.slice(1);
-        if (wrap.id === id) return wrap;
-        // The element may still be detached (wrap.innerHTML just assigned, not yet
-        // appended), so document.getElementById cannot see it. Query the subtree by
-        // attribute instead, then fall back to the document.
-        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
-        if (local) return local;
-        if (wrap.ownerDocument) {
-          const hit = wrap.ownerDocument.getElementById(id);
-          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
-        }
-      }
-      try {
-        return wrap.querySelector(sel);
-      } catch (_) {
-        return null;
-      }
-    };
+    const q = makeScopedQuery(wrap);
 
     wrap.innerHTML = `<div class="form-grid">${[
       fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(node.name)}">`),
       fg('节点角色', `<select class="select" id="ed_node_role_${id}"><option value="full" ${node.role === 'full' ? 'selected' : ''}>Full (全功能代理网关)</option><option value="lite" ${node.role === 'lite' ? 'selected' : ''}>Lite (轻量本地代理)</option></select>`),
       fg('租约时长 (秒 lease_ttl)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || 86400}">`),
       fg('断网宽限期 (秒 grace_ttl)', `<input class="input tabular" id="ed_node_grace_${id}" type="number" value="${node.grace_ttl || 3600}">`),
-      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" value="${eh(formatScopeInput(node.scope?.providers))}">`),
-      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" value="${eh(formatScopeInput(node.scope?.models))}">`),
+      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" list="datalistProviders" value="${eh(formatScopeInput(node.scope?.providers))}">`),
+      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" list="datalistModels" value="${eh(formatScopeInput(node.scope?.models))}">`),
     ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
       fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
       fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
@@ -2542,6 +2685,7 @@
             role: q(`#ed_node_role_${id}`)?.value || node.role || 'lite',
             hubUrl: window.location.origin,
             nodeToken: res.node_token,
+            clientKey: res.client_key,
             bootstrapEnv: res.bootstrap_env,
           });
         }
@@ -2590,6 +2734,7 @@
             role: res.node?.role || role,
             hubUrl: window.location.origin,
             nodeToken: res.node_token,
+            clientKey: res.client_key,
             bootstrapEnv: res.bootstrap_env,
           });
         }
@@ -2680,6 +2825,7 @@
           ${brandIcon}
           <span>${eh(mName)}</span>
           ${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
+          ${isFixed && isHubMode() ? '<span class="pill pill--amber">仅 Full 节点生效 · Lite 节点自动忽略</span>' : ''}
           <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
           ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
         </div>
@@ -2750,30 +2896,7 @@
 
   function buildModelEditor(mName, m, isFixed = false) {
     const wrap = ce('div');
-    const q = (s) => {
-      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
-      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
-      // and abort rendering mid-list. getElementById needs no escaping at all.
-      const sel = String(s);
-      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
-        const id = sel.slice(1);
-        if (wrap.id === id) return wrap;
-        // The element may still be detached (wrap.innerHTML just assigned, not yet
-        // appended), so document.getElementById cannot see it. Query the subtree by
-        // attribute instead, then fall back to the document.
-        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
-        if (local) return local;
-        if (wrap.ownerDocument) {
-          const hit = wrap.ownerDocument.getElementById(id);
-          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
-        }
-      }
-      try {
-        return wrap.querySelector(sel);
-      } catch (_) {
-        return null;
-      }
-    };
+    const q = makeScopedQuery(wrap);
     m.candidates = m.candidates || [];
     const candidates = m.candidates;
     const strat = m.routing_strategy || (isFixed ? 'round_robin' : 'sticky_failover');
@@ -2841,7 +2964,7 @@
 
       <div class="form-grid mt-3">
         <div class="form-group">
-          <input class="input" id="new_c_prov_${mName}" placeholder="供应商 ID (如 minimax)">
+          <input class="input" id="new_c_prov_${mName}" list="datalistProviders" placeholder="供应商 ID (如 minimax)">
         </div>
         <div class="form-group">
           <input class="input" id="new_c_lbl_${mName}" placeholder="Key 标签 (留空=全部启用Key)">
@@ -3086,12 +3209,15 @@
       .map((item) => item.trim())
       .filter(Boolean);
 
+    const isZeroVersion = state.config._version === 0;
     setVal('cfgRoutingStrategy', s.agent_routing_strategy || 'sticky_failover');
     setVal('cfgFirstByteTimeout', s.agent_first_byte_timeout_sec || 120);
-    setVal('cfgCooldown429', s.cooldown_rate_limit_sec || 15);
-    setVal('cfgCooldown5xx', s.cooldown_server_error_sec || 30);
-    setVal('cfgCooldownNet', s.cooldown_network_error_sec || 15);
-    setVal('cfgCooldownAuth', s.cooldown_auth_error_sec ?? 86400);
+    setVal('cfgCooldown429', isZeroVersion && !s.cooldown_rate_limit_sec ? 15 : (s.cooldown_rate_limit_sec ?? 15));
+    setVal('cfgCooldown5xx', isZeroVersion && !s.cooldown_server_error_sec ? 30 : (s.cooldown_server_error_sec ?? 30));
+    setVal('cfgCooldownNet', isZeroVersion && !s.cooldown_network_error_sec ? 15 : (s.cooldown_network_error_sec ?? 15));
+    setVal('cfgCooldownAuth', isZeroVersion && !s.cooldown_auth_error_sec ? 86400 : (s.cooldown_auth_error_sec ?? 86400));
+    setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
+    setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
     // Gateway Access Center: open on BOTH Hub (for Lite projection) and Full
     const gwBox = $('gatewayAccessCenter');
@@ -3107,9 +3233,10 @@
     if (gwBaseUrlGroup) gwBaseUrlGroup.hidden = !isFull;
     if (gwLocalOnlyBox) gwLocalOnlyBox.hidden = !isFull;
     if (gwHubNotice) gwHubNotice.hidden = isFull;
-    if (guardBox) guardBox.hidden = !isFull;
+    if (guardBox) guardBox.hidden = false;
     if (backupBox) backupBox.hidden = false;
     if (sysBox) sysBox.hidden = !window.HOST.capabilities.systemUpdate;
+    renumberSettingsSections();
 
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
     const localBase = `${baseOrigin}/v1`;
@@ -3119,7 +3246,7 @@
     if (gwSummaryPill) {
       gwSummaryPill.textContent = clientKey
         ? `主密钥已配置 · 附加 ${extraKeys.length} 把`
-        : (isFull ? '主密钥未配置' : '待设置下发至 Lite');
+        : (isFull ? '主密钥未配置' : '待设置下发至节点');
     }
 
     const gwBaseUrl = $('gwBaseUrl');
@@ -3132,7 +3259,7 @@
     if (gwProxyKeys) gwProxyKeys.value = extraKeys.join('\n');
 
     const snippetClaude = $('snippetClaude');
-    const displayKey = clientKey || 'sk-proxy-key';
+    const displayKey = clientKey || 'sk-llmproxy-key';
     if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${displayKey}"`;
 
     const snippetCursor = $('snippetCursor');
@@ -3141,7 +3268,7 @@
     const btnGen = $('btnGenClientKey');
     if (btnGen) {
       btnGen.onclick = () => {
-        const rand = `sk-proxy-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+        const rand = generateClientSecretKey();
         if (gwClientKey) gwClientKey.value = rand;
         if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
         if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
@@ -3156,10 +3283,7 @@
         s.client_key = k;
         s.proxy_api_key = k;
         s.proxy_keys = pk;
-        if (isFull && window.HOST.updateAccessKey) {
-          await window.HOST.updateAccessKey({ client_key: k, proxy_keys: pk });
-        }
-        await persistConfig(isFull ? '客户端鉴权密钥更新成功' : '已保存，将自动投影下发至 Lite 节点');
+        await persistConfig(isFull ? '客户端鉴权密钥已保存' : '已保存，将自动投影下发至节点');
       };
     }
 
@@ -3179,9 +3303,6 @@
           toast('已复制 Cursor 配置', 'ok');
         };
       }
-
-      setVal('cfgOcrInflight', s.ocr_max_inflight || 4);
-      setVal('cfgKbConcurrency', s.kb_global_max_concurrency || 16);
 
       const sysSub = $('sysCurrentVersionSub');
       if (sysSub && state.systemVersion) {
@@ -3217,28 +3338,30 @@
     const btnSave = $('btnSaveSettings');
     if (btnSave) {
       btnSave.onclick = async () => {
-        const ck = (gwClientKey?.value || '').trim();
-        s.client_key = ck;
-        s.proxy_api_key = ck;
-        s.proxy_keys = parseProxyKeys(gwProxyKeys?.value);
-        s.agent_routing_strategy = $('cfgRoutingStrategy').value;
-        s.agent_first_byte_timeout_sec = Number($('cfgFirstByteTimeout').value) || 120;
-        s.cooldown_rate_limit_sec = Number($('cfgCooldown429').value) || 15;
-        s.cooldown_server_error_sec = Number($('cfgCooldown5xx').value) || 30;
-        s.cooldown_network_error_sec = Number($('cfgCooldownNet').value) || 15;
-        s.cooldown_auth_error_sec = Math.max(0, Number($('cfgCooldownAuth').value) || 0);
+        const parseBoundedInt = (id, label, min, max, fallback) => {
+          const raw = ($(id)?.value ?? '').trim();
+          if (raw === '') return { val: fallback };
+          const n = Number(raw);
+          if (!Number.isFinite(n) || n < min || n > max) {
+            return { error: `${label} 需在 ${min} ~ ${max} 之间` };
+          }
+          return { val: Math.floor(n) };
+        };
 
-        delete s.run_mode;
-        delete s.mode_schedule_enabled;
-        delete s.mode_schedule_agent_window;
-        delete s.mode_schedule_timezone;
-        delete s.mode_schedule_webhook_url;
-        delete s.mode_schedule_webhook_secret;
-
-        if (isFull) {
-          s.ocr_max_inflight = Number($('cfgOcrInflight')?.value) || 4;
-          s.kb_global_max_concurrency = Number($('cfgKbConcurrency')?.value) || 16;
-        }
+        const fbTimeout = parseBoundedInt('cfgFirstByteTimeout', '首字超时', 5, 600, 120);
+        if (fbTimeout.error) return toast(fbTimeout.error, 'err');
+        const cd429 = parseBoundedInt('cfgCooldown429', '429 限流冷却', 0, 86400, 15);
+        if (cd429.error) return toast(cd429.error, 'err');
+        const cd5xx = parseBoundedInt('cfgCooldown5xx', '5xx 异常冷却', 0, 86400, 30);
+        if (cd5xx.error) return toast(cd5xx.error, 'err');
+        const cdNet = parseBoundedInt('cfgCooldownNet', '网络超时冷却', 0, 86400, 15);
+        if (cdNet.error) return toast(cdNet.error, 'err');
+        const cdAuth = parseBoundedInt('cfgCooldownAuth', '鉴权失败冷却', 0, 604800, 86400);
+        if (cdAuth.error) return toast(cdAuth.error, 'err');
+        const ocrInf = parseBoundedInt('cfgOcrInflight', 'OCR 预读并发上限', 1, 64, 4);
+        if (ocrInf.error) return toast(ocrInf.error, 'err');
+        const kbConc = parseBoundedInt('cfgKbConcurrency', '固定通道全局并发上限', 1, 256, 16);
+        if (kbConc.error) return toast(kbConc.error, 'err');
 
         if (window.HOST.capabilities.vaultClient) {
           const prevUrl = (state.config?.vault?.url || '').trim();
@@ -3258,6 +3381,26 @@
             state.config.vault = { url: '', node_token: '' };
           }
         }
+
+        const ck = (gwClientKey?.value || '').trim();
+        s.client_key = ck;
+        s.proxy_api_key = ck;
+        s.proxy_keys = parseProxyKeys(gwProxyKeys?.value);
+        s.agent_routing_strategy = $('cfgRoutingStrategy').value;
+        s.agent_first_byte_timeout_sec = fbTimeout.val;
+        s.cooldown_rate_limit_sec = cd429.val;
+        s.cooldown_server_error_sec = cd5xx.val;
+        s.cooldown_network_error_sec = cdNet.val;
+        s.cooldown_auth_error_sec = cdAuth.val;
+        s.ocr_max_inflight = ocrInf.val;
+        s.kb_global_max_concurrency = kbConc.val;
+
+        delete s.run_mode;
+        delete s.mode_schedule_enabled;
+        delete s.mode_schedule_agent_window;
+        delete s.mode_schedule_timezone;
+        delete s.mode_schedule_webhook_url;
+        delete s.mode_schedule_webhook_secret;
 
         await persistConfig('设置保存成功');
       };
@@ -3294,6 +3437,7 @@
         const verEl = $('configVersionDisplay');
         if (verEl && ver) verEl.textContent = `v${ver}`;
         toast(successMsg || '保存成功', 'ok');
+        refreshDatalists();
         renderProvidersList();
         renderModelsList();
         renderSettingsView();

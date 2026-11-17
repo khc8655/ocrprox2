@@ -75,6 +75,8 @@ var FullOnlyRoutes = map[string]bool{
 	"GET /api/vault/manifest":           true,
 	"/api/vault/fetch":                  true,
 	"POST /api/vault/fetch":             true,
+	"/api/vault/sync":                   true,
+	"POST /api/vault/sync":              true,
 	"/v1/ocr":                           true,
 	"POST /v1/ocr":                      true,
 	"/v1/embeddings":                    true,

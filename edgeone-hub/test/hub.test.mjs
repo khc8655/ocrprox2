@@ -13,6 +13,8 @@ import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
+import { generateClientKey } from '../lib/nodes.js';
+import { projectConfigForNode } from '../lib/projection.js';
 import { PRESET_MAP } from '../lib/generated-presets.js';
 import * as edgeIndex from '../../edge-functions/index.js';
 import * as edgeHealth from '../../edge-functions/health.js';
@@ -1530,5 +1532,192 @@ describe('11. Security Hardening & Flat Preset AdapterRules Gates', () => {
     const storedModelNames = Object.keys(updatedNode.usage.models);
     assert.equal(storedModelNames.length, 1);
     assert.equal(/[<>"'&]/.test(storedModelNames[0]), false);
+  });
+
+  test('Decision #2: projectConfigForNode projects kb_models & KB concurrency settings ONLY to Full nodes, stripping them for Lite', () => {
+    const hubCfg = {
+      providers: {
+        minimax: {
+          id: 'minimax',
+          name: 'MiniMax',
+          origin: 'vault',
+          enabled: true,
+          base_url: 'https://api.minimax.io/v1',
+          api_keys: [{ id: 'k1', label: 'mm-1', key: 'sk-mm-123456', enabled: true, origin: 'vault' }],
+        },
+        local_only: {
+          id: 'local_only',
+          name: 'Local',
+          origin: 'local',
+          enabled: true,
+          base_url: 'https://api.openai.com/v1',
+          api_keys: [{ id: 'kl', label: 'loc', key: 'sk-loc-999', enabled: true, origin: 'local' }],
+        },
+      },
+      agent_models: {
+        'MiniMax-M3': {
+          enabled: true,
+          candidates: [{ provider: 'minimax', key_label: 'mm-1', target_model: 'MiniMax-M3', enabled: true }],
+        },
+        ocr: {
+          enabled: true,
+          routing_strategy: 'round_robin',
+          candidates: [
+            { provider: 'minimax', key_label: 'mm-1', target_model: 'MiniMax-M3', max_concurrency: 4, enabled: true },
+            { provider: 'local_only', key_label: 'loc', target_model: 'gpt-4o', enabled: true },
+          ],
+        },
+      },
+      kb_models: {
+        embedding: [
+          { provider: 'minimax', key_label: 'mm-1', model: 'embo-01', max_concurrency: 8, enabled: true },
+          { provider: 'local_only', key_label: 'loc', model: 'text-embedding-3-small', enabled: true },
+        ],
+      },
+      settings: {
+        client_key: 'sk-llmproxy-shared',
+        agent_routing_strategy: 'sticky_failover',
+        ocr_max_inflight: 6,
+        kb_global_max_concurrency: 24,
+      },
+    };
+
+    const liteProj = projectConfigForNode(
+      { id: 'n_lite', role: 'lite', scope: { providers: ['*'], models: ['*'] } },
+      hubCfg,
+      PRESET_MAP
+    );
+    assert.equal(liteProj.kb_models, undefined, 'Lite node must not receive kb_models');
+    assert.equal(liteProj.agent_models.ocr, undefined, 'Lite node must ignore fixed KB 4-channels');
+    assert.ok(liteProj.agent_models['MiniMax-M3'], 'Lite node still receives regular agent models');
+    assert.equal(liteProj.settings.ocr_max_inflight, undefined, 'Lite node settings omit ocr_max_inflight');
+    assert.equal(liteProj.settings.kb_global_max_concurrency, undefined, 'Lite node settings omit kb_global_max_concurrency');
+
+    const fullProj = projectConfigForNode(
+      { id: 'n_full', role: 'full', scope: { providers: ['*'], models: ['*'] } },
+      hubCfg,
+      PRESET_MAP
+    );
+    assert.ok(fullProj.kb_models, 'Full node must receive kb_models');
+    assert.equal(fullProj.kb_models.embedding.length, 1, 'Local provider stripped from Full kb_models');
+    assert.equal(fullProj.kb_models.embedding[0].provider, 'minimax');
+    assert.equal(fullProj.kb_models.ocr.length, 1, 'Unified fixed route projected to kb_models.ocr for Full node');
+    assert.equal(fullProj.settings.ocr_max_inflight, 6);
+    assert.equal(fullProj.settings.kb_global_max_concurrency, 24);
+  });
+
+  test('P0-10, LITE-P1, FULL-05 & P0-05: 304 usage/version bypass, model_stats, revoke last_seen preservation, sk-llmproxy- prefix, vault touch & verifyKey _version', async () => {
+    const kv = new MockKV();
+    assert.match(generateClientKey(), /^sk-llmproxy-[a-f0-9]{32}$/);
+
+    // Seed config without client_key -> issued node auto-generates sk-llmproxy- client_key
+    await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {
+          openai: {
+            name: 'OpenAI',
+            enabled: true,
+            base_url: 'https://api.openai.com/v1',
+            api_keys: [{ id: 'k1', label: 'main', key: 'sk-real-openai-12345678', enabled: true }],
+          },
+        },
+      }),
+      TEST_ENV,
+      kv
+    );
+
+    const liteNode = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'lite-304', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+    assert.match(liteNode.client_key, /^sk-llmproxy-/);
+    assert.match(liteNode.bootstrap_env, /LLMPROXY_CLIENT_KEY=sk-llmproxy-/);
+
+    // 1. Initial 200 pull sets ETag and last_seen
+    const pull1 = await handleNodeConfigRequest(makeNodeReq('POST', '/api/node/config', liteNode.node_token), TEST_ENV, kv);
+    assert.equal(pull1.status, 200);
+    const etag = pull1.headers.get('etag');
+
+    // 2. Immediate 304 within 60s WITH X-Node-Usage (model_stats) & X-Node-Version MUST NOT be dropped!
+    const req304WithUsage = new Request('https://hub.example.com/api/node/config', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${liteNode.node_token}`,
+        'if-none-match': etag,
+        'x-node-version': 'v20261118-live',
+        'x-node-usage': JSON.stringify({
+          requests: 12,
+          successes: 11,
+          failed: 1,
+          in_tokens: 1200,
+          out_tokens: 340,
+          models: { 'gpt-4o': 12 },
+          model_stats: {
+            'gpt-4o': { calls: 12, successes: 11, failed: 1, in_tokens: 1200, out_tokens: 340 },
+          },
+        }),
+      },
+    });
+    const pull2 = await handleNodeConfigRequest(req304WithUsage, TEST_ENV, kv);
+    assert.equal(pull2.status, 304);
+
+    // 3. Revoking node preserves last_seen & last_config_version
+    const patched = await (
+      await handleNodesRequest(
+        makeAdminReq('PATCH', `/api/admin/nodes/${liteNode.node.id}`, { enabled: false }),
+        TEST_ENV,
+        kv
+      )
+    ).json();
+    assert.equal(patched.node.enabled, false);
+    assert.ok(patched.node.last_seen, 'Revoked node must preserve last_seen timestamp');
+    assert.equal(patched.node.last_binary_version, 'v20261118-live');
+    assert.deepEqual(patched.node.usage.model_stats['gpt-4o'], {
+      calls: 12,
+      successes: 11,
+      failed: 1,
+      in_tokens: 1200,
+      out_tokens: 340,
+    });
+
+    // 4. Full node calling /api/vault/manifest updates last_seen & last_binary_version
+    const fullNode = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'full-vault', role: 'full' }), TEST_ENV, kv)
+    ).json();
+    const vfResp = await handleVaultManifestRequest(
+      new Request('https://hub.example.com/api/vault/manifest', {
+        headers: {
+          authorization: `Bearer ${fullNode.node_token}`,
+          'x-node-version': 'v20261118-full',
+        },
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(vfResp.status, 200);
+    const allNodes = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+    const fullRecord = allNodes.nodes.find((n) => n.id === fullNode.node.id);
+    assert.ok(fullRecord.last_seen, 'Vault manifest pull must update Full node last_seen');
+    assert.equal(fullRecord.last_binary_version, 'v20261118-full');
+
+    // 5. P0-05: handleVerifyKey returns bumped _version when KV health is persisted
+    const envWithKv = { ...TEST_ENV, agent_kv: kv };
+    const vResp = await handleVerifyKey(
+      makeAdminReq('POST', '/api/admin/verify-key', {
+        provider: 'openai',
+        key_label: 'main',
+        api_key: 'sk-●●●●●●5678',
+      }),
+      envWithKv,
+      async () => new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+    assert.equal(vResp.status, 200);
+    const vData = await vResp.json();
+    assert.equal(vData.valid, true);
+    assert.equal(typeof vData._version, 'number', 'verify-key must return updated _version to prevent UI 409 CAS conflict');
+    assert.equal(vData._version, 3);
   });
 });

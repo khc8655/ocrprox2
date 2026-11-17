@@ -1,6 +1,7 @@
 import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
+import { touchNodeLastSeen } from '../../lib/nodes.js';
 
 export async function handleVaultManifestRequest(request, env, kv) {
   const auth = await checkVaultAuth(request, env, kv);
@@ -8,6 +9,30 @@ export async function handleVaultManifestRequest(request, env, kv) {
 
   const config = await loadConfig(kv);
   const presetsMap = getPresetMap();
+
+  if (!auth.isAdmin && auth.node) {
+    const clientIp =
+      (request.headers.get('eo-connecting-ip') ||
+        request.headers.get('cf-connecting-ip') ||
+        request.headers.get('x-forwarded-for') ||
+        '')
+        .split(',')[0]
+        .trim() || null;
+    let usageDigest = null;
+    const usageHeader = request.headers.get('x-node-usage');
+    if (usageHeader && usageHeader.length < 8192) {
+      try {
+        usageDigest = JSON.parse(usageHeader);
+      } catch (_) {}
+    }
+    try {
+      await touchNodeLastSeen(auth.node.id, kv, config._version || 1, {
+        ip: clientIp,
+        binaryVersion: (request.headers.get('x-node-version') || '').trim(),
+        usage: usageDigest,
+      });
+    } catch (_) {}
+  }
   const scopeProvs = !auth.isAdmin ? (auth.node?.scope?.providers || ['*']) : ['*'];
   const allowAllProvs = auth.isAdmin || scopeProvs.includes('*');
 

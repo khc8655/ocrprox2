@@ -43,6 +43,8 @@
     systemUpdate: true,
   };
 
+  const SESSION_MARKER = '__cookie_session__';
+
   function isMaskedVaultToken(val) {
     if (!val || typeof val !== 'string') return false;
     return val.includes('●') || val.includes('•') || val.includes('***') || val.includes('...');
@@ -161,41 +163,63 @@
     },
 
     async login(password) {
-      HOST.setToken(password);
-      // 1. Try login on full node
-      try {
-        const res = await fetch('/api/admin/auth/login', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'authorization': `Bearer ${password}` },
-          body: JSON.stringify({ password }),
-        });
-        if (res.ok) {
-          HOST.hideLogin();
-          return { ok: true };
+      if (hostKind === 'full') {
+        try {
+          const res = await fetch('/api/admin/auth/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+          if (res.ok) {
+            HOST.setToken(SESSION_MARKER);
+            HOST.hideLogin();
+            return { ok: true };
+          }
+          if (res.status === 429) {
+            let retry = '';
+            try {
+              const body = await res.json();
+              if (body && body.retry_after_sec) retry = `（约 ${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）`;
+            } catch (_) {}
+            HOST.setToken('');
+            return { ok: false, error: `尝试过于频繁，已临时锁定${retry}` };
+          }
+          if (res.status === 401 || res.status === 403 || res.status === 503) {
+            let errMsg = '管理员凭据错误，请重试';
+            try {
+              const body = await res.json();
+              if (body && body.error && res.status === 503) errMsg = body.error;
+            } catch (_) {}
+            HOST.setToken('');
+            return { ok: false, error: errMsg };
+          }
+        } catch (err) {
+          return { ok: false, error: err.message || '网络连接失败' };
         }
-        if (res.status === 429) {
-          let retry = '';
-          try {
-            const body = await res.json();
-            if (body && body.retry_after_sec) retry = `（约 ${Math.ceil(body.retry_after_sec / 60)} 分钟后重试）`;
-          } catch (_) {}
-          HOST.setToken('');
-          return { ok: false, error: `尝试过于频繁，已临时锁定${retry}` };
-        }
-      } catch (_) {}
+      }
 
-      // 2. Validate token against /api/config
+      HOST.setToken(password);
+      // Validate Bearer token against /api/config (Hub stateless KV)
       try {
         const testRes = await fetch('/api/config', {
+          credentials: 'same-origin',
           headers: { 'authorization': `Bearer ${password}` },
         });
         if (testRes.status === 429) {
           HOST.setToken('');
           return { ok: false, error: '尝试过于频繁，已临时锁定，请稍后重试' };
         }
-        if (testRes.status === 401) {
+        if (testRes.status === 401 || testRes.status === 503) {
+          let errMsg = '管理员凭据错误，请重试';
+          if (testRes.status === 503) {
+            try {
+              const body = await testRes.json();
+              if (body && body.error) errMsg = body.error;
+            } catch (_) {}
+          }
           HOST.setToken('');
-          return { ok: false, error: '管理员凭据错误，请重试' };
+          return { ok: false, error: errMsg };
         }
         HOST.hideLogin();
         return { ok: true };
@@ -211,11 +235,12 @@
       };
 
       const token = HOST.getToken();
-      if (token && !headers['authorization']) {
+      if (token && token !== SESSION_MARKER && !headers['authorization']) {
         headers['authorization'] = `Bearer ${token}`;
       }
 
       const res = await fetch(path, {
+        credentials: 'same-origin',
         ...options,
         headers,
       });
@@ -518,10 +543,29 @@
       }
     },
 
+    async syncFromVault(opts = {}) {
+      const hubUrl = typeof opts.hubUrl === 'string' ? opts.hubUrl.trim() : '';
+      const nodeToken = typeof opts.nodeToken === 'string' ? opts.nodeToken.trim() : '';
+      const payload = {};
+      if (hubUrl) payload.hub_url = hubUrl;
+      if (nodeToken && !isMaskedVaultToken(nodeToken)) {
+        payload.node_token = nodeToken;
+      }
+      const res = await HOST.request('/api/vault/sync', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
     async logout() {
       if (hostKind === 'full') {
         try {
-          await fetch('/api/admin/auth/logout', { method: 'POST' });
+          await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'same-origin' });
         } catch (_) {}
       }
       HOST.setToken('');

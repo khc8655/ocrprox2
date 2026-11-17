@@ -4,6 +4,27 @@
 
 ---
 
+## [v20261118-02] - 2026-11-18
+
+### Changed
+- **Full 节点统一「从中枢同步」（`POST /api/vault/sync`）**：移除原先割裂且会导致全量供应商 Key 翻倍重复的「拉取中枢清单 + 从 Vault 同步密钥」双按钮流程，合并为单一「从中枢同步」原子操作，一次性拉取节点授权范围内的供应商、Vault 密钥、`agent_models` 与 `kb_models` 路由模板（完整保留 Full 本地自建供应商与本地路由），并同步刷新中枢侧节点的在线时间与二进制版本号。
+- **角色与 Key 归属边界彻底理顺**：
+  - **Hub 中枢**：移除无实际意义的“本地自用 Key / 本地供应商”概念，中枢录入资源统一作为可下发共享资源，按节点 `Scope` 精确授权；
+  - **Lite 节点**：中枢投影对 Lite 角色物理忽略 `kb_models` 固定 4 通道及 KB 并发参数（UI 明确标注「仅 Full 节点生效 · Lite 自动忽略」）；
+  - **Full 节点**：`origin="vault"` 供应商密钥池严格只读（禁止混塞本地私有 Key），本地私有 Key 统一通过新建本地供应商管理并支持干净导出备份。
+
+### Fixed
+- **UI 全流程死胡同与 409 冲突清零**：
+  - 修复含 `:` 与 `/` 的模型名（如 `deepseek-ai/DeepSeek-V3.2:free`）在展开编辑或添加时触发选择器崩溃的问题；
+  - 修复 Full 设置页「保存密钥」双重提交必现 409 CAS 冲突，以及 Hub 端「校验 Key」递增 KV 版本后未回传 `_version` 导致后续保存必现 409 的问题；
+  - 修复「探测模型」点击首个模型一键纳管后整个探测面板被重绘销毁的问题（现持久保留探测列表并标记 `✓ 已纳管`）；
+  - 清理预设列表重复项，修正 `minimax` (`api.minimax.io`) 与 `minimax-cn` (`api.minimaxi.com`) 官方域名及 `anthropic_base_url`，保留真实 `preset_id`；
+  - 修复候选 `key_label` 留空（「全部启用 Key」）时「测试路由」报 400 的问题，以及 Full 端校验/探测 Anthropic Key 缺少 `x-api-key` / `anthropic-version` 头的问题；
+  - 统一 `api_type` 真实协议能力选项（新增原生 `ocr` 类型），仅对 MiniMax 预设展示 OAuth 扫码登录，补齐添加重名模型防覆盖保护、供应商/模型 `<datalist>` 自动补全、密钥表模型级冷却状态展示与设置项数值范围校验；
+  - 修复 Full 冷启动 `.env` 注入的 `CLIENT_KEY` 在设置页显示为「未配置」且无法在 Web UI 轮换吊销的问题；Full 管理端登录改用 `HttpOnly` Cookie 会话，不再在 `localStorage` 存放明文管理员密码；空模型列表 `/v1/models` 返回标准 `data: []`。
+- **遥测统计失真修复**：`usagecount` 新增按模型独立统计 `calls / successes / failed / in_tokens / out_tokens`，消除中枢概览将失败模型按比例均摊显示为 100% 成功的失真，并在概览与节点卡片展示 `last_binary_version` 版本徽标；修复 `touchNodeLastSeen` 在 60s 内 304 续租丢弃 `X-Node-Usage` 用量的问题；修复非流式请求 `TPS` 虚高为 `20000 tok/s` 的分母计算问题。
+- **一键安装与 `llmproxy-ctl` 运维修复**：修复无控制终端 SSH/管道下 `llmproxy-ctl uninstall` 因 `/dev/tty` 报错退出的问题并新增 `-y/--yes` 参数（Lite 卸载不再产生空备份目录）；修复 `curl | sudo bash` 下 `SUDO_USER` 权限配置与普通用户执行 `llmproxy-ctl status` 误判 `8787` 端口的问题；签发 Full 节点面板自动生成并展示后台密码，补齐 Docker 部署、多架构自适应命令与客户端接入指引。
+
 ## [v20261118-01] - 2026-11-18
 
 ### Security

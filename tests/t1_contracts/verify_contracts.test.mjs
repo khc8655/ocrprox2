@@ -48,6 +48,12 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         }
       }
 
+      // Lite profile explicitly omits KB concurrency settings (Decision #2)
+      assert.strictEqual(runtimeProfiles.profiles.lite.settings.ocr_max_inflight, undefined);
+      assert.strictEqual(runtimeProfiles.profiles.lite.settings.kb_global_max_concurrency, undefined);
+      assert.strictEqual(runtimeProfiles.profiles.full.settings.ocr_max_inflight, 4);
+      assert.strictEqual(runtimeProfiles.profiles.full.settings.kb_global_max_concurrency, 16);
+
       // 3. Extract RuntimeSettings json tags from Go types.go
       const typesGoPath = join(projectRoot, 'internal/types/types.go');
       const typesGoContent = readFileSync(typesGoPath, 'utf8');
@@ -162,6 +168,7 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         'nodes_list',
         'nodes_issue',
         'node_config',
+        'vault_sync',
       ];
       for (const ep of requiredEndpoints) {
         assert.ok(contract.endpoints[ep], `contract must declare endpoint '${ep}'`);
@@ -285,12 +292,14 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const cssPath = join(adminDir, 'css/app.css');
       const hostJsPath = join(adminDir, 'js/host.js');
       const appJsPath = join(adminDir, 'js/app.js');
+      const usageJsPath = join(adminDir, 'js/usage.js');
       const distPath = join(adminDir, 'dist/index.html');
 
       const html = readFileSync(htmlPath, 'utf8');
       const css = readFileSync(cssPath, 'utf8');
       const hostJs = readFileSync(hostJsPath, 'utf8');
       const appJs = readFileSync(appJsPath, 'utf8');
+      const usageJs = readFileSync(usageJsPath, 'utf8');
 
       // 1. Zero inline style in HTML and JS
       const htmlStyleMatch = html.match(/style\s*=/i);
@@ -302,7 +311,10 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const appStyleMatch = appJs.match(/style\s*=/i);
       assert.strictEqual(appStyleMatch, null, 'app.js must have 0 style= inline attributes');
 
-      const stylePropMatch = appJs.match(/\.style\.[a-zA-Z]+/i) || hostJs.match(/\.style\.[a-zA-Z]+/i);
+      const usageStyleMatch = usageJs.match(/style\s*=/i);
+      assert.strictEqual(usageStyleMatch, null, 'usage.js must have 0 style= inline attributes');
+
+      const stylePropMatch = appJs.match(/\.style\.[a-zA-Z]+/i) || hostJs.match(/\.style\.[a-zA-Z]+/i) || usageJs.match(/\.style\.[a-zA-Z]+/i);
       assert.strictEqual(stylePropMatch, null, 'JS must have 0 .style.xxx property manipulations (use [hidden])');
 
       // 2. Zero drawer in HTML, CSS, JS

@@ -25,6 +25,7 @@ type UsageRecord struct {
 	ServedModel        string       `json:"served"`
 	Provider           string       `json:"provider"`
 	KeyID              string       `json:"key_id"`
+	Stream             bool         `json:"stream,omitempty"`
 	InTokens           int          `json:"in"`
 	OutTokens          int          `json:"out"`
 	CacheReadTokens    int          `json:"cache_read,omitempty"`
@@ -289,6 +290,7 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 		ServedModel:        trace.ServedModel,
 		Provider:           trace.WinnerProvider,
 		KeyID:              trace.WinnerKey,
+		Stream:             trace.Stream,
 		InTokens:           trace.InTokens,
 		OutTokens:          trace.OutTokens,
 		CacheReadTokens:    trace.CacheReadTokens,
@@ -344,16 +346,26 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 	}
 }
 
+// DigestModelStat holds exact per-model call/status/token counts for Hub sync reporting.
+type DigestModelStat struct {
+	Calls     int `json:"calls"`
+	Successes int `json:"successes"`
+	Failed    int `json:"failed"`
+	InTokens  int `json:"in_tokens"`
+	OutTokens int `json:"out_tokens"`
+}
+
 // UsageDigest summarizes the in-memory record window for hub reporting: which
 // models were actually served and how much traffic they carried. Kept intentionally
 // compact so it fits in a single request header.
 type UsageDigest struct {
-	Models    map[string]int `json:"models"`
-	Requests  int            `json:"requests"`
-	Successes int            `json:"successes"`
-	Failed    int            `json:"failed"`
-	InTokens  int            `json:"in_tokens"`
-	OutTokens int            `json:"out_tokens"`
+	Models     map[string]int             `json:"models"`
+	ModelStats map[string]DigestModelStat `json:"model_stats,omitempty"`
+	Requests   int                        `json:"requests"`
+	Successes  int                        `json:"successes"`
+	Failed     int                        `json:"failed"`
+	InTokens   int                        `json:"in_tokens"`
+	OutTokens  int                        `json:"out_tokens"`
 }
 
 // UsageDigest builds the digest from the in-memory ledger window.
@@ -364,9 +376,13 @@ func (m *Manager) UsageDigest() UsageDigest {
 	m.mu.Unlock()
 
 	digest := UsageDigest{Models: make(map[string]int, 16)}
+	if len(records) > 0 {
+		digest.ModelStats = make(map[string]DigestModelStat, 16)
+	}
 	for _, r := range records {
 		digest.Requests++
-		if r.Status >= 200 && r.Status < 300 {
+		ok := r.Status >= 200 && r.Status < 400
+		if ok {
 			digest.Successes++
 		} else {
 			digest.Failed++
@@ -380,6 +396,16 @@ func (m *Manager) UsageDigest() UsageDigest {
 		}
 		if model != "" {
 			digest.Models[model]++
+			st := digest.ModelStats[model]
+			st.Calls++
+			if ok {
+				st.Successes++
+			} else {
+				st.Failed++
+			}
+			st.InTokens += r.InTokens
+			st.OutTokens += r.OutTokens
+			digest.ModelStats[model] = st
 		}
 	}
 	return digest
@@ -628,9 +654,13 @@ func (m *Manager) QueryUsage(period string, tzName string) (map[string]any, erro
 		}
 		sumTotal += r.Millis
 
-		effFlow := r.FlowMillis
-		if effFlow <= 0 && r.Millis > r.TTFTMillis && r.TTFTMillis > 0 {
+		var effFlow int64
+		if r.Stream && r.TTFTMillis > 0 && r.Millis-r.TTFTMillis >= 20 {
 			effFlow = r.Millis - r.TTFTMillis
+		} else if r.FlowMillis >= 20 {
+			effFlow = r.FlowMillis
+		} else if r.Millis > 0 {
+			effFlow = r.Millis
 		}
 		if effFlow > 0 && r.OutTokens > 0 {
 			sumFlow += effFlow

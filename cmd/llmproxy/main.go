@@ -37,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261118-01"
+	version    = "v20261118-02"
 	commit     = "dev"
-	AppVersion = "2.5.0"
+	AppVersion = "2.5.1"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -221,33 +221,11 @@ func main() {
 	}
 
 	// Initialize Authenticator (D6: supports hot-reload & multi-keys)
-	cliClientKey := *clientKeyFlag
+	cliClientKey := strings.TrimSpace(*clientKeyFlag)
 	authMgr := auth.NewAuthenticator(cliClientKey, *adminPassFlag)
 
-	// Helper to dynamically update Authenticator from settings while preserving CLI/env flag precedence
 	updateAuthFromSettings := func(cfg *types.ProxyConfig) {
-		if cfg == nil {
-			return
-		}
-		primary := cliClientKey
-		var extras []string
-		if primary == "" {
-			if cfg.Settings.ClientKey != "" {
-				primary = cfg.Settings.ClientKey
-			} else if cfg.Settings.ProxyAPIKey != "" {
-				primary = cfg.Settings.ProxyAPIKey
-			}
-			extras = cfg.Settings.ProxyKeys
-		} else {
-			if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
-				extras = append(extras, cfg.Settings.ClientKey)
-			}
-			if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
-				extras = append(extras, cfg.Settings.ProxyAPIKey)
-			}
-			extras = append(extras, cfg.Settings.ProxyKeys...)
-		}
-		authMgr.UpdateClientKeys(primary, extras)
+		syncAuthKeysForRole(role, cliClientKey, cfg, authMgr)
 	}
 
 	// Initialize Config Source according to Role
@@ -278,7 +256,7 @@ func main() {
 		}
 		configSrc = localSrc
 
-		// Register hot-reload callback and sync initial settings
+		// Register hot-reload callback and sync settings
 		localSrc.OnConfigChange(updateAuthFromSettings)
 		if snap, _ := localSrc.Current(context.Background(), false); snap != nil && snap.Config != nil {
 			updateAuthFromSettings(snap.Config)
@@ -377,7 +355,7 @@ func main() {
 		}
 
 		seen := make(map[string]bool)
-		var list []ModelItem
+		list := make([]ModelItem, 0)
 		for mID, route := range snap.Config.AgentModels {
 			if route != nil && route.Enabled {
 				seen[mID] = true
@@ -487,6 +465,9 @@ func main() {
 		adminSrv.SetOAuthManager(oauthMgr)
 		adminSrv.SetBuildInfo(version, AppVersion, commit)
 		adminSrv.SetAdminPassword(*adminPassFlag)
+		if cliClientKey != "" {
+			adminSrv.SetDefaultClientKey(cliClientKey)
+		}
 		if *hubURLFlag != "" || *nodeTokenFlag != "" {
 			adminSrv.SetDefaultVault(*hubURLFlag, *nodeTokenFlag)
 		}
@@ -586,6 +567,61 @@ func listenDualStack(addr string) (net.Listener, error) {
 		},
 	}
 	return lc.Listen(context.Background(), "tcp", addr)
+}
+
+// syncAuthKeysForRole updates Authenticator client keys according to node role:
+//   - RoleFull: once Settings has any client_key / proxy_api_key / proxy_keys configured,
+//     authenticate strictly against Settings so rotating keys in Full Web UI revokes the old CLI/.env key;
+//     fall back to cliClientKey only if Settings has zero client keys configured.
+//   - RoleLite: keep cliClientKey alongside Hub-projected Settings keys.
+func syncAuthKeysForRole(role types.Role, cliClientKey string, cfg *types.ProxyConfig, authMgr *auth.Authenticator) {
+	if cfg == nil || authMgr == nil {
+		return
+	}
+	cliClientKey = strings.TrimSpace(cliClientKey)
+	settingsPrimary := strings.TrimSpace(cfg.Settings.ClientKey)
+	if settingsPrimary == "" {
+		settingsPrimary = strings.TrimSpace(cfg.Settings.ProxyAPIKey)
+	}
+
+	if role == types.RoleFull {
+		var cleanedExtras []string
+		if cfg.Settings.ProxyAPIKey != "" && strings.TrimSpace(cfg.Settings.ProxyAPIKey) != settingsPrimary {
+			cleanedExtras = append(cleanedExtras, strings.TrimSpace(cfg.Settings.ProxyAPIKey))
+		}
+		for _, pk := range cfg.Settings.ProxyKeys {
+			if t := strings.TrimSpace(pk); t != "" && t != settingsPrimary {
+				cleanedExtras = append(cleanedExtras, t)
+			}
+		}
+		if settingsPrimary != "" || len(cleanedExtras) > 0 {
+			if settingsPrimary == "" && len(cleanedExtras) > 0 {
+				settingsPrimary = cleanedExtras[0]
+				cleanedExtras = cleanedExtras[1:]
+			}
+			authMgr.UpdateClientKeys(settingsPrimary, cleanedExtras)
+			return
+		}
+		authMgr.UpdateClientKeys(cliClientKey, nil)
+		return
+	}
+
+	// RoleLite: preserve cliClientKey + Hub-projected Settings keys
+	primary := cliClientKey
+	var extras []string
+	if primary == "" {
+		primary = settingsPrimary
+		extras = cfg.Settings.ProxyKeys
+	} else {
+		if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
+			extras = append(extras, cfg.Settings.ClientKey)
+		}
+		if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
+			extras = append(extras, cfg.Settings.ProxyAPIKey)
+		}
+		extras = append(extras, cfg.Settings.ProxyKeys...)
+	}
+	authMgr.UpdateClientKeys(primary, extras)
 }
 
 func envOr(key, fallback string) string {

@@ -54,6 +54,7 @@ export async function handleNodesRequest(request, env, kv, params) {
           ok: true,
           node: res.node,
           node_token: res.node_token,
+          client_key: res.client_key,
           bootstrap_env: res.bootstrap_env,
           install_command: res.install_command,
         }),
@@ -85,6 +86,7 @@ export async function handleNodesRequest(request, env, kv, params) {
       JSON.stringify({
         ok: true,
         node_token: res.node_token,
+        client_key: res.client_key,
         bootstrap_env: res.bootstrap_env,
         install_command: res.install_command,
       }),

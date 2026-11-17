@@ -422,12 +422,13 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 		}
 		var res struct {
 			OK        bool   `json:"ok"`
+			Version   int64  `json:"_version"`
 			ClientKey string `json:"client_key"`
 			Masked    string `json:"masked"`
 		}
 		_ = json.NewDecoder(rec.Body).Decode(&res)
-		if !res.OK || !strings.HasPrefix(res.ClientKey, "sk-llmproxy-") {
-			t.Fatalf("unexpected generated key: %s", res.ClientKey)
+		if !res.OK || res.Version < 2 || !strings.HasPrefix(res.ClientKey, "sk-llmproxy-") {
+			t.Fatalf("unexpected generated key resp: %+v", res)
 		}
 		generatedKey = res.ClientKey
 
@@ -454,6 +455,27 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 		testReq.Header.Set("Authorization", "Bearer "+customKey)
 		if !authMgr.VerifyClientKey(testReq) {
 			t.Fatalf("expected authMgr to verify custom client key")
+		}
+	}
+
+	// 4. P1-6: POST /api/admin/access-key with empty client_key and generate=false clears key (no surprise random generation)
+	{
+		body, _ := json.Marshal(map[string]any{"client_key": "", "generate": false})
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/access-key", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer admin-pass")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for clearing client_key, got %d", rec.Code)
+		}
+		var res struct {
+			OK        bool   `json:"ok"`
+			Version   int64  `json:"_version"`
+			ClientKey string `json:"client_key"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&res)
+		if !res.OK || res.ClientKey != "" || res.Version < 4 {
+			t.Fatalf("expected cleared client_key='' with incremented _version, got %+v", res)
 		}
 	}
 }

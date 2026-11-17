@@ -1,6 +1,7 @@
 import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
+import { touchNodeLastSeen } from '../../lib/nodes.js';
 
 export async function handleVaultFetchRequest(request, env, kv) {
   const auth = await checkVaultAuth(request, env, kv);
@@ -35,6 +36,23 @@ export async function handleVaultFetchRequest(request, env, kv) {
   }
 
   const config = await loadConfig(kv);
+
+  if (!auth.isAdmin && auth.node) {
+    const clientIp =
+      (request.headers.get('eo-connecting-ip') ||
+        request.headers.get('cf-connecting-ip') ||
+        request.headers.get('x-forwarded-for') ||
+        '')
+        .split(',')[0]
+        .trim() || null;
+    try {
+      await touchNodeLastSeen(auth.node.id, kv, config._version || 1, {
+        ip: clientIp,
+        binaryVersion: (request.headers.get('x-node-version') || '').trim(),
+      });
+    } catch (_) {}
+  }
+
   const pData = config.providers?.[provider];
 
   if (!pData || pData.origin === 'local' || pData.is_local) {

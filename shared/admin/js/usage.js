@@ -35,6 +35,25 @@
     if (el) el.textContent = val;
   }
 
+  // Guard non-stream / ultra-short flow TPS calculation so (total_ms - ttft_ms < 20)
+  // uses total_ms instead of a 1ms denominator.
+  function resolveSafeTps(reportedTps, outTokens, totalMs, ttftMs) {
+    const out = Number(outTokens) || 0;
+    const tot = Number(totalMs) || 0;
+    const ttft = Number(ttftMs) || 0;
+    const raw = Number(reportedTps) || 0;
+    if (out > 0 && tot > 0 && (tot - ttft) < 20) {
+      const safe = (out * 1000) / tot;
+      if (raw <= 0 || raw > safe * 4) return safe;
+    }
+    if (raw > 0) return raw;
+    if (out > 0 && tot > 0) {
+      const genMs = (tot - ttft) < 20 ? tot : (tot - ttft);
+      return genMs > 0 ? (out * 1000) / genMs : 0;
+    }
+    return 0;
+  }
+
   function renderKPIs(usage, meta = {}) {
     const totals = usage?.totals || {};
     const reqs = totals.requests || 0;
@@ -60,7 +79,7 @@
     const avgQueued = totals.avg_queued_ms || 0;
     const avgOwn = totals.avg_own_ms || 0;
     const avgSent = totals.avg_sent_ms || 0;
-    const tps = totals.tps || totals.tok_per_sec || 0;
+    const tps = resolveSafeTps(totals.tps || totals.tok_per_sec || 0, outT, avgTotal, avgTtft);
     const upBytes = totals.up_bytes || 0;
     const downBytes = totals.down_bytes || 0;
 
@@ -309,13 +328,14 @@
       const failCount = p.failed || 0;
 
       const timeLabel = p.label || (p.timestamp ? new Date(p.timestamp * 1000).toLocaleDateString() : `#${idx + 1}`);
+      const safeBarTps = resolveSafeTps(p.tps || 0, outTok, p.avg_total_ms || 0, p.avg_ttft_ms || 0);
       const title = document.createElementNS(svgNs, 'title');
       title.textContent = [
         timeLabel,
         `请求: ${reqCount} (成功 ${succCount}, 失败 ${failCount})`,
         `Tokens: 输入 ${fmtN(inTok)} · 缓存读 ${fmtN(cRead)} · 缓存写 ${fmtN(cWrite)} · 输出 ${fmtN(outTok)}`,
         p.avg_ttft_ms ? `平均 TTFT: ${Math.round(p.avg_ttft_ms)}ms` : '',
-        p.tps ? `平均 TPS: ${p.tps} tok/s` : '',
+        safeBarTps > 0 ? `平均 TPS: ${safeBarTps.toFixed(1)} tok/s` : '',
       ].filter(Boolean).join('\n');
       g.appendChild(title);
 
@@ -386,7 +406,7 @@
     const retried = s.retried || 0;
     const avgTtft = s.avg_ttft_ms || 0;
     const avgTotal = s.avg_total_ms || (reqs > 0 && s.total_ms ? Math.round(s.total_ms / reqs) : 0);
-    const tps = s.tps || 0;
+    const tps = resolveSafeTps(s.tps || 0, outTokens, avgTotal, avgTtft);
     const cacheHitRate = s.cache_hit_rate !== undefined
       ? s.cache_hit_rate
       : (inTokens + cacheRead > 0 ? cacheRead / (inTokens + cacheRead) : 0);

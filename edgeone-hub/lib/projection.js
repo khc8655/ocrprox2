@@ -6,7 +6,11 @@
  * 2. SCOPE ISOLATION: Nodes only receive providers and models allowed in their scope.
  */
 
+const FIXED_KB_CHANNELS = ['chat', 'ocr', 'embedding', 'reranker'];
+const FIXED_KB_SET = new Set(FIXED_KB_CHANNELS);
+
 export function projectConfigForNode(node, config, presetsMap = {}) {
+  const isFullNode = node?.role === 'full';
   const scopeProviders = node.scope?.providers || ['*'];
   const scopeModels = node.scope?.models || ['*'];
 
@@ -21,7 +25,7 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     if (!pData) continue;
 
     // 1. Physical zero-leak check on provider
-    if (pData.origin === 'local') {
+    if (pData.origin === 'local' || pData.is_local) {
       continue;
     }
 
@@ -34,7 +38,7 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     const rawKeys = Array.isArray(pData.api_keys) ? pData.api_keys : [];
     const validKeys = rawKeys.filter((k) => {
       if (!k || !k.enabled) return false;
-      if (k.origin === 'local') return false;
+      if (k.origin === 'local' || k.is_local) return false;
       if (!k.key) return false;
       return true;
     });
@@ -88,11 +92,12 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     projectedProviders[pId] = projectedProvider;
   }
 
-  // Filter agent_models by scope
+  // Filter agent_models by scope (Lite ignores fixed KB 4-channels)
   const projectedModels = {};
   const sourceModels = config.agent_models || {};
   for (const [mName, mRoute] of Object.entries(sourceModels)) {
     if (!mRoute || !mRoute.enabled) continue;
+    if (!isFullNode && FIXED_KB_SET.has(mName)) continue;
 
     if (!allowAllModels && !scopeModels.includes(mName)) {
       continue;
@@ -113,14 +118,54 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
       };
       if (mRoute.no_reasoning) projectedRoute.no_reasoning = true;
       if (mRoute.force_non_stream) projectedRoute.force_non_stream = true;
+      if (mRoute.allow_key_fallback) projectedRoute.allow_key_fallback = true;
       projectedModels[mName] = projectedRoute;
     }
   }
 
-  return {
+  // Project settings according to node role
+  const projectedSettings = { ...(config.settings || {}) };
+  if (!isFullNode) {
+    delete projectedSettings.ocr_max_inflight;
+    delete projectedSettings.kb_global_max_concurrency;
+  }
+
+  const out = {
     providers: projectedProviders,
     agent_models: projectedModels,
-    settings: config.settings || {},
+    settings: projectedSettings,
     adapter_rules: projectedAdapterRules,
   };
+
+  // Full nodes also receive projected kb_models (chat, ocr, embedding, reranker)
+  if (isFullNode) {
+    const projectedKbModels = {};
+    const sourceKb = config.kb_models || {};
+    for (const cat of FIXED_KB_CHANNELS) {
+      if (!allowAllModels && !scopeModels.includes(cat)) continue;
+      if (Array.isArray(sourceKb[cat]) && sourceKb[cat].length > 0) {
+        const validKb = sourceKb[cat]
+          .filter((c) => c && c.enabled !== false && Boolean(projectedProviders[c.provider]))
+          .map((c) => ({
+            provider: c.provider,
+            key_label: c.key_label || c.key || '',
+            model: c.model || c.target_model || '',
+            ...(c.max_concurrency ? { max_concurrency: Number(c.max_concurrency) } : {}),
+            enabled: true,
+          }));
+        if (validKb.length > 0) projectedKbModels[cat] = validKb;
+      } else if (projectedModels[cat]?.candidates?.length > 0) {
+        projectedKbModels[cat] = projectedModels[cat].candidates.map((c) => ({
+          provider: c.provider,
+          key_label: c.key_label || '',
+          model: c.target_model || c.model || '',
+          ...(c.max_concurrency ? { max_concurrency: Number(c.max_concurrency) } : {}),
+          enabled: true,
+        }));
+      }
+    }
+    out.kb_models = projectedKbModels;
+  }
+
+  return out;
 }

@@ -189,15 +189,31 @@ func TestCatalog_AndPresetAdapterRules(t *testing.T) {
 	}
 
 	expectedIDs := []string{
-		"openai", "anthropic", "google", "vertex", "deepseek",
-		"minimax", "minimax-cn", "moonshot", "moonshot-cn", "zhipu",
-		"volcengine", "bailian-token-plan", "qwen", "openrouter",
-		"siliconflow", "stepfun", "groq", "nvidia",
+		"amd", "anthropic", "baidu-qianfan", "bailian-token-plan", "bedrock",
+		"deepseek", "google", "minimax", "minimax-cn", "moonshot", "nvidia",
+		"openai", "openrouter", "siliconflow", "tencent-cloud", "vertex",
+		"volcengine", "zai", "zhipu", "stepfun", "qwen", "groq", "moonshot-cn",
 	}
 	for _, id := range expectedIDs {
-		if p := FindPreset(id); p == nil || p.ID != id {
+		p := FindPreset(id)
+		if p == nil || p.ID != id {
 			t.Errorf("FindPreset(%q) failed: %+v", id, p)
+			continue
 		}
+		if p.BaseURL == "" {
+			t.Errorf("preset %q missing canonical BaseURL", id)
+		}
+	}
+
+	// Verify canonical URLs and AnthropicBaseURL alignment
+	if mm := FindPreset("minimax"); mm == nil || mm.BaseURL != "https://api.minimax.io/v1" || mm.AnthropicBaseURL != "https://api.minimax.io/anthropic" {
+		t.Fatalf("unexpected minimax preset URLs: %+v", mm)
+	}
+	if mmCN := FindPreset("minimax-cn"); mmCN == nil || mmCN.BaseURL != "https://api.minimaxi.com/v1" || mmCN.AnthropicBaseURL != "https://api.minimaxi.com/anthropic" {
+		t.Fatalf("unexpected minimax-cn preset URLs: %+v", mmCN)
+	}
+	if anth := FindPreset("anthropic"); anth == nil || anth.AnthropicBaseURL != "https://api.anthropic.com" {
+		t.Fatalf("unexpected anthropic preset URLs: %+v", anth)
 	}
 
 	// Verify DefaultPresetAdapterRules covers critical presets

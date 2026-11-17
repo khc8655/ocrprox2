@@ -19,10 +19,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-SCRIPT_VERSION="v20261117-02"
+SCRIPT_VERSION="v20261118-02"
 TARGET_DIR="/usr/local/bin"
 BIN_NAME="llmproxy"
 CTL_NAME="llmproxy-ctl"
+PORT_HINT_FILE="/etc/default/llmproxy-port"
 GITHUB_REPO="${GITHUB_REPO:-khc8655/ocrprox2}"
 
 info()     { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -43,6 +44,16 @@ run_sudo() {
 }
 
 CURRENT_USER=$(whoami 2>/dev/null || id -un 2>/dev/null || echo "root")
+AUTO_GENERATED_ADMIN_PASS=false
+
+write_port_hint() {
+    local port="$1"
+    if [[ -n "$port" && "$port" =~ ^[0-9]+$ ]]; then
+        run_sudo mkdir -p /etc/default 2>/dev/null || true
+        printf '%s\n' "$port" | run_sudo tee "$PORT_HINT_FILE" >/dev/null 2>&1 || true
+        run_sudo chmod 644 "$PORT_HINT_FILE" 2>/dev/null || true
+    fi
+}
 
 # 随机安全字符串生成器
 gen_random_str() {
@@ -52,14 +63,14 @@ gen_random_str() {
     date +%s%N | sha256sum 2>/dev/null | head -c "$len"
 }
 
-# 安全交互输入工具：支持 curl ... | bash 管道场景，强制从 /dev/tty 读取
+# 安全交互输入工具：支持 curl ... | bash 管道场景，探测真实控制终端
 safe_read() {
     local prompt="$1"
     local var_name="$2"
     local input_val=""
     if [ -t 0 ]; then
         read -r -p "$prompt" input_val
-    elif [ -r /dev/tty ]; then
+    elif (exec </dev/tty) 2>/dev/null; then
         read -r -p "$prompt" input_val < /dev/tty
     else
         input_val=""
@@ -536,9 +547,11 @@ setup_cli_and_sudoers() {
     local sudoers_file="/etc/sudoers.d/llmproxy"
 
     if [[ -d /etc/sudoers.d ]]; then
-        # SEC-11: 绝不授予 llmproxy 服务运行账号任何 sudo 权限；仅对非 root 安装者授予无通配符的精确固定命令
-        if [[ "$CURRENT_USER" != "root" && "$CURRENT_USER" != "llmproxy" && "$CURRENT_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-            local expected_rule="${CURRENT_USER} ALL=(root) NOPASSWD: /bin/systemctl restart llmproxy-full, /usr/bin/systemctl restart llmproxy-full, /bin/systemctl restart llmproxy-lite, /usr/bin/systemctl restart llmproxy-lite, /bin/systemctl stop llmproxy-full, /usr/bin/systemctl stop llmproxy-full, /bin/systemctl stop llmproxy-lite, /usr/bin/systemctl stop llmproxy-lite, /bin/systemctl start llmproxy-full, /usr/bin/systemctl start llmproxy-full, /bin/systemctl start llmproxy-lite, /usr/bin/systemctl start llmproxy-lite, /bin/systemctl status llmproxy-full --no-pager, /usr/bin/systemctl status llmproxy-full --no-pager, /bin/systemctl status llmproxy-lite --no-pager, /usr/bin/systemctl status llmproxy-lite --no-pager, /bin/systemctl daemon-reload, /usr/bin/systemctl daemon-reload"
+        # SEC-11 / P0-09: 通过 SUDO_USER 识别 curl | sudo bash 下的真实操作用户；
+        # 绝不授予 llmproxy 服务运行账号任何 sudo 权限，仅授予无通配符的精确固定命令。
+        local target_user="${SUDO_USER:-$(whoami 2>/dev/null || id -un 2>/dev/null || echo root)}"
+        if [[ -n "$target_user" && "$target_user" != "root" && "$target_user" != "llmproxy" && "$target_user" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            local expected_rule="${target_user} ALL=(root) NOPASSWD: /bin/systemctl restart llmproxy-full, /usr/bin/systemctl restart llmproxy-full, /bin/systemctl restart llmproxy-lite, /usr/bin/systemctl restart llmproxy-lite, /bin/systemctl stop llmproxy-full, /usr/bin/systemctl stop llmproxy-full, /bin/systemctl stop llmproxy-lite, /usr/bin/systemctl stop llmproxy-lite, /bin/systemctl start llmproxy-full, /usr/bin/systemctl start llmproxy-full, /bin/systemctl start llmproxy-lite, /usr/bin/systemctl start llmproxy-lite, /bin/systemctl status llmproxy-full --no-pager, /usr/bin/systemctl status llmproxy-full --no-pager, /bin/systemctl status llmproxy-lite --no-pager, /usr/bin/systemctl status llmproxy-lite --no-pager, /bin/systemctl daemon-reload, /usr/bin/systemctl daemon-reload, ${ctl_path} status, ${ctl_path} restart, ${ctl_path} upgrade, ${ctl_path} update, ${ctl_path} uninstall -y, ${ctl_path} uninstall --yes, ${ctl_path} uninstall -y --keep-config, ${ctl_path} uninstall --keep-config -y"
             local tmp_sudoers
             tmp_sudoers=$(umask 077 && mktemp /tmp/llmproxy_sudoers_XXXXXX)
             printf '%s\n' "$expected_rule" > "$tmp_sudoers"
@@ -605,6 +618,14 @@ detect_service() {
 get_port() {
     local service="$1"
     local port="8787"
+    if [[ -r /etc/default/llmproxy-port ]]; then
+        local ph
+        ph=$(tr -d '[:space:]' < /etc/default/llmproxy-port 2>/dev/null || true)
+        if [[ "$ph" =~ ^[0-9]+$ ]]; then
+            echo "$ph"
+            return 0
+        fi
+    fi
     for env_file in "/etc/llmproxy/.env" "/opt/llmproxy/.env"; do
         if [[ -f "$env_file" ]]; then
             local p
@@ -774,19 +795,26 @@ case "$1" in
     uninstall)
         shift
         KEEP_CONFIG=false
-        for opt in "$@"; do
-            [[ "$opt" == "--keep-config" ]] && KEEP_CONFIG=true
+        ASSUME_YES=0
+        for arg in "$@"; do
+            case "$arg" in
+                --keep-config) KEEP_CONFIG=true ;;
+                -y|--yes) ASSUME_YES=1 ;;
+            esac
         done
-        if [ -t 0 ] || [ -r /dev/tty ]; then
-            if [ -t 0 ]; then
-                read -r -p "确定要卸载 LLMProxy2 服务吗？(y/N): " CONFIRM
-            else
-                read -r -p "确定要卸载 LLMProxy2 服务吗？(y/N): " CONFIRM < /dev/tty
-            fi
-            if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
-                echo "已取消卸载。"
-                exit 0
-            fi
+        if [ "${ASSUME_YES:-0}" = "1" ]; then
+            confirm="y"
+        elif [ -t 0 ]; then
+            read -r -p "确定要完全卸载 LLMProxy2 服务及二进制文件吗？[y/N]: " confirm
+        elif (exec </dev/tty) 2>/dev/null; then
+            read -r -p "确定要完全卸载 LLMProxy2 服务及二进制文件吗？[y/N]: " confirm </dev/tty
+        else
+            echo "错误: 当前为非交互终端，请使用 'llmproxy-ctl uninstall -y' 确认卸载。" >&2
+            exit 1
+        fi
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "已取消卸载。"
+            exit 0
         fi
         echo -e "${YELLOW}正在停止并注销 LLMProxy 服务...${NC}"
         run_cmd systemctl stop llmproxy-full 2>/dev/null || true
@@ -796,19 +824,27 @@ case "$1" in
         run_cmd rm -f /etc/systemd/system/llmproxy-full.service /etc/systemd/system/llmproxy-lite.service
         run_cmd systemctl daemon-reload 2>/dev/null || true
 
-        run_cmd rm -f /usr/local/bin/llmproxy
-        run_cmd rm -f /etc/sudoers.d/llmproxy
+        run_cmd rm -f /usr/local/bin/llmproxy /opt/llmproxy/bin/llmproxy 2>/dev/null || true
+        run_cmd rm -f /etc/sudoers.d/llmproxy /etc/default/llmproxy-port 2>/dev/null || true
 
         if [[ "$KEEP_CONFIG" == "true" ]]; then
             echo -e "${GREEN}✔ 配置文件已保留在现有配置目录${NC}"
         else
-            BK=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
-            chmod 700 "$BK"
-            [[ -d /etc/llmproxy ]] && run_cmd cp -r /etc/llmproxy "$BK/" 2>/dev/null || true
-            [[ -d /opt/llmproxy ]] && run_cmd cp -r /opt/llmproxy "$BK/" 2>/dev/null || true
-            run_cmd chmod -R go-rwx "$BK" 2>/dev/null || true
-            echo -e "配置数据已安全归档至: $BK"
-            run_cmd rm -rf /etc/llmproxy /opt/llmproxy
+            HAS_CFG=false
+            if run_cmd sh -c '[ -d /etc/llmproxy ] && [ -n "$(ls -A /etc/llmproxy 2>/dev/null)" ]' 2>/dev/null; then
+                HAS_CFG=true
+            elif run_cmd sh -c '[ -d /opt/llmproxy ] && [ -n "$(ls -A /opt/llmproxy 2>/dev/null)" ]' 2>/dev/null; then
+                HAS_CFG=true
+            fi
+            if [[ "$HAS_CFG" == "true" ]]; then
+                BK=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
+                chmod 700 "$BK"
+                [[ -d /etc/llmproxy ]] && run_cmd cp -r /etc/llmproxy "$BK/" 2>/dev/null || true
+                [[ -d /opt/llmproxy ]] && run_cmd cp -r /opt/llmproxy "$BK/" 2>/dev/null || true
+                run_cmd chmod -R go-rwx "$BK" 2>/dev/null || true
+                echo -e "配置数据已安全归档至: $BK"
+            fi
+            run_cmd rm -rf /etc/llmproxy /opt/llmproxy 2>/dev/null || true
             echo -e "${GREEN}✔ 相关配置已清理完毕${NC}"
         fi
         run_cmd rm -f /usr/local/bin/llmproxy-ctl
@@ -821,11 +857,11 @@ case "$1" in
         echo "用法: llmproxy-ctl <命令> [选项]"
         echo ""
         echo "可用命令:"
-        echo "  status                      查看服务运行状态与 /healthz 健康检查"
-        echo "  log [lines]                 查看实时运行日志 (默认 100 行, Ctrl+C 退出)"
-        echo "  restart                     平滑重启代理服务"
-        echo "  upgrade                     从 GitHub Releases 升级最新版本并平滑重启"
-        echo "  uninstall [--keep-config]   卸载 LLMProxy2 服务"
+        echo "  status                          查看服务运行状态与 /healthz 健康检查"
+        echo "  log [lines]                     查看实时运行日志 (默认 100 行, Ctrl+C 退出)"
+        echo "  restart                         平滑重启代理服务"
+        echo "  upgrade                         从 GitHub Releases 升级最新版本并平滑重启"
+        echo "  uninstall [-y] [--keep-config]  卸载 LLMProxy2 服务"
         echo -e "${CYAN}${BOLD}================================================================${NC}"
         ;;
 esac
@@ -874,6 +910,9 @@ print_summary_banner() {
     echo -e "  🔑 客户端密钥 (Client)  : ${YELLOW}${masked_key}${NC} (已脱敏保护)"
     if [[ "$role" == "full" ]]; then
         echo -e "  🔒 后台密码 (Admin)     : ${YELLOW}********${NC} (已脱敏保护，受限存储于配置文件)"
+        if [[ "$AUTO_GENERATED_ADMIN_PASS" == "true" ]]; then
+            echo -e "  💡 查看后台密码: sudo grep ADMIN_PASSWORD ${env_file:-/etc/llmproxy/.env}"
+        fi
         echo -e "  📁 配置文件 (Config)    : ${BOLD}${env_file}${NC} (权限: 0600)"
         if [[ -n "$FINAL_HUB_URL" ]]; then
             echo -e "  🔗 Vault 中枢 (Hub)     : ${CYAN}${FINAL_HUB_URL}${NC} (已预绑定)"
@@ -888,7 +927,7 @@ print_summary_banner() {
     echo -e "     查看实时运行日志:   ${BOLD}llmproxy-ctl log${NC}"
     echo -e "     平滑重启代理服务:   ${BOLD}llmproxy-ctl restart${NC}"
     echo -e "     一键升级最新版本:   ${BOLD}llmproxy-ctl upgrade${NC}"
-    echo -e "     卸载清理代理服务:   ${BOLD}llmproxy-ctl uninstall [--keep-config]${NC}"
+    echo -e "     卸载清理代理服务:   ${BOLD}llmproxy-ctl uninstall [-y] [--keep-config]${NC}"
     echo "=============================================================================="
     echo ""
 }
@@ -907,12 +946,18 @@ if [[ "$CLI_ACTION" == "uninstall" ]]; then
         exit 0
     fi
 
-    if [[ "$NON_INTERACTIVE" != "true" && ( -t 0 || -r /dev/tty ) ]]; then
-        safe_read "确定要卸载 LLMProxy2 服务吗？(y/N): " CONFIRM
-        if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
-            info "已取消卸载。"
-            exit 0
-        fi
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        CONFIRM="y"
+    elif [ -t 0 ]; then
+        read -r -p "确定要完全卸载 LLMProxy2 服务及二进制文件吗？[y/N]: " CONFIRM
+    elif (exec </dev/tty) 2>/dev/null; then
+        read -r -p "确定要完全卸载 LLMProxy2 服务及二进制文件吗？[y/N]: " CONFIRM </dev/tty
+    else
+        error "当前为非交互终端，请使用 'install.sh uninstall -y' 确认卸载。"
+    fi
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        info "已取消卸载。"
+        exit 0
     fi
 
     info "正在停止并注销 LLMProxy 服务..."
@@ -929,17 +974,25 @@ if [[ "$CLI_ACTION" == "uninstall" ]]; then
     run_sudo rm -f "${TARGET_DIR}/${BIN_NAME}"
     run_sudo rm -f "${TARGET_DIR}/${CTL_NAME}"
     run_sudo rm -f "/opt/llmproxy/bin/llmproxy" 2>/dev/null || true
-    run_sudo rm -f "/etc/sudoers.d/llmproxy" 2>/dev/null || true
+    run_sudo rm -f "/etc/sudoers.d/llmproxy" "$PORT_HINT_FILE" 2>/dev/null || true
 
     if [[ "$KEEP_CONFIG" == "true" ]]; then
         ok "服务已卸载，您的配置文件与密钥安全保留在现有配置目录中。"
     else
-        BACKUP_EXPORT=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
-        chmod 700 "$BACKUP_EXPORT"
-        [[ -d /etc/llmproxy ]] && run_sudo cp -r /etc/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
-        [[ -d /opt/llmproxy ]] && run_sudo cp -r /opt/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
-        run_sudo chmod -R go-rwx "$BACKUP_EXPORT" 2>/dev/null || true
-        info "配置数据已安全归档备份至: $BACKUP_EXPORT"
+        HAS_CFG=false
+        if run_sudo sh -c '[ -d /etc/llmproxy ] && [ -n "$(ls -A /etc/llmproxy 2>/dev/null)" ]' 2>/dev/null; then
+            HAS_CFG=true
+        elif run_sudo sh -c '[ -d /opt/llmproxy ] && [ -n "$(ls -A /opt/llmproxy 2>/dev/null)" ]' 2>/dev/null; then
+            HAS_CFG=true
+        fi
+        if [[ "$HAS_CFG" == "true" ]]; then
+            BACKUP_EXPORT=$(umask 077 && mktemp -d /tmp/llmproxy_backup_XXXXXX)
+            chmod 700 "$BACKUP_EXPORT"
+            [[ -d /etc/llmproxy ]] && run_sudo cp -r /etc/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
+            [[ -d /opt/llmproxy ]] && run_sudo cp -r /opt/llmproxy "$BACKUP_EXPORT/" 2>/dev/null || true
+            run_sudo chmod -R go-rwx "$BACKUP_EXPORT" 2>/dev/null || true
+            info "配置数据已安全归档备份至: $BACKUP_EXPORT"
+        fi
         run_sudo rm -rf /etc/llmproxy /opt/llmproxy 2>/dev/null || true
         ok "LLMProxy2 已完全卸载！"
     fi
@@ -1072,7 +1125,8 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
         run_sudo chmod +x /opt/llmproxy/bin/llmproxy
     fi
 
-    # 注册或更新全局 CLI 与免密规则
+    # 注册或更新全局 CLI 与免密规则，写入非机密端口提示文件
+    write_port_hint "$FINAL_PORT"
     setup_cli_and_sudoers
 
     # 出站网络调优
@@ -1124,7 +1178,7 @@ optimize_network_routing
 
 # 判断是否需要进入交互向导
 NEED_WIZARD=false
-if [[ "$NON_INTERACTIVE" != "true" && ( -t 0 || -r /dev/tty ) ]]; then
+if [[ "$NON_INTERACTIVE" != "true" ]] && { [ -t 0 ] || (exec </dev/tty) 2>/dev/null; }; then
     if [[ -z "$CLI_ROLE" || -z "$CLI_PORT" || -z "$CLI_CLIENT_KEY" ]]; then
         NEED_WIZARD=true
     fi
@@ -1182,6 +1236,7 @@ if [[ "$NEED_WIZARD" == "true" ]]; then
             safe_read "请输入管理控制台密码 / Enter admin password (直接回车自动生成 / Enter for auto): " INPUT_PASS
             if [[ -z "$INPUT_PASS" ]]; then
                 FINAL_ADMIN_PASS="$(gen_random_str 24)"
+                AUTO_GENERATED_ADMIN_PASS=true
                 info "已自动生成管理员密码"
             else
                 FINAL_ADMIN_PASS="$INPUT_PASS"
@@ -1229,7 +1284,12 @@ else
     FINAL_ROLE="${CLI_ROLE:-full}"
     FINAL_PORT="${CLI_PORT:-8787}"
     FINAL_CLIENT_KEY="${CLI_CLIENT_KEY:-sk-llmproxy-$(gen_random_str 32)}"
-    FINAL_ADMIN_PASS="${CLI_ADMIN_PASS:-$(gen_random_str 24)}"
+    if [[ -n "$CLI_ADMIN_PASS" ]]; then
+        FINAL_ADMIN_PASS="$CLI_ADMIN_PASS"
+    else
+        FINAL_ADMIN_PASS="$(gen_random_str 24)"
+        AUTO_GENERATED_ADMIN_PASS=true
+    fi
     FINAL_ENCRYPT_KEY="${CLI_ENCRYPT_KEY:-$FINAL_ADMIN_PASS}"
     FINAL_CONFIG_DIR="${CLI_CONFIG_DIR:-/etc/llmproxy}"
     if [[ "$FINAL_ROLE" == "full" ]]; then
@@ -1376,7 +1436,8 @@ fi
 # 安装二进制
 resolve_binary "${TARGET_DIR}/${BIN_NAME}"
 
-# 注册管理工具与免密规则
+# 注册管理工具与免密规则，写入非机密端口提示文件
+write_port_hint "$FINAL_PORT"
 setup_cli_and_sudoers
 
 # 启动并激活服务

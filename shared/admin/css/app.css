@@ -1055,6 +1055,12 @@ input[type="checkbox"] {
   color: var(--khc-primary-500);
 }
 
+.probe-pill--managed {
+  background-color: var(--khc-success-bg);
+  color: var(--khc-success-text);
+  border-color: transparent;
+}
+
 /* Details & Code Snippets */
 .headers-details {
   border: 1px solid var(--khc-border-1);

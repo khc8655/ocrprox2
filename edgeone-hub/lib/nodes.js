@@ -6,6 +6,16 @@ import {
 
 export const NODES_KV_KEY = 'relay_nodes';
 
+export function generateClientKey() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return `sk-llmproxy-${hex}`;
+}
+
 function sanitizeNode(n) {
   const copy = { ...n };
   delete copy.token_sha256;
@@ -139,19 +149,21 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', 
   nodes.push(node);
   await saveNodes(nodes, kv);
 
-  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
-  const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
+  const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
 
   return {
     node: sanitizeNode(node),
     node_token: rawToken,
+    client_key: effectiveClientKey,
     bootstrap_env: bootstrapEnv,
     install_command: installCommand,
   };
 }
 
 /**
- * Update an existing node.
+ * Update an existing node (preserving last_seen / last_config_version across revoke/restore).
  */
 export async function patchNode(nodeId, patch, kv) {
   const nodes = await loadNodes(kv);
@@ -159,6 +171,8 @@ export async function patchNode(nodeId, patch, kv) {
   if (idx === -1) return null;
 
   const node = nodes[idx];
+  const prevLastSeen = node.last_seen ?? null;
+  const prevConfigVer = node.last_config_version ?? 0;
   if (patch.name !== undefined) node.name = String(patch.name);
   if (patch.role === 'full' || patch.role === 'lite') {
     node.role = patch.role;
@@ -175,6 +189,8 @@ export async function patchNode(nodeId, patch, kv) {
       providers: Array.isArray(patch.scope.providers) ? patch.scope.providers : (existingScope.providers || ['*']),
     };
   }
+  node.last_seen = prevLastSeen;
+  node.last_config_version = prevConfigVer;
 
   nodes[idx] = node;
   await saveNodes(nodes, kv);
@@ -203,11 +219,13 @@ export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.
   nodes[idx] = node;
   await saveNodes(nodes, kv);
 
-  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
-  const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
+  const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+  const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
 
   return {
     node_token: rawToken,
+    client_key: effectiveClientKey,
     bootstrap_env: bootstrapEnv,
     install_command: installCommand,
   };
@@ -240,15 +258,24 @@ export async function findNodeByToken(rawToken, kv) {
 }
 
 /**
- * Update node last_seen and sync telemetry (throttled on repeated 304s to avoid excessive KV writes).
+ * Update node last_seen and sync telemetry (throttled only on idle 304s without usage or version change).
  */
-export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
+export async function touchNodeLastSeen(nodeId, kv, configVerOrMeta = 0, maybeMeta = {}) {
+  const configVer = typeof configVerOrMeta === 'number' ? configVerOrMeta : 0;
+  const meta = configVerOrMeta && typeof configVerOrMeta === 'object' ? configVerOrMeta : (maybeMeta || {});
+
   const nodes = await loadNodes(kv);
   const node = nodes.find((n) => n.id === nodeId);
   if (!node) return;
 
   const now = Date.now();
   const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
+  const prevBinVer = node.last_binary_version || '';
+  const cleanBinVer = meta && meta.binaryVersion
+    ? String(meta.binaryVersion).replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 32)
+    : '';
+  const hasBinVerChange = Boolean(cleanBinVer && cleanBinVer !== prevBinVer);
+  const hasUsage = Boolean(meta && meta.usage && typeof meta.usage === 'object');
 
   node.sync_count = (Number(node.sync_count) || 0) + 1;
   if (meta && meta.is304) {
@@ -257,12 +284,11 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
   if (meta && meta.ip) {
     node.last_ip = String(meta.ip);
   }
-  if (meta && meta.binaryVersion) {
-    node.last_binary_version = String(meta.binaryVersion).replace(/[<>"'&\x00-\x1f\x7f]/g, '').slice(0, 32);
+  if (cleanBinVer) {
+    node.last_binary_version = cleanBinVer;
   }
-  // Usage digest reported by the node on each sync (models actually served, with
-  // request counts). Absent on older nodes, which simply omit it.
-  if (meta && meta.usage && typeof meta.usage === 'object') {
+  // Usage digest reported by the node on each sync (models + per-model stats).
+  if (hasUsage) {
     const models = {};
     const raw = meta.usage.models && typeof meta.usage.models === 'object' ? meta.usage.models : {};
     let guard = 0;
@@ -274,8 +300,34 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
       models[cleanModel] = Math.floor(count);
       guard += 1;
     }
+
+    let modelStats = null;
+    const rawStats = meta.usage.model_stats && typeof meta.usage.model_stats === 'object' ? meta.usage.model_stats : null;
+    if (rawStats) {
+      modelStats = {};
+      let sGuard = 0;
+      for (const [m, st] of Object.entries(rawStats)) {
+        if (sGuard >= 50) break;
+        if (!st || typeof st !== 'object') continue;
+        const cleanModel = String(m || '').replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 96);
+        if (!cleanModel) continue;
+        const calls = Math.max(0, Math.floor(Number(st.calls ?? st.requests) || 0));
+        const successes = Math.max(0, Math.floor(Number(st.successes ?? st.success) || 0));
+        const failed = Math.max(0, Math.floor(Number(st.failed) || 0));
+        const in_tokens = Math.max(0, Math.floor(Number(st.in_tokens ?? st.input_tokens) || 0));
+        const out_tokens = Math.max(0, Math.floor(Number(st.out_tokens ?? st.output_tokens) || 0));
+        if (calls <= 0 && successes <= 0 && failed <= 0 && in_tokens <= 0 && out_tokens <= 0) continue;
+        modelStats[cleanModel] = { calls, successes, failed, in_tokens, out_tokens };
+        if (!models[cleanModel] && calls > 0) {
+          models[cleanModel] = calls;
+        }
+        sGuard += 1;
+      }
+    }
+
     node.usage = {
       models,
+      ...(modelStats ? { model_stats: modelStats } : {}),
       requests: Number(meta.usage.requests) || 0,
       successes: Number(meta.usage.successes) || 0,
       failed: Number(meta.usage.failed) || 0,
@@ -286,8 +338,8 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
   }
   const nowIso = new Date(now).toISOString();
 
-  // Throttle repeated 304 writes to once every 60s unless first sync or full 200 pull
-  if (lastTime > 0 && meta?.is304 && now - lastTime < 60_000) return;
+  // Only throttle pure idle 304 heartbeats with no usage payload and no binaryVersion change
+  if (lastTime > 0 && meta?.is304 && !hasUsage && !hasBinVerChange && now - lastTime < 60_000) return;
 
   node.last_seen = nowIso;
   if (configVer) node.last_config_version = configVer;

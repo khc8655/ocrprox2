@@ -339,13 +339,14 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	newKey := strings.TrimSpace(req.ClientKey)
-	if req.Generate || newKey == "" {
+	if req.Generate {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		newKey = "sk-llmproxy-" + hex.EncodeToString(b)
 	}
 
 	var extraKeys []string
+	var savedVersion int64
 	if s.localSrc != nil {
 		snap, _ := s.localSrc.Current(r.Context(), false)
 		var clonedCfg types.ProxyConfig
@@ -365,7 +366,8 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 			clonedCfg.Settings.ProxyKeys = cleaned
 		}
 		extraKeys = clonedCfg.Settings.ProxyKeys
-		if _, err := s.localSrc.SaveConfig(&clonedCfg); err != nil {
+		savedSnap, err := s.localSrc.SaveConfig(&clonedCfg)
+		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":    false,
@@ -373,14 +375,23 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if savedSnap != nil && savedSnap.Config != nil {
+			savedVersion = savedSnap.Config.Version
+		}
 	}
 
 	s.authMgr.UpdateClientKeys(newKey, extraKeys)
 
+	masked := ""
+	if newKey != "" {
+		masked = provider.MaskKey(newKey)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":         true,
+		"_version":   savedVersion,
 		"client_key": newKey,
-		"masked":     provider.MaskKey(newKey),
+		"masked":     masked,
 	})
 }

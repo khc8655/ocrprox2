@@ -172,3 +172,100 @@ func TestUsageManager_FullMode(t *testing.T) {
 		t.Errorf("expected totals.avg_total_ms == 600, got %v", totals["avg_total_ms"])
 	}
 }
+
+func TestUsage_NonStreamTPSNeverInflated(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(types.RoleFull, tmpDir)
+	if err != nil {
+		t.Fatalf("NewManager error: %v", err)
+	}
+	defer mgr.Close()
+
+	now := time.Now().Unix()
+
+	// Non-streaming request where TotalMillis=1836 and TTFTMillis=1835 (1ms apart) with 20 OutTokens.
+	// Must use TotalMillis (1.836s) -> ~10.89 tok/s, NEVER (1836-1835)=1ms -> 20000.0 tok/s!
+	mgr.RecordRequest(types.RequestTrace{
+		ID:             "req-nonstream-tps",
+		Timestamp:      now,
+		Mode:           "agent",
+		Endpoint:       "/v1/chat/completions",
+		ReqModel:       "gpt-4o",
+		ServedModel:    "gpt-4o",
+		WinnerProvider: "openai",
+		WinnerKey:      "k1",
+		Status:         200,
+		Stream:         false,
+		InTokens:       50,
+		OutTokens:      20,
+		TTFTMillis:     1835,
+		FlowMillis:     0,
+		TotalMillis:    1836,
+		Tries:          []types.Try{{Attempt: 1, Status: 200}},
+	})
+
+	stats, err := mgr.QueryUsage("today", "UTC")
+	if err != nil {
+		t.Fatalf("QueryUsage error: %v", err)
+	}
+
+	totals := stats["totals"].(map[string]any)
+	tps, ok := totals["tps"].(float64)
+	if !ok {
+		t.Fatalf("expected float64 tps, got %T", totals["tps"])
+	}
+	// 20 / 1.836 = 10.8932 -> 10.89
+	if tps < 10.5 || tps > 11.5 {
+		t.Fatalf("expected realistic non-streaming TPS ~10.89 tok/s, got %v", tps)
+	}
+
+	// Also verify streaming request with tiny post-TTFT delta (< 20ms) falls back to TotalMillis
+	mgr2, err := NewManager(types.RoleLite, "")
+	if err != nil {
+		t.Fatalf("NewManager lite error: %v", err)
+	}
+	defer mgr2.Close()
+
+	mgr2.RecordRequest(types.RequestTrace{
+		ID:          "req-burst-stream",
+		Timestamp:   now,
+		Mode:        "agent",
+		ReqModel:    "gpt-4o",
+		ServedModel: "gpt-4o",
+		Status:      200,
+		Stream:      true,
+		OutTokens:   20,
+		TTFTMillis:  1830,
+		FlowMillis:  5,
+		TotalMillis: 1836,
+	})
+	stats2, err := mgr2.QueryUsage("today", "UTC")
+	if err != nil {
+		t.Fatalf("QueryUsage lite error: %v", err)
+	}
+	tps2 := stats2["totals"].(map[string]any)["tps"].(float64)
+	if tps2 < 10.5 || tps2 > 11.5 {
+		t.Fatalf("expected burst stream (<20ms delta) TPS ~10.89 tok/s, got %v", tps2)
+	}
+
+	// Verify genuine streaming request (TTFT=200ms, Total=1200ms -> 1000ms generation for 60 tokens = 60 tok/s)
+	mgr3, _ := NewManager(types.RoleLite, "")
+	defer mgr3.Close()
+	mgr3.RecordRequest(types.RequestTrace{
+		ID:          "req-real-stream",
+		Timestamp:   now,
+		Mode:        "agent",
+		ReqModel:    "gpt-4o",
+		ServedModel: "gpt-4o",
+		Status:      200,
+		Stream:      true,
+		OutTokens:   60,
+		TTFTMillis:  200,
+		TotalMillis: 1200,
+	})
+	stats3, _ := mgr3.QueryUsage("today", "UTC")
+	tps3 := stats3["totals"].(map[string]any)["tps"].(float64)
+	if tps3 != 60.0 {
+		t.Fatalf("expected streaming TPS 60.0 tok/s, got %v", tps3)
+	}
+}

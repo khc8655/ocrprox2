@@ -9,38 +9,41 @@ import (
 
 // Region represents a regional endpoint or specific subscription plan for a provider.
 type Region struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	BaseURL      string   `json:"base_url,omitempty"`
-	ChatURL      string   `json:"chat_url,omitempty"`
-	ResponsesURL string   `json:"responses_url,omitempty"`
-	AnthropicURL string   `json:"anthropic_url,omitempty"`
-	Models       []string `json:"models,omitempty"`
-	Lists        bool     `json:"lists,omitempty"`
-	KeysURL      string   `json:"keys_url,omitempty"`
-	Website      string   `json:"website,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	BaseURL          string   `json:"base_url,omitempty"`
+	ChatURL          string   `json:"chat_url,omitempty"`
+	ResponsesURL     string   `json:"responses_url,omitempty"`
+	AnthropicURL     string   `json:"anthropic_url,omitempty"`
+	AnthropicBaseURL string   `json:"anthropic_base_url,omitempty"`
+	Models           []string `json:"models,omitempty"`
+	Lists            bool     `json:"lists,omitempty"`
+	KeysURL          string   `json:"keys_url,omitempty"`
+	Website          string   `json:"website,omitempty"`
 }
 
 // PresetDef defines a curated provider template with default routes, fallback models, and capability hints.
 type PresetDef struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Icon            string   `json:"icon,omitempty"`
-	Kind            string   `json:"kind,omitempty"` // "vendor", "relay", "local"
-	BaseURL         string   `json:"base_url,omitempty"`
-	ChatURL         string   `json:"chat_url,omitempty"`
-	ResponsesURL    string   `json:"responses_url,omitempty"`
-	AnthropicURL    string   `json:"anthropic_url,omitempty"`
-	DecideURL       string   `json:"decide_url,omitempty"`
-	Website         string   `json:"website,omitempty"`
-	KeysURL         string   `json:"keys_url,omitempty"`
-	NoList          bool     `json:"no_list,omitempty"`
-	Models          []string `json:"models,omitempty"`
-	VisionModels    []string `json:"vision_models,omitempty"`
-	ReasoningModels []string `json:"reasoning_models,omitempty"`
-	Regions         []Region `json:"regions,omitempty"`
-	RegionLabel     string   `json:"region_label,omitempty"`
-	KeyPlans        bool     `json:"key_plans,omitempty"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	Icon             string              `json:"icon,omitempty"`
+	Kind             string              `json:"kind,omitempty"` // "vendor", "relay", "local"
+	BaseURL          string              `json:"base_url,omitempty"`
+	ChatURL          string              `json:"chat_url,omitempty"`
+	ResponsesURL     string              `json:"responses_url,omitempty"`
+	AnthropicURL     string              `json:"anthropic_url,omitempty"`
+	AnthropicBaseURL string              `json:"anthropic_base_url,omitempty"`
+	DecideURL        string              `json:"decide_url,omitempty"`
+	Website          string              `json:"website,omitempty"`
+	KeysURL          string              `json:"keys_url,omitempty"`
+	NoList           bool                `json:"no_list,omitempty"`
+	Models           []string            `json:"models,omitempty"`
+	VisionModels     []string            `json:"vision_models,omitempty"`
+	ReasoningModels  []string            `json:"reasoning_models,omitempty"`
+	Regions          []Region            `json:"regions,omitempty"`
+	RegionLabel      string              `json:"region_label,omitempty"`
+	KeyPlans         bool                `json:"key_plans,omitempty"`
+	AdapterRules     *types.AdapterRules `json:"adapter_rules,omitempty"`
 }
 
 // Fallback model lists for vendors that do not provide a live /models endpoint (NoList=true).
@@ -95,14 +98,16 @@ var catalogPresets = []PresetDef{
 
 	// 2. Anthropic
 	{
-		ID:           "anthropic",
-		Name:         "Anthropic",
-		Icon:         "claude-color",
-		Kind:         "vendor",
-		BaseURL:      "https://api.anthropic.com",
-		AnthropicURL: "https://api.anthropic.com",
-		Website:      "https://console.anthropic.com",
-		KeysURL:      "https://console.anthropic.com/settings/keys",
+		ID:               "anthropic",
+		Name:             "Anthropic",
+		Icon:             "claude-color",
+		Kind:             "vendor",
+		BaseURL:          "https://api.anthropic.com/v1",
+		ChatURL:          "https://api.anthropic.com/v1",
+		AnthropicURL:     "https://api.anthropic.com",
+		AnthropicBaseURL: "https://api.anthropic.com",
+		Website:          "https://console.anthropic.com",
+		KeysURL:          "https://console.anthropic.com/settings/keys",
 		VisionModels: []string{
 			"claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307",
 			"claude-3-5-sonnet-20240620", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-7-sonnet",
@@ -126,14 +131,16 @@ var catalogPresets = []PresetDef{
 
 	// 4. Google Vertex AI
 	{
-		ID:           "vertex",
-		Name:         "Google Vertex AI",
-		Icon:         "vertexai-color",
-		Kind:         "vendor",
-		Website:      "https://cloud.google.com/vertex-ai",
-		NoList:       true,
-		Models:       vertexModels,
-		VisionModels: []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"},
+		ID:              "vertex",
+		Name:            "Google Vertex AI",
+		Icon:            "vertexai-color",
+		Kind:            "vendor",
+		BaseURL:         "https://aiplatform.googleapis.com/v1beta1/openai",
+		ChatURL:         "https://aiplatform.googleapis.com/v1beta1/openai",
+		Website:         "https://cloud.google.com/vertex-ai",
+		NoList:          true,
+		Models:          vertexModels,
+		VisionModels:    []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"},
 		ReasoningModels: []string{"gemini-2.5-pro", "gemini-2.5-flash"},
 	},
 
@@ -477,18 +484,60 @@ var catalogPresets = []PresetDef{
 		},
 	},
 
-	// 25. Ollama Local
+	// 25. AMD Developer Cloud
 	{
-		ID:        "ollama",
-		Name:      "Ollama",
-		Icon:      "ollama",
-		Kind:      "local",
-		BaseURL:   "http://localhost:11434/v1",
-		ChatURL:   "http://localhost:11434/v1",
-		AnthropicURL: "http://localhost:11434",
-		DecideURL: "http://localhost:11434/v1",
-		Website:   "https://ollama.com",
+		ID:      "amd",
+		Name:    "AMD Developer Cloud",
+		Icon:    "amd",
+		Kind:    "vendor",
+		BaseURL: "https://llm-api.amd.com/v1",
+		ChatURL: "https://llm-api.amd.com/v1",
+		Website: "https://developer.amd.com",
 	},
+
+	// 26. Ollama Local
+	{
+		ID:               "ollama",
+		Name:             "Ollama",
+		Icon:             "ollama",
+		Kind:             "local",
+		BaseURL:          "http://localhost:11434/v1",
+		ChatURL:          "http://localhost:11434/v1",
+		AnthropicURL:     "http://localhost:11434",
+		AnthropicBaseURL: "http://localhost:11434",
+		DecideURL:        "http://localhost:11434/v1",
+		Website:          "https://ollama.com",
+	},
+}
+
+func init() {
+	for i := range catalogPresets {
+		p := &catalogPresets[i]
+		if p.BaseURL == "" && p.ChatURL != "" {
+			p.BaseURL = p.ChatURL
+		}
+		if p.ChatURL == "" && p.BaseURL != "" {
+			p.ChatURL = p.BaseURL
+		}
+		if p.AnthropicBaseURL == "" && p.AnthropicURL != "" {
+			p.AnthropicBaseURL = p.AnthropicURL
+		}
+		if p.AnthropicURL == "" && p.AnthropicBaseURL != "" {
+			p.AnthropicURL = p.AnthropicBaseURL
+		}
+		if p.AdapterRules == nil {
+			p.AdapterRules = DefaultPresetAdapterRules(p.ID)
+		}
+		for j := range p.Regions {
+			r := &p.Regions[j]
+			if r.BaseURL == "" && r.ChatURL != "" {
+				r.BaseURL = r.ChatURL
+			}
+			if r.AnthropicBaseURL == "" && r.AnthropicURL != "" {
+				r.AnthropicBaseURL = r.AnthropicURL
+			}
+		}
+	}
 }
 
 // Catalog returns all curated preset definitions.

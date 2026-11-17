@@ -136,6 +136,52 @@ func IsMaskedSecret(val string) bool {
 	return false
 }
 
+// DefaultRuntimeSettings returns the canonical schema defaults for cold-start configuration.
+func DefaultRuntimeSettings() types.RuntimeSettings {
+	return types.RuntimeSettings{
+		AgentRoutingStrategy:     "sticky_failover",
+		AgentFirstByteTimeoutSec: 120,
+		CooldownRateLimitSec:     15,
+		CooldownServerErrorSec:   30,
+		CooldownNetworkErrorSec:  15,
+		CooldownAuthErrorSec:     86400,
+		OCRMaxInflight:           4,
+		KBGlobalMaxConcurrency:   16,
+	}
+}
+
+// ApplyColdStartSettingsDefaults fills unset fields on s with schema defaults.
+func ApplyColdStartSettingsDefaults(s *types.RuntimeSettings) {
+	if s == nil {
+		return
+	}
+	def := DefaultRuntimeSettings()
+	if s.AgentRoutingStrategy == "" {
+		s.AgentRoutingStrategy = def.AgentRoutingStrategy
+	}
+	if s.AgentFirstByteTimeoutSec <= 0 {
+		s.AgentFirstByteTimeoutSec = def.AgentFirstByteTimeoutSec
+	}
+	if s.CooldownRateLimitSec <= 0 {
+		s.CooldownRateLimitSec = def.CooldownRateLimitSec
+	}
+	if s.CooldownServerErrorSec <= 0 {
+		s.CooldownServerErrorSec = def.CooldownServerErrorSec
+	}
+	if s.CooldownNetworkErrorSec <= 0 {
+		s.CooldownNetworkErrorSec = def.CooldownNetworkErrorSec
+	}
+	if s.CooldownAuthErrorSec <= 0 {
+		s.CooldownAuthErrorSec = def.CooldownAuthErrorSec
+	}
+	if s.OCRMaxInflight <= 0 {
+		s.OCRMaxInflight = def.OCRMaxInflight
+	}
+	if s.KBGlobalMaxConcurrency <= 0 {
+		s.KBGlobalMaxConcurrency = def.KBGlobalMaxConcurrency
+	}
+}
+
 // normalizeProviderIDs backfills ProviderConfig.ID from its map key. The admin UI
 // used to create providers without writing `id` into the object, which left
 // provider.ID empty in the scheduler and silently disabled per-provider/per-key
@@ -151,12 +197,50 @@ func normalizeProviderIDs(cfg *types.ProxyConfig) {
 	}
 }
 
+func keyEntriesMatch(a, b *types.KeyEntry) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Label != "" && b.Label != "" && a.Label == b.Label {
+		return true
+	}
+	if a.ID != "" && b.ID != "" && a.ID == b.ID {
+		return true
+	}
+	if a.ID != "" && b.Label != "" && (a.ID == b.Label || a.ID == "k_"+b.Label) {
+		return true
+	}
+	if b.ID != "" && a.Label != "" && (b.ID == a.Label || b.ID == "k_"+a.Label) {
+		return true
+	}
+	return a.Key != "" && b.Key != "" && !IsMaskedSecret(a.Key) && !IsMaskedSecret(b.Key) && a.Key == b.Key
+}
+
+func stabilizeVaultKey(vk *types.KeyEntry) *types.KeyEntry {
+	if vk == nil {
+		return nil
+	}
+	kCopy := *vk
+	if vk.OAuthMeta != nil {
+		metaCopy := *vk.OAuthMeta
+		kCopy.OAuthMeta = &metaCopy
+	}
+	if kCopy.ID == "" {
+		kCopy.ID = kCopy.Label
+	}
+	if kCopy.Label == "" {
+		kCopy.Label = kCopy.ID
+	}
+	kCopy.Origin = "vault"
+	return &kCopy
+}
+
 // SaveConfig saves updated config to disk with Kernel Guard and CAS checks.
 func (s *LocalSource) SaveConfig(newCfg *types.ProxyConfig) (*types.RuntimeSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.saveConfigLocked(newCfg)
+	return s.saveConfigLocked(newCfg, false)
 }
 
 // PersistKeyEntry atomically updates the given KeyEntry (matching by ID, Label, or OAuthMeta) in the current config and saves to proxy_config.enc.
@@ -225,8 +309,283 @@ func (s *LocalSource) PersistKeyEntry(ctx context.Context, updatedKey *types.Key
 		return errors.New("config: key entry to persist not found in config")
 	}
 
-	_, err = s.saveConfigLocked(&clonedCfg)
+	_, err = s.saveConfigLocked(&clonedCfg, true)
 	return err
+}
+
+// MergeHubSync performs a unified one-click Hub sync into LocalSource:
+//  1. Removes stale Origin=="vault" providers absent from payload.Providers, inserts/replaces
+//     payload.Providers as Origin=="vault" with stable deduplicated keys, and preserves 100%
+//     of Origin!="vault" ("local") providers and their keys.
+//  2. Removes stale Origin=="vault" AgentModels absent from payload.AgentModels (preserving
+//     Origin!="vault" local models and any local-provider candidates), and inserts/updates
+//     payload.AgentModels as Origin=="vault".
+//  3. Replaces vault-provider KBCandidates with payload.KBModels while preserving local-provider KBCandidates.
+//  4. Adopts payload.Settings.ClientKey if local Settings.ClientKey is empty.
+func (s *LocalSource) MergeHubSync(payload *types.ProxyConfig) (*types.ProxyConfig, error) {
+	if payload == nil {
+		return nil, errors.New("config: nil hub sync payload")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentSnap := s.snapshot.Load()
+	var currentCfg *types.ProxyConfig
+	if currentSnap != nil {
+		currentCfg = currentSnap.Config
+	}
+
+	var clonedCfg types.ProxyConfig
+	if currentCfg != nil {
+		raw, err := json.Marshal(currentCfg)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &clonedCfg); err != nil {
+			return nil, err
+		}
+	} else {
+		clonedCfg = types.ProxyConfig{
+			Providers:   make(map[string]*types.ProviderConfig),
+			AgentModels: make(map[string]*types.AgentModelRoute),
+			KBModels:    make(map[string][]*types.KBCandidate),
+			Settings:    DefaultRuntimeSettings(),
+		}
+	}
+
+	// 1. Providers: preserve 100% of Origin != "vault" providers, replace all vault providers from payload.
+	newProviders := make(map[string]*types.ProviderConfig)
+	localProvIDs := make(map[string]bool)
+	oldVaultProviders := make(map[string]*types.ProviderConfig)
+
+	for pID, existingP := range clonedCfg.Providers {
+		if existingP == nil {
+			continue
+		}
+		if existingP.Origin == "vault" {
+			oldVaultProviders[pID] = existingP
+			continue
+		}
+		if existingP.Origin == "" {
+			existingP.Origin = "local"
+		}
+		if existingP.ID == "" {
+			existingP.ID = pID
+		}
+		newProviders[pID] = existingP
+		localProvIDs[pID] = true
+	}
+
+	for pID, vp := range payload.Providers {
+		if vp == nil || localProvIDs[pID] {
+			continue
+		}
+		rawP, err := json.Marshal(vp)
+		if err != nil {
+			continue
+		}
+		var newP types.ProviderConfig
+		if err := json.Unmarshal(rawP, &newP); err != nil {
+			continue
+		}
+		if newP.ID == "" {
+			newP.ID = pID
+		}
+		newP.Origin = "vault"
+
+		oldVP := oldVaultProviders[pID]
+		dedupKeys := make([]*types.KeyEntry, 0, len(vp.APIKeys))
+		for _, vk := range vp.APIKeys {
+			sk := stabilizeVaultKey(vk)
+			if sk == nil {
+				continue
+			}
+			// Preserve newer locally refreshed OAuth token if matching key existed
+			if oldVP != nil {
+				for _, ok := range oldVP.APIKeys {
+					if keyEntriesMatch(ok, sk) {
+						if IsMaskedSecret(sk.Key) && !IsMaskedSecret(ok.Key) {
+							sk.Key = ok.Key
+						}
+						if ok.OAuthMeta != nil && sk.OAuthMeta != nil && ok.OAuthMeta.ExpiresAt > sk.OAuthMeta.ExpiresAt {
+							sk.Key = ok.Key
+							m := *ok.OAuthMeta
+							sk.OAuthMeta = &m
+						} else if ok.OAuthMeta != nil && sk.OAuthMeta == nil {
+							m := *ok.OAuthMeta
+							sk.OAuthMeta = &m
+						}
+						break
+					}
+				}
+			}
+
+			replaced := false
+			for idx, existing := range dedupKeys {
+				if keyEntriesMatch(existing, sk) {
+					dedupKeys[idx] = sk
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				dedupKeys = append(dedupKeys, sk)
+			}
+		}
+		newP.APIKeys = dedupKeys
+		newProviders[pID] = &newP
+	}
+	clonedCfg.Providers = newProviders
+
+	// 2. AgentModels: replace vault models with payload.AgentModels while preserving local models & local candidates.
+	newAgentModels := make(map[string]*types.AgentModelRoute)
+	extractLocalAgentCands := func(route *types.AgentModelRoute) []*types.RouteCandidate {
+		if route == nil {
+			return nil
+		}
+		var out []*types.RouteCandidate
+		for _, c := range route.Candidates {
+			if c != nil && localProvIDs[c.Provider] {
+				cp := *c
+				out = append(out, &cp)
+			}
+		}
+		return out
+	}
+
+	for mName, oldRoute := range clonedCfg.AgentModels {
+		if oldRoute == nil {
+			continue
+		}
+		if _, inHub := payload.AgentModels[mName]; inHub && payload.AgentModels[mName] != nil {
+			// Will be merged in the payload.AgentModels loop below
+			continue
+		}
+		localCands := extractLocalAgentCands(oldRoute)
+		if oldRoute.Origin != "vault" {
+			// Local-only model: preserve intact, dropping only dead references to deleted vault providers
+			keptCands := make([]*types.RouteCandidate, 0, len(oldRoute.Candidates))
+			for _, c := range oldRoute.Candidates {
+				if c != nil && clonedCfg.Providers[c.Provider] != nil {
+					cp := *c
+					keptCands = append(keptCands, &cp)
+				}
+			}
+			// If local model referenced an uncreated/custom provider name, keep localCands or original if none were vault
+			if len(keptCands) == 0 && len(oldRoute.Candidates) > 0 {
+				for _, c := range oldRoute.Candidates {
+					if c != nil && oldVaultProviders[c.Provider] == nil {
+						cp := *c
+						keptCands = append(keptCands, &cp)
+					}
+				}
+			}
+			cpRoute := *oldRoute
+			if cpRoute.Origin == "" {
+				cpRoute.Origin = "local"
+			}
+			cpRoute.Candidates = keptCands
+			newAgentModels[mName] = &cpRoute
+		} else if len(localCands) > 0 {
+			// Vault model removed on Hub, but operator had attached local-provider candidates: retain local candidates
+			cpRoute := *oldRoute
+			cpRoute.Origin = "local"
+			cpRoute.Candidates = localCands
+			newAgentModels[mName] = &cpRoute
+		}
+	}
+
+	for mName, hubRoute := range payload.AgentModels {
+		if hubRoute == nil {
+			continue
+		}
+		rawR, err := json.Marshal(hubRoute)
+		if err != nil {
+			continue
+		}
+		var mergedRoute types.AgentModelRoute
+		if err := json.Unmarshal(rawR, &mergedRoute); err != nil {
+			continue
+		}
+		mergedRoute.Origin = "vault"
+
+		if oldRoute := clonedCfg.AgentModels[mName]; oldRoute != nil {
+			for _, lc := range extractLocalAgentCands(oldRoute) {
+				dup := false
+				for _, mc := range mergedRoute.Candidates {
+					if mc != nil && mc.Provider == lc.Provider && mc.KeyLabel == lc.KeyLabel && mc.TargetModel == lc.TargetModel {
+						dup = true
+						break
+					}
+				}
+				if !dup {
+					mergedRoute.Candidates = append(mergedRoute.Candidates, lc)
+				}
+			}
+		}
+		newAgentModels[mName] = &mergedRoute
+	}
+	clonedCfg.AgentModels = newAgentModels
+
+	// 3. KBModels: replace vault candidates with payload.KBModels[ch], preserving local-provider candidates.
+	newKBModels := make(map[string][]*types.KBCandidate)
+	kbChannels := map[string]bool{
+		"chat":      true,
+		"ocr":       true,
+		"embedding": true,
+		"reranker":  true,
+	}
+	for ch := range clonedCfg.KBModels {
+		kbChannels[ch] = true
+	}
+	for ch := range payload.KBModels {
+		kbChannels[ch] = true
+	}
+	for ch := range kbChannels {
+		var combined []*types.KBCandidate
+		for _, hc := range payload.KBModels[ch] {
+			if hc == nil {
+				continue
+			}
+			cp := *hc
+			combined = append(combined, &cp)
+		}
+		for _, lc := range clonedCfg.KBModels[ch] {
+			if lc == nil || !localProvIDs[lc.Provider] {
+				continue
+			}
+			dup := false
+			for _, ex := range combined {
+				if ex.Provider == lc.Provider && ex.Model == lc.Model && ex.KeyLabel == lc.KeyLabel {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				cp := *lc
+				combined = append(combined, &cp)
+			}
+		}
+		if len(combined) > 0 {
+			newKBModels[ch] = combined
+		}
+	}
+	clonedCfg.KBModels = newKBModels
+
+	// 4. Adopt ClientKey if local Settings.ClientKey is empty.
+	if strings.TrimSpace(clonedCfg.Settings.ClientKey) == "" && strings.TrimSpace(payload.Settings.ClientKey) != "" {
+		clonedCfg.Settings.ClientKey = strings.TrimSpace(payload.Settings.ClientKey)
+		if strings.TrimSpace(clonedCfg.Settings.ProxyAPIKey) == "" {
+			clonedCfg.Settings.ProxyAPIKey = clonedCfg.Settings.ClientKey
+		}
+	}
+
+	snap, err := s.saveConfigLocked(&clonedCfg, true)
+	if err != nil {
+		return nil, err
+	}
+	return snap.Config, nil
 }
 
 // MergeVaultConfig merges vault-provided providers and keys into local configuration.
@@ -257,6 +616,7 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 		clonedCfg = types.ProxyConfig{
 			Providers:   make(map[string]*types.ProviderConfig),
 			AgentModels: make(map[string]*types.AgentModelRoute),
+			Settings:    DefaultRuntimeSettings(),
 		}
 	}
 
@@ -269,27 +629,24 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			continue
 		}
 
-		// Normalize incoming vault keys: copy them and force Origin = "vault"
+		// Normalize incoming vault keys: copy them, stabilize ID/Label, and force Origin = "vault"
 		incomingKeys := make([]*types.KeyEntry, 0, len(vp.APIKeys))
 		for _, vk := range vp.APIKeys {
-			if vk == nil {
-				continue
+			sk := stabilizeVaultKey(vk)
+			if sk != nil {
+				incomingKeys = append(incomingKeys, sk)
 			}
-			kCopy := *vk
-			if vk.OAuthMeta != nil {
-				metaCopy := *vk.OAuthMeta
-				kCopy.OAuthMeta = &metaCopy
-			}
-			kCopy.Origin = "vault"
-			incomingKeys = append(incomingKeys, &kCopy)
 		}
 
 		existingP, exists := clonedCfg.Providers[vpID]
 		if !exists {
 			// New provider from vault
 			newP := *vp
+			if newP.ID == "" {
+				newP.ID = vpID
+			}
 			newP.Origin = "vault"
-			newP.APIKeys = incomingKeys
+			newP.APIKeys = mergeProviderKeys(nil, incomingKeys, false)
 			if vp.ModelAliases != nil {
 				newP.ModelAliases = make(map[string]string)
 				for k, v := range vp.ModelAliases {
@@ -307,12 +664,9 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 		// Existing provider
 		if existingP.Origin == "local" {
 			// Iron Rule: Local provider is never overwritten or deleted!
-			// BaseURL, Name, PresetID, etc., remain unchanged.
-			// Only merge keys: local keys preserved, vault keys updated or appended.
-			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys)
+			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys, true)
 		} else {
-			// Origin is vault (or not local)
-			// Update provider attributes from vp
+			// Origin is vault: update provider attributes & enforce vault-only keys (no mixed keys)
 			existingP.Name = vp.Name
 			existingP.PresetID = vp.PresetID
 			existingP.BaseURL = vp.BaseURL
@@ -337,14 +691,14 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 				rulesCopy := *vp.AdapterRules
 				existingP.AdapterRules = &rulesCopy
 			}
-			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys)
+			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys, false)
 		}
 	}
 
-	return s.saveConfigLocked(&clonedCfg)
+	return s.saveConfigLocked(&clonedCfg, true)
 }
 
-func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*types.KeyEntry) []*types.KeyEntry {
+func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*types.KeyEntry, allowLocalKeys bool) []*types.KeyEntry {
 	var localKeys []*types.KeyEntry
 	var existingVaultKeys []*types.KeyEntry
 
@@ -353,14 +707,9 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 			continue
 		}
 		if k.Origin == "vault" {
-			kCopy := *k
-			if k.OAuthMeta != nil {
-				m := *k.OAuthMeta
-				kCopy.OAuthMeta = &m
-			}
-			existingVaultKeys = append(existingVaultKeys, &kCopy)
-		} else {
-			// Origin == "local" or unspecified local
+			existingVaultKeys = append(existingVaultKeys, stabilizeVaultKey(k))
+		} else if allowLocalKeys {
+			// Origin == "local" or unspecified local on a local provider
 			kCopy := *k
 			if k.OAuthMeta != nil {
 				m := *k.OAuthMeta
@@ -373,19 +722,6 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 		}
 	}
 
-	matchesKey := func(a, b *types.KeyEntry) bool {
-		if a == nil || b == nil {
-			return false
-		}
-		if a.ID != "" && b.ID != "" {
-			return a.ID == b.ID
-		}
-		if a.Label != "" && b.Label != "" {
-			return a.Label == b.Label
-		}
-		return a.Key != "" && a.Key == b.Key
-	}
-
 	updatedVaultKeys := make([]*types.KeyEntry, len(existingVaultKeys))
 	copy(updatedVaultKeys, existingVaultKeys)
 
@@ -396,40 +732,32 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 		// Check if it conflicts with an existing local key
 		conflictsLocal := false
 		for _, lk := range localKeys {
-			if matchesKey(lk, vk) {
+			if keyEntriesMatch(lk, vk) {
 				conflictsLocal = true
 				break
 			}
 		}
 		if conflictsLocal {
-			// Do not overwrite local key!
 			continue
 		}
 
 		foundIndex := -1
 		for i, evk := range updatedVaultKeys {
-			if matchesKey(evk, vk) {
+			if keyEntriesMatch(evk, vk) {
 				foundIndex = i
 				break
 			}
 		}
 
-		vkCopy := *vk
-		if vk.OAuthMeta != nil {
-			m := *vk.OAuthMeta
-			vkCopy.OAuthMeta = &m
-		}
-		vkCopy.Origin = "vault"
+		vkCopy := stabilizeVaultKey(vk)
 
 		if foundIndex >= 0 {
-			if vkCopy.ID == "" && updatedVaultKeys[foundIndex].ID != "" {
+			if updatedVaultKeys[foundIndex].ID != "" {
 				vkCopy.ID = updatedVaultKeys[foundIndex].ID
 			}
-			// If incoming key has masked secret, keep existing real key
 			if IsMaskedSecret(vkCopy.Key) && !IsMaskedSecret(updatedVaultKeys[foundIndex].Key) {
 				vkCopy.Key = updatedVaultKeys[foundIndex].Key
 			}
-			// If existing key had a refreshed token with newer expiry, preserve it
 			if updatedVaultKeys[foundIndex].OAuthMeta != nil && vkCopy.OAuthMeta != nil {
 				if updatedVaultKeys[foundIndex].OAuthMeta.ExpiresAt > vkCopy.OAuthMeta.ExpiresAt {
 					vkCopy.Key = updatedVaultKeys[foundIndex].Key
@@ -439,9 +767,9 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 				m := *updatedVaultKeys[foundIndex].OAuthMeta
 				vkCopy.OAuthMeta = &m
 			}
-			updatedVaultKeys[foundIndex] = &vkCopy
+			updatedVaultKeys[foundIndex] = vkCopy
 		} else {
-			updatedVaultKeys = append(updatedVaultKeys, &vkCopy)
+			updatedVaultKeys = append(updatedVaultKeys, vkCopy)
 		}
 	}
 
@@ -451,13 +779,18 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 	return result
 }
 
-func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.RuntimeSnapshot, error) {
+func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig, fromVaultSync bool) (*types.RuntimeSnapshot, error) {
 	normalizeProviderIDs(newCfg)
 
 	currentSnap := s.snapshot.Load()
 	var currentCfg *types.ProxyConfig
 	if currentSnap != nil {
 		currentCfg = currentSnap.Config
+	}
+
+	// Cold-start defaults (P1-3): when initializing brand-new config at version 0, populate schema defaults.
+	if currentCfg == nil && newCfg.Version == 0 {
+		ApplyColdStartSettingsDefaults(&newCfg.Settings)
 	}
 
 	// 1. CAS Check: if newCfg has version > 0, it must match current version
@@ -471,6 +804,13 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.Runtim
 	// 2. Kernel Guard: Prevent masked placeholders from overwriting real keys
 	if currentCfg != nil {
 		recoverMaskedKeys(newCfg, currentCfg)
+	}
+
+	// 2b. Strict No-Mixed-Keys Rule (User Decision #3):
+	// Vault providers are strictly read-only for keys during external SaveConfig submissions;
+	// never allow Origin=="local" or unstored keys to be added onto an Origin=="vault" provider.
+	if !fromVaultSync {
+		enforceVaultProviderKeyLock(newCfg, currentCfg)
 	}
 
 	// 3. Vault URL-Change Guard (SECURITY_SPEC §4.4 / SEC-07):
@@ -528,6 +868,61 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.Runtim
 	s.snapshot.Store(newSnap)
 	s.notifyListeners(newCfg)
 	return newSnap, nil
+}
+
+func enforceVaultProviderKeyLock(target, source *types.ProxyConfig) {
+	if target == nil {
+		return
+	}
+	for pID, p := range target.Providers {
+		if p == nil {
+			continue
+		}
+		var srcP *types.ProviderConfig
+		if source != nil {
+			srcP = source.Providers[pID]
+		}
+		if (srcP == nil || srcP.Origin != "vault") && p.Origin != "vault" {
+			continue
+		}
+		p.Origin = "vault"
+
+		if srcP != nil && srcP.Origin == "vault" {
+			var storedVaultKeys []*types.KeyEntry
+			for _, sk := range srcP.APIKeys {
+				if sk != nil && sk.Origin == "vault" {
+					storedVaultKeys = append(storedVaultKeys, stabilizeVaultKey(sk))
+				}
+			}
+			kept := make([]*types.KeyEntry, 0, len(storedVaultKeys))
+			for _, sk := range storedVaultKeys {
+				cp := *sk
+				if sk.OAuthMeta != nil {
+					m := *sk.OAuthMeta
+					cp.OAuthMeta = &m
+				}
+				// Allow Enabled toggle from target if matching vault key was submitted
+				for _, tk := range p.APIKeys {
+					if tk != nil && tk.Origin != "local" && keyEntriesMatch(tk, sk) {
+						cp.Enabled = tk.Enabled
+						break
+					}
+				}
+				kept = append(kept, &cp)
+			}
+			p.APIKeys = kept
+		} else {
+			// Initial creation of a vault provider (e.g., test seed): strip any local keys
+			kept := make([]*types.KeyEntry, 0, len(p.APIKeys))
+			for _, tk := range p.APIKeys {
+				if tk == nil || tk.Origin == "local" {
+					continue
+				}
+				kept = append(kept, stabilizeVaultKey(tk))
+			}
+			p.APIKeys = kept
+		}
+	}
 }
 
 func recoverMaskedKeys(target, source *types.ProxyConfig) {
@@ -642,6 +1037,9 @@ func (s *LocalSource) loadFromDisk() (*types.RuntimeSnapshot, error) {
 		return nil, fmt.Errorf("config: json unmarshal: %w", err)
 	}
 	normalizeProviderIDs(&cfg)
+	if cfg.Version == 0 {
+		ApplyColdStartSettingsDefaults(&cfg.Settings)
+	}
 
 	snap := &types.RuntimeSnapshot{
 		Config:     &cfg,

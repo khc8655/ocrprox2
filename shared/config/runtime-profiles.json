@@ -21,9 +21,7 @@
         "cooldown_rate_limit_sec": 15,
         "cooldown_server_error_sec": 30,
         "cooldown_network_error_sec": 15,
-        "cooldown_auth_error_sec": 86400,
-        "ocr_max_inflight": 4,
-        "kb_global_max_concurrency": 16
+        "cooldown_auth_error_sec": 86400
       }
     },
     "full": {

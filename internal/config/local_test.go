@@ -161,14 +161,7 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 				Enabled: true,
 				APIKeys: []*types.KeyEntry{
 					{
-						ID:      "k_p2_loc",
-						Label:   "admin-added-local-key",
-						Key:     "sk-p2-local-secret",
-						Origin:  "local",
-						Enabled: true,
-					},
-					{
-						ID:      "k_p2_v1",
+						ID:      "k_vault-k1",
 						Label:   "vault-k1",
 						Key:     "sk-p2-v1-old",
 						Origin:  "vault",
@@ -184,7 +177,7 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 		t.Fatalf("SaveConfig error: %v", err)
 	}
 
-	// Incoming Vault configuration
+	// Incoming Vault configuration (note: vault_p sends ID "vault-k1" vs stored "k_vault-k1" — must match without duplicating!)
 	vaultProviders := map[string]*types.ProviderConfig{
 		"local_p": {
 			ID:      "local_p",
@@ -224,7 +217,7 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 			Enabled: true,
 			APIKeys: []*types.KeyEntry{
 				{
-					ID:      "k_p2_v1",
+					ID:      "vault-k1",
 					Label:   "vault-k1",
 					Key:     "sk-p2-v1-new",
 					Origin:  "vault",
@@ -293,7 +286,7 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 		t.Errorf("new vault key k_vault_new was not appended properly: %+v", vNewKey)
 	}
 
-	// 2. Check vault_p: BaseURL updated, local key preserved
+	// 2. Check vault_p: BaseURL updated, vault-k1 updated in-place without k_<label> vs <label> duplication!
 	pVault := mergedSnap.Config.Providers["vault_p"]
 	if pVault == nil {
 		t.Fatalf("vault_p was deleted!")
@@ -301,15 +294,8 @@ func TestLocalSource_MergeVaultConfig(t *testing.T) {
 	if pVault.BaseURL != "https://new-vault-url.com" {
 		t.Errorf("expected vault_p BaseURL updated, got %q", pVault.BaseURL)
 	}
-	p2KeyMap := make(map[string]*types.KeyEntry)
-	for _, k := range pVault.APIKeys {
-		p2KeyMap[k.ID] = k
-	}
-	if p2KeyMap["k_p2_loc"] == nil || p2KeyMap["k_p2_loc"].Key != "sk-p2-local-secret" || p2KeyMap["k_p2_loc"].Origin != "local" {
-		t.Errorf("local key on vault provider was not preserved: %+v", p2KeyMap["k_p2_loc"])
-	}
-	if p2KeyMap["k_p2_v1"] == nil || p2KeyMap["k_p2_v1"].Key != "sk-p2-v1-new" || p2KeyMap["k_p2_v1"].Origin != "vault" {
-		t.Errorf("vault key on vault provider was not updated: %+v", p2KeyMap["k_p2_v1"])
+	if len(pVault.APIKeys) != 1 || pVault.APIKeys[0].Key != "sk-p2-v1-new" || pVault.APIKeys[0].Origin != "vault" {
+		t.Errorf("expected 1 deduplicated vault key on vault_p, got %+v", pVault.APIKeys)
 	}
 
 	// 3. Check new_vault_p: added
@@ -641,5 +627,184 @@ func TestLocalSource_VaultURLChangeGuard(t *testing.T) {
 	}
 	if snapChanged.Config.Vault.NodeToken != "" {
 		t.Fatalf("SEC-07 violation: expected NodeToken to be cleared when Vault.URL changed with masked token, got %q", snapChanged.Config.Vault.NodeToken)
+	}
+}
+
+func TestLocalSource_StrictNoMixedKeys_And_MergeHubSync_And_DefaultSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	// 1. Cold-start save with Version: 0 populates DefaultRuntimeSettings (P1-3)
+	snapInit, err := src.SaveConfig(&types.ProxyConfig{
+		Version: 0,
+		Providers: map[string]*types.ProviderConfig{
+			"local-ollama": {
+				ID:      "local-ollama",
+				Name:    "Local Ollama",
+				BaseURL: "http://127.0.0.1:11434/v1",
+				Origin:  "local",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "loc-k1", Label: "loc-k1", Key: "sk-local-ollama", Origin: "local", Enabled: true},
+				},
+			},
+			"stale-vault-prov": {
+				ID:      "stale-vault-prov",
+				BaseURL: "https://stale.vault/v1",
+				Origin:  "vault",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "svk1", Label: "svk1", Key: "sk-stale-vault", Origin: "vault", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"local-llama3": {
+				Enabled:    true,
+				Origin:     "local",
+				Candidates: []*types.RouteCandidate{{Provider: "local-ollama", KeyLabel: "loc-k1", Enabled: true}},
+			},
+			"stale-vault-model": {
+				Enabled:    true,
+				Origin:     "vault",
+				Candidates: []*types.RouteCandidate{{Provider: "stale-vault-prov", KeyLabel: "svk1", Enabled: true}},
+			},
+			"shared-gpt4o": {
+				Enabled: true,
+				Origin:  "vault",
+				Candidates: []*types.RouteCandidate{
+					{Provider: "stale-vault-prov", KeyLabel: "svk1", Enabled: true},
+					{Provider: "local-ollama", KeyLabel: "loc-k1", TargetModel: "llama3", Enabled: true},
+				},
+			},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"ocr": {
+				{Provider: "stale-vault-prov", Model: "old-ocr", KeyLabel: "svk1", Enabled: true},
+				{Provider: "local-ollama", Model: "llava", KeyLabel: "loc-k1", Enabled: true},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig initial err: %v", err)
+	}
+	if snapInit.Config.Settings.AgentRoutingStrategy != "sticky_failover" ||
+		snapInit.Config.Settings.AgentFirstByteTimeoutSec != 120 ||
+		snapInit.Config.Settings.CooldownRateLimitSec != 15 ||
+		snapInit.Config.Settings.CooldownServerErrorSec != 30 ||
+		snapInit.Config.Settings.CooldownNetworkErrorSec != 15 ||
+		snapInit.Config.Settings.CooldownAuthErrorSec != 86400 ||
+		snapInit.Config.Settings.OCRMaxInflight != 4 ||
+		snapInit.Config.Settings.KBGlobalMaxConcurrency != 16 {
+		t.Fatalf("P1-3: expected cold-start schema defaults, got %+v", snapInit.Config.Settings)
+	}
+
+	// 2. Strict No-Mixed-Keys Rule (User Decision #3): attempting to add a local key onto a vault provider via SaveConfig is ignored!
+	snapAttemptMix, err := src.SaveConfig(&types.ProxyConfig{
+		Version: snapInit.Config.Version,
+		Providers: map[string]*types.ProviderConfig{
+			"local-ollama": snapInit.Config.Providers["local-ollama"],
+			"stale-vault-prov": {
+				ID:      "stale-vault-prov",
+				BaseURL: "https://stale.vault/v1",
+				Origin:  "vault",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "svk1", Label: "svk1", Key: "sk--...ault", Origin: "vault", Enabled: true},
+					{ID: "injected-local", Label: "injected-local", Key: "sk-user-local-on-vault", Origin: "local", Enabled: true},
+				},
+			},
+		},
+		AgentModels: snapInit.Config.AgentModels,
+		KBModels:    snapInit.Config.KBModels,
+		Settings:    snapInit.Config.Settings,
+	})
+	if err != nil {
+		t.Fatalf("SaveConfig mix attempt err: %v", err)
+	}
+	vpKeys := snapAttemptMix.Config.Providers["stale-vault-prov"].APIKeys
+	if len(vpKeys) != 1 || vpKeys[0].ID != "svk1" || vpKeys[0].Key != "sk-stale-vault" {
+		t.Fatalf("User Decision #3 violation: expected only stored vault key svk1 on vault provider, got %+v", vpKeys)
+	}
+
+	// 3. MergeHubSync (P0-01 & P0-02): replaces vault providers/models/kb_models while preserving local ones!
+	merged, err := src.MergeHubSync(&types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"deepseek": {
+				ID:      "deepseek",
+				Name:    "DeepSeek Hub",
+				BaseURL: "https://api.deepseek.com/v1",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{Label: "hk-01", Key: "sk-ds-hub-1", Enabled: true},
+					{ID: "k_hk-01", Label: "hk-01", Key: "sk-ds-hub-1-dedup", Enabled: true}, // duplicate label must deduplicate!
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"shared-gpt4o": {
+				Enabled: true,
+				Candidates: []*types.RouteCandidate{
+					{Provider: "deepseek", KeyLabel: "hk-01", TargetModel: "deepseek-chat", Enabled: true},
+				},
+			},
+			"deepseek-r1": {
+				Enabled: true,
+				Candidates: []*types.RouteCandidate{
+					{Provider: "deepseek", KeyLabel: "hk-01", TargetModel: "deepseek-reasoner", Enabled: true},
+				},
+			},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"ocr": {
+				{Provider: "deepseek", Model: "deepseek-vl", KeyLabel: "hk-01", Enabled: true},
+			},
+		},
+		Settings: types.RuntimeSettings{
+			ClientKey: "sk-llmproxy-from-hub",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MergeHubSync err: %v", err)
+	}
+
+	// Stale vault provider removed; local-ollama preserved; deepseek inserted with 1 deduplicated vault key
+	if _, exists := merged.Providers["stale-vault-prov"]; exists {
+		t.Fatalf("expected stale-vault-prov to be removed by MergeHubSync")
+	}
+	if merged.Providers["local-ollama"] == nil || merged.Providers["local-ollama"].APIKeys[0].Key != "sk-local-ollama" {
+		t.Fatalf("expected local-ollama provider preserved untouched")
+	}
+	ds := merged.Providers["deepseek"]
+	if ds == nil || ds.Origin != "vault" || len(ds.APIKeys) != 1 || ds.APIKeys[0].Key != "sk-ds-hub-1-dedup" || ds.APIKeys[0].ID == "" {
+		t.Fatalf("expected deepseek with 1 deduplicated vault key, got %+v", ds)
+	}
+
+	// Stale vault model removed; local-llama3 preserved; shared-gpt4o updated as vault + local candidate preserved; deepseek-r1 inserted
+	if _, exists := merged.AgentModels["stale-vault-model"]; exists {
+		t.Fatalf("expected stale-vault-model to be removed by MergeHubSync")
+	}
+	if merged.AgentModels["local-llama3"] == nil {
+		t.Fatalf("expected local-llama3 to be preserved")
+	}
+	sharedRoute := merged.AgentModels["shared-gpt4o"]
+	if sharedRoute == nil || sharedRoute.Origin != "vault" || len(sharedRoute.Candidates) != 2 {
+		t.Fatalf("expected shared-gpt4o with 1 hub candidate + 1 preserved local candidate, got %+v", sharedRoute)
+	}
+	if merged.AgentModels["deepseek-r1"] == nil || merged.AgentModels["deepseek-r1"].Origin != "vault" {
+		t.Fatalf("expected deepseek-r1 inserted with Origin='vault'")
+	}
+
+	// KBModels: stale vault ocr candidate replaced by deepseek-vl, local-ollama llava preserved!
+	if len(merged.KBModels["ocr"]) != 2 || merged.KBModels["ocr"][0].Provider != "deepseek" || merged.KBModels["ocr"][1].Provider != "local-ollama" {
+		t.Fatalf("unexpected merged KBModels['ocr']: %+v", merged.KBModels["ocr"])
+	}
+
+	// ClientKey adopted since local Settings.ClientKey was empty
+	if merged.Settings.ClientKey != "sk-llmproxy-from-hub" {
+		t.Fatalf("expected ClientKey adopted from Hub, got %q", merged.Settings.ClientKey)
 	}
 }

@@ -761,3 +761,246 @@ func TestAdminServer_VaultFetchKeysMap_SSRFDefault_And_BaseURLLock(t *testing.T)
 		}
 	}
 }
+
+func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) {
+	var seenAuth, seenNodeVer string
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/node/config" && r.Method == http.MethodPost {
+			seenAuth = r.Header.Get("Authorization")
+			seenNodeVer = r.Header.Get("X-Node-Version")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"config_version": 42,
+				"payload": {
+					"providers": {
+						"hub-deepseek": {
+							"id": "hub-deepseek",
+							"name": "DeepSeek Hub",
+							"base_url": "https://api.deepseek.com/v1",
+							"enabled": true,
+							"api_keys": [
+								{"id": "hk-01", "label": "hk-01", "key": "sk-hub-ds-secret-9999", "enabled": true}
+							]
+						}
+					},
+					"agent_models": {
+						"deepseek-v3": {
+							"enabled": true,
+							"candidates": [
+								{"provider": "hub-deepseek", "key_label": "hk-01", "target_model": "deepseek-chat", "enabled": true}
+							]
+						}
+					},
+					"kb_models": {
+						"ocr": [
+							{"provider": "hub-deepseek", "model": "deepseek-vl", "key_label": "hk-01", "enabled": true}
+						]
+					},
+					"settings": {
+						"client_key": "sk-llmproxy-hub-seeded"
+					}
+				}
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer hubServer.Close()
+
+	authMgr := auth.NewAuthenticator("", "ap")
+	src, _ := config.NewLocalSource(t.TempDir(), "ap")
+	// Pre-seed 1 local provider + 1 local model + 1 stale vault provider
+	_, _ = src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"my-local": {
+				ID: "my-local", BaseURL: "https://local.example/v1", Origin: "local", Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "lk1", Label: "lk1", Key: "sk-local-plain-1234", Origin: "local", Enabled: true}},
+			},
+			"old-vault": {
+				ID: "old-vault", BaseURL: "https://old.vault/v1", Origin: "vault", Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "ov1", Label: "ov1", Key: "sk-old-vault-0000", Origin: "vault", Enabled: true}},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"my-local-model": {
+				Enabled:    true,
+				Origin:     "local",
+				Candidates: []*types.RouteCandidate{{Provider: "my-local", KeyLabel: "lk1", Enabled: true}},
+			},
+		},
+	})
+
+	srv := NewServer(authMgr, src, nil, nil)
+	srv.SetAllowPrivate(true)
+	srv.SetAdminPassword("ap")
+	srv.SetBuildInfo("v20261118-02", "2.4.4", "abcdef")
+	srv.SetDefaultVault(hubServer.URL, "stk_node_sync_tok")
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// 1. POST /api/vault/sync
+	req := httptest.NewRequest(http.MethodPost, "/api/vault/sync", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer ap")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/vault/sync status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if seenAuth != "Bearer stk_node_sync_tok" || seenNodeVer != "v20261118-02" {
+		t.Fatalf("unexpected hub request headers: auth=%q ver=%q", seenAuth, seenNodeVer)
+	}
+	if strings.Contains(rec.Body.String(), "sk-hub-ds-secret-9999") {
+		t.Fatalf("POST /api/vault/sync leaked plaintext vault key in response: %s", rec.Body.String())
+	}
+
+	var syncResp struct {
+		OK              bool               `json:"ok"`
+		Version         int64              `json:"_version"`
+		SyncedProviders int                `json:"synced_providers"`
+		SyncedModels    int                `json:"synced_models"`
+		Config          *types.ProxyConfig `json:"config"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &syncResp); err != nil {
+		t.Fatalf("decode syncResp: %v", err)
+	}
+	if !syncResp.OK || syncResp.SyncedProviders != 1 || syncResp.SyncedModels != 1 || syncResp.Config == nil {
+		t.Fatalf("unexpected syncResp: %+v", syncResp)
+	}
+	if _, hasOld := syncResp.Config.Providers["old-vault"]; hasOld {
+		t.Fatalf("expected old-vault removed")
+	}
+	if syncResp.Config.AgentModels["deepseek-v3"] == nil || syncResp.Config.AgentModels["my-local-model"] == nil {
+		t.Fatalf("expected both deepseek-v3 and my-local-model in merged config")
+	}
+
+	// 2. GET /api/admin/config/export must omit hub-deepseek AND omit vault-only deepseek-v3 + vault ocr candidate!
+	expReq := httptest.NewRequest(http.MethodGet, "/api/admin/config/export", nil)
+	expReq.Header.Set("Authorization", "Bearer ap")
+	expRec := httptest.NewRecorder()
+	mux.ServeHTTP(expRec, expReq)
+	if expRec.Code != http.StatusOK {
+		t.Fatalf("export status=%d", expRec.Code)
+	}
+	expStr := expRec.Body.String()
+	for _, forbidden := range []string{"hub-deepseek", "deepseek-v3", "deepseek-vl", "sk-hub-ds-secret-9999"} {
+		if strings.Contains(expStr, forbidden) {
+			t.Fatalf("export leaked vault artifact %q:\n%s", forbidden, expStr)
+		}
+	}
+	if !strings.Contains(expStr, "my-local-model") || !strings.Contains(expStr, "sk-local-plain-1234") {
+		t.Fatalf("export missing local provider/model:\n%s", expStr)
+	}
+}
+
+func TestAdminServer_AnthropicProbe_EmptyKeyLabelCandidate_And_NumericSettingsValidation(t *testing.T) {
+	var seenXAPIKey, seenAnthVer string
+	mockAnth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenXAPIKey = r.Header.Get("x-api-key")
+		seenAnthVer = r.Header.Get("anthropic-version")
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_, _ = w.Write([]byte(`{"data":[{"id":"claude-sonnet-4-5"}]}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockAnth.Close()
+
+	authMgr := auth.NewAuthenticator("ck", "ap")
+	src, _ := config.NewLocalSource(t.TempDir(), "ap")
+	srv := NewServer(authMgr, src, nil, nil)
+	srv.SetAllowPrivate(true)
+	srv.SetAdminPassword("ap")
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// 1. P1-3: Uninitialized GET /api/config returns cold-start schema default settings
+	getReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	getReq.Header.Set("Authorization", "Bearer ap")
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	var coldCfg struct {
+		Settings types.RuntimeSettings `json:"settings"`
+	}
+	_ = json.Unmarshal(getRec.Body.Bytes(), &coldCfg)
+	if coldCfg.Settings.AgentFirstByteTimeoutSec != 120 || coldCfg.Settings.OCRMaxInflight != 4 || coldCfg.Settings.KBGlobalMaxConcurrency != 16 {
+		t.Fatalf("P1-3: expected cold-start default settings on GET /api/config, got %+v", coldCfg.Settings)
+	}
+
+	// 2. P1-4: Negative cooldown or out-of-range timeout/concurrency rejected with 400 Bad Request
+	for _, badJSON := range []string{
+		`{"providers":{},"settings":{"cooldown_rate_limit_sec":-1}}`,
+		`{"providers":{},"settings":{"agent_first_byte_timeout_sec":3}}`,
+		`{"providers":{},"settings":{"ocr_max_inflight":99}}`,
+		`{"providers":{},"settings":{"kb_global_max_concurrency":300}}`,
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(badJSON))
+		r.Header.Set("Authorization", "Bearer ap")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("P1-4: expected 400 Bad Request for %s, got %d: %s", badJSON, w.Code, w.Body.String())
+		}
+	}
+
+	// 3. P0-07: Anthropic verify-key & probe-models send x-api-key + anthropic-version: 2023-06-01
+	vReq := httptest.NewRequest(http.MethodPost, "/api/admin/verify-key",
+		strings.NewReader(`{"base_url":"`+mockAnth.URL+`/v1","api_key":"sk-ant-test-key-123456","api_type":"anthropic-messages"}`))
+	vReq.Header.Set("Authorization", "Bearer ap")
+	vRec := httptest.NewRecorder()
+	mux.ServeHTTP(vRec, vReq)
+	if vRec.Code != http.StatusOK || seenXAPIKey != "sk-ant-test-key-123456" || seenAnthVer != "2023-06-01" {
+		t.Fatalf("P0-07: expected Anthropic headers on verify-key, got code=%d x-api-key=%q ver=%q", vRec.Code, seenXAPIKey, seenAnthVer)
+	}
+
+	// 4. P0-06: test-candidate & test-agent-model with key_label == "" ("留空=全部启用Key") resolve first enabled key!
+	_, _ = src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"anth-prov": {
+				ID:               "anth-prov",
+				APIType:          "anthropic",
+				AnthropicBaseURL: mockAnth.URL + "/v1",
+				Enabled:          true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "ak1", Label: "claude-main", Key: "sk-ant-stored-999", Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"claude-sonnet": {
+				Enabled: true,
+				Candidates: []*types.RouteCandidate{
+					{Provider: "anth-prov", KeyLabel: "", TargetModel: "claude-sonnet-4-5", Enabled: true},
+				},
+			},
+		},
+	})
+
+	tcReq := httptest.NewRequest(http.MethodPost, "/api/admin/test-candidate",
+		strings.NewReader(`{"provider":"anth-prov","key_label":"","type":"chat","model":""}`))
+	tcReq.Header.Set("Authorization", "Bearer ap")
+	tcRec := httptest.NewRecorder()
+	mux.ServeHTTP(tcRec, tcReq)
+	if tcRec.Code != http.StatusOK || !strings.Contains(tcRec.Body.String(), `"ok":true`) {
+		t.Fatalf("P0-06: expected test-candidate with empty key_label & model to succeed, got %d: %s", tcRec.Code, tcRec.Body.String())
+	}
+
+	tamReq := httptest.NewRequest(http.MethodPost, "/api/admin/test-agent-model",
+		strings.NewReader(`{"model":"claude-sonnet"}`))
+	tamReq.Header.Set("Authorization", "Bearer ap")
+	tamRec := httptest.NewRecorder()
+	mux.ServeHTTP(tamRec, tamReq)
+	if tamRec.Code != http.StatusOK || !strings.Contains(tamRec.Body.String(), `"passed":1`) {
+		t.Fatalf("P0-06: expected test-agent-model with empty key_label candidate to pass, got %d: %s", tamRec.Code, tamRec.Body.String())
+	}
+}

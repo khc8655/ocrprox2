@@ -326,18 +326,18 @@ if (item?.key && !isMaskedSecret(item.key)) return item.key;
 return null;
 }
 export async function persistProviderKeyHealth(env, mapName, providerId, keyLabel, result) {
-if (!providerId) return;
+if (!providerId) return null;
 const kv = resolveKvBinding(env);
-if (!kv) return;
+if (!kv) return null;
 for (let attempt = 0; attempt < 2; attempt++) {
 try {
 const config = await loadConfig(kv);
 const prov = config?.[mapName]?.[providerId];
-if (!prov || !Array.isArray(prov.api_keys)) return;
+if (!prov || !Array.isArray(prov.api_keys)) return null;
 const match = keyLabel
 ? prov.api_keys.find(k => k && (k.label === keyLabel || k.id === keyLabel))
 : prov.api_keys[0];
-if (!match) return;
+if (!match) return null;
 match.last_ok = Boolean(result.valid);
 match.last_status = Number(result.status) || 0;
 match.last_latency_ms = Number(result.latency_ms) || 0;
@@ -345,13 +345,14 @@ if (result.models_count !== undefined) {
 match.last_models_count = Number(result.models_count) || 0;
 }
 match.last_checked_at = new Date().toISOString();
-await saveConfigWithCAS(config, kv);
-return;
+const saved = await saveConfigWithCAS(config, kv);
+return typeof saved?._version === 'number' ? saved._version : null;
 } catch (err) {
 if (attempt === 0 && (err instanceof CASConflictError || err?.status === 409)) {
 continue;
 }
-return;
+return null;
 }
 }
+return null;
 }

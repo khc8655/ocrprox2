@@ -72,6 +72,7 @@ type OAuthMeta struct {
 // AgentModelRoute 统一路由模式下的模型路由绑定（兼容 1 代 agent_models 与固定 4 KB 模型槽位）
 type AgentModelRoute struct {
 	Enabled         bool   `json:"enabled"`
+	Origin          string `json:"origin,omitempty"`           // "vault" (中枢同步模板) | "local" (节点本地路由)
 	ActiveKey       string `json:"active_key,omitempty"`       // 格式: "{provider}:{key_label}"（sticky_failover 首选粘性 Key）
 	RoutingStrategy string `json:"routing_strategy,omitempty"` // 覆盖全局: "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
 	NoReasoning     bool   `json:"no_reasoning,omitempty"`     // 强制剥离思考/推理参数（KB RAG chat 推荐开启）

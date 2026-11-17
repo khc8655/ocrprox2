@@ -245,6 +245,25 @@
         "provider_config": "object"
       }
     },
+    "vault_sync": {
+      "method": "POST",
+      "path": "/api/vault/sync",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "request": {
+        "hub_url": "string (optional)",
+        "node_token": "string (optional)"
+      },
+      "response": {
+        "ok": true,
+        "_version": "integer",
+        "synced_providers": "integer",
+        "synced_models": "integer",
+        "config": "object"
+      }
+    },
     "detect_provider": {
       "method": "POST",
       "path": "/api/admin/detect-provider",
