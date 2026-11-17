@@ -23,7 +23,7 @@ import (
 var (
 	ErrNodeUnauthorized  = errors.New("hubsync: node token unauthorized or revoked (401/403)")
 	ErrSourceUnavailable = errors.New("hubsync: hub unavailable and grace period expired")
-	ErrInvalidPayload     = errors.New("hubsync: invalid configuration payload from hub")
+	ErrInvalidPayload    = errors.New("hubsync: invalid configuration payload from hub")
 )
 
 const (
@@ -43,15 +43,23 @@ type HubSource struct {
 	hubURL      string
 	nodeToken   string
 	nodeVersion string
-	client      *http.Client
-	snapshot    atomic.Pointer[types.RuntimeSnapshot]
-	state       atomic.Value // holds string
-	mu          sync.Mutex   // protects refresh coordination
-	refreshing  bool
-	refreshCond *sync.Cond
-	lastRefresh time.Time
-	cbMu        sync.RWMutex
-	callbacks   []func(*types.ProxyConfig)
+	// usageProvider supplies a compact usage digest reported with each sync so the
+	// hub can show which models a VM actually serves. Nil in tests/older wiring.
+	usageProvider func() any
+	client        *http.Client
+	snapshot      atomic.Pointer[types.RuntimeSnapshot]
+	state         atomic.Value // holds string
+	mu            sync.Mutex   // protects refresh coordination
+	refreshing    bool
+	refreshCond   *sync.Cond
+	lastRefresh   time.Time
+	cbMu          sync.RWMutex
+	callbacks     []func(*types.ProxyConfig)
+}
+
+// SetUsageProvider registers a callback returning a JSON-serializable usage digest.
+func (s *HubSource) SetUsageProvider(fn func() any) {
+	s.usageProvider = fn
 }
 
 // SetNodeVersion sets the binary version reported to the hub on every sync request.
@@ -207,6 +215,13 @@ func (s *HubSource) syncWithHub(ctx context.Context, currentSnap *types.RuntimeS
 		// Lets the hub record the real binary version (last_binary_version) instead
 		// of the issuance-time default.
 		req.Header.Set("X-Node-Version", s.nodeVersion)
+	}
+	if s.usageProvider != nil {
+		if digest := s.usageProvider(); digest != nil {
+			if raw, err := json.Marshal(digest); err == nil && len(raw) < 8000 {
+				req.Header.Set("X-Node-Usage", string(raw))
+			}
+		}
 	}
 	if currentSnap != nil && currentSnap.ETag != "" {
 		req.Header.Set("If-None-Match", currentSnap.ETag)

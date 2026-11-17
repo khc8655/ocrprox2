@@ -113,9 +113,12 @@
   function maskKeyForDisplay(raw) {
     const s = String(raw || '');
     if (!s) return '';
-    if (s.includes('●')) return s;
-    if (s.length <= 8) return '●●●●●●';
-    return `${s.slice(0, 3)}●●●●●●${s.slice(-4)}`;
+    // Already a server-issued hint (either legacy dots or the short "sk-...7Yjl" form).
+    if (s.includes('●') || s.includes('-...')) return s;
+    if (s.length <= 8) return '***';
+    // Match the server format so the list stays readable without revealing the key.
+    const head = s.slice(0, 3).replace(/[-_]+$/, '') || s.slice(0, 1);
+    return `${head}-...${s.slice(-4)}`;
   }
 
   // Short human duration for cooldown pills: 45s / 12m / 3h / 1d.
@@ -183,6 +186,15 @@
   }
 
   const eh = escapeHtml;
+  // Model names and provider ids may contain ".", spaces or other CSS-special
+  // characters (e.g. "MiniMax-M3.1-Flash-Preview"). Building "#id_<name>" then
+  // throws SyntaxError and aborts rendering mid-list, which used to wipe the whole
+  // view. Escape every interpolated id fragment before it reaches querySelector.
+  function cssId(value) {
+    const s = String(value == null ? '' : value);
+    return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -1207,68 +1219,69 @@
 
   function renderHubOverview() {
     const kpiGrid = $('hubKpiGrid');
-    const provBody = $('hubProviderStatsBody');
     const nodeBody = $('hubNodeStatsBody');
+    const usageBody = $('hubModelUsageBody');
     const summarySub = $('hubHealthSummarySub');
-    if (!kpiGrid || !provBody || !nodeBody) return;
+    if (!kpiGrid || !nodeBody || !usageBody) return;
 
     const cfg = state.config || {};
     const providers = cfg.providers || {};
-    const provEntries = Object.entries(providers).sort(([a], [b]) => a.localeCompare(b));
     const agentModels = cfg.agent_models || {};
-    const kbModels = cfg.kb_models || {};
-    const nodes = state.nodes || [];
+    const nodes = (state.nodes || []).slice();
 
-    let enabledProvs = 0;
-    let totalKeys = 0;
-    let enabledKeys = 0;
-    let okKeys = 0;
-    let failKeys = 0;
-    let untestedKeys = 0;
+    const ONLINE_MS = 15 * 60 * 1000;
+    const nowMs = Date.now();
+    let onlineCount = 0;
+    let enabledNodes = 0;
+    let totalSyncs = 0;
+    let total304 = 0;
+    const modelUsage = new Map(); // model -> { nodes:Set, requests, success, failed, inTok, outTok }
 
-    for (const [, p] of provEntries) {
-      if (p.enabled !== false) enabledProvs++;
-      const keys = p.api_keys || [];
-      for (const k of keys) {
-        totalKeys++;
-        if (k.enabled !== false) enabledKeys++;
-        if (k.last_ok === true) okKeys++;
-        else if (k.last_ok === false) failKeys++;
-        else untestedKeys++;
+    for (const n of nodes) {
+      if (n.enabled !== false) enabledNodes++;
+      totalSyncs += Number(n.sync_count || 0);
+      total304 += Number(n.hit_304_count || 0);
+      const lastMs = n.last_seen ? new Date(n.last_seen).getTime() : 0;
+      if (n.enabled !== false && lastMs && nowMs - lastMs <= ONLINE_MS) onlineCount++;
+
+      const u = n.usage;
+      if (!u || typeof u !== 'object') continue;
+      const models = u.models && typeof u.models === 'object' ? u.models : {};
+      for (const [model, count] of Object.entries(models)) {
+        const c = Number(count) || 0;
+        if (c <= 0) continue;
+        let agg = modelUsage.get(model);
+        if (!agg) {
+          agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0 };
+          modelUsage.set(model, agg);
+        }
+        agg.nodes.add(n.name || n.id);
+        agg.requests += c;
+      }
+      // distribute node-level success/token totals proportionally to request counts
+      const nodeReqs = Number(u.requests) || 0;
+      const successRate = nodeReqs > 0 ? (Number(u.successes) || 0) / nodeReqs : 0;
+      const failRate = nodeReqs > 0 ? (Number(u.failed) || 0) / nodeReqs : 0;
+      for (const [model, count] of Object.entries(models)) {
+        const agg = modelUsage.get(model);
+        if (!agg) continue;
+        const c = Number(count) || 0;
+        agg.success += Math.round(c * successRate);
+        agg.failed += Math.round(c * failRate);
+        agg.inTok += Math.round((Number(u.in_tokens) || 0) * (nodeReqs > 0 ? c / nodeReqs : 0));
+        agg.outTok += Math.round((Number(u.out_tokens) || 0) * (nodeReqs > 0 ? c / nodeReqs : 0));
       }
     }
 
-    const agentModelCount = Object.keys(agentModels).length;
-    let agentCandCount = 0;
-    for (const m of Object.values(agentModels)) {
-      agentCandCount += (m?.candidates || []).length;
-    }
-
-    let kbCandCount = 0;
-    for (const list of Object.values(kbModels)) {
-      if (Array.isArray(list)) kbCandCount += list.length;
-    }
-
-    let activeNodes = 0;
-    let totalSyncs = 0;
-    let total304 = 0;
-    for (const n of nodes) {
-      if (n.enabled) activeNodes++;
-      totalSyncs += Number(n.sync_count || 0);
-      total304 += Number(n.hit_304_count || 0);
-    }
-
-    const testedCount = okKeys + failKeys;
-    const healthRate = testedCount > 0 ? `${Math.round((okKeys / testedCount) * 100)}%` : '-';
+    let totalKeys = 0;
+    for (const p of Object.values(providers)) totalKeys += (p.api_keys || []).length;
 
     const kpis = [
-      { label: '纳管供应商', value: String(provEntries.length), sub: `${enabledProvs} 个已启用` },
-      { label: 'API 密钥总量', value: String(totalKeys), sub: `${enabledKeys} 把已启用` },
-      { label: '密钥探活健康度', value: healthRate, sub: `正常 ${okKeys} · 异常 ${failKeys} · 未测 ${untestedKeys}` },
-      { label: 'Agent 路由模型', value: String(agentModelCount), sub: `${agentCandCount} 个上游候选` },
-      { label: '知识库流水线', value: String(kbCandCount), sub: '4 条 KB 并发通道' },
-      { label: '注册中转节点', value: String(nodes.length), sub: `${activeNodes} 个在线启用` },
-      { label: '节点同步 / 304', value: String(totalSyncs), sub: `304 缓存命中 ${total304} 次` },
+      { label: '纳管 VM 节点', value: String(nodes.length), sub: `${onlineCount} 在线 · ${enabledNodes} 已启用` },
+      { label: '下发供应商', value: String(Object.keys(providers).length), sub: `${totalKeys} 把密钥` },
+      { label: '下发模型', value: String(Object.keys(agentModels).length), sub: `${Object.values(agentModels).reduce((a, m) => a + (m?.candidates || []).length, 0)} 个候选` },
+      { label: '实际在用模型', value: String(modelUsage.size), sub: modelUsage.size ? '近一个上报窗口' : '暂无上报' },
+      { label: '节点同步总次数', value: String(totalSyncs), sub: `304 命中 ${total304} 次` },
       { label: '当前配置版本', value: `v${cfg._version || 1}`, sub: 'EdgeOne KV CAS' },
     ];
 
@@ -1281,57 +1294,68 @@
     `).join('');
 
     if (summarySub) {
-      summarySub.textContent = `共 ${provEntries.length} 个供应商、${totalKeys} 把密钥（已探活正常 ${okKeys}，异常 ${failKeys}，未测 ${untestedKeys}）`;
+      summarySub.textContent = `共 ${nodes.length} 个节点，${onlineCount} 个在线（15 分钟内同步过）`;
     }
 
-    if (provEntries.length === 0) {
-      provBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无供应商配置，点击右上角「管理供应商」添加或导入</td></tr>';
+    // --- Active VM table ---
+    const sortedNodes = nodes.slice().sort((a, b) => {
+      const ta = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+      const tb = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+      return tb - ta;
+    });
+
+    if (sortedNodes.length === 0) {
+      nodeBody.innerHTML = '<tr><td colspan="7" class="text-muted">暂无接入节点，点击右上角「管理节点」签发</td></tr>';
     } else {
-      provBody.innerHTML = '';
-      for (const [pId, p] of provEntries) {
-        const keys = p.api_keys || [];
-        const pTotal = keys.length;
-        const pEnabled = keys.filter((k) => k.enabled !== false).length;
-        const pOk = keys.filter((k) => k.last_ok === true).length;
-        const pFail = keys.filter((k) => k.last_ok === false).length;
-        const pLat = keys.reduce((acc, k) => (k.last_latency_ms ? Math.min(acc, k.last_latency_ms) : acc), Infinity);
-        const latText = Number.isFinite(pLat) ? `${pLat}ms` : '-';
-        const pct = pTotal > 0 ? Math.round(((pOk > 0 ? pOk : (pFail > 0 ? 0 : pEnabled)) / pTotal) * 100) : 0;
-        const barCls = pFail > 0 && pOk === 0 ? 'health-fill--err' : pOk > 0 ? 'health-fill--ok' : 'health-fill--warn';
-        const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+      nodeBody.innerHTML = '';
+      for (const n of sortedNodes) {
+        const lastMs = n.last_seen ? new Date(n.last_seen).getTime() : 0;
+        const online = n.enabled !== false && lastMs && (nowMs - lastMs) <= ONLINE_MS;
+        const statusHtml = n.enabled === false
+          ? '<span class="pill pill--red">已停用</span>'
+          : online
+            ? '<span class="pill pill--green">在线</span>'
+            : '<span class="pill pill--amber">离线</span>';
+
+        const usageModels = n.usage && n.usage.models ? Object.keys(n.usage.models) : [];
+        const modelText = usageModels.length
+          ? usageModels.slice(0, 3).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
+          : '<span class="text-muted">未上报</span>';
 
         const tr = ce('tr');
         tr.innerHTML = `
-          <td>
-            <div class="name">${icoHtml}<span>${eh(p.name || pId)}</span><span class="pill">${eh(pId)}</span></div>
-          </td>
-          <td><span class="pill">${eh(p.api_type || 'openai')}</span></td>
-          <td class="tabular">${pEnabled} / ${pTotal}</td>
-          <td>
-            <div class="health-bar">
-              <svg viewBox="0 0 100 6" width="72" height="6">
-                <rect x="0" y="0" width="100" height="6" rx="3" fill="currentColor" opacity="0.12"></rect>
-                <rect x="0" y="0" width="${pct}" height="6" rx="3" class="health-fill ${barCls}"></rect>
-              </svg>
-              <span class="text-xs text-muted">${pOk}正常 / ${pFail}异常</span>
-            </div>
-          </td>
-          <td class="tabular">${latText}</td>
-          <td>
-            <button class="btn btn--sm btn-hub-verify-prov" data-pid="${eh(pId)}" type="button">探活</button>
-          </td>
+          <td><strong>${eh(n.name || n.id)}</strong></td>
+          <td><span class="pill pill--accent">${eh(n.role || 'full')}</span></td>
+          <td>${statusHtml}</td>
+          <td class="text-sm">${modelText}</td>
+          <td class="tabular">${eh(`v${n.last_config_version || 1}`)} · ${n.sync_count || 0} 次</td>
+          <td class="tabular">${eh(lastMs ? formatTime(lastMs) : '从未同步')}</td>
+          <td class="tabular">${eh(n.last_ip || '-')}</td>
         `;
-        clk(tr.querySelector('.btn-hub-verify-prov'), () => verifyProviderKeys(pId));
-        provBody.appendChild(tr);
+        nodeBody.appendChild(tr);
       }
     }
 
-    nodeBody.innerHTML = nodes.length
-      ? nodes.map((n) => {
-          const snap = getNodeSyncSnapshotStatus(n);
-          return `<tr><td><strong>${eh(n.name || n.id)}</strong></td><td><span class="pill pill--accent">${eh(n.role || 'full')}</span></td><td><span class="pill ${snap.pillCls}">${eh(snap.label)}</span> <span class="text-xs text-muted">${eh(snap.leaseText)}</span></td><td class="tabular">${eh(`${n.last_ip || '-'} · ${n.last_config_version ? `v${n.last_config_version}` : '-'}`)}</td><td class="tabular">${n.sync_count || 0} / ${n.hit_304_count || 0}</td><td class="tabular">${eh(snap.syncMs ? formatTime(snap.syncMs) : '从未同步')}</td></tr>`;
-        }).join('')
-      : '<tr><td colspan="6" class="text-muted">暂无中转节点</td></tr>';
+    // --- Model usage distribution ---
+    const usageRows = [...modelUsage.entries()].sort((a, b) => b[1].requests - a[1].requests);
+    if (usageRows.length === 0) {
+      usageBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无节点上报模型使用数据。节点在下一次配置同步时会自动上报。</td></tr>';
+      return;
+    }
+    usageBody.innerHTML = '';
+    for (const [model, agg] of usageRows) {
+      const tr = ce('tr');
+      const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(model) : '';
+      tr.innerHTML = `
+        <td><div class="name">${icoHtml}<span>${eh(model)}</span></div></td>
+        <td class="tabular">${agg.nodes.size}</td>
+        <td class="tabular">${agg.requests}</td>
+        <td class="tabular">${agg.success} / ${agg.failed}</td>
+        <td class="tabular">${agg.inTok} / ${agg.outTok}</td>
+        <td class="text-sm">${eh([...agg.nodes].slice(0, 4).join(', '))}${agg.nodes.size > 4 ? ' …' : ''}</td>
+      `;
+      usageBody.appendChild(tr);
+    }
   }
 
   async function verifyProviderKeys(pId) {
@@ -1675,7 +1699,6 @@
           ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
           ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
           ${busyCount > 0 ? `<span class="pill pill--accent">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
-          ${p._balance ? `<span class="pill pill--green">${eh(p._balance)}</span>` : ''}
         </div>
         <div class="sub">${eh(p.base_url || '未配置 Base URL')}</div>
       `;
@@ -1710,7 +1733,30 @@
 
   function buildProviderEditor(pId, p) {
     const wrap = ce('div');
-    const q = (s) => wrap.querySelector(s);
+    const q = (s) => {
+      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
+      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
+      // and abort rendering mid-list. getElementById needs no escaping at all.
+      const sel = String(s);
+      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
+        const id = sel.slice(1);
+        if (wrap.id === id) return wrap;
+        // The element may still be detached (wrap.innerHTML just assigned, not yet
+        // appended), so document.getElementById cannot see it. Query the subtree by
+        // attribute instead, then fall back to the document.
+        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
+        if (local) return local;
+        if (wrap.ownerDocument) {
+          const hit = wrap.ownerDocument.getElementById(id);
+          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
+        }
+      }
+      try {
+        return wrap.querySelector(sel);
+      } catch (_) {
+        return null;
+      }
+    };
     const keys = p.api_keys || [];
 
     const aliasText = Object.entries(p.model_aliases || {})
@@ -1731,11 +1777,9 @@
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
       fg('定时刷新模型周期 (refresh_every)', `<input class="input input--code" id="ed_p_refresh_${pId}" value="${eh(p.refresh_every || 'off')}" placeholder="off / 1h / 6h / 24h">`),
       fg('新模型自动纳管正则 (auto_include)', `<input class="input input--code" id="ed_p_autoinclude_${pId}" value="${eh(p.auto_include || '')}" placeholder="如 ^(claude|deepseek)">`),
-      fg('自定义余额查询 URL (balance_url)', `<input class="input input--code" id="ed_p_bal_url_${pId}" value="${eh(p.balance_url || '')}" placeholder="https://api.../user/balance">`),
-      fg('余额提取 JSONPath (balance_path)', `<input class="input input--code" id="ed_p_bal_path_${pId}" value="${eh(p.balance_path || '')}" placeholder="$.balance">`),
-      fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
+            fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'>${eh(adapterText)}</textarea>`),
-    ].join('')}</div><div class="section-bar mt-2 flex-end"><button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button></div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_check_balance_${pId}" type="button">查询余额</button><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
+    ].join('')}</div><div class="section-bar mt-2 flex-end"><button class="btn btn--sm" id="btn_autolist_sync_${pId}" type="button">立即刷新并纳管模型</button></div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${window.HOST.capabilities.oauthLogin ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" href="#" target="_blank" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div><div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     keys.forEach((k, idx) => {
@@ -1752,17 +1796,20 @@
         statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
       }
 
+      // Keys synced from the hub vault are owned by the hub: the node shows a short
+      // hint and cannot edit or delete them. Locally added keys stay fully editable.
+      const vaultKey = !isHubMode() && k.origin === 'vault';
       tr.innerHTML = `
-        <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''}></td>
+        <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
         <td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td>
         <td><span class="tabular privacy-mask">${eh(maskKeyForDisplay(k.key))}</span></td>
-        <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重"><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM"></div></td>
-        ${isHubMode() ? '' : `<td><span class="pill">${k.origin === 'local' ? '本地' : '共享'}</span></td>`}
+        <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM" ${vaultKey ? 'disabled' : ''}></div></td>
+        ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
         <td>${statusHtml}</td>
         <td>
           <div class="fields">
             <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
-            <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
+            ${vaultKey ? '<span class="text-xs text-muted">由中枢管理</span>' : `<button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>`}
           </div>
         </td>
       `;
@@ -1841,34 +1888,7 @@
       tbody.appendChild(tr);
     });
 
-    // Check Balance (M2)
-    clk(q(`#btn_check_balance_${pId}`), async () => {
-      const baseUrl = q(`#ed_p_base_${pId}`)?.value.trim() || p.base_url || '';
-      const firstKey = p.api_keys?.[0]?.key || '';
-      const balUrl = q(`#ed_p_bal_url_${pId}`)?.value.trim() || p.balance_url || '';
-      const balPath = q(`#ed_p_bal_path_${pId}`)?.value.trim() || p.balance_path || '';
-
-      toast(`正在查询供应商 ${pId} 余额...`, 'info');
-      try {
-        const res = await window.HOST.checkBalance({
-          provider: pId,
-          base_url: baseUrl,
-          api_key: firstKey,
-          balance_url: balUrl,
-          balance_path: balPath,
-        });
-        if (res && (res.ok || res.balance !== undefined)) {
-          const bal = res.formatted || res.balance || '正常可用';
-          p._balance = String(bal);
-          toast(`余额查询成功: ${bal}`, 'ok');
-          renderProvidersList();
-        } else {
-          toast(`余额查询不可用: ${res?.error || '上游无余额接口'}`, 'warn');
-        }
-      } catch (e) {
-        toast(`查询异常: ${e.message}`, 'err');
-      }
-    });
+    // (查询余额已移除：无通用上游余额接口，见 #3)
 
     // Batch Test All Keys (uses /api/admin/test-provider batch on Full, falls back to verifyKey)
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
@@ -2073,8 +2093,6 @@
       else delete p.rpm_per_key;
       p.refresh_every = q(`#ed_p_refresh_${pId}`)?.value.trim() || 'off';
       p.auto_include = q(`#ed_p_autoinclude_${pId}`)?.value.trim() || '';
-      p.balance_url = q(`#ed_p_bal_url_${pId}`).value.trim();
-      p.balance_path = q(`#ed_p_bal_path_${pId}`).value.trim();
 
       const rawAliases = q(`#ed_p_aliases_${pId}`)?.value || '';
       const aliasMap = {};
@@ -2316,7 +2334,30 @@
     const wrap = ce('div');
     const isEnabled = node.enabled;
     const id = node.id;
-    const q = (s) => wrap.querySelector(s);
+    const q = (s) => {
+      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
+      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
+      // and abort rendering mid-list. getElementById needs no escaping at all.
+      const sel = String(s);
+      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
+        const id = sel.slice(1);
+        if (wrap.id === id) return wrap;
+        // The element may still be detached (wrap.innerHTML just assigned, not yet
+        // appended), so document.getElementById cannot see it. Query the subtree by
+        // attribute instead, then fall back to the document.
+        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
+        if (local) return local;
+        if (wrap.ownerDocument) {
+          const hit = wrap.ownerDocument.getElementById(id);
+          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
+        }
+      }
+      try {
+        return wrap.querySelector(sel);
+      } catch (_) {
+        return null;
+      }
+    };
 
     wrap.innerHTML = `<div class="form-grid">${[
       fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(node.name)}">`),
@@ -2583,7 +2624,30 @@
 
   function buildModelEditor(mName, m, isFixed = false) {
     const wrap = ce('div');
-    const q = (s) => wrap.querySelector(s);
+    const q = (s) => {
+      // Plain "#id" lookups: ids may contain dots/spaces (model names such as
+      // "MiniMax-M3.1-Flash-Preview"), which make querySelector throw SyntaxError
+      // and abort rendering mid-list. getElementById needs no escaping at all.
+      const sel = String(s);
+      if (sel.startsWith('#') && !/[\s>+~\[\]:,]/.test(sel)) {
+        const id = sel.slice(1);
+        if (wrap.id === id) return wrap;
+        // The element may still be detached (wrap.innerHTML just assigned, not yet
+        // appended), so document.getElementById cannot see it. Query the subtree by
+        // attribute instead, then fall back to the document.
+        const local = wrap.querySelector('[id="' + id.replace(/"/g, '\\"') + '"]');
+        if (local) return local;
+        if (wrap.ownerDocument) {
+          const hit = wrap.ownerDocument.getElementById(id);
+          if (hit && (hit === wrap || wrap.contains(hit))) return hit;
+        }
+      }
+      try {
+        return wrap.querySelector(sel);
+      } catch (_) {
+        return null;
+      }
+    };
     m.candidates = m.candidates || [];
     const candidates = m.candidates;
     const strat = m.routing_strategy || (isFixed ? 'round_robin' : 'sticky_failover');

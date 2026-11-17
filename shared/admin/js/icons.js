@@ -71,9 +71,29 @@
     return ICONS[key] || ICONS.generic;
   }
 
+  // Initial-letter avatar instead of vendor logos: keeps the list scannable across
+  // providers/models without shipping or maintaining brand SVGs.
+  const AVATAR_PALETTE = ['#1664FF', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
+
+  function initialOf(idOrName) {
+    const raw = String(idOrName || '').trim();
+    if (!raw) return '?';
+    const ch = Array.from(raw)[0];
+    return ch.toUpperCase();
+  }
+
+  function avatarColor(idOrName) {
+    const raw = String(idOrName || '');
+    let h = 0;
+    for (let i = 0; i < raw.length; i += 1) h = (h * 31 + raw.charCodeAt(i)) % 100000;
+    return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+  }
+
   function renderBrandIcon(idOrName) {
-    const svg = getBrandIcon(idOrName);
-    return `<span class="ico">${svg}</span>`;
+    const letter = initialOf(idOrName);
+    const color = avatarColor(idOrName);
+    const safe = letter.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return `<span class="avatar-initial" data-bg="${color}">${safe}</span>`;
   }
 
   const UI_ICONS = {

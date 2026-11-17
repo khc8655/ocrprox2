@@ -117,7 +117,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
   });
 
   describe('2. Kernel Guard: Preventing Mask Overwrite', () => {
-    test('Kernel Guard restores original secret when UI submits masked ● key', async () => {
+    test('Hub returns plaintext keys; Kernel Guard still restores masked submissions', async () => {
       // 1. Save original real secret
       const saveReq = makeAdminReq('POST', '/api/config', {
         _version: 1,
@@ -133,13 +133,17 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       const saveResp = await handleConfigRequest(saveReq, TEST_ENV, kv);
       assert.equal(saveResp.status, 200);
 
-      // 2. GET returns masked key
+      // 2. GET returns the plaintext key: the Hub is the authoritative source and the
+      //    admin console must be able to view and edit it. Node projections stay masked.
       const getReq = makeAdminReq('GET', '/api/config');
       const getResp = await handleConfigRequest(getReq, TEST_ENV, kv);
       const getData = await getResp.json();
-      const maskedKeyVal = getData.providers.deepseek.api_keys[0].key;
-      assert.match(maskedKeyVal, /●/);
-      assert.doesNotMatch(maskedKeyVal, /secret-999/);
+      const visibleKeyVal = getData.providers.deepseek.api_keys[0].key;
+      assert.equal(visibleKeyVal, 'sk-real-deepseek-secret-999');
+
+      // 2b. A masked value arriving from a stale UI/cache must still be replaced by the
+      //     stored secret instead of overwriting it (Kernel Guard).
+      const maskedKeyVal = 'sk-re●●●●●●et-999';
 
       // 3. UI sends back the masked key while modifying provider name
       const uiUpdateReq = makeAdminReq('POST', '/api/config', {

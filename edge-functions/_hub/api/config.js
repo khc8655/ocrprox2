@@ -1,7 +1,6 @@
 import {
 loadConfig,
 saveConfigWithCAS,
-toMaskedConfig,
 checkAdminAuth,
 CASConflictError,
 ConfigValidationError,
@@ -19,7 +18,7 @@ return new Response(
 JSON.stringify({
 ok: true,
 _version: config._version || 1,
-...toMaskedConfig(config),
+...config,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );
@@ -40,7 +39,7 @@ return new Response(
 JSON.stringify({
 ok: true,
 _version: saved._version,
-config: toMaskedConfig(saved),
+config: saved,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );

@@ -37,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261117-02"
+	version    = "v20261117-03"
 	commit     = "dev"
-	AppVersion = "2.4.0"
+	AppVersion = "2.4.1"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -160,6 +160,10 @@ func main() {
 	if role == types.RoleLite {
 		hubSrc = hubsync.NewHubSource(*hubURLFlag, *nodeTokenFlag, *allowPrivateFlag)
 		hubSrc.SetNodeVersion(version)
+		if obsMgr != nil {
+			// obsMgr is *obs.Manager here, so the concrete digest type is available.
+			hubSrc.SetUsageProvider(func() any { return obsMgr.UsageDigest() })
+		}
 		hubSrc.OnConfigChange(updateAuthFromSettings)
 		configSrc = hubSrc
 	} else {

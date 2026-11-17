@@ -1,7 +1,6 @@
 import {
   loadConfig,
   saveConfigWithCAS,
-  toMaskedConfig,
   checkAdminAuth,
   CASConflictError,
   ConfigValidationError,
@@ -22,7 +21,9 @@ export async function handleConfigRequest(request, env, kv) {
       JSON.stringify({
         ok: true,
         _version: config._version || 1,
-        ...toMaskedConfig(config),
+        // Hub is the authoritative source: the admin console needs the plaintext key
+        // to display and edit it. Node-facing projections stay masked (projection.js).
+        ...config,
       }),
       { status: 200, headers: { 'content-type': 'application/json' } }
     );
@@ -45,7 +46,7 @@ export async function handleConfigRequest(request, env, kv) {
         JSON.stringify({
           ok: true,
           _version: saved._version,
-          config: toMaskedConfig(saved),
+          config: saved,
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       );

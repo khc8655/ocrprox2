@@ -121,9 +121,14 @@ func TestAdminServer_ConfigAndAuth(t *testing.T) {
 		t.Errorf("expected ok: true in POST /api/config, got %+v", postResp)
 	}
 
-	// Returned config should have masked secret
-	if !strings.Contains(rec.Body.String(), "●●●●●●") {
-		t.Errorf("expected masked secret in response, got %s", rec.Body.String())
+	// Returned config must not leak the plaintext secret; it uses the short hint
+	// format ("sk-...3456") so the operator can tell which key is in use.
+	bodyStr := string(rec.Body.Bytes())
+	if strings.Contains(bodyStr, "sk-real-secret-123456") {
+		t.Errorf("plaintext secret leaked in response: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "-...") {
+		t.Errorf("expected masked secret hint in response, got %s", bodyStr)
 	}
 
 	// 4. CAS Conflict: Send stale version 100

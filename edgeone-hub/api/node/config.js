@@ -66,7 +66,23 @@ export async function handleNodeConfigRequest(request, env, kv) {
 
   // Touch node's last_seen and sync counters (plus the real binary version the node reports)
   const binaryVersion = (request.headers.get('x-node-version') || '').trim();
-  touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, binaryVersion }).catch(() => {});
+  // Optional usage digest, sent as a JSON header to keep it out of the config payload
+  // and avoid adding a second round-trip.
+  let usageDigest = null;
+  const usageHeader = request.headers.get('x-node-usage');
+  if (usageHeader && usageHeader.length < 8192) {
+    try {
+      usageDigest = JSON.parse(usageHeader);
+    } catch (_) {
+      usageDigest = null;
+    }
+  }
+  touchNodeLastSeen(node.id, kv, config._version, {
+    is304,
+    ip: clientIp,
+    binaryVersion,
+    usage: usageDigest,
+  }).catch(() => {});
 
   const responseHeaders = {
     'ETag': etag,

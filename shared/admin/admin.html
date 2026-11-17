@@ -42,11 +42,10 @@
         <div class="view-header">
           <div>
             <h1 class="view-title">中枢控制面概览</h1>
-            <p class="view-sub" id="hubOverviewSub">实时统计密钥池健康度、模型路由规模与中转节点同步状态</p>
+            <p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p>
           </div>
           <div class="view-actions">
             <button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button>
-            <button class="btn btn--primary" id="btnHubBatchVerifyAll" type="button">批量探活全部密钥</button>
           </div>
         </div>
 
@@ -55,33 +54,8 @@
         <div class="card">
           <div class="card-header">
             <div>
-              <h2 class="card-title">供应商密钥池与探活健康分布</h2>
-              <div class="card-sub" id="hubHealthSummarySub"></div>
-            </div>
-            <button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>供应商</th>
-                  <th>协议</th>
-                  <th>启用 / 总密钥</th>
-                  <th>健康分布</th>
-                  <th>最近探活延迟</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="hubProviderStatsBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="card-title">中转节点同步遥测</h2>
-              <div class="card-sub">节点配置拉取、304 缓存命中及活跃租约</div>
+              <h2 class="card-title">活跃 VM 节点</h2>
+              <div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div>
             </div>
             <button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button>
           </div>
@@ -89,15 +63,41 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>节点名称</th>
+                  <th>节点</th>
                   <th>角色</th>
-                  <th>同步快照状态</th>
-                  <th>最近 IP / Config</th>
-                  <th>同步 / 304 命中</th>
-                  <th>最后同步时间</th>
+                  <th>状态</th>
+                  <th>下发模型</th>
+                  <th>配置版本 / 同步</th>
+                  <th>最后同步</th>
+                  <th>最近 IP</th>
                 </tr>
               </thead>
               <tbody id="hubNodeStatsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">VM 端模型使用分布</h2>
+              <div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div>
+            </div>
+            <button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>模型</th>
+                  <th>使用节点数</th>
+                  <th>总调用</th>
+                  <th>成功 / 失败</th>
+                  <th>输入 / 输出 Token</th>
+                  <th>节点分布</th>
+                </tr>
+              </thead>
+              <tbody id="hubModelUsageBody"></tbody>
             </table>
           </div>
         </div>
@@ -321,8 +321,8 @@
     <section id="viewModels" hidden>
       <div class="view-header">
         <div>
-          <h1 class="view-title">统一模型路由与内置通道</h1>
-          <p class="view-sub" id="modelsSubtitle">内置 4 条固定高并发通道 (chat / embedding / reranker / ocr) 与大模型逻辑路由，支持会话粘性及轮询/权重/最闲/低延迟并发策略</p>
+          <h1 class="view-title">模型路由模板（下发编排）</h1>
+          <p class="view-sub" id="modelsSubtitle">中枢只做编排与下发模板，不参与中转。节点拉取后可在本地自由调整路由与候选，中枢不会覆盖或限制节点自己的编排。</p>
         </div>
         <div class="view-actions">
           <div class="seg" id="modelPipelineSeg">
@@ -497,7 +497,8 @@
       <!-- 2. Routing & Cooldown Policy -->
       <div class="card card-pad">
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">2</span>全局路由与异常冷却策略</h2>
+          <h2 class="card-title"><span class="step-num">2</span>下发模板默认值与冷却策略</h2>
+          <div class="card-sub">中枢不做中转；这些值作为节点首次拉取时的默认策略，节点可在本地覆盖</div>
           <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
         </div>
         <div class="form-grid">

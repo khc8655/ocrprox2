@@ -252,6 +252,29 @@ export async function touchNodeLastSeen(nodeId, kv, configVer = 0, meta = {}) {
   if (meta && meta.binaryVersion) {
     node.last_binary_version = String(meta.binaryVersion).slice(0, 32);
   }
+  // Usage digest reported by the node on each sync (models actually served, with
+  // request counts). Absent on older nodes, which simply omit it.
+  if (meta && meta.usage && typeof meta.usage === 'object') {
+    const models = {};
+    const raw = meta.usage.models && typeof meta.usage.models === 'object' ? meta.usage.models : {};
+    let guard = 0;
+    for (const [m, n] of Object.entries(raw)) {
+      if (guard >= 50) break;
+      const count = Number(n);
+      if (!m || !Number.isFinite(count) || count <= 0) continue;
+      models[String(m).slice(0, 96)] = Math.floor(count);
+      guard += 1;
+    }
+    node.usage = {
+      models,
+      requests: Number(meta.usage.requests) || 0,
+      successes: Number(meta.usage.successes) || 0,
+      failed: Number(meta.usage.failed) || 0,
+      in_tokens: Number(meta.usage.in_tokens) || 0,
+      out_tokens: Number(meta.usage.out_tokens) || 0,
+      updated_at: new Date(now).toISOString(),
+    };
+  }
   const nowIso = new Date(now).toISOString();
 
   // Throttle repeated 304 writes to once every 60s unless first sync or full 200 pull

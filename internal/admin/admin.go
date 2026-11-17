@@ -1888,10 +1888,21 @@ func maskConfigSecrets(cfg *types.ProxyConfig) *types.ProxyConfig {
 	return &copyCfg
 }
 
+// maskSecret renders a short, readable hint instead of a dot run: keys synced from
+// the hub vault cannot be read back or edited on the node, so "sk-...7Yjl" is enough
+// to identify which credential is in use without exposing it.
 func maskSecret(s string) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= 8 {
-		return "●●●●●●●●"
+	if s == "" {
+		return ""
 	}
-	return s[:3] + "●●●●●●" + s[len(s)-4:]
+	if len(s) <= 8 {
+		return "***"
+	}
+	head := strings.TrimRight(s[:3], "-_")
+	if head == "" {
+		head = s[:1]
+	}
+	tail := s[len(s)-4:]
+	return head + "-..." + tail
 }

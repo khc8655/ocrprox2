@@ -50,7 +50,21 @@ request.headers.get('x-forwarded-for') ||
 .split(',')[0]
 .trim() || null;
 const binaryVersion = (request.headers.get('x-node-version') || '').trim();
-touchNodeLastSeen(node.id, kv, config._version, { is304, ip: clientIp, binaryVersion }).catch(() => {});
+let usageDigest = null;
+const usageHeader = request.headers.get('x-node-usage');
+if (usageHeader && usageHeader.length < 8192) {
+try {
+usageDigest = JSON.parse(usageHeader);
+} catch (_) {
+usageDigest = null;
+}
+}
+touchNodeLastSeen(node.id, kv, config._version, {
+is304,
+ip: clientIp,
+binaryVersion,
+usage: usageDigest,
+}).catch(() => {});
 const responseHeaders = {
 'ETag': etag,
 'Cache-Control': 'no-store',

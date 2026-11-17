@@ -280,6 +280,47 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 	}
 }
 
+// UsageDigest summarizes the in-memory record window for hub reporting: which
+// models were actually served and how much traffic they carried. Kept intentionally
+// compact so it fits in a single request header.
+type UsageDigest struct {
+	Models    map[string]int `json:"models"`
+	Requests  int            `json:"requests"`
+	Successes int            `json:"successes"`
+	Failed    int            `json:"failed"`
+	InTokens  int            `json:"in_tokens"`
+	OutTokens int            `json:"out_tokens"`
+}
+
+// UsageDigest builds the digest from the in-memory ledger window.
+func (m *Manager) UsageDigest() UsageDigest {
+	m.mu.Lock()
+	records := make([]UsageRecord, len(m.memRecords))
+	copy(records, m.memRecords)
+	m.mu.Unlock()
+
+	digest := UsageDigest{Models: make(map[string]int, 16)}
+	for _, r := range records {
+		digest.Requests++
+		if r.Status >= 200 && r.Status < 300 {
+			digest.Successes++
+		} else {
+			digest.Failed++
+		}
+		digest.InTokens += r.InTokens
+		digest.OutTokens += r.OutTokens
+
+		model := r.ServedModel
+		if model == "" {
+			model = r.ReqModel
+		}
+		if model != "" {
+			digest.Models[model]++
+		}
+	}
+	return digest
+}
+
 // RecentTraces returns recent traces.
 func (m *Manager) RecentTraces(onlyFailedOrRetried bool) []types.RequestTrace {
 	if m == nil || m.traceBuffer == nil {

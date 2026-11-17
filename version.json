@@ -1,14 +1,15 @@
 {
-  "version": "v20261117-02",
-  "semver": "2.4.0",
+  "version": "v20261117-03",
+  "semver": "2.4.1",
   "release_date": "2026-11-17",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.4.0 — 一键部署脚本加固（版本/镜像/校验/卸载重装）与隐藏请求头",
+  "title": "LLMProxy2 (OCRProxy v2) 2.4.1 — 概览改为 VM 视角、隐藏请求头与 UI 体验修复",
   "changelog": [
-    "一键部署脚本：新增 --version=<TAG> 指定 Release 版本、--mirror=<URL> 自定义下载镜像，SHA256SUMS 校验覆盖镜像/官方/ghfast；full 模式支持 --hub-url/--node-token 预绑定 Vault",
-    "修复 llmproxy-ctl 权限 711 导致所有子命令 Permission denied（改为 chmod 755）",
-    "修复 uninstall --keep-config 后重装走升级分支、unit 缺失导致 Unit not found（保留配置的重装正确走全新安装并复用配置）",
-    "隐藏请求头 hide_client_name：供应商级开关，默认透传客户端 User-Agent，开启后统一以 llmproxy/2 发送；AdapterRules.ExtraHeaders 优先，Vault 同步保留该字段",
-    "Hub 节点状态与投影调整、T1 契约与构建/门禁脚本同步"
+    "修复模型名含点（如 MiniMax-M3.1-Flash-Preview）时展开编辑器清空整个列表的严重 UI 缺陷（id 选择器需转义）",
+    "全站品牌 logo 改为首字母圆形徽标（供应商与模型列表），取消无法使用的查询余额功能",
+    "Key 显示规则：中枢端与节点本地 Key 明文可见可改；中枢下发的 Key 在节点端显示短掩码（如 sk-...7Yjl）且只读",
+    "Hub 概览重规划为统一 VM 管理视角：活跃 VM 节点表 + VM 端模型使用分布；移除密钥探活健康分布表",
+    "节点新增使用量上报（X-Node-Usage）：每次配置同步携带模型调用计数，中枢据此展示实际在用模型",
+    "Hub 模型路由与全局策略明确为「下发模板」定位：中枢不中转、不强制，节点可自由本地编排"
   ]
 }

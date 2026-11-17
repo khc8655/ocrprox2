@@ -126,7 +126,14 @@ func IsMaskedSecret(val string) bool {
 	if s == "" {
 		return false
 	}
-	return strings.Contains(s, "●") || s == "********" || strings.HasPrefix(s, "***") || strings.Contains(s, "…")
+	if strings.Contains(s, "●") || s == "********" || strings.HasPrefix(s, "***") || strings.Contains(s, "…") {
+		return true
+	}
+	// Short hint format emitted by maskSecret: "sk--...7Yjl" (prefix-...-suffix).
+	if strings.Contains(s, "-...") {
+		return true
+	}
+	return false
 }
 
 // SaveConfig saves updated config to disk with Kernel Guard and CAS checks.
