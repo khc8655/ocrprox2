@@ -4,6 +4,16 @@
 
 ---
 
+## [v20261117-06] - 2026-11-17
+
+### Fixed
+- **UI 创建的供应商缺少 `id` 字段**：前端只把 id 用作 map key，没有写进对象，导致调度器 `Trace.WinnerProvider`/`UsageRecord.Provider` 为空——按供应商与按 Key 的用量统计整体失效（实测 `keys: []`）。前端补写 `id`，并在后端 `SaveConfig`/`loadFromDisk` 增加按 map key 回填的兜底，历史配置重启即自愈。
+- **节点端手动添加的 Key 被误标 `origin=vault`**：三处三元表达式写成了 `isHubMode() ? 'vault' : 'vault'`，本地 Key 因此被当作中枢下发资源——显示为只读短掩码且不可编辑。改为 `'local'`；`parseMultiApiKeys` 默认 origin 也从 `vault` 改为 `local`。
+- **Key 可见性规则落地**：节点仅对 `origin=vault`（中枢下发）的 Key 掩码只读，本地 Key 返回明文并支持「显示/隐藏」切换。新增 `TestAdminServer_VaultKeysMasked` 锁定该语义（vault 必须掩码、local 必须明文）。
+
+### Verified
+- 全流程浏览器 UI 端到端（从零创建，无任何预置配置）：登录 → 创建供应商 → 加 Key → 校验 Key(3ms) → 探测模型(2 个) → 一键纳管 → 数据面非流式/流式真实调用（上游回显 key+model 一致）→ Key 显示/隐藏 → 设置保存 → 刷新/重启持久化 → 质量门禁（零内联样式/零抽屉/零溢出/零 emoji/零 JS 错误）。
+
 ## [v20261117-05] - 2026-11-17
 
 ### Fixed

@@ -121,14 +121,12 @@ func TestAdminServer_ConfigAndAuth(t *testing.T) {
 		t.Errorf("expected ok: true in POST /api/config, got %+v", postResp)
 	}
 
-	// Returned config must not leak the plaintext secret; it uses the short hint
-	// format ("sk-...3456") so the operator can tell which key is in use.
+	// Node-sourced (origin != vault) keys are returned in plaintext: the operator owns
+	// them and the console needs the value to display/copy it. Vault-synced keys are
+	// masked separately (see TestAdminServer_VaultKeysMasked).
 	bodyStr := string(rec.Body.Bytes())
-	if strings.Contains(bodyStr, "sk-real-secret-123456") {
-		t.Errorf("plaintext secret leaked in response: %s", bodyStr)
-	}
-	if !strings.Contains(bodyStr, "-...") {
-		t.Errorf("expected masked secret hint in response, got %s", bodyStr)
+	if !strings.Contains(bodyStr, "sk-real-secret-123456") {
+		t.Errorf("locally added key should be returned plaintext, got %s", bodyStr)
 	}
 
 	// 4. CAS Conflict: Send stale version 100
@@ -549,5 +547,52 @@ func TestAdminServer_DefaultVaultFallback(t *testing.T) {
 	}
 	if seenAuth != "Bearer stk_node_seed_token" {
 		t.Fatalf("expected Bearer stk_node_seed_token sent to hub, got %q", seenAuth)
+	}
+}
+
+// Vault-synced keys must never come back in plaintext from a node: the node does not
+// own them and the console locks editing for them.
+func TestAdminServer_VaultKeysMasked(t *testing.T) {
+	authMgr := auth.NewAuthenticator("ck", "ap")
+	obsMgr, _ := obs.NewManager(types.RoleFull, t.TempDir())
+	defer obsMgr.Close()
+	src, err := config.NewLocalSource(t.TempDir(), "ap")
+	if err != nil {
+		t.Fatalf("local source: %v", err)
+	}
+	if _, err := src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"shared": {
+				ID: "shared", BaseURL: "https://x.example", Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "v1", Label: "from-hub", Key: "sk-vault-secret-9999", Enabled: true, Origin: "vault"},
+					{ID: "l1", Label: "mine", Key: "sk-local-secret-8888", Enabled: true, Origin: "local"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	srv := NewServer(authMgr, src, obsMgr, scheduler.NewScheduler(src, obsMgr, true))
+	srv.SetAdminPassword("ap")
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req.Header.Set("Authorization", "Bearer ap")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if strings.Contains(body, "sk-vault-secret-9999") {
+		t.Errorf("vault key leaked as plaintext: %s", body)
+	}
+	if !strings.Contains(body, "-...") {
+		t.Errorf("expected a short mask hint for the vault key, got %s", body)
+	}
+	if !strings.Contains(body, "sk-local-secret-8888") {
+		t.Errorf("locally added key should stay plaintext, got %s", body)
 	}
 }

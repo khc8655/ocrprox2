@@ -136,6 +136,21 @@ func IsMaskedSecret(val string) bool {
 	return false
 }
 
+// normalizeProviderIDs backfills ProviderConfig.ID from its map key. The admin UI
+// used to create providers without writing `id` into the object, which left
+// provider.ID empty in the scheduler and silently disabled per-provider/per-key
+// usage statistics.
+func normalizeProviderIDs(cfg *types.ProxyConfig) {
+	if cfg == nil {
+		return
+	}
+	for id, p := range cfg.Providers {
+		if p != nil && p.ID == "" {
+			p.ID = id
+		}
+	}
+}
+
 // SaveConfig saves updated config to disk with Kernel Guard and CAS checks.
 func (s *LocalSource) SaveConfig(newCfg *types.ProxyConfig) (*types.RuntimeSnapshot, error) {
 	s.mu.Lock()
@@ -481,6 +496,8 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 }
 
 func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig) (*types.RuntimeSnapshot, error) {
+	normalizeProviderIDs(newCfg)
+
 	currentSnap := s.snapshot.Load()
 	var currentCfg *types.ProxyConfig
 	if currentSnap != nil {
@@ -648,6 +665,7 @@ func (s *LocalSource) loadFromDisk() (*types.RuntimeSnapshot, error) {
 	if err := json.Unmarshal(plain, &cfg); err != nil {
 		return nil, fmt.Errorf("config: json unmarshal: %w", err)
 	}
+	normalizeProviderIDs(&cfg)
 
 	snap := &types.RuntimeSnapshot{
 		Config:     &cfg,

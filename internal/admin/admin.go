@@ -1874,14 +1874,22 @@ func maskConfigSecrets(cfg *types.ProxyConfig) *types.ProxyConfig {
 	var copyCfg types.ProxyConfig
 	_ = json.Unmarshal(data, &copyCfg)
 
+	// Visibility rules on a node:
+	//  - keys added locally on this node  -> plaintext (the operator owns them)
+	//  - keys synced from the hub vault   -> short mask only, and the UI locks editing
+	// The hub itself is the authoritative source and always returns plaintext.
 	for _, p := range copyCfg.Providers {
 		if p == nil {
 			continue
 		}
 		for _, k := range p.APIKeys {
-			if k != nil && k.Key != "" {
-				k.Key = maskSecret(k.Key)
+			if k == nil || k.Key == "" {
+				continue
 			}
+			if k.Origin != "vault" {
+				continue
+			}
+			k.Key = maskSecret(k.Key)
 		}
 	}
 

@@ -1,15 +1,13 @@
 {
-  "version": "v20261117-05",
-  "semver": "2.4.3",
+  "version": "v20261117-06",
+  "semver": "2.4.4",
   "release_date": "2026-11-17",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.4.3 — 修复签发节点不可用等 5 项 UI 缺陷",
+  "title": "LLMProxy2 (OCRProxy v2) 2.4.4 — 修复供应商 id 缺失与本地 Key 误标 vault",
   "changelog": [
-    "修复「签发新节点」点击无反应（P1）：toggle 助手跨函数作用域不可见且不接受字符串 id，导致表单永远打不开",
-    "修复「自动探测协议」只显示「未知错误」：全协议失败时改为透出每个协议的真实状态与原因",
-    "修复 Hub 端看不到完整 Key：后端已返明文但前端二次掩码；现 Hub 与本地 Key 提供「显示」按钮，中枢下发 Key 保持短掩码只读",
-    "修复复选框与标签错位：.form-label 的 space-between 把开关与文字推到两端，改用 form-label--check",
-    "首字母徽标中性化：移除按名称哈希随机上色（会误读为状态），改为中性 surface 令牌；中文取首字原样",
-    "路由策略收敛：默认仅展示「会话粘性优先」「空闲优先轮询」，其余 4 种归入「高级策略」分组并补充选择指引"
+    "修复 UI 创建供应商未写入对象 id 字段，导致调度器 Trace/Usage 中 provider 为空、按供应商与按 Key 的用量统计整体失效（后端增加按 map key 回填的兜底）",
+    "修复节点端手动添加的 Key 被误标 origin=vault（三元表达式两支均为 vault），导致本地 Key 显示为只读掩码且无法查看",
+    "Key 可见性规则修正：节点仅对中枢下发的 Key 掩码只读，本地添加的 Key 返回明文并支持显示/隐藏切换",
+    "parseMultiApiKeys 默认 origin 改为 local，避免调用方遗漏时静默产生 vault 归属"
   ]
 }

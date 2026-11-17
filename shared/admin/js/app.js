@@ -75,7 +75,10 @@
     return `${prefix}${i}`;
   }
 
-  function parseMultiApiKeys(raw, rawLabel, existing = [], origin = 'vault') {
+  // Default to local: a credential is only vault-owned when the caller explicitly
+  // says so (hub console, or a vault sync). Defaulting to vault used to mark
+  // node-side keys as read-only hub keys.
+  function parseMultiApiKeys(raw, rawLabel, existing = [], origin = 'local') {
     const items = String(raw || '').split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean);
     if (!items.length) return { keys: [] };
     const lbl = String(rawLabel || '').trim();
@@ -1124,7 +1127,10 @@
       const defOrigin = isHubMode() ? 'vault' : 'local';
       const parsed = parseMultiApiKeys(apiKey, keyAlias, [], defOrigin);
       if (parsed.error) return toast(parsed.error, 'warn');
-      state.config.providers[id] = { name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: defOrigin, api_keys: parsed.keys };
+      // id must be written into the object, not only used as the map key: the
+      // scheduler records provider.ID into usage/trace records, and an empty id
+      // silently broke the per-provider and per-key statistics.
+      state.config.providers[id] = { id, name, base_url: baseUrl, api_type: apiType, preset_id: id, enabled: true, origin: defOrigin, api_keys: parsed.keys };
       state.activeEditorKey = `p_${id}`;
       toggle(pForm, false);
       await persistConfig('供应商创建成功');
@@ -2151,7 +2157,9 @@
       const lbl = q(`#new_key_lbl_${pId}`).value.trim();
       const val = q(`#new_key_val_${pId}`).value.trim();
       if (!val) return toast('请填写密钥内容', 'warn');
-      const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'vault');
+      // A key typed into this editor is owned locally on a node; only the hub itself
+      // (the authoritative vault) labels its own entries as vault origin.
+      const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'local');
       if (parsed.error) return toast(parsed.error, 'warn');
       p.api_keys = p.api_keys || [];
       p.api_keys.push(...parsed.keys);
