@@ -121,6 +121,18 @@ const currentVer = Number(stored._version || 1);
 if (incomingVer === null || incomingVer !== currentVer) {
 throw new CASConflictError(currentVer, incomingVer);
 }
+const incomingProviders = incomingConfig.providers || {};
+const storedProviders = stored.providers || {};
+if (Object.keys(storedProviders).length > 0) {
+const usable = Object.values(incomingProviders).filter(
+(p) => p && p.enabled !== false && Array.isArray(p.api_keys) && p.api_keys.some((k) => k && k.enabled !== false)
+);
+if (usable.length === 0) {
+throw new ConfigValidationError(
+'refusing to save an empty template: at least one enabled provider with an enabled key is required'
+);
+}
+}
 const sanitized = applyKernelGuard(incomingConfig, stored);
 sanitized._version = currentVer + 1;
 const serialized = JSON.stringify(sanitized);

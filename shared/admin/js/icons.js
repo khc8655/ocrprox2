@@ -72,28 +72,30 @@
   }
 
   // Initial-letter avatar instead of vendor logos: keeps the list scannable across
-  // providers/models without shipping or maintaining brand SVGs.
-  const AVATAR_PALETTE = ['#1664FF', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
+  // providers/models without shipping or maintaining brand SVGs. Tones come from the
+  // design-system status tokens (accent/success/warning/danger) rather than raw hex,
+  // so light and dark themes stay consistent and contrast-safe.
+  const AVATAR_TONES = ['neutral', 'accent', 'success', 'warning', 'danger'];
 
   function initialOf(idOrName) {
     const raw = String(idOrName || '').trim();
     if (!raw) return '?';
-    const ch = Array.from(raw)[0];
-    return ch.toUpperCase();
+    return Array.from(raw)[0].toUpperCase();
   }
 
-  function avatarColor(idOrName) {
+  function avatarTone(idOrName) {
     const raw = String(idOrName || '');
     let h = 0;
     for (let i = 0; i < raw.length; i += 1) h = (h * 31 + raw.charCodeAt(i)) % 100000;
-    return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+    return AVATAR_TONES[h % AVATAR_TONES.length];
   }
 
   function renderBrandIcon(idOrName) {
     const letter = initialOf(idOrName);
-    const color = avatarColor(idOrName);
+    const tone = avatarTone(idOrName);
     const safe = letter.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    return `<span class="avatar-initial" data-bg="${color}">${safe}</span>`;
+    const aria = ` aria-hidden="true"`;
+    return `<span class="avatar-initial" data-tone="${tone}"${aria}>${safe}</span>`;
   }
 
   const UI_ICONS = {

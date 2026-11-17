@@ -1515,7 +1515,10 @@ input[type="checkbox"] {
   }
 }
 
-/* Initial-letter avatar (replaces vendor brand logos) */
+/* Initial-letter avatar (replaces vendor brand logos).
+ * Uses existing semantic tokens only — no hardcoded colors, so both themes follow
+ * automatically. Accent variants map to the design-system status palette instead of
+ * an ad-hoc rainbow, keeping the console visually coherent. */
 .avatar-initial {
   display: inline-flex;
   align-items: center;
@@ -1526,17 +1529,30 @@ input[type="checkbox"] {
   border-radius: 50%;
   background: var(--khc-surface-muted);
   color: var(--khc-text-2);
+  border: 1px solid var(--khc-border-1);
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
   text-transform: uppercase;
   user-select: none;
 }
-.avatar-initial[data-bg="#1664FF"] { background: #1664FF; color: #fff; }
-.avatar-initial[data-bg="#0EA5E9"] { background: #0EA5E9; color: #fff; }
-.avatar-initial[data-bg="#10B981"] { background: #10B981; color: #fff; }
-.avatar-initial[data-bg="#F59E0B"] { background: #F59E0B; color: #fff; }
-.avatar-initial[data-bg="#EF4444"] { background: #EF4444; color: #fff; }
-.avatar-initial[data-bg="#8B5CF6"] { background: #8B5CF6; color: #fff; }
-.avatar-initial[data-bg="#EC4899"] { background: #EC4899; color: #fff; }
-.avatar-initial[data-bg="#14B8A6"] { background: #14B8A6; color: #fff; }
+.avatar-initial[data-tone="accent"] {
+  background: var(--khc-primary-50);
+  color: var(--khc-primary-600);
+  border-color: var(--khc-primary-100);
+}
+.avatar-initial[data-tone="success"] {
+  background: var(--khc-success-bg);
+  color: var(--khc-success-text);
+  border-color: var(--khc-success-500);
+}
+.avatar-initial[data-tone="warning"] {
+  background: var(--khc-warning-bg);
+  color: var(--khc-warning-text);
+  border-color: var(--khc-warning-500);
+}
+.avatar-initial[data-tone="danger"] {
+  background: var(--khc-danger-bg);
+  color: var(--khc-danger-text);
+  border-color: var(--khc-danger-500);
+}

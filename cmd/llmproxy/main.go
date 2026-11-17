@@ -31,15 +31,16 @@ import (
 	"github.com/khc8655/llmproxy2/internal/router"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
+	"github.com/khc8655/llmproxy2/internal/usagecount"
 )
 
 var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261117-03"
+	version    = "v20261117-04"
 	commit     = "dev"
-	AppVersion = "2.4.1"
+	AppVersion = "2.4.2"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -160,10 +161,12 @@ func main() {
 	if role == types.RoleLite {
 		hubSrc = hubsync.NewHubSource(*hubURLFlag, *nodeTokenFlag, *allowPrivateFlag)
 		hubSrc.SetNodeVersion(version)
-		if obsMgr != nil {
-			// obsMgr is *obs.Manager here, so the concrete digest type is available.
-			hubSrc.SetUsageProvider(func() any { return obsMgr.UsageDigest() })
-		}
+		// Lite keeps zero-disk / near-zero-RAM semantics, so it cannot use obs.Manager
+		// (trace ring + usage.jsonl). A tiny counter is enough to report which models
+		// this node actually serves back to the hub.
+		liteUsage := usagecount.New()
+		hubSrc.SetUsageProvider(func() any { return liteUsage.Digest() })
+		obsSink = liteUsage
 		hubSrc.OnConfigChange(updateAuthFromSettings)
 		configSrc = hubSrc
 	} else {

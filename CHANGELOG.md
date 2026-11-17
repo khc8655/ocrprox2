@@ -4,6 +4,24 @@
 
 ---
 
+## [v20261117-04] - 2026-11-17
+
+### Fixed
+- **lite 用量上报为空**：lite 设计上不创建 `obs.Manager`（零落盘、无 trace 环形缓冲），导致 `X-Node-Usage` 永不发出、中枢概览永远显示「暂无上报」。新增极轻量内存计数器 `internal/usagecount`（仅按模型计数与汇总，上限 64 个模型），同时作为 lite 的 ObservabilitySink 与上报来源。
+- **空模板静默全断**：Hub 允许保存「providers 全空 / 全部 Key 禁用」的模板，节点下一次拉取后所有模型消失且无告警。现在保存时即拒绝（400 `refusing to save an empty template`），已有配置保持不变；同时新增 hub 测试覆盖该防护。
+
+### Changed
+- **首字母徽标样式 token 化（UI-UX 规范审查结论）**：移除徽标上 8 个硬编码十六进制色与 `[data-bg]` 属性选择器，改用 KHC 语义令牌 `accent / success / warning / danger`（浅/深色主题各自取值），满足正文 4.5:1 对比度要求；徽标补充 `aria-hidden="true"`（装饰性元素，名称文本已可读）。
+
+### Verified
+- **Hub↔VM 模板同步全链路测试**（mock hub 复刻真实投影语义）：
+  - 模板新增模型 → lite 租约后续租 `config_version` 递增、新模型可调用且使用正确 Key；
+  - 模板删除供应商 → 依赖模型自动下架（404 `not configured`），无关模型不受影响；
+  - Key 轮换 → 租约内仍用旧 Key、续租后切到新 Key；
+  - `origin=local` 供应商与 Key 在投影中被物理阻断；
+  - scope 过滤生效；20 并发首拉 20/20 拿到完整 payload；ETag 命中返回 304 且零载荷；
+  - 空模板被拒绝、恢复后节点自愈。
+
 ## [v20261117-03] - 2026-11-17
 
 ### Fixed

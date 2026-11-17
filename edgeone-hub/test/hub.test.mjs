@@ -1181,3 +1181,41 @@ describe('9. Vault node-token auth & node binary version', () => {
     assert.equal(node.last_binary_version, 'v20261117-02');
   });
 });
+
+describe('10. Empty-template guard (nodes must never be starved)', () => {
+  test('rejects saving a config with zero usable providers once one exists', async () => {
+    const kv = new MockKV();
+    const base = {
+      _version: 1,
+      providers: {
+        p1: { name: 'P1', enabled: true, api_keys: [{ id: 'k1', label: 'k1', key: 'sk-1', enabled: true }] },
+      },
+    };
+    assert.equal((await handleConfigRequest(makeAdminReq('POST', '/api/config', base), TEST_ENV, kv)).status, 200);
+
+    // Wiping providers must be refused with 400 rather than published to nodes.
+    const wipeResp = await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', { _version: 2, providers: {} }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(wipeResp.status, 400);
+    const wiped = await wipeResp.json();
+    assert.match(String(wiped.error || ''), /empty template/i);
+
+    // Stored config must still hold the original provider.
+    const stored = await loadConfig(kv);
+    assert.ok(stored.providers.p1);
+
+    // Removing the only enabled key is equally destructive and must be refused.
+    const noKeys = await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 2,
+        providers: { p1: { name: 'P1', enabled: true, api_keys: [{ id: 'k1', label: 'k1', key: 'sk-1', enabled: false }] } },
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(noKeys.status, 400);
+  });
+});
