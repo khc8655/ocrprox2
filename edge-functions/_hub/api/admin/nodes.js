@@ -42,6 +42,7 @@ ok: true,
 node: res.node,
 node_token: res.node_token,
 bootstrap_env: res.bootstrap_env,
+install_command: res.install_command,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );
@@ -70,6 +71,7 @@ JSON.stringify({
 ok: true,
 node_token: res.node_token,
 bootstrap_env: res.bootstrap_env,
+install_command: res.install_command,
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );

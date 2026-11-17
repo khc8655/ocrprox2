@@ -59,6 +59,7 @@ type Server struct {
 	buildSemver   string
 	buildCommit   string
 	updateAPIBase string
+	defaultVault  *types.VaultClientConfig
 }
 
 // NewServer creates a new admin Server.
@@ -96,6 +97,59 @@ func (s *Server) SetModeScheduler(ms *modesched.ModeScheduler) {
 // SetOAuthManager connects the OAuth manager to the admin server.
 func (s *Server) SetOAuthManager(om *oauth.Manager) {
 	s.oauthMgr = om
+}
+
+// SetDefaultVault configures fallback Hub URL and NodeToken supplied via CLI/env for Full mode.
+func (s *Server) SetDefaultVault(hubURL, nodeToken string) {
+	hubURL = strings.TrimSpace(hubURL)
+	nodeToken = strings.TrimSpace(nodeToken)
+	if hubURL == "" && nodeToken == "" {
+		s.defaultVault = nil
+		return
+	}
+	s.defaultVault = &types.VaultClientConfig{
+		URL:       hubURL,
+		NodeToken: nodeToken,
+	}
+}
+
+func (s *Server) effectiveVault(cfgVault *types.VaultClientConfig) *types.VaultClientConfig {
+	var url, tok string
+	if cfgVault != nil {
+		url = strings.TrimSpace(cfgVault.URL)
+		tok = strings.TrimSpace(cfgVault.NodeToken)
+	}
+	if s.defaultVault != nil {
+		if url == "" {
+			url = s.defaultVault.URL
+		}
+		if tok == "" {
+			tok = s.defaultVault.NodeToken
+		}
+	}
+	if url == "" && tok == "" {
+		return nil
+	}
+	return &types.VaultClientConfig{URL: url, NodeToken: tok}
+}
+
+func (s *Server) resolveVaultCredentials(snap *types.RuntimeSnapshot, explicitURL, explicitToken string) (string, string) {
+	hubURL := strings.TrimSpace(explicitURL)
+	nodeToken := strings.TrimSpace(explicitToken)
+	var cfgVault *types.VaultClientConfig
+	if snap != nil && snap.Config != nil {
+		cfgVault = snap.Config.Vault
+	}
+	eff := s.effectiveVault(cfgVault)
+	if eff != nil {
+		if hubURL == "" {
+			hubURL = eff.URL
+		}
+		if nodeToken == "" {
+			nodeToken = eff.NodeToken
+		}
+	}
+	return hubURL, nodeToken
 }
 
 // SetBuildInfo sets the running binary's version, semver, and commit metadata.
@@ -261,6 +315,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		snap, err := s.localSrc.Current(r.Context(), false)
 		if err != nil || snap == nil || snap.Config == nil {
+			var vaultVal any = map[string]any{}
+			if dv := s.effectiveVault(nil); dv != nil {
+				vaultVal = dv
+			}
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok":           true,
@@ -269,12 +327,15 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 				"agent_models": map[string]any{},
 				"kb_models":    map[string]any{},
 				"settings":     map[string]any{},
-				"vault":        map[string]any{},
+				"vault":        vaultVal,
 			})
 			return
 		}
 
 		masked := maskConfigSecrets(snap.Config)
+		if dv := s.effectiveVault(masked.Vault); dv != nil {
+			masked.Vault = dv
+		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok":           true,
@@ -506,6 +567,9 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 			}
 			if inP.RPMPerKey > 0 {
 				exP.RPMPerKey = inP.RPMPerKey
+			}
+			if inP.HideClientName {
+				exP.HideClientName = true
 			}
 			if inP.AdapterRules != nil {
 				exP.AdapterRules = inP.AdapterRules
@@ -1549,15 +1613,7 @@ func (s *Server) handleVaultManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	snap, _ := s.localSrc.Current(r.Context(), false)
-	hubURL := r.URL.Query().Get("hub_url")
-	nodeToken := r.URL.Query().Get("node_token")
-
-	if hubURL == "" && snap != nil && snap.Config != nil && snap.Config.Vault != nil {
-		hubURL = snap.Config.Vault.URL
-	}
-	if nodeToken == "" && snap != nil && snap.Config != nil && snap.Config.Vault != nil {
-		nodeToken = snap.Config.Vault.NodeToken
-	}
+	hubURL, nodeToken := s.resolveVaultCredentials(snap, r.URL.Query().Get("hub_url"), r.URL.Query().Get("node_token"))
 
 	if hubURL == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1631,15 +1687,9 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Otherwise forward fetch to Hub
 	snap, _ := s.localSrc.Current(r.Context(), false)
-	hubURL, _ := reqBody["hub_url"].(string)
-	nodeToken, _ := reqBody["node_token"].(string)
-
-	if hubURL == "" && snap != nil && snap.Config != nil && snap.Config.Vault != nil {
-		hubURL = snap.Config.Vault.URL
-	}
-	if nodeToken == "" && snap != nil && snap.Config != nil && snap.Config.Vault != nil {
-		nodeToken = snap.Config.Vault.NodeToken
-	}
+	reqHubURL, _ := reqBody["hub_url"].(string)
+	reqNodeToken, _ := reqBody["node_token"].(string)
+	hubURL, nodeToken := s.resolveVaultCredentials(snap, reqHubURL, reqNodeToken)
 
 	if hubURL == "" {
 		w.WriteHeader(http.StatusBadRequest)

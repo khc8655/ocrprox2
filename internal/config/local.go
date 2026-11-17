@@ -330,6 +330,7 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			existingP.Enabled = vp.Enabled
 			existingP.Origin = "vault"
 			existingP.RuleHash = vp.RuleHash
+			existingP.HideClientName = vp.HideClientName
 			if vp.RPMPerKey > 0 {
 				existingP.RPMPerKey = vp.RPMPerKey
 			}

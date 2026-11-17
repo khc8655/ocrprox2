@@ -529,7 +529,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			cancelWait()
 			continue
 		}
-		applyUpstreamAuthHeaders(upReq, cand.Provider, cand.KeyEntry.Key, extraHeaders)
+		applyUpstreamHeaders(upReq, r, cand.Provider, cand.KeyEntry.Key, extraHeaders)
 
 		queuedMillis := time.Since(queuedStart).Milliseconds()
 		cancelWait()
@@ -781,7 +781,23 @@ func classifyFailureReason(status int) string {
 	}
 }
 
-func applyUpstreamAuthHeaders(upReq *http.Request, prov *types.ProviderConfig, rawKey string, extraHeaders map[string]string) {
+// proxyDefaultUA replaces the inbound client's User-Agent when HideClientName is enabled
+// (or when the caller sent no User-Agent), matching Magpie's userAgentFor logic.
+const proxyDefaultUA = "llmproxy/2"
+
+func resolveUpstreamUserAgent(inboundReq *http.Request, prov *types.ProviderConfig) string {
+	if prov != nil && prov.HideClientName {
+		return proxyDefaultUA
+	}
+	if inboundReq != nil {
+		if ua := strings.TrimSpace(inboundReq.Header.Get("User-Agent")); ua != "" {
+			return ua
+		}
+	}
+	return proxyDefaultUA
+}
+
+func applyUpstreamHeaders(upReq *http.Request, inboundReq *http.Request, prov *types.ProviderConfig, rawKey string, extraHeaders map[string]string) {
 	authHeader := "Authorization"
 	authPrefix := "Bearer "
 	if prov != nil && prov.AdapterRules != nil {
@@ -794,6 +810,7 @@ func applyUpstreamAuthHeaders(upReq *http.Request, prov *types.ProviderConfig, r
 	}
 	upReq.Header.Set(authHeader, authPrefix+rawKey)
 	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("User-Agent", resolveUpstreamUserAgent(inboundReq, prov))
 	for hk, hv := range extraHeaders {
 		upReq.Header.Set(hk, hv)
 	}

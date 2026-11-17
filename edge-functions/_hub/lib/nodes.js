@@ -33,6 +33,21 @@ parts.push(`LLMPROXY_CLIENT_KEY=${clientKey.trim()}`);
 }
 return parts.join(' ');
 }
+function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
+const cleanHub = String(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
+const role = node.role === 'full' ? 'full' : 'lite';
+const args = [
+`--role=${role}`,
+`--hub-url="${cleanHub}"`,
+`--node-token="${rawToken}"`,
+];
+if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
+const cleanKey = clientKey.trim().replace(/["$`\\]/g, '');
+if (cleanKey) args.push(`--client-key="${cleanKey}"`);
+}
+args.push('-p 8787', '-y');
+return `curl -fsSL ${cleanHub}/install.sh | sudo bash -s -- ${args.join(' ')}`;
+}
 export async function loadNodes(kv) {
 let raw = null;
 if (kv) {
@@ -96,10 +111,12 @@ hit_304_count: 0,
 nodes.push(node);
 await saveNodes(nodes, kv);
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
+const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
 return {
 node: sanitizeNode(node),
 node_token: rawToken,
 bootstrap_env: bootstrapEnv,
+install_command: installCommand,
 };
 }
 export async function patchNode(nodeId, patch, kv) {
@@ -143,9 +160,11 @@ delete node.cached_status;
 nodes[idx] = node;
 await saveNodes(nodes, kv);
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
+const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
 return {
 node_token: rawToken,
 bootstrap_env: bootstrapEnv,
+install_command: installCommand,
 };
 }
 export async function deleteNode(nodeId, kv) {

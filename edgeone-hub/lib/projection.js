@@ -75,6 +75,7 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     if (pData.quota_reset_at) projectedProvider.quota_reset_at = pData.quota_reset_at;
     if (pData.refresh_every) projectedProvider.refresh_every = pData.refresh_every;
     if (pData.auto_include) projectedProvider.auto_include = pData.auto_include;
+    if (pData.hide_client_name) projectedProvider.hide_client_name = true;
 
     // Attach adapter rules directly on ProviderConfig (for Go ProxyConfig deserialization)
     // and keep top-level adapter_rules map for backward compatibility.

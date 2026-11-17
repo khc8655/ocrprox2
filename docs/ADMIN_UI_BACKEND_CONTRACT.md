@@ -65,19 +65,20 @@
   }
 }
 ```
-- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）及一键启动命令模板：
+- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`：
 ```json
 {
   "ok": true,
   "node": { "id": "node_jp_02", "name": "日本 NAT 极简节点", "enabled": true },
   "node_token": "stk_node_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a",
-  "bootstrap_env": "LLMPROXY_ROLE=lite LLMPROXY_HUB_URL=https://hub.example.com LLMPROXY_NODE_TOKEN=stk_node_9f8e... LLMPROXY_CLIENT_KEY=sk-llmproxy-..."
+  "bootstrap_env": "LLMPROXY_ROLE=lite LLMPROXY_HUB_URL=https://hub.example.com LLMPROXY_NODE_TOKEN=stk_node_9f8e... LLMPROXY_CLIENT_KEY=sk-llmproxy-...",
+  "install_command": "curl -fsSL https://hub.example.com/install.sh | sudo bash -s -- --role=lite --hub-url=\"https://hub.example.com\" --node-token=\"stk_node_9f8e...\" --client-key=\"sk-llmproxy-...\" -p 8787 -y"
 }
 ```
 
 ### 2.3 注销/吊销、恢复、轮换与删除节点
 - **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
-- **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`，旧 Token 立即失效。
+- **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`、`bootstrap_env` 与 `install_command`，旧 Token 立即失效。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
 
 ---

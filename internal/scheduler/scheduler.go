@@ -702,23 +702,7 @@ func (s *Scheduler) Dispatch(
 			continue
 		}
 
-		// Set auth header
-		authHeader := "Authorization"
-		authPrefix := "Bearer "
-		if cand.Provider.AdapterRules != nil {
-			if cand.Provider.AdapterRules.AuthHeader != "" {
-				authHeader = cand.Provider.AdapterRules.AuthHeader
-			}
-			if cand.Provider.AdapterRules.AuthPrefix != "" {
-				authPrefix = cand.Provider.AdapterRules.AuthPrefix
-			}
-		}
-		upReq.Header.Set(authHeader, authPrefix+cand.KeyEntry.Key)
-		upReq.Header.Set("Content-Type", "application/json")
-
-		for hk, hv := range extraHeaders {
-			upReq.Header.Set(hk, hv)
-		}
+		applyUpstreamHeaders(upReq, r, cand.Provider, cand.KeyEntry.Key, extraHeaders)
 
 		// Concurrency tracking: acquire busy slot
 		queuedMillis := time.Since(queuedStart).Milliseconds()

@@ -157,39 +157,42 @@ EdgeOne Makers 仅负责供应商/Key 与适配规则维护、节点 Token 签�
 
 `llmproxy2` 为单一静态 Go 二进制，零 CGO 依赖，支持以下两种部署方式：
 
-#### 方式一：使用 `deploy/install.sh` 一键安装（推荐）
+#### 方式一：使用 `install.sh` 一键安装（推荐，对齐 1 代流程）
 
-脚本将自动识别 Linux 架构（`amd64` / `arm64`）、安装二进制到 `/usr/local/bin/llmproxy` 并配置注册为 systemd 系统服务。
+在 Hub 控制台「中转节点 → 签发新节点」（或「轮换 Token」）后，可直接复制生成的单行一键安装命令；也可直接在 Linux VM 上执行脚本。脚本将自动识别架构（`amd64` / `arm64`）、从 GitHub Releases 下载静态二进制（内置 `ghfast.top` / `gh-proxy.com` 回退与 `SHA256SUMS` 校验，支持 `--version` / `--mirror`）、安装到 `/usr/local/bin/llmproxy` 并注册 `systemd`（已兼容非特权 LXD/Docker 容器）与 `llmproxy-ctl` 快捷运维命令。
 
-**1. NAT VM 极简节点 (`--role=lite`)**
+> 脚本同步托管在你的 EdgeOne Hub 同域 `/install.sh`（国内/纯 IPv6 推荐，不依赖 `raw.githubusercontent.com`）及仓库根目录 `install.sh`。
+
+**1. 交互式一键安装（与 1 代相同，`safe_read` 兼容管道交互向导）**：
+```bash
+curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash
+# 或从 GitHub Raw:
+curl -fsSL https://raw.githubusercontent.com/khc8655/ocrprox2/main/install.sh | sudo bash
+```
+
+**2. NAT VM 极简节点 (`--role=lite`) 非交互一键安装**：
 > 专为 **64MB~256MB 内存、共享 IPv4 / 纯 IPv6、不可信磁盘** 的 NAT 小鸡设计。纯内存运行、零落盘、开机无定时轮询、中枢注销即停服。
 
 ```bash
-# 执行一键安装并自动配置 systemd 极简服务
-sudo ./deploy/install.sh --role=lite \
+curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \
+  --role=lite \
   --hub-url="https://your-hub.edgeone.app" \
   --node-token="stk_node_example_node_token_48chars_long_placeholder" \
-  --client-key="sk-llmproxy-client-example-key"
-
-# 启动并检查运行状态
-sudo systemctl daemon-reload
-sudo systemctl enable --now llmproxy-lite
-sudo systemctl status llmproxy-lite
+  --client-key="sk-llmproxy-client-example-key" \
+  -p 8787 -y
 ```
 
-**2. 标准 VM 完整节点 (`--role=full`)**
-> 适用于自有主力云主机，具备本地 AES-256-GCM 加密落盘、离线可用、Agent + KB 双模时段切换、20MB 零拷贝 OCR 队列与本地 Web 控制台。
+**3. 标准 VM 完整节点 (`--role=full`) 一键安装**：
+> 适用于自有主力云主机，具备本地 AES-256-GCM 加密落盘、离线可用、Agent + KB 双模时段切换、20MB 零拷贝 OCR 队列与本地 Web 控制台；传入 `--hub-url` 与 `--node-token` 可预绑定 Vault 同步源，登录后台直接同步中枢密钥。
 
 ```bash
-# 执行一键安装并配置专用 systemd 服务及用户隔离环境 (/opt/llmproxy)
-sudo ./deploy/install.sh --role=full \
+curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \
+  --role=full \
+  --hub-url="https://your-hub.edgeone.app" \
+  --node-token="stk_node_example_node_token_48chars_long_placeholder" \
   --client-key="sk-llmproxy-client-example-key" \
-  --admin-pass="your_strong_admin_pass"
-
-# 启动并检查服务
-sudo systemctl daemon-reload
-sudo systemctl enable --now llmproxy-full
-sudo systemctl status llmproxy-full
+  --admin-pass="your_strong_admin_pass" \
+  -p 8787 -y
 ```
 
 ---

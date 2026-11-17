@@ -85,8 +85,8 @@ func main() {
 	clientKeyFlag := flag.String("client-key", envOr("LLMPROXY_CLIENT_KEY", envOr("CLIENT_KEY", envOr("PROXY_API_KEY", ""))), "Client authentication key")
 	adminPassFlag := flag.String("admin-pass", envOr("ADMIN_PASSWORD", ""), "Admin management password")
 	encryptKeyFlag := flag.String("encrypt-key", envOr("ENCRYPT_KEY", ""), "Encryption passphrase for local config (defaults to admin-pass)")
-	hubURLFlag := flag.String("hub-url", envOr("LLMPROXY_HUB_URL", envOr("HUB_URL", envOr("EDGEONE_HUB_URL", ""))), "EdgeOne Hub URL (lite mode)")
-	nodeTokenFlag := flag.String("node-token", envOr("LLMPROXY_NODE_TOKEN", envOr("NODE_TOKEN", "")), "Node authorization token (lite mode)")
+	hubURLFlag := flag.String("hub-url", envOr("LLMPROXY_HUB_URL", envOr("HUB_URL", envOr("EDGEONE_HUB_URL", ""))), "EdgeOne Hub URL (lite sync / full default vault)")
+	nodeTokenFlag := flag.String("node-token", envOr("LLMPROXY_NODE_TOKEN", envOr("NODE_TOKEN", "")), "Node authorization token (lite sync / full default vault)")
 	allowPrivateFlag := flag.Bool("allow-private", envBoolOr("ALLOW_PRIVATE_IPS", false), "Allow private upstream IPs")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
@@ -487,6 +487,9 @@ func main() {
 		adminSrv.SetRefreshManager(refreshMgr)
 		adminSrv.SetBuildInfo(version, AppVersion, commit)
 		adminSrv.SetAdminPassword(*adminPassFlag)
+		if *hubURLFlag != "" || *nodeTokenFlag != "" {
+			adminSrv.SetDefaultVault(*hubURLFlag, *nodeTokenFlag)
+		}
 		adminSrv.RegisterRoutes(mux)
 	}
 

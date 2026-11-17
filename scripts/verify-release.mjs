@@ -128,6 +128,9 @@ try {
   const beforeCatalog = existsSync(catalogPath) ? readFileSync(catalogPath, 'utf8') : '';
   const beforeAdmin = existsSync(adminDistPath) ? readFileSync(adminDistPath, 'utf8') : '';
   const beforeInternal = existsSync(internalAssetHtml) ? readFileSync(internalAssetHtml, 'utf8') : '';
+  const deployInstallPath = join(projectRoot, 'deploy/install.sh');
+  const rootInstallPath = join(projectRoot, 'install.sh');
+  const beforeRootInstall = existsSync(rootInstallPath) ? readFileSync(rootInstallPath, 'utf8') : '';
 
   // 1. Run preset catalog build
   runCmd('node', ['shared/presets/build-catalog.mjs']);
@@ -176,6 +179,13 @@ try {
   }
   if (beforeInternal && beforeInternal !== afterInternal) {
     throw new Error('Build drift detected in internal/admin/assets/index.html. Run `npm run build:admin` first.');
+  }
+  if (existsSync(deployInstallPath)) {
+    const deployInstall = readFileSync(deployInstallPath, 'utf8');
+    const afterRootInstall = existsSync(rootInstallPath) ? readFileSync(rootInstallPath, 'utf8') : '';
+    if (deployInstall !== afterRootInstall || (beforeRootInstall && beforeRootInstall !== afterRootInstall)) {
+      throw new Error('Build drift detected in install.sh vs deploy/install.sh. Run `npm run build:admin` first.');
+    }
   }
 
   logSuccess('Zero build drift verified: build outputs are completely deterministic and up to date');

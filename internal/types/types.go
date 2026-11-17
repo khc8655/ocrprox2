@@ -51,6 +51,7 @@ type ProviderConfig struct {
 	AutoInclude      string            `json:"auto_include,omitempty"`   // Magpie 新模型自动纳管正则
 	BalanceURL       string            `json:"balance_url,omitempty"`    // 自定义余额查询 URL
 	BalancePath      string            `json:"balance_path,omitempty"`   // 自定义余额 JSONPath 提取表达式
+	HideClientName   bool              `json:"hide_client_name,omitempty"` // 仿 Magpie user-agent 开关：默认 false 透传客户端 User-Agent；开启后隐藏客户端名称，统一以 llmproxy 发送
 	APIKeys          []*KeyEntry       `json:"api_keys"`
 	ModelAliases     map[string]string `json:"model_aliases,omitempty"`
 	AdapterRules     *AdapterRules     `json:"adapter_rules,omitempty"`

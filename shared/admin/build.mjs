@@ -116,11 +116,11 @@ let bundledHtml = html
   .map(line => line.trim())
   .filter(Boolean)
   .join('\n');
-bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', `<style>\n${minCss}\n</style>`);
-bundledHtml = bundledHtml.replace('<script src="js/icons.js"></script>', `<script>\n${cleanIconsJs}\n</script>`);
-bundledHtml = bundledHtml.replace('<script src="js/usage.js"></script>', `<script>\n${cleanUsageJs}\n</script>`);
-bundledHtml = bundledHtml.replace('<script src="js/host.js"></script>', `<script>\n${cleanHostJs}\n</script>`);
-bundledHtml = bundledHtml.replace('<script src="js/app.js"></script>', `<script>\n${cleanAppJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', () => `<style>\n${minCss}\n</style>`);
+bundledHtml = bundledHtml.replace('<script src="js/icons.js"></script>', () => `<script>\n${cleanIconsJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/usage.js"></script>', () => `<script>\n${cleanUsageJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/host.js"></script>', () => `<script>\n${cleanHostJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/app.js"></script>', () => `<script>\n${cleanAppJs}\n</script>`);
 
 mkdirSync(distDir, { recursive: true });
 const distPath = join(distDir, 'index.html');
@@ -163,6 +163,14 @@ const legacyEdgeAdminPath = join(edgeFuncDir, 'admin.js');
 if (existsSync(legacyEdgeAdminPath)) {
   unlinkSync(legacyEdgeAdminPath);
   console.log('   ✓ Removed legacy edge-functions/admin.js (0 bytes in bu_script)');
+}
+
+// Mirror deploy/install.sh to repo root /install.sh so EdgeOne Hub hosts it directly on the same origin.
+const deployInstallPath = join(projectRoot, 'deploy/install.sh');
+const rootInstallPath = join(projectRoot, 'install.sh');
+if (existsSync(deployInstallPath)) {
+  writeFileSync(rootInstallPath, readFileSync(deployInstallPath), { mode: 0o755 });
+  console.log('   ✓ Synchronized deploy/install.sh -> install.sh (Hub same-origin one-click script)');
 }
 
 // 9. Sync pure Web Standard hub files to edge-functions/_hub/ (Self-Contained Edge Packaging)

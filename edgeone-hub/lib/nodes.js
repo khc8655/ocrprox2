@@ -37,6 +37,22 @@ function buildBootstrapEnv(node, rawToken, hubUrl, clientKey = '') {
   return parts.join(' ');
 }
 
+function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
+  const cleanHub = String(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
+  const role = node.role === 'full' ? 'full' : 'lite';
+  const args = [
+    `--role=${role}`,
+    `--hub-url="${cleanHub}"`,
+    `--node-token="${rawToken}"`,
+  ];
+  if (clientKey && typeof clientKey === 'string' && clientKey.trim()) {
+    const cleanKey = clientKey.trim().replace(/["$`\\]/g, '');
+    if (cleanKey) args.push(`--client-key="${cleanKey}"`);
+  }
+  args.push('-p 8787', '-y');
+  return `curl -fsSL ${cleanHub}/install.sh | sudo bash -s -- ${args.join(' ')}`;
+}
+
 export async function loadNodes(kv) {
   let raw = null;
   if (kv) {
@@ -116,11 +132,13 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', 
   await saveNodes(nodes, kv);
 
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
 
   return {
     node: sanitizeNode(node),
     node_token: rawToken,
     bootstrap_env: bootstrapEnv,
+    install_command: installCommand,
   };
 }
 
@@ -178,10 +196,12 @@ export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.
   await saveNodes(nodes, kv);
 
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, clientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, clientKey);
 
   return {
     node_token: rawToken,
     bootstrap_env: bootstrapEnv,
+    install_command: installCommand,
   };
 }
 

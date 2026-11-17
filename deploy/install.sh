@@ -19,7 +19,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-SCRIPT_VERSION="v20261115-01"
+SCRIPT_VERSION="v20261117-02"
 TARGET_DIR="/usr/local/bin"
 BIN_NAME="llmproxy"
 CTL_NAME="llmproxy-ctl"
@@ -137,14 +137,16 @@ show_help() {
     echo "选项 (Options):"
     echo "  --role=<lite|full>         运行模式: lite (EdgeOne 内存中继) 或 full (全功能网关+后台) [默认: full]"
     echo "  --bin=<path>               使用本地指定的编译二进制文件"
+    echo "  --version=<TAG>            指定下载的 GitHub Release 版本标签 [默认: latest]"
+    echo "  --mirror=<URL>             前置自定义 GitHub 下载加速镜像 (如 https://ghfast.top)"
     echo "  -p, --port=<PORT>          服务监听端口 [默认: 8787]"
     echo "  -k, --client-key=<KEY>     客户端接入 API Key (空则自动生成 sk-llmproxy-...)"
     echo "  -w, --admin-password=<PW>  管理控制台密码 (仅 full 模式，空则自动生成)"
     echo "      --admin-pass=<PW>      同 --admin-password"
     echo "      --encrypt-key=<KEY>    本地配置加密密钥 (仅 full 模式，默认使用管理密码)"
     echo "      --config-dir=<DIR>     配置文件存放目录 [默认: /etc/llmproxy]"
-    echo "      --hub-url=<URL>        EdgeOne Hub 端点 URL (仅 lite 模式)"
-    echo "      --node-token=<TOKEN>   节点授权通信 Token (仅 lite 模式)"
+    echo "      --hub-url=<URL>        EdgeOne Hub URL (lite 必填；full 可选预填 Vault 同步源)"
+    echo "      --node-token=<TOKEN>   节点授权通信 Token (lite 必填；full 可选预填 Vault 同步源)"
     echo "  -y, --yes                  非交互模式 (自动确认并使用默认或随机生成值)"
     echo "  -h, --help                 显示本帮助信息并退出"
     echo "=============================================================================="
@@ -156,6 +158,8 @@ show_help() {
 CLI_ACTION=""
 CLI_ROLE=""
 CLI_BIN=""
+CLI_VERSION=""
+CLI_MIRROR=""
 CLI_HUB_URL=""
 CLI_NODE_TOKEN=""
 CLI_PORT=""
@@ -182,6 +186,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bin)
             CLI_BIN="$2"
+            shift 2
+            ;;
+        --version=*)
+            CLI_VERSION="${1#*=}"
+            shift
+            ;;
+        --version)
+            CLI_VERSION="$2"
+            shift 2
+            ;;
+        --mirror=*)
+            CLI_MIRROR="${1#*=}"
+            shift
+            ;;
+        --mirror)
+            CLI_MIRROR="$2"
             shift 2
             ;;
         --hub-url=*)
@@ -281,9 +301,10 @@ is_installed() {
     if [[ -x "${TARGET_DIR}/${BIN_NAME}" || -x "/opt/llmproxy/bin/llmproxy" ]]; then
         return 0
     fi
-    if [[ -f "/etc/llmproxy/.env" || -f "/etc/llmproxy/proxy_config.enc" || -f "/opt/llmproxy/.env" || -f "/opt/llmproxy/config/proxy_config.enc" ]]; then
-        return 0
-    fi
+    # NOTE: config files alone do NOT mean "installed" — `uninstall --keep-config`
+    # deliberately leaves them behind. Treating that state as installed sends a
+    # later fresh install into the upgrade branch, which never writes a systemd
+    # unit, so the service ends up "Unit not found". Only unit/binary count.
     return 1
 }
 
@@ -385,16 +406,35 @@ resolve_binary() {
     fi
 
     # 3. 从 GitHub Release 下载
-    info "未检测到本地编译产物，准备从 GitHub Releases 下载最新发行版..."
+    local release_tag="${CLI_VERSION:-latest}"
+    local release_base="https://github.com/${GITHUB_REPO}/releases/latest/download"
+    if [[ -n "$release_tag" && "$release_tag" != "latest" ]]; then
+        release_base="https://github.com/${GITHUB_REPO}/releases/download/${release_tag}"
+        info "未检测到本地编译产物，准备从 GitHub Releases (${release_tag}) 下载..."
+    else
+        info "未检测到本地编译产物，准备从 GitHub Releases 下载最新发行版..."
+    fi
+
     local tmp_bin
     tmp_bin=$(mktemp /tmp/llmproxy_bin_XXXXXX)
     local tmp_sha
     tmp_sha=$(mktemp /tmp/llmproxy_sha_XXXXXX)
 
-    local dl_candidates=(
-        "https://github.com/${GITHUB_REPO}/releases/latest/download/${binary_target_name}"
-        "https://ghfast.top/https://github.com/${GITHUB_REPO}/releases/latest/download/${binary_target_name}"
-        "https://gh-proxy.com/https://github.com/${GITHUB_REPO}/releases/latest/download/${binary_target_name}"
+    local dl_candidates=()
+    local sha_candidates=()
+    if [[ -n "$CLI_MIRROR" ]]; then
+        local custom_mirror="${CLI_MIRROR%/}"
+        dl_candidates+=("${custom_mirror}/${release_base}/${binary_target_name}")
+        sha_candidates+=("${custom_mirror}/${release_base}/SHA256SUMS")
+    fi
+    dl_candidates+=(
+        "${release_base}/${binary_target_name}"
+        "https://ghfast.top/${release_base}/${binary_target_name}"
+        "https://gh-proxy.com/${release_base}/${binary_target_name}"
+    )
+    sha_candidates+=(
+        "${release_base}/SHA256SUMS"
+        "https://ghfast.top/${release_base}/SHA256SUMS"
     )
 
     local dl_ok=false
@@ -408,14 +448,10 @@ resolve_binary() {
 
     if [[ "$dl_ok" != "true" ]]; then
         rm -f "$tmp_bin" "$tmp_sha"
-        error "无法从 GitHub 下载二进制包，请检查网络或通过 --bin=/path/to/binary 指定本地二进制"
+        error "无法从 GitHub 下载二进制包，请检查网络、使用 --mirror 指定镜像或通过 --bin=/path/to/binary 指定本地二进制"
     fi
 
     # SHA256 校验 (若可用)
-    local sha_candidates=(
-        "https://github.com/${GITHUB_REPO}/releases/latest/download/SHA256SUMS"
-        "https://ghfast.top/https://github.com/${GITHUB_REPO}/releases/latest/download/SHA256SUMS"
-    )
     for surl in "${sha_candidates[@]}"; do
         if curl -fsSL --connect-timeout 4 --max-time 15 "$surl" -o "$tmp_sha" 2>/dev/null; then
             local exp_sha
@@ -723,7 +759,9 @@ esac
 EOF_CTL
 
     run_sudo cp "$tmp_ctl" "$ctl_path"
-    run_sudo chmod +x "$ctl_path"
+    # llmproxy-ctl is a bash script: non-root users need read permission too
+    # (mktemp is 600, so plain `chmod +x` would leave mode 711 and break `llmproxy-ctl status`).
+    run_sudo chmod 755 "$ctl_path"
     rm -f "$tmp_ctl"
     ok "管理命令 llmproxy-ctl 注册就绪 (${ctl_path})"
 }
@@ -764,6 +802,9 @@ print_summary_banner() {
     if [[ "$role" == "full" ]]; then
         echo -e "  🔒 后台密码 (Admin)     : ${YELLOW}********${NC} (已脱敏保护，受限存储于配置文件)"
         echo -e "  📁 配置文件 (Config)    : ${BOLD}${env_file}${NC} (权限: 0600)"
+        if [[ -n "$FINAL_HUB_URL" ]]; then
+            echo -e "  🔗 Vault 中枢 (Hub)     : ${CYAN}${FINAL_HUB_URL}${NC} (已预绑定)"
+        fi
         echo ""
         echo -e "  🌐 管理控制台 (Admin Web) : ${CYAN}http://${public_ip}:${port}/${NC}"
     fi
@@ -881,6 +922,10 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
     FINAL_ADMIN_PASS="${CLI_ADMIN_PASS:-$EXISTING_PASS}"
     FINAL_ENCRYPT_KEY="${CLI_ENCRYPT_KEY:-$EXISTING_ENC}"
     FINAL_CLIENT_KEY="${CLI_CLIENT_KEY:-$EXISTING_KEY}"
+    EXISTING_HUB_URL=$(get_env_val "$ENV_FILE" "LLMPROXY_HUB_URL")
+    EXISTING_NODE_TOKEN=$(get_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN")
+    FINAL_HUB_URL="${CLI_HUB_URL:-$EXISTING_HUB_URL}"
+    FINAL_NODE_TOKEN="${CLI_NODE_TOKEN:-$EXISTING_NODE_TOKEN}"
 
     info "当前服务运行模式: ${BOLD}${FINAL_ROLE}${NC}, 监听端口: ${BOLD}${FINAL_PORT}${NC}"
 
@@ -914,6 +959,8 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
             [[ -n "$CLI_ADMIN_PASS" ]] && set_env_val "$ENV_FILE" "ADMIN_PASSWORD" "$FINAL_ADMIN_PASS"
             [[ -n "$CLI_ENCRYPT_KEY" ]] && set_env_val "$ENV_FILE" "ENCRYPT_KEY" "$FINAL_ENCRYPT_KEY"
             [[ -n "$CLI_CLIENT_KEY" ]] && set_env_val "$ENV_FILE" "PROXY_API_KEY" "$FINAL_CLIENT_KEY" && set_env_val "$ENV_FILE" "LLMPROXY_CLIENT_KEY" "$FINAL_CLIENT_KEY"
+            [[ -n "$CLI_HUB_URL" ]] && set_env_val "$ENV_FILE" "LLMPROXY_HUB_URL" "$FINAL_HUB_URL"
+            [[ -n "$CLI_NODE_TOKEN" ]] && set_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN" "$FINAL_NODE_TOKEN"
             set_env_val "$ENV_FILE" "CONFIG_DIR" "$CONFIG_DIR"
             set_env_val "$ENV_FILE" "LLMPROXY_ROLE" "full"
         else
@@ -927,6 +974,8 @@ ENCRYPT_KEY=${FINAL_ENCRYPT_KEY}
 PROXY_API_KEY=${FINAL_CLIENT_KEY}
 LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}
 EOF
+            [[ -n "$FINAL_HUB_URL" ]] && echo "LLMPROXY_HUB_URL=${FINAL_HUB_URL}" | run_sudo tee -a "$ENV_FILE" >/dev/null
+            [[ -n "$FINAL_NODE_TOKEN" ]] && echo "LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}" | run_sudo tee -a "$ENV_FILE" >/dev/null
         fi
         run_sudo chmod 600 "$ENV_FILE" 2>/dev/null || true
     elif [[ "$FINAL_ROLE" == "lite" && -f "/etc/systemd/system/llmproxy-lite.service" ]]; then
@@ -1073,6 +1122,16 @@ if [[ "$NEED_WIZARD" == "true" ]]; then
         fi
 
         FINAL_CONFIG_DIR="${CLI_CONFIG_DIR:-/etc/llmproxy}"
+        FINAL_HUB_URL="${CLI_HUB_URL}"
+        FINAL_NODE_TOKEN="${CLI_NODE_TOKEN}"
+        if [[ -z "$FINAL_HUB_URL" ]]; then
+            safe_read "请输入 EdgeOne Hub URL (可选，用于 Vault 同步，直接回车跳过): " INPUT_FULL_HUB
+            FINAL_HUB_URL="$INPUT_FULL_HUB"
+        fi
+        if [[ -n "$FINAL_HUB_URL" && -z "$FINAL_NODE_TOKEN" ]]; then
+            safe_read "请输入节点授权 Token (例如 stk_node_...，直接回车跳过): " INPUT_FULL_TOK
+            FINAL_NODE_TOKEN="$INPUT_FULL_TOK"
+        fi
     else
         if [[ -n "$CLI_HUB_URL" ]]; then
             FINAL_HUB_URL="$CLI_HUB_URL"
@@ -1095,8 +1154,13 @@ else
     FINAL_ADMIN_PASS="${CLI_ADMIN_PASS:-$(gen_random_str 24)}"
     FINAL_ENCRYPT_KEY="${CLI_ENCRYPT_KEY:-$FINAL_ADMIN_PASS}"
     FINAL_CONFIG_DIR="${CLI_CONFIG_DIR:-/etc/llmproxy}"
-    FINAL_HUB_URL="${CLI_HUB_URL:-https://your-hub.edgeone.app}"
-    FINAL_NODE_TOKEN="${CLI_NODE_TOKEN:-stk_node_replace_me}"
+    if [[ "$FINAL_ROLE" == "full" ]]; then
+        FINAL_HUB_URL="${CLI_HUB_URL}"
+        FINAL_NODE_TOKEN="${CLI_NODE_TOKEN}"
+    else
+        FINAL_HUB_URL="${CLI_HUB_URL:-https://your-hub.edgeone.app}"
+        FINAL_NODE_TOKEN="${CLI_NODE_TOKEN:-stk_node_replace_me}"
+    fi
 fi
 
 # 确定运行用户
@@ -1160,6 +1224,8 @@ ENCRYPT_KEY=${FINAL_ENCRYPT_KEY}
 PROXY_API_KEY=${FINAL_CLIENT_KEY}
 LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}
 EOF
+    [[ -n "$FINAL_HUB_URL" ]] && echo "LLMPROXY_HUB_URL=${FINAL_HUB_URL}" | run_sudo tee -a "$ENV_FILE" >/dev/null
+    [[ -n "$FINAL_NODE_TOKEN" ]] && echo "LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}" | run_sudo tee -a "$ENV_FILE" >/dev/null
     run_sudo chmod 600 "$ENV_FILE"
     run_sudo chown -R "${RUN_AS_USER}:${RUN_AS_USER}" "$CONFIG_DIR" "$WORK_DIR" 2>/dev/null || true
 

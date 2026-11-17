@@ -62,6 +62,7 @@ export async function handleVaultFetchRequest(request, env, kv) {
         preset_id: pData.preset_id || '',
         base_url: pData.base_url || '',
         anthropic_base_url: pData.anthropic_base_url || '',
+        hide_client_name: Boolean(pData.hide_client_name),
         adapter_rules: rules || {},
         keys: matchedKeys,
       },

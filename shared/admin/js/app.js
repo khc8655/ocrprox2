@@ -481,6 +481,16 @@
       clk(btnDoIssue, handleIssueNode);
     }
 
+    const btnCopyIssuedToken = $('btnCopyIssuedToken');
+    if (btnCopyIssuedToken) {
+      clk(btnCopyIssuedToken, () => copyToClipboard($('issuedTokenVal')?.value, 'NODE_TOKEN 已复制'));
+    }
+
+    const btnCopyIssuedEnv = $('btnCopyIssuedEnv');
+    if (btnCopyIssuedEnv) {
+      clk(btnCopyIssuedEnv, () => copyToClipboard($('issuedEnvVal')?.value, '环境变量已复制'));
+    }
+
     const btnSyncManifest = $('btnSyncManifest');
     if (btnSyncManifest) {
       clk(btnSyncManifest, handleSyncManifest);
@@ -1557,6 +1567,7 @@
             if (pCfg.preset_id) p.preset_id = pCfg.preset_id;
             if (pCfg.anthropic_base_url) p.anthropic_base_url = pCfg.anthropic_base_url;
             if (pCfg.adapter_rules) p.adapter_rules = pCfg.adapter_rules;
+            p.hide_client_name = Boolean(pCfg.hide_client_name);
 
             p.api_keys = p.api_keys || [];
             const keyMap = pCfg.keys || {};
@@ -1714,6 +1725,7 @@
       fg('Base URL (OpenAI 协议)', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button">自动探测</button></div>`),
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
       fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
+      `<div class="form-group form-group--span2"><label class="form-label"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端名称（脱敏：开启后不向该供应商透传客户端 User-Agent，默认关闭）</span></label></div>`,
     ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (自动刷新/纳管、模型别名、适配器规则与余额查询)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
@@ -2053,6 +2065,8 @@
       p.base_url = q(`#ed_p_base_${pId}`).value.trim();
       p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
       p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
+      if (q(`#ed_p_hide_ua_${pId}`)?.checked) p.hide_client_name = true;
+      else delete p.hide_client_name;
       p.quota_reset_at = q(`#ed_p_reset_${pId}`).value.trim();
       const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
       if (rpm > 0) p.rpm_per_key = rpm;
@@ -2173,6 +2187,131 @@
     }
   }
 
+  function buildNodeShellCommands(opts) {
+    const cleanHub = String(opts.hubUrl || window.location.origin).replace(/\/+$/, '');
+    const role = opts.role === 'full' ? 'full' : 'lite';
+    const port = Math.max(1, Math.min(65535, Number(opts.port) || 8787));
+    const token = String(opts.nodeToken || '').trim();
+    const clientKey = String(opts.clientKey || '').trim().replace(/["$`\\]/g, '');
+
+    if (opts.mode === 'binary') {
+      const env = opts.bootstrapEnv || `LLMPROXY_ROLE=${role} LLMPROXY_HUB_URL=${cleanHub} LLMPROXY_NODE_TOKEN=${token}${clientKey ? ` LLMPROXY_CLIENT_KEY=${clientKey}` : ''}`;
+      return `${env} ./llmproxy-linux-amd64 --addr="[::]:${port}"`;
+    }
+
+    let scriptUrl = `${cleanHub}/install.sh`;
+    if (opts.scriptSource === 'ghraw') {
+      scriptUrl = 'https://raw.githubusercontent.com/khc8655/ocrprox2/main/install.sh';
+    } else if (opts.scriptSource === 'ghfast') {
+      scriptUrl = 'https://ghfast.top/https://raw.githubusercontent.com/khc8655/ocrprox2/main/install.sh';
+    }
+
+    const flags = [
+      `--role=${role}`,
+      `--hub-url="${cleanHub}"`,
+      `--node-token="${token}"`,
+    ];
+    if (clientKey) flags.push(`--client-key="${clientKey}"`);
+    flags.push(`-p ${port}`);
+    if (opts.mirror === 'ghfast') flags.push('--mirror="https://ghfast.top"');
+    if (opts.autoYes) flags.push('-y');
+    return `curl -fsSL ${scriptUrl} | sudo bash -s -- ${flags.join(' ')}`;
+  }
+
+  function mountNodeCommandPanel(container, payload) {
+    if (!container) return;
+    const clientKey = payload.clientKey || (state.config?.settings?.client_key || state.config?.settings?.proxy_api_key || '');
+    const hubUrl = payload.hubUrl || window.location.origin;
+    const panelState = {
+      mode: 'install',
+      port: 8787,
+      scriptSource: 'hub',
+      mirror: 'auto',
+      autoYes: true,
+    };
+
+    container.innerHTML = `<div class="snippet-box">
+      <div class="snippet-header">
+        <span class="form-label">快速部署命令（对齐 1 代一键安装流程）</span>
+        <div class="fields">
+          <div class="seg" data-cmd-seg>
+            <button class="seg-btn active" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
+            <button class="seg-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
+          </div>
+          <button class="btn btn--sm" data-cmd-copy type="button">复制命令</button>
+        </div>
+      </div>
+      <div class="form-grid mb-2" data-cmd-opts>
+        <div class="form-group">
+          <label class="form-label">监听端口</label>
+          <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
+        </div>
+        <div class="form-group">
+          <label class="form-label">安装脚本源</label>
+          <select class="select" data-cmd-source>
+            <option value="hub">Hub 同域 /install.sh (推荐)</option>
+            <option value="ghfast">ghfast.top 加速</option>
+            <option value="ghraw">GitHub Raw 直连</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">二进制下载源</label>
+          <select class="select" data-cmd-mirror>
+            <option value="auto">GitHub 直连 + 国内自动回退</option>
+            <option value="ghfast">优先走 ghfast.top 镜像</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">交互方式</label>
+          <label class="form-label">
+            <input type="checkbox" data-cmd-yes checked>
+            <span>无人值守 (-y)，取消可交互确认</span>
+          </label>
+        </div>
+      </div>
+      <textarea class="textarea input--code" data-cmd-output readonly rows="2"></textarea>
+    </div>`;
+
+    const q = (sel) => container.querySelector(sel);
+    const outEl = q('[data-cmd-output]');
+    const optsEl = q('[data-cmd-opts]');
+    const portEl = q('[data-cmd-port]');
+    const srcEl = q('[data-cmd-source]');
+    const mirrorEl = q('[data-cmd-mirror]');
+    const yesEl = q('[data-cmd-yes]');
+
+    const refresh = () => {
+      if (optsEl) optsEl.hidden = panelState.mode !== 'install';
+      if (outEl) {
+        outEl.value = buildNodeShellCommands({
+          ...panelState,
+          role: payload.role,
+          hubUrl,
+          nodeToken: payload.nodeToken,
+          clientKey,
+          bootstrapEnv: payload.bootstrapEnv,
+        });
+      }
+    };
+
+    container.querySelectorAll('[data-cmd-mode]').forEach((btn) => {
+      clk(btn, () => {
+        panelState.mode = btn.getAttribute('data-cmd-mode') || 'install';
+        container.querySelectorAll('[data-cmd-mode]').forEach((b) => {
+          b.classList.toggle('active', b === btn);
+        });
+        refresh();
+      });
+    });
+    if (portEl) portEl.addEventListener('input', () => { panelState.port = portEl.value; refresh(); });
+    if (srcEl) srcEl.addEventListener('change', () => { panelState.scriptSource = srcEl.value; refresh(); });
+    if (mirrorEl) mirrorEl.addEventListener('change', () => { panelState.mirror = mirrorEl.value; refresh(); });
+    if (yesEl) yesEl.addEventListener('change', () => { panelState.autoYes = yesEl.checked; refresh(); });
+    const copyBtn = q('[data-cmd-copy]');
+    if (copyBtn) clk(copyBtn, () => copyToClipboard(outEl?.value, '部署命令已复制'));
+    refresh();
+  }
+
   function buildNodeEditor(node) {
     const wrap = ce('div');
     const isEnabled = node.enabled;
@@ -2187,9 +2326,9 @@
       fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" value="${eh(formatScopeInput(node.scope?.providers))}">`),
       fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" value="${eh(formatScopeInput(node.scope?.models))}">`),
     ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
-      fg('新 NODE_TOKEN (仅显示一次)', `<input class="input input--code" readonly id="node_new_token_val_${id}">`),
-      fg('启动环境变量', `<input class="input input--code" readonly id="node_new_env_val_${id}">`),
-    ].join('')}</div></div>`;
+      fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
+      fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
+    ].join('')}</div><div class="mt-3" id="node_cmd_panel_${id}"></div></div>`;
 
     clk(q(`#btn_save_node_${id}`), async () => {
       const name = q(`#ed_node_name_${id}`).value.trim();
@@ -2225,9 +2364,18 @@
           q(`#node_token_display_box_${id}`).hidden = false;
           q(`#node_new_token_val_${id}`).value = res.node_token;
           q(`#node_new_env_val_${id}`).value = res.bootstrap_env;
+          mountNodeCommandPanel(q(`#node_cmd_panel_${id}`), {
+            role: q(`#ed_node_role_${id}`)?.value || node.role || 'lite',
+            hubUrl: window.location.origin,
+            nodeToken: res.node_token,
+            bootstrapEnv: res.bootstrap_env,
+          });
         }
       } catch (e) { toast(e.message, 'err'); }
     });
+
+    clk(q(`#btn_copy_node_tok_${id}`), () => copyToClipboard(q(`#node_new_token_val_${id}`)?.value, 'NODE_TOKEN 已复制'));
+    clk(q(`#btn_copy_node_env_${id}`), () => copyToClipboard(q(`#node_new_env_val_${id}`)?.value, '环境变量已复制'));
 
     clk(q(`#btn_del_node_${id}`), async () => {
       if (!confirm(`确认永久删除节点 ${node.name} 吗？`)) return;
@@ -2264,6 +2412,12 @@
           tokenDisplay.hidden = false;
           $('issuedTokenVal').value = res.node_token;
           $('issuedEnvVal').value = res.bootstrap_env;
+          mountNodeCommandPanel($('issuedCmdPanel'), {
+            role: res.node?.role || role,
+            hubUrl: window.location.origin,
+            nodeToken: res.node_token,
+            bootstrapEnv: res.bootstrap_env,
+          });
         }
         await loadNodesData();
       } else {

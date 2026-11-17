@@ -54,6 +54,7 @@ if (pData.rpm_per_key) projectedProvider.rpm_per_key = pData.rpm_per_key;
 if (pData.quota_reset_at) projectedProvider.quota_reset_at = pData.quota_reset_at;
 if (pData.refresh_every) projectedProvider.refresh_every = pData.refresh_every;
 if (pData.auto_include) projectedProvider.auto_include = pData.auto_include;
+if (pData.hide_client_name) projectedProvider.hide_client_name = true;
 if (pData.adapter_rules && Object.keys(pData.adapter_rules).length > 0) {
 projectedProvider.adapter_rules = pData.adapter_rules;
 projectedAdapterRules[pId] = pData.adapter_rules;

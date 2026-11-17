@@ -490,3 +490,59 @@ func TestAdminServer_VaultSync(t *testing.T) {
 		t.Errorf("unexpected merged api keys: %+v", vp.APIKeys)
 	}
 }
+
+func TestAdminServer_DefaultVaultFallback(t *testing.T) {
+	dir := t.TempDir()
+	authMgr := auth.NewAuthenticator("client-key", "admin-pass")
+	localSrc, _ := config.NewLocalSource(dir, "enc-pass")
+
+	var seenAuth string
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"providers": map[string]any{
+				"vault-seed": map[string]any{"name": "Vault Seed", "base_url": "https://api.example.com"},
+			},
+		})
+	}))
+	defer hubServer.Close()
+
+	srv := NewServer(authMgr, localSrc, nil, nil)
+	srv.SetAdminPassword("admin-pass")
+	srv.SetDefaultVault(hubServer.URL, "stk_node_seed_token")
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// Uninitialized GET /api/config should include pre-seeded vault fields
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	req.Header.Set("Authorization", "Bearer admin-pass")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/config status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var cfgResp struct {
+		Vault *types.VaultClientConfig `json:"vault"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfgResp); err != nil {
+		t.Fatalf("decode config resp: %v", err)
+	}
+	if cfgResp.Vault == nil || cfgResp.Vault.URL != hubServer.URL || cfgResp.Vault.NodeToken != "stk_node_seed_token" {
+		t.Fatalf("expected seeded vault in /api/config, got %+v", cfgResp.Vault)
+	}
+
+	// Vault manifest without query params should use SetDefaultVault credentials
+	req = httptest.NewRequest("GET", "/api/vault/manifest", nil)
+	req.Header.Set("Authorization", "Bearer admin-pass")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/vault/manifest status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if seenAuth != "Bearer stk_node_seed_token" {
+		t.Fatalf("expected Bearer stk_node_seed_token sent to hub, got %q", seenAuth)
+	}
+}

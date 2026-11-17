@@ -236,6 +236,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
               preset_id: 'minimax',
               origin: 'vault',
               enabled: true,
+              hide_client_name: true,
               base_url: 'https://api.minimaxi.com/v1',
               api_keys: [
                 { id: 'k_shared', label: 'shared-pool', key: 'sk-shared-key-111', enabled: true, origin: 'vault' },
@@ -298,6 +299,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(projData.payload.providers.vertex_local, undefined, 'Provider with origin=local must be excluded');
       // 2. minimax provider MUST EXIST
       assert.ok(projData.payload.providers.minimax, 'Shared provider must be present');
+      assert.equal(projData.payload.providers.minimax.hide_client_name, true, 'hide_client_name flag must project to nodes');
       // 3. local private key MUST NOT EXIST in minimax
       const returnedKeys = projData.payload.providers.minimax.api_keys;
       assert.equal(returnedKeys.length, 1);
@@ -1044,6 +1046,9 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(issueData.node.grace_ttl, 7200);
       assert.match(issueData.bootstrap_env, /LLMPROXY_ROLE=lite/);
       assert.match(issueData.bootstrap_env, /LLMPROXY_CLIENT_KEY=sk-lite-hub-primary/);
+      assert.match(issueData.install_command, /^curl -fsSL https:\/\/hub\.example\.com\/install\.sh \| sudo bash -s -- --role=lite /);
+      assert.match(issueData.install_command, /--client-key="sk-lite-hub-primary"/);
+      assert.match(issueData.install_command, / -p 8787 -y$/);
 
       // 3. Patch node role & grace_ttl
       const patchData = await (

@@ -107,7 +107,8 @@
         "ok": true,
         "node": "object",
         "node_token": "string (stk_node_<48hex>)",
-        "bootstrap_env": "string"
+        "bootstrap_env": "string",
+        "install_command": "string"
       }
     },
     "nodes_patch": {
@@ -128,7 +129,8 @@
       "response": {
         "ok": true,
         "node_token": "string (stk_node_<48hex>)",
-        "bootstrap_env": "string"
+        "bootstrap_env": "string",
+        "install_command": "string"
       }
     },
     "nodes_delete": {
