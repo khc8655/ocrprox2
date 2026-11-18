@@ -4,6 +4,20 @@
 
 ---
 
+## [v20261119-01] - 2026-11-19
+
+### Fixed
+- **上游忽略 `stream=true` 时的畸形 SSE（上线前验收 P1）**：客户端请求流式、上游却返回普通 `chat.completion` JSON 时，网关此前直接以 `text/event-stream` 头透传裸 JSON——零 `data:` 帧、无 `[DONE]`、无 usage，任何 SSE 客户端都会解析失败或挂起。现 `PeekFirstChunk` 识别「整块为单个 JSON 对象且无 `data:` 帧」的载荷并置 `BareJSONPayload`，调度器用 `adapters.SynthesizeSSEFromJSON` 合成标准 SSE（delta 帧 + finish_reason/usage 帧 + `[DONE]`），并按合成结果回填流式用量与 trace（此前该类请求 `in_tokens/out_tokens` 恒为 0、`stop_reason` 为空）。真实 SSE 上游路径不受影响（新增回归单测覆盖）。
+- **Hub 管理员凭据持久化（上线前验收 P2）**：Hub 无登录端点、密码本身即 Bearer 凭证，此前被写入 `localStorage` 长期留存。现改为 `sessionStorage`（关闭标签页即失效）+ 内存兜底，并在 `setToken` 时清理历史遗留的 localStorage 值。Full 节点仍使用 HttpOnly Cookie 会话语义，不受影响。
+
+### Verified
+- 本地双向上游实测：裸 JSON 上游 + `stream=true` → 3 个 `data:` 帧 + `[DONE]` + usage；流式 trace 由 `in=0/out=0/stop=None` 变为 `in=1/out=1/stop=stop`；真实 SSE 上游依旧 4 帧原样透传。
+- 构建产物零 `localStorage` 写入 `admin_token`，`sessionStorage` 3 处使用，保留迁移清理。
+- `verify:release` G1–G6 全绿（bundle 216,592 B）。
+
+### Notes
+- 本轮上线前三路并行验收（Lite NAT 主机 / Full 端到端 / Hub 线上 UI）结论：用例通过率 30/33。遗留项为环境限制或非阻塞观察——低 `pids.max` 容器（LXD，128）在 >20 并发时出现服务悬崖、50 并发 3 次冲击 1 次 Go runtime `newosproc` abort（主因容器进程数上限，非内存，VmHWM 13.2MB/零 OOM）；Hub 无变更保存会把 `api_type` 从 `openai` 规范为 `openai-completions`（Go 侧不参与协议判定，无功能影响）。
+
 ## [v20261118-02] - 2026-11-18
 
 ### Changed

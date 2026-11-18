@@ -44,6 +44,7 @@
   };
 
   const SESSION_MARKER = '__cookie_session__';
+  let memoryToken = ''; // fallback when storage is blocked (private browsing)
 
   function isMaskedVaultToken(val) {
     if (!val || typeof val !== 'string') return false;
@@ -127,15 +128,33 @@
     capabilities,
 
     getToken() {
-      return localStorage.getItem('llmproxy_admin_token') || '';
+      // Hub has no login endpoint (the admin password IS the bearer credential), so
+      // the value cannot be replaced by a server-issued session token. Keep it in
+      // sessionStorage only: it dies with the tab and never lands in the long-lived
+      // localStorage profile that any origin script or later user can read back.
+      // Full uses the opaque SESSION_MARKER + HttpOnly cookie instead.
+      try {
+        return sessionStorage.getItem('llmproxy_admin_token') || memoryToken;
+      } catch (_) {
+        return memoryToken;
+      }
     },
 
     setToken(token) {
-      if (token) {
-        localStorage.setItem('llmproxy_admin_token', token);
-      } else {
-        localStorage.removeItem('llmproxy_admin_token');
+      try {
+        if (token) {
+          sessionStorage.setItem('llmproxy_admin_token', token);
+        } else {
+          sessionStorage.removeItem('llmproxy_admin_token');
+        }
+      } catch (_) {
+        // Storage unavailable (private mode): stay in-memory only.
+        memoryToken = token || '';
       }
+      // Migrate any value left behind by an older build so it stops persisting.
+      try {
+        localStorage.removeItem('llmproxy_admin_token');
+      } catch (_) {}
     },
 
     showLogin() {

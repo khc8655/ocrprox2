@@ -678,6 +678,7 @@ usageAndTraces: true,
 systemUpdate: true,
 };
 const SESSION_MARKER = '__cookie_session__';
+let memoryToken = ''; // fallback when storage is blocked (private browsing)
 function isMaskedVaultToken(val) {
 if (!val || typeof val !== 'string') return false;
 return val.includes('●') || val.includes('•') || val.includes('***') || val.includes('...');
@@ -753,14 +754,25 @@ const HOST = {
 kind: hostKind,
 capabilities,
 getToken() {
-return localStorage.getItem('llmproxy_admin_token') || '';
+try {
+return sessionStorage.getItem('llmproxy_admin_token') || memoryToken;
+} catch (_) {
+return memoryToken;
+}
 },
 setToken(token) {
+try {
 if (token) {
-localStorage.setItem('llmproxy_admin_token', token);
+sessionStorage.setItem('llmproxy_admin_token', token);
 } else {
-localStorage.removeItem('llmproxy_admin_token');
+sessionStorage.removeItem('llmproxy_admin_token');
 }
+} catch (_) {
+memoryToken = token || '';
+}
+try {
+localStorage.removeItem('llmproxy_admin_token');
+} catch (_) {}
 },
 showLogin() {
 const scr = document.getElementById('loginScreen');

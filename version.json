@@ -1,14 +1,11 @@
 {
-  "version": "v20261118-02",
-  "semver": "2.5.1",
-  "release_date": "2026-11-18",
+  "version": "v20261119-01",
+  "semver": "2.5.2",
+  "release_date": "2026-11-19",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.5.1 — 双机实测与 UI 全流程问题清零（统一中枢同步、中枢无本地 Key 化、单模型精确统计与运维加固）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.5.2 — 流式兜底合成与 Hub 凭据存储加固（上线前验收修复）",
   "changelog": [
-    "统一 Full 节点中枢同步：新增 POST /api/vault/sync 并合并 UI 为单一「从中枢同步」按钮，一次原子拉取授权供应商、密钥、对话模型路由与 KB 4 通道模板，修复 Key 翻倍重复与中枢节点状态未刷新问题",
-    "角色与归属边界净化：中枢彻底取消伪“本地 Key/本地供应商”概念（全量共享可按 Scope 下发）；Lite 投影物理忽略 KB 4 通道与 KB 并发字段；Full 节点中枢下发供应商密钥严格只读（禁止混塞本地 Key，导出配置仅保留本地资源）",
-    "UI 交互与 CAS 冲突修复：修复含 : 与 / 模型名展开崩溃、设置保存密钥与 Hub 校验 Key 后保存必现 409 冲突、探测模型纳管后列表消失、预设重复及 MiniMax 域名写反、空 key_label 路由探活失败、Anthropic 校验头缺失与冷启动默认参数错位",
-    "精确遥测与安全会话：Lite/Full 单模型独立统计调用/成功/失败/Token 消除概览均摊失真，展示节点二进制版本徽标；修复非流式请求 TPS 虚高；Full 登录改用 HttpOnly Cookie 会话不再持久化明文密码",
-    "安装与运维脚本加固：修复非 TTY 环境下 llmproxy-ctl uninstall 报错退出并新增 -y 参数，Lite 卸载不再创建空备份目录；修复 sudo bash 下 SUDO_USER 识别与非 root 用户 llmproxy-ctl status 端口误判；签发面板补齐 Full 随机管理密码、Docker/多架构命令与客户端接入指引"
+    "修复上游忽略 stream=true 时网关返回 text/event-stream 却透传裸 JSON 的缺陷：peek 阶段识别裸 JSON 载荷并合成为标准 SSE（delta + finish_reason/usage + [DONE]），同时恢复流式用量入账",
+    "Hub 管理端令牌不再持久化到 localStorage（改为 sessionStorage + 内存兜底，并清理历史遗留值），降低 XSS/本机访问下的管理员密码读取面"
   ]
 }

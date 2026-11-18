@@ -21,12 +21,32 @@ var (
 	ErrPeekBufferExceeded = errors.New("scheduler: upstream stream exceeded 4MB peek buffer before payload")
 )
 
+// looksLikeBareJSON reports whether body is a single complete JSON object with no
+// SSE framing. Used to detect upstreams that ignore stream=true.
+func looksLikeBareJSON(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return false
+	}
+	// An SSE body always contains a "data:" line; a bare JSON body never does.
+	if bytes.Contains(trimmed, []byte("\ndata:")) || bytes.HasPrefix(trimmed, []byte("data:")) {
+		return false
+	}
+	var probe map[string]any
+	return json.Unmarshal(trimmed, &probe) == nil
+}
+
 // PeekResult holds the inspected stream outcome before committing HTTP 200 to client.
 type PeekResult struct {
 	FirstChunk   []byte
 	CombinedBody io.Reader
 	IsError      bool
 	ErrorSnippet string
+	// BareJSONPayload marks a stream that ended without a single "data:" frame while
+	// carrying a complete JSON object instead. Some upstreams ignore stream=true and
+	// answer with a normal chat.completion body; callers must synthesize SSE for the
+	// client rather than forwarding raw JSON under a text/event-stream header.
+	BareJSONPayload bool
 }
 
 type readMsg struct {
@@ -138,9 +158,10 @@ func PeekFirstChunk(
 				}
 				allBytes := buffered.Bytes()
 				return &PeekResult{
-					FirstChunk:   allBytes,
-					CombinedBody: bytes.NewReader(allBytes),
-					IsError:      false,
+					FirstChunk:      allBytes,
+					CombinedBody:    bytes.NewReader(allBytes),
+					IsError:         false,
+					BareJSONPayload: looksLikeBareJSON(allBytes),
 				}, nil
 			}
 
@@ -151,9 +172,10 @@ func PeekFirstChunk(
 					}
 					allBytes := buffered.Bytes()
 					return &PeekResult{
-						FirstChunk:   allBytes,
-						CombinedBody: bytes.NewReader(allBytes),
-						IsError:      false,
+						FirstChunk:      allBytes,
+						CombinedBody:    bytes.NewReader(allBytes),
+						IsError:         false,
+						BareJSONPayload: looksLikeBareJSON(allBytes),
 					}, nil
 				}
 				return nil, msg.err

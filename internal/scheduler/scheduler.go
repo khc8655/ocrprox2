@@ -1024,6 +1024,80 @@ func (s *Scheduler) Dispatch(
 					return
 				}
 
+				// Client wants stream, but the upstream ignored stream=true and answered
+				// with a plain completion body. Forwarding it under text/event-stream
+				// breaks every SSE client, so synthesize a single-chunk SSE stream.
+				if clientStream && peekRes.BareJSONPayload {
+					resp.Body.Close()
+					rel()
+					w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+					w.Header().Set("Cache-Control", "no-cache")
+					w.Header().Set("Connection", "keep-alive")
+					w.Header().Set("X-Accel-Buffering", "no")
+					w.Header().Set("X-Routed-Via", cand.Provider.ID)
+					w.WriteHeader(http.StatusOK)
+
+					synthBytes := adapters.SynthesizeSSEFromJSON(peekRes.FirstChunk)
+					_, _ = w.Write(synthBytes)
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+
+					totalMillis := time.Since(reqStart).Milliseconds()
+					done = true
+					retErr = nil
+
+					// Record usage from the synthesized body so streaming stats are not lost.
+					var usageTracker *StreamUsageTracker
+					if hasObs {
+						usageTracker = NewStreamUsageTracker(reqStart, ttftMillis)
+						usageTracker.FeedChunk(synthBytes)
+					}
+					if usageTracker != nil {
+						s.recordFinalTrace(types.RequestTrace{
+							ID:          traceID,
+							Timestamp:   time.Now().Unix(),
+							Mode:        "agent",
+							Endpoint:    endpoint,
+							ReqModel:    reqModel,
+							ServedModel: cand.TargetModel,
+							WinnerProvider: cand.Provider.ID,
+							WinnerKey:   cand.KeyEntry.Label,
+							Status:      http.StatusOK,
+							Stream:      true,
+							InTokens:    usageTracker.InTokens,
+							OutTokens:   usageTracker.OutTokens,
+							StopReason:  usageTracker.StopReason,
+							TTFTMillis:  ttftMillis,
+							TotalMillis: totalMillis,
+							UpBytes:     len(mutatedBody),
+							DownBytes:   len(synthBytes),
+							ReqHeaders:  reqHeaders,
+							Tries:       tries,
+						})
+					} else {
+						s.recordFinalTrace(types.RequestTrace{
+							ID:             traceID,
+							Timestamp:      time.Now().Unix(),
+							Mode:           "agent",
+							Endpoint:       endpoint,
+							ReqModel:       reqModel,
+							ServedModel:    cand.TargetModel,
+							WinnerProvider: cand.Provider.ID,
+							WinnerKey:      cand.KeyEntry.Label,
+							Status:         http.StatusOK,
+							Stream:         true,
+							TTFTMillis:     ttftMillis,
+							TotalMillis:    totalMillis,
+							UpBytes:        len(mutatedBody),
+							DownBytes:      len(synthBytes),
+							ReqHeaders:     reqHeaders,
+							Tries:          tries,
+						})
+					}
+					return
+				}
+
 				// Client wants stream
 				if !streamHeadersCommitted {
 					w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")

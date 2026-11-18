@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	providerpkg "github.com/khc8655/llmproxy2/internal/provider"
 	"github.com/khc8655/llmproxy2/internal/types"
@@ -1048,4 +1049,95 @@ func findTopLevelBool(data []byte, key string) (val bool, valStart, valEnd int, 
 		}
 	}
 	return false, 0, 0, false
+}
+
+// SynthesizeSSEFromJSON converts a complete non-streaming completion body into a
+// minimal OpenAI-compatible SSE stream. It exists for upstreams that ignore
+// stream=true: the gateway would otherwise forward raw JSON under a
+// text/event-stream header, which breaks every SSE client and loses usage stats.
+//
+// Output: one delta chunk carrying the message content/tool calls, one final chunk
+// carrying finish_reason plus usage, then "data: [DONE]".
+func SynthesizeSSEFromJSON(body []byte) []byte {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return []byte("data: [DONE]\n\n")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(trimmed, &payload); err != nil {
+		// Not JSON we understand: emit it as a single opaque data frame so the client
+		// still gets a well-formed SSE stream.
+		return []byte("data: " + string(trimmed) + "\n\ndata: [DONE]\n\n")
+	}
+
+	id, _ := payload["id"].(string)
+	if id == "" {
+		id = "chatcmpl-synth"
+	}
+	model, _ := payload["model"].(string)
+	created := int64(0)
+	switch v := payload["created"].(type) {
+	case float64:
+		created = int64(v)
+	case int64:
+		created = v
+	}
+	if created == 0 {
+		created = time.Now().Unix()
+	}
+
+	var content string
+	finishReason := "stop"
+	var toolCalls any
+	if choices, ok := payload["choices"].([]any); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]any); ok {
+			if msg, ok := choice["message"].(map[string]any); ok {
+				if s, ok := msg["content"].(string); ok {
+					content = s
+				}
+				if tc, ok := msg["tool_calls"]; ok {
+					toolCalls = tc
+				}
+			}
+			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
+				finishReason = fr
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	emit := func(obj map[string]any) {
+		raw, err := json.Marshal(obj)
+		if err != nil {
+			return
+		}
+		buf.WriteString("data: ")
+		buf.Write(raw)
+		buf.WriteString("\n\n")
+	}
+
+	delta := map[string]any{"role": "assistant"}
+	if content != "" {
+		delta["content"] = content
+	}
+	if toolCalls != nil {
+		delta["tool_calls"] = toolCalls
+	}
+	emit(map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": nil}},
+	})
+
+	final := map[string]any{
+		"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
+		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finishReason}},
+	}
+	if usage, ok := payload["usage"]; ok && usage != nil {
+		final["usage"] = usage
+	}
+	emit(final)
+
+	buf.WriteString("data: [DONE]\n\n")
+	return buf.Bytes()
 }
