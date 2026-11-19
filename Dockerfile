@@ -15,6 +15,15 @@
 
 ARG TARGETARCH=amd64
 
+# Intermediate stage pinned to the TARGET platform: buildx otherwise resolves an
+# anonymous `COPY --from=alpine` against the builder architecture, which broke
+# multi-arch builds (zoneinfo/certs paths not found).
+FROM --platform=$TARGETPLATFORM alpine:3.20 AS assets
+
+RUN apk add --no-cache ca-certificates tzdata \
+ && addgroup -S -g 10001 llmproxy \
+ && adduser -S -u 10001 -G llmproxy -h /data -s /sbin/nologin llmproxy
+
 FROM scratch
 
 ARG TARGETARCH
@@ -24,10 +33,10 @@ ARG COMMIT=unknown
 
 # CA bundle for outbound TLS, tz database for schedule/cooldown math, and the
 # standard passwd/group entries so the non-root user resolves correctly.
-COPY --from=alpine:3.20 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=alpine:3.20 /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=alpine:3.20 /etc/passwd /etc/passwd
-COPY --from=alpine:3.20 /etc/group /etc/group
+COPY --from=assets /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=assets /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=assets /etc/passwd /etc/passwd
+COPY --from=assets /etc/group /etc/group
 
 COPY dist/llmproxy-linux-${TARGETARCH} /usr/local/bin/llmproxy
 
