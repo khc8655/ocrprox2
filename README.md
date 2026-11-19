@@ -58,6 +58,8 @@ llmproxy2/
 ├── version.json                     # 全局唯一版本号真源 (SSOT)
 ├── package.json                     # 前端构建、契约校验与门禁脚本入口
 ├── go.mod / go.sum                  # Go 模块定义 (CGO_ENABLED=0)
+├── install.sh                       # 一键安装 / 平滑升级 / 卸载脚本（与 deploy/install.sh 同步）
+├── Dockerfile                       # 容器镜像定义（scratch 基础，多架构，由 CI 推送 ghcr.io）
 ├── cmd/
 │   └── llmproxy/
 │       └── main.go                  # 统一二进制入口 (--role=lite|full，RLIMIT_CORE=0，双栈监听)
@@ -155,7 +157,13 @@ EdgeOne Makers 仅负责供应商/Key 与适配规则维护、节点 Token 签�
 
 ### 6.2 VM 客户端节点部署
 
-`llmproxy2` 为单一静态 Go 二进制，零 CGO 依赖，支持以下两种部署方式：
+`llmproxy2` 为单一静态 Go 二进制，零 CGO 依赖，支持以下三种部署方式。Hub 控制台签发节点后会自动生成对应的单行命令（含角色、中枢地址、节点令牌、客户端 Key 等全部参数），复制即用：
+
+| 方式 | 适用场景 | 开机自启 | 配置持久化 | 升级 / 卸载 |
+|---|---|---|---|---|
+| **一键安装（systemd）** | 生产部署（推荐） | ✅ systemd | `/etc/llmproxy` | `llmproxy-ctl upgrade` / `uninstall` |
+| **Docker 容器** | 容器化 / K8s 环境 | ✅ `--restart` | 卷 `./llmproxy-data`（仅 Full） | 拉新镜像重建 / `docker rm -f` |
+| **单行直跑（免安装）** | 临时试跑、调试 | ❌ 关终端即停 | `./llmproxy-data/config` | 手动替换二进制 |
 
 #### 方式一：使用 `install.sh` 一键安装（推荐，对齐 1 代流程）
 
@@ -197,27 +205,83 @@ curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \
 
 ---
 
-#### 方式二：直接运行预编译静态二进制（免安装）
+#### 方式二：单行直跑预编译静态二进制（免安装）
 
 从 GitHub Releases (https://github.com/khc8655/ocrprox2/releases) 下载对应架构的免依赖单文件二进制：
 
-**1. 极简节点 (`lite`) 纯环境变量单行启动**：
+> Hub 签发面板生成的「单行直跑」命令会自动探测架构、从 GitHub Releases 下载对应二进制再启动，无需手工准备文件：
+
+**1. 极简节点 (`lite`)，一条命令完成下载 + 启动**：
 ```bash
-chmod +x llmproxy-linux-amd64
-LLMPROXY_ROLE=lite \
-LLMPROXY_ADDR="[::]:8000" \
-LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
-LLMPROXY_NODE_TOKEN="stk_node_example_node_token_48chars_long_placeholder" \
-LLMPROXY_CLIENT_KEY="sk-llmproxy-client-example-key" \
-GOMEMLIMIT=48MiB \
-./llmproxy-linux-amd64
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+  && mkdir -p ./llmproxy-data && cd ./llmproxy-data \
+  && curl -fL --retry 2 -o llmproxy \
+     "https://github.com/khc8655/ocrprox2/releases/latest/download/llmproxy-linux-${ARCH}" \
+  && chmod +x ./llmproxy \
+  && LLMPROXY_ROLE=lite \
+     LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
+     LLMPROXY_NODE_TOKEN="stk_node_example_node_token_48chars_long_placeholder" \
+     LLMPROXY_CLIENT_KEY="sk-llmproxy-client-example-key" \
+     GOMEMLIMIT=48MiB \
+     ./llmproxy --addr="[::]:8000"
 ```
 
-**2. 完整节点 (`full`) 命令行启动**：
+**2. 完整节点 (`full`)**（配置写入 `./llmproxy-data/config`）：
 ```bash
-chmod +x llmproxy-linux-amd64
-./llmproxy-linux-amd64 --role=full --addr="[::]:8000" --config-dir="./config"
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+  && mkdir -p ./llmproxy-data && cd ./llmproxy-data \
+  && curl -fL --retry 2 -o llmproxy \
+     "https://github.com/khc8655/ocrprox2/releases/latest/download/llmproxy-linux-${ARCH}" \
+  && chmod +x ./llmproxy \
+  && ADMIN_PASSWORD="your_strong_admin_pass" CONFIG_DIR="$(pwd)/config" \
+     ./llmproxy --role=full --addr="[::]:8000"
 ```
+
+> 免安装模式的进程随终端退出而停止，适合验证与调试；长期运行请用下面的一键安装或 Docker。
+
+---
+
+---
+
+#### 方式三：Docker 容器部署
+
+官方镜像发布在 GitHub Container Registry，基于 `scratch` 构建，仅打包静态二进制 + CA 证书 + tzdata（约 **12.8 MB**），支持 `linux/amd64` 与 `linux/arm64` 双架构：
+
+```
+ghcr.io/khc8655/ocrprox2:latest        # main 分支最新构建
+ghcr.io/khc8655/ocrprox2:v20261119-04  # 指定版本（生产建议固定版本号）
+```
+
+**1. 极简节点 (`lite`)——零落盘，无需数据卷**：
+```bash
+docker run -d --name llmproxy-lite --restart unless-stopped \
+  -p 8787:8787 \
+  -e LLMPROXY_ROLE=lite \
+  -e LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
+  -e LLMPROXY_NODE_TOKEN="stk_node_example_node_token_48chars_long_placeholder" \
+  -e LLMPROXY_CLIENT_KEY="sk-llmproxy-client-example-key" \
+  ghcr.io/khc8655/ocrprox2:latest
+```
+
+**2. 完整节点 (`full`)——挂载数据卷持久化配置**：
+```bash
+mkdir -p "$(pwd)/llmproxy-data" && docker run -d --name llmproxy-full --restart unless-stopped \
+  -p 8787:8787 \
+  -v "$(pwd)/llmproxy-data:/data" \
+  -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data \
+  -e ADMIN_PASSWORD="your_strong_admin_pass" \
+  -e LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
+  -e LLMPROXY_NODE_TOKEN="stk_node_example_node_token_48chars_long_placeholder" \
+  ghcr.io/khc8655/ocrprox2:latest
+```
+
+> **注意（实测踩坑）**：数据卷目录必须**先创建**再挂载，否则 Docker 会以 root 属主创建它。镜像默认以 root 运行以保证 bind mount 可写；若需最小权限运行，可加 `--user "$(id -u):$(id -g)"`（镜像内置 `llmproxy` 账户 UID/GID 10001）。
+
+**运维要点**：
+- 升级：`docker pull ghcr.io/khc8655/ocrprox2:latest && docker rm -f llmproxy-full` 后用原命令重建（数据卷保留）；
+- 查看日志：`docker logs -f llmproxy-full`（容器内同时写入 `/data/app.log`）；
+- 卸载：`docker rm -f llmproxy-full`，删除数据卷目录即彻底清理；
+- 健康检查：`curl http://127.0.0.1:8787/healthz`。
 
 ---
 
@@ -225,4 +289,5 @@ chmod +x llmproxy-linux-amd64
 
 本仓库已配置完善的 GitHub Actions 工作流（[`.github/workflows/ci-release.yml`](.github/workflows/ci-release.yml)）：
 - **每次 Push (`main`) 与 Pull Request**：自动触发 `verify-gates` 任务，运行 G1~G6 全量门禁（T1 契约守卫、EdgeOne Hub 单测、Go `-race` 并发竞争检测、T3 真实进程黑盒 E2E、敏感私钥与凭据扫描）；
-- **推送版本 Tag (`v*` 如 `v2.0.0`)**：自动交叉编译全架构 Linux (amd64 / arm64) 与 macOS (arm64) 静态二进制，生成 SHA256 校验清单，并通过 `softprops/action-gh-release@v2` 自动发布至 GitHub Releases。
+- **推送版本 Tag (`v*` 如 `v20261119-04`)**：自动交叉编译全架构 Linux (amd64 / arm64) 与 macOS (arm64) 静态二进制，生成 SHA256 校验清单，并通过 `softprops/action-gh-release@v2` 自动发布至 GitHub Releases；
+- **容器镜像发布（`docker-release` job）**：分 `linux/amd64` 与 `linux/arm64` 构建推送到 `ghcr.io/khc8655/ocrprox2`，再用 `docker/buildx imagetools` 组装多架构 manifest——`main` 分支推 `latest` 标签，`v*` Tag 推版本号标签。

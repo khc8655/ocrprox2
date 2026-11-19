@@ -132,3 +132,63 @@ PROXY_API_KEY=<默认客户端CLIENT_KEY>
 ### 3.2 从 1 代 (`ocrprox`) 平滑升级至 2 代 Full 节点
 1. 将 1 代的 `/opt/ocrproxy/config/proxy_config.enc` 与 `.env` 中的 `ENCRYPT_KEY` 直接复制到 `/opt/llmproxy/config/`；
 2. 启动 `llmproxy --role=full`：内置的 `internal/crypto` 会自动识别 1 代 Fernet 密文格式并无损解密，首次保存时自动原子升级为 `PBKDF2-SHA256 + AES-256-GCM` 格式。
+
+---
+
+## 四、 Docker 容器部署（`lite` / `full` 通用）
+
+官方镜像基于 `scratch` 构建，仅含静态二进制、CA 证书与 tzdata，约 **12.8 MB**，支持 `linux/amd64` 与 `linux/arm64`：
+
+```
+ghcr.io/khc8655/ocrprox2:latest         # main 分支最新构建
+ghcr.io/khc8655/ocrprox2:<version>      # 生产建议固定版本，如 v20261119-04
+```
+
+> 镜像由 CI 的 `docker-release` job 自动构建推送（G1~G6 门禁通过后执行），无需手工构建。
+
+### 4.1 极简节点（`lite`）：零落盘，不需要数据卷
+
+```bash
+docker run -d --name llmproxy-lite --restart unless-stopped \
+  -p 8787:8787 \
+  -e LLMPROXY_ROLE=lite \
+  -e LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
+  -e LLMPROXY_NODE_TOKEN="stk_node_..." \
+  -e LLMPROXY_CLIENT_KEY="sk-llmproxy-..." \
+  ghcr.io/khc8655/ocrprox2:latest
+```
+
+Lite 模式纯内存运行、不写任何配置与日志文件，因此**不要**挂载 `/data`（挂了也只是空目录）。
+
+### 4.2 完整节点（`full`）：挂载数据卷
+
+```bash
+mkdir -p "$(pwd)/llmproxy-data" && docker run -d --name llmproxy-full --restart unless-stopped \
+  -p 8787:8787 \
+  -v "$(pwd)/llmproxy-data:/data" \
+  -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data \
+  -e ADMIN_PASSWORD="<管理端强密码>" \
+  -e LLMPROXY_HUB_URL="https://your-hub.edgeone.app" \
+  -e LLMPROXY_NODE_TOKEN="stk_node_..." \
+  ghcr.io/khc8655/ocrprox2:latest
+```
+
+**必须注意（实测踩坑）**：
+
+| 事项 | 说明 |
+|---|---|
+| 先建目录再挂载 | 目录不存在时 Docker 会以 `root:root` 创建它；先 `mkdir -p` 可保持宿主用户属主 |
+| 默认以 root 运行 | 为让 bind mount 可写，镜像未强制非 root；需要最小权限时加 `--user "$(id -u):$(id -g)"`（镜像内置 `llmproxy` 账户 UID/GID 为 10001） |
+| 卷内产物 | `proxy_config.enc`（AES-256-GCM 加密配置）、`app.log`、`usage.jsonl`、`key_bans.json.lock` |
+
+### 4.3 容器运维
+
+```bash
+docker logs -f llmproxy-full                       # 实时日志（容器内同时写 /data/app.log）
+curl -s http://127.0.0.1:8787/healthz              # 健康检查
+docker pull ghcr.io/khc8655/ocrprox2:latest \
+  && docker rm -f llmproxy-full                    # 升级：拉新镜像后按原命令重建，数据卷保留
+docker rm -f llmproxy-full && rm -rf ./llmproxy-data   # 卸载：含数据
+```
+
+> 容器部署不提供 `llmproxy-ctl`（该命令由 `install.sh` 安装到宿主的 systemd 场景）；如需 `upgrade` / `uninstall` 等便捷运维，请使用一键安装方式。

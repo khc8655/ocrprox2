@@ -42,6 +42,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" 
 - **内存占用基线**：
   - `--role=lite` 启动空载 RSS **≤ 15MB**，常规并发代理下 RSS **≤ 30MB**；
   - `--role=full` 启动空载 RSS **≤ 22MB**。
+- **容器镜像**：基于 `scratch`，仅含静态二进制 + CA + tzdata + passwd/group，体积 **≤ 20MB**（当前约 12.8MB）；必须支持 `linux/amd64` 与 `linux/arm64`；`docker run <image> --version` 必须退出码 0（镜像内二进制需 `COPY --chmod=0755`，Release 资产不带执行位）。
 
 ---
 
@@ -109,3 +110,4 @@ git tag vYYYYMMDD-NN
 git push origin vYYYYMMDD-NN
 ```
 - **GitHub Actions 自动化流水线**：推送到 Tag 后，`.github/workflows/ci-release.yml` 触发流水线，在纯净容器中自动交叉编译 `linux-amd64`、`linux-arm64`、`darwin-arm64` 静态二进制，计算 `SHA256SUMS`，并自动发布 GitHub Release 制品。
+- **容器镜像发布（`docker-release` job）**：`build-release` 完成后，按 `linux/amd64` 与 `linux/arm64` 分别构建推送 `ghcr.io/khc8655/ocrprox2`，再用 `docker buildx imagetools create` 组装多架构 manifest（`main` → `latest`，`v*` Tag → 版本号）。Gatekeeper 的 G1~G6 通过是前置条件（`needs: build-release` → `needs: verify-gates`）。
