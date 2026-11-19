@@ -2482,11 +2482,15 @@
     }
 
     if (opts.mode === 'binary') {
+      // One-liner that actually works from a bare shell: detect arch, download the
+      // matching release asset, verify nothing is required beyond the binary, run it.
+      // Previously this assumed the binary was already in the current directory.
       const archDetect = `ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')`;
+      const fetch = `mkdir -p ./llmproxy-data && cd ./llmproxy-data && curl -fL --retry 2 -o llmproxy "https://github.com/khc8655/ocrprox2/releases/latest/download/llmproxy-linux-\${ARCH}" && chmod +x ./llmproxy`;
       if (role === 'full') {
-        return `${archDetect} && mkdir -p ./data && ADMIN_PASSWORD="${adminPass}" CONFIG_DIR="./data" LLMPROXY_ROLE=full LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy-linux-\${ARCH} --addr="[::]:${port}"`;
+        return `${archDetect} && ${fetch} && ADMIN_PASSWORD="${adminPass}" CONFIG_DIR="$(pwd)/cfg" LLMPROXY_ROLE=full LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy --addr="[::]:${port}"`;
       }
-      return `${archDetect} && LLMPROXY_ROLE=lite LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy-linux-\${ARCH} --addr="[::]:${port}"`;
+      return `${archDetect} && ${fetch} && LLMPROXY_ROLE=lite LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy --addr="[::]:${port}"`;
     }
 
     let scriptUrl = `${cleanHub}/install.sh`;

@@ -4,6 +4,23 @@
 
 ---
 
+## [v20261119-03] - 2026-11-19
+
+### Added
+- **容器镜像发布（ghcr.io）**：新增 `Dockerfile`——基于 `scratch`，仅打包静态二进制 + CA 证书 + tzdata + passwd/group，镜像体积最小化。CI 新增 `docker-release` job：按 `linux/amd64` 与 `linux/arm64` 分别构建推送，再用 `buildx imagetools` 组装多架构 manifest（main → `latest`，`v*` tag → 版本号标签）。
+- 节点签发面板的 **Docker 部署**方式自此真实可用（此前镜像从未构建，命令必然 `manifest unknown`）。
+
+### Fixed
+- **「单行直跑」命令缺少下载步骤**：原命令直接执行 `./llmproxy-linux-${ARCH}`，假设二进制已在当前目录，用户粘贴即报 `No such file or directory`。现改为：探测架构 → 从 GitHub Release 下载对应资产 → `chmod +x` → 以 env 注入角色/中枢/令牌启动，一条命令真正跑起来。
+
+### Verified
+- 香港 NAT 真机实测：一键安装在 Hub 拉脚本后装好并连通中枢（`config_version 27`、真实 MiniMax 调用返回正常）；单行直跑下载 7.3MB 二进制后 `--version` 与 `/healthz` 均正常。
+- 四种生成的命令（install/binary × lite/full）均通过 `bash -n` 语法校验。
+- `verify:release` G1–G6 全绿（bundle 216,946 B）。
+
+### Notes
+- 三种部署方式的定位：**一键安装（systemd）**=生产推荐，有开机自启与 `llmproxy-ctl` 运维；**Docker**=容器化/K8s 场景；**单行直跑**=免安装临时试跑（无自启，关终端即停）。
+
 ## [v20261119-02] - 2026-11-19
 
 ### Fixed

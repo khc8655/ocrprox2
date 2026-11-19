@@ -1,12 +1,13 @@
 {
-  "version": "v20261119-02",
-  "semver": "2.5.3",
+  "version": "v20261119-03",
+  "semver": "2.6.0",
   "release_date": "2026-11-19",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.5.3 — 中文排版字重/字号修正与列表冗余清理",
+  "title": "LLMProxy2 (OCRProxy v2) 2.6.0 — 容器镜像发布与三种部署方式落地",
   "changelog": [
-    "统一字重与字号体系：新增权重/字号 token（正文 400、强调 500、标题 600，12px 及以下禁用 600）。此前后台 12 处 600 semibold（其中 6 处为 11px 小字）导致中文笔画粘连发黑、观感过粗",
-    "表头、供应商/模型名、导航分段、版本与角色徽章由 600 降为 500；正文 13→14px，表头 11→12px，卡片标题 13→14px，表单标签/KPI 标签/卡片副标题 11→12px",
-    "供应商列表在名称与 ID 相同时不再重复渲染 ID 胶囊"
+    "新增 Dockerfile（scratch 基础镜像，仅含静态二进制 + CA + tzdata，双架构 linux/amd64 与 arm64）",
+    "CI 新增 ghcr.io 镜像构建与多架构 manifest 发布：main 分支推 latest，v* tag 推版本号标签",
+    "修复「单行直跑」命令缺少下载步骤的问题：现在自动探测架构并从 GitHub Release 下载对应二进制后启动",
+    "节点签发面板的三种部署方式（一键安装 / Docker / 单行直跑）全部可真实执行"
   ]
 }
