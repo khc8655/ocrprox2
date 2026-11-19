@@ -2475,10 +2475,17 @@
     const adminPass = String(opts.adminPass || '').trim().replace(/["'$`\\\s]/g, '');
 
     if (opts.mode === 'docker') {
+      // Verified against a real container run: the data dir must be an absolute path
+      // created before the run (Docker would otherwise create it as root), and the
+      // image needs no --user for that to work.
+      const vol = `-v "$(pwd)/llmproxy-data:/data"`;
+      const common = `-p ${port}:8787`;
+      const hubEnv = `-e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''}`;
       if (role === 'full') {
-        return `docker run -d --name llmproxy-full --restart unless-stopped -p ${port}:8787 -v "$(pwd)/llmproxy-data:/data" -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data -e ADMIN_PASSWORD="${adminPass}" -e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ghcr.io/khc8655/ocrprox2:latest`;
+        return `mkdir -p "$(pwd)/llmproxy-data" && docker run -d --name llmproxy-full --restart unless-stopped ${common} ${vol} -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data -e ADMIN_PASSWORD="${adminPass}" ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
       }
-      return `docker run -d --name llmproxy-lite --restart unless-stopped -p ${port}:8787 -e LLMPROXY_ROLE=lite -e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ghcr.io/khc8655/ocrprox2:latest`;
+      // Lite is zero-disk by design: no volume needed at all.
+      return `docker run -d --name llmproxy-lite --restart unless-stopped ${common} -e LLMPROXY_ROLE=lite ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
     }
 
     if (opts.mode === 'binary') {

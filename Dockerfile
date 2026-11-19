@@ -38,13 +38,20 @@ COPY --from=assets /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=assets /etc/passwd /etc/passwd
 COPY --from=assets /etc/group /etc/group
 
-COPY dist/llmproxy-linux-${TARGETARCH} /usr/local/bin/llmproxy
+# GitHub Release assets arrive without the executable bit, and COPY preserves mode.
+# Force 0755 so the ENTRYPOINT can actually exec the binary.
+COPY --chmod=0755 dist/llmproxy-linux-${TARGETARCH} /usr/local/bin/llmproxy
 
 ENV TZ=UTC \
     LLMPROXY_ROLE=full \
     LLMPROXY_ADDR=[::]:8787 \
     PORT=8787 \
     CONFIG_DIR=/data
+
+# Runs as root by default so a bind-mounted volume (created by the host user)
+# stays writable without chown. For least privilege, pass `--user` with a UID that
+# owns the mounted data dir, e.g. `-v $PWD/llmproxy-data:/data --user $(id -u):$(id -g)`.
+# The image also ships an `llmproxy` account (UID/GID 10001) for that purpose.
 
 # Full nodes keep configuration here; mount a volume to persist it.
 VOLUME ["/data"]

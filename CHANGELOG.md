@@ -4,6 +4,16 @@
 
 ---
 
+## [v20261119-04] - 2026-11-19
+
+### Fixed
+- **容器镜像无法启动（permission denied）**：GitHub Release 资产下载后不带可执行位，`COPY` 保留原权限，镜像内 `/usr/local/bin/llmproxy` 为 0644，`docker run` 直接报 `exec: "...": permission denied`。改用 `COPY --chmod=0755`。
+- **Docker 一键命令加固**（实测暴露）：Full 模式先 `mkdir -p` 数据目录再挂载（否则 Docker 会以 root 建目录，后续非 root 使用不便）；Lite 模式明确不带数据卷（零落盘设计）；镜像默认以 root 运行以确保 bind mount 可写，Dockerfile 注明可选的 `--user $(id -u):$(id -g)` 非 root 用法。
+
+### Verified
+- 在 Instabox 沙箱容器（Docker 29.8）实测：镜像 `12.8MB`（`scratch` 基础），`--version` 正常，Lite 与 Full 双模式均启动成功；Full 模式数据卷正确生成 `app.log` / `usage.jsonl` / `key_bans.json.lock`。
+- 复现并确认根因：拉取修复前的线上镜像执行即 `permission denied`，用本地修复版构建后同一命令正常运行。
+
 ## [v20261119-03] - 2026-11-19
 
 ### Added

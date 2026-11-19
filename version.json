@@ -1,13 +1,12 @@
 {
-  "version": "v20261119-03",
-  "semver": "2.6.0",
+  "version": "v20261119-04",
+  "semver": "2.6.1",
   "release_date": "2026-11-19",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.6.0 — 容器镜像发布与三种部署方式落地",
+  "title": "LLMProxy2 (OCRProxy v2) 2.6.1 — 容器镜像可执行权限修复与 Docker 一键命令加固",
   "changelog": [
-    "新增 Dockerfile（scratch 基础镜像，仅含静态二进制 + CA + tzdata，双架构 linux/amd64 与 arm64）",
-    "CI 新增 ghcr.io 镜像构建与多架构 manifest 发布：main 分支推 latest，v* tag 推版本号标签",
-    "修复「单行直跑」命令缺少下载步骤的问题：现在自动探测架构并从 GitHub Release 下载对应二进制后启动",
-    "节点签发面板的三种部署方式（一键安装 / Docker / 单行直跑）全部可真实执行"
+    "修复容器镜像内二进制缺少可执行权限导致 docker run 报 permission denied（GitHub Release 资产不带执行位，COPY 保留原权限）",
+    "Docker 一键命令加固：Full 模式先创建数据卷目录再挂载（避免 Docker 以 root 建目录）、Lite 模式明确无需数据卷；镜像默认以 root 运行以保证 bind mount 可写，并在 Dockerfile 注明可选的非 root 用法",
+    "实测验证：镜像 12.8MB（scratch 基础），lite/full 双模式容器均正常启动，full 模式数据卷正确生成 app.log/usage.jsonl/key_bans.json.lock"
   ]
 }
