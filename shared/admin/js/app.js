@@ -1898,7 +1898,7 @@
         <div class="name">
           ${brandIcon}
           <span>${eh(p.name || pId)}</span>
-          <span class="pill">${eh(pId)}</span>
+          ${(p.name && p.name !== pId) ? `<span class="pill">${eh(pId)}</span>` : ''}
           ${isHubMode() ? '' : (isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>')}
           ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
           ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}

@@ -42,6 +42,16 @@
   --khc-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --khc-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
+  /* Typography scale. CJK glyphs at 600 render noticeably heavier than Latin and
+   * lose stroke separation at small sizes, so the UI caps emphasis at 500 and uses
+   * size, not weight, for hierarchy. Magpie (the reference design) does the same. */
+  --khc-weight-body: 400;
+  --khc-weight-medium: 500;
+  --khc-weight-strong: 600; /* headings only, never at <=12px */
+  --khc-text-xs: 12px;
+  --khc-text-sm: 13px;
+  --khc-text-md: 14px;
+
   --khc-header-h: 48px;
   --khc-ctrl-h: 32px;
 }
@@ -110,7 +120,7 @@ html, body {
   background-color: var(--khc-surface-page);
   color: var(--khc-text-1);
   font-family: var(--khc-font-sans);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -176,7 +186,7 @@ html, body {
 
 .badge-role {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 2px 6px;
   border-radius: var(--khc-radius-sm);
   background-color: var(--khc-primary-50);
@@ -227,7 +237,7 @@ html, body {
 .seg-btn.active {
   background-color: var(--khc-surface-card);
   color: var(--khc-text-1);
-  font-weight: 600;
+  font-weight: 500;
   box-shadow: var(--khc-shadow-sm);
 }
 
@@ -240,7 +250,7 @@ html, body {
 
 .version-pill {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 0 8px;
   height: 26px;
   display: inline-flex;
@@ -459,7 +469,7 @@ html, body {
 }
 
 .form-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--khc-text-2);
   display: flex;
@@ -546,8 +556,8 @@ input[type="checkbox"] {
 
 .card-title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--khc-text-1);
   display: flex;
   align-items: center;
@@ -635,7 +645,7 @@ input[type="checkbox"] {
   gap: 6px;
   flex-wrap: wrap;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--khc-text-1);
 }
 
@@ -743,8 +753,8 @@ input[type="checkbox"] {
 
 .data-table th {
   text-align: left;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--khc-text-2);
   padding: 9px 12px;
   border-bottom: 1px solid var(--khc-border-1);
@@ -836,7 +846,7 @@ input[type="checkbox"] {
 }
 
 .kpi-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--khc-text-2);
 }
@@ -1246,7 +1256,7 @@ input[type="checkbox"] {
   background-color: var(--khc-primary-50);
   color: var(--khc-primary-500);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;

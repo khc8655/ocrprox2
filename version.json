@@ -1,11 +1,12 @@
 {
-  "version": "v20261119-01",
-  "semver": "2.5.2",
+  "version": "v20261119-02",
+  "semver": "2.5.3",
   "release_date": "2026-11-19",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.5.2 — 流式兜底合成与 Hub 凭据存储加固（上线前验收修复）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.5.3 — 中文排版字重/字号修正与列表冗余清理",
   "changelog": [
-    "修复上游忽略 stream=true 时网关返回 text/event-stream 却透传裸 JSON 的缺陷：peek 阶段识别裸 JSON 载荷并合成为标准 SSE（delta + finish_reason/usage + [DONE]），同时恢复流式用量入账",
-    "Hub 管理端令牌不再持久化到 localStorage（改为 sessionStorage + 内存兜底，并清理历史遗留值），降低 XSS/本机访问下的管理员密码读取面"
+    "统一字重与字号体系：新增权重/字号 token（正文 400、强调 500、标题 600，12px 及以下禁用 600）。此前后台 12 处 600 semibold（其中 6 处为 11px 小字）导致中文笔画粘连发黑、观感过粗",
+    "表头、供应商/模型名、导航分段、版本与角色徽章由 600 降为 500；正文 13→14px，表头 11→12px，卡片标题 13→14px，表单标签/KPI 标签/卡片副标题 11→12px",
+    "供应商列表在名称与 ID 相同时不再重复渲染 ID 胶囊"
   ]
 }
