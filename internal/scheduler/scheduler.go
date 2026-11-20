@@ -247,12 +247,10 @@ func (s *Scheduler) OrderCandidates(
 	providers map[string]*types.ProviderConfig,
 	reqModel string,
 ) []*CandidateKey {
-	return s.OrderCandidatesForSession(route, providers, reqModel, "", "")
+	return s.orderCandidates(route, providers, reqModel, "", SessionIdentity{}, false).candidates()
 }
 
-// OrderCandidatesForSession sorts candidate keys using per-session sticky affinity,
-// falling back to globalStrategy -> route.ActiveKey / model sticky fallback, and spreading
-// concurrent unbound sessions across healthy idle keys of the primary provider.
+// OrderCandidatesForSession sorts candidate keys for a bare session key.
 func (s *Scheduler) OrderCandidatesForSession(
 	route *types.AgentModelRoute,
 	providers map[string]*types.ProviderConfig,
@@ -260,6 +258,45 @@ func (s *Scheduler) OrderCandidatesForSession(
 	globalStrategy string,
 	sessionKey string,
 ) []*CandidateKey {
+	return s.orderCandidates(route, providers, reqModel, globalStrategy, SessionIdentity{Key: sessionKey}, false).candidates()
+}
+
+// OrderCandidatesForIdentity sorts candidate keys for a request's full session
+// identity, keeping a subagent apart from its lead conversation.
+func (s *Scheduler) OrderCandidatesForIdentity(
+	route *types.AgentModelRoute,
+	providers map[string]*types.ProviderConfig,
+	reqModel string,
+	globalStrategy string,
+	ident SessionIdentity,
+) []*CandidateKey {
+	return s.orderCandidates(route, providers, reqModel, globalStrategy, ident, false).candidates()
+}
+
+// CandidateOrder is an ordering plus, for a brand-new conversation, the key whose
+// lane it already occupies. Claim is "" when nothing was taken. The request owns
+// ClaimRelease and must call it exactly once: the attempt loop passes it to the
+// key's lane, or releases it when it never gets there.
+type CandidateOrder struct {
+	List         []*CandidateKey
+	Claim        string
+	ClaimRelease func()
+}
+
+func (o CandidateOrder) candidates() []*CandidateKey { return o.List }
+
+// orderCandidates sorts candidate keys using per-session sticky affinity,
+// falling back to globalStrategy -> route.ActiveKey / model sticky fallback, and
+// spreading concurrent unbound sessions across healthy keys of the primary provider.
+func (s *Scheduler) orderCandidates(
+	route *types.AgentModelRoute,
+	providers map[string]*types.ProviderConfig,
+	reqModel string,
+	globalStrategy string,
+	ident SessionIdentity,
+	claimOpening bool,
+) CandidateOrder {
+	sessionKey := ident.Key
 	var candidates []*CandidateKey
 
 	for _, cand := range route.Candidates {
@@ -366,7 +403,7 @@ func (s *Scheduler) OrderCandidatesForSession(
 	}
 
 	if len(candidates) <= 1 {
-		return candidates
+		return CandidateOrder{List: candidates}
 	}
 
 	switch strategy {
@@ -375,62 +412,107 @@ func (s *Scheduler) OrderCandidatesForSession(
 		if route.ActiveKey != "" {
 			for _, c := range candidates {
 				if c.KeyTag == route.ActiveKey {
-					return []*CandidateKey{c}
+					return CandidateOrder{List: []*CandidateKey{c}}
 				}
 			}
 		}
-		return candidates
+		return CandidateOrder{List: candidates}
 
 	case "round_robin":
-		return s.orderRoundRobin(candidates, reqModel)
+		return CandidateOrder{List: s.orderRoundRobin(candidates, reqModel)}
 
 	case "weighted":
-		return s.orderWeighted(candidates, reqModel)
+		return CandidateOrder{List: s.orderWeighted(candidates, reqModel)}
 
 	case "least_busy":
-		return s.orderLeastBusy(candidates, reqModel)
+		return CandidateOrder{List: s.orderLeastBusy(candidates, reqModel)}
 
 	case "fast":
-		return s.orderFast(candidates)
+		return CandidateOrder{List: s.orderFast(candidates)}
 
 	case "sticky_failover":
 		fallthrough
 	default:
-		// 1. Per-session sticky affinity takes highest precedence so concurrent sessions never stomp each other
+		// 1. Per-session sticky affinity takes highest precedence so concurrent sessions never stomp each other.
+		//    A subagent shares its lead's session key; GetWithLead starts it where the lead already
+		//    warms the cache, and its own binding is written back under its agent id alone.
+		bound := false
 		if sessionKey != "" && s.sessionSticky != nil {
-			if boundTag, ok := s.sessionSticky.Get(reqModel, sessionKey); ok {
+			if boundTag, ok := s.sessionSticky.GetWithLead(reqModel, sessionKey, ident.AgentID); ok {
+				bound = true
 				if reordered, moved := moveCandidateFirst(candidates, boundTag); moved {
-					return reordered
+					return CandidateOrder{List: reordered}
 				}
 			}
 		}
 
-		// 2. Explicit route.ActiveKey (config-pinned) or sessionless model fallback
-		preferred := route.ActiveKey
-		if preferred == "" && sessionKey == "" && s.sessionSticky != nil {
-			preferred = s.sessionSticky.GetModelFallback(reqModel)
-		}
-		if preferred != "" {
-			if reordered, moved := moveCandidateFirst(candidates, preferred); moved {
-				return reordered
+		// 2. Explicit route.ActiveKey is an operator pin and outranks everything
+		//    learned, including a session binding that landed elsewhere.
+		if route.ActiveKey != "" {
+			if reordered, moved := moveCandidateFirst(candidates, route.ActiveKey); moved {
+				return CandidateOrder{List: reordered}
 			}
 		}
 
-		// 3. New unbound session with multiple keys on the primary provider:
-		//    if candidates[0] is currently busy/cooled/over-RPM, prefer an idle healthy sibling key
-		//    on the same provider so concurrent multi-path sessions warm separate caches.
-		if sessionKey != "" && !s.isCandidateAvailableAndIdle(candidates[0]) {
+		// 3. A new conversation that shares its cacheable prefix with one already
+		//    being served starts on the same key: the prefix is already warm there,
+		//    so the second agent reads it instead of paying to write it again. Room is
+		//    settled below, where the decision is also made atomic; returning here
+		//    would let a whole burst read the same free slot.
+		if !bound && ident.PrefixKey != "" && s.sessionSticky != nil {
+			if tag := s.sessionSticky.GetPrefix(reqModel, ident.PrefixKey); tag != "" {
+				if reordered, moved := moveCandidateFirst(candidates, tag); moved {
+					candidates = reordered
+				}
+			}
+		}
+
+		// 4. Model-level fallback for requests without any session identity.
+		if !bound && sessionKey == "" && s.sessionSticky != nil {
+			if preferred := s.sessionSticky.GetModelFallback(reqModel); preferred != "" {
+				if reordered, moved := moveCandidateFirst(candidates, preferred); moved {
+					candidates = reordered
+				}
+			}
+		}
+
+		// 5. Overflow: only when the leading key has reached its soft concurrency
+		//    cap (or is cooling / over RPM) does traffic move to a sibling. An
+		//    uncapped key has room by definition, so it keeps the traffic and its
+		//    cache instead of scattering it.
+		if !bound && !s.candidateHasRoom(candidates[0]) {
 			primaryProv := candidates[0].Provider.ID
 			for _, c := range candidates[1:] {
-				if c.Provider.ID == primaryProv && s.isCandidateAvailableAndIdle(c) {
+				if c.Provider.ID == primaryProv && s.candidateHasRoom(c) {
 					if reordered, moved := moveCandidateFirst(candidates, c.KeyTag); moved {
-						return reordered
+						candidates = reordered
 					}
+					break
 				}
 			}
 		}
 
-		return candidates
+		// 6. Ordering alone cannot settle simultaneous arrivals — each sees the same
+		//    idle keys — so an unbound request occupies its key's lane while it is
+		//    still being ordered. Taking the slot here is what makes the cap exact
+		//    under a burst; the request hands the release back to the attempt loop.
+		if claimOpening && !bound && s.anyCandidateCapped(candidates) {
+			choices := make([]LaneChoice, 0, len(candidates))
+			for _, c := range candidates {
+				if !s.isCandidateHealthy(c) {
+					continue
+				}
+				choices = append(choices, LaneChoice{Tag: c.KeyTag, Cap: c.MaxConc})
+			}
+			if tag, release, ok := s.lanes.TryAcquire(choices); ok {
+				if reordered, moved := moveCandidateFirst(candidates, tag); moved {
+					candidates = reordered
+				}
+				return CandidateOrder{List: candidates, Claim: tag, ClaimRelease: release}
+			}
+		}
+
+		return CandidateOrder{List: candidates}
 	}
 }
 
@@ -453,7 +535,10 @@ func moveCandidateFirst(candidates []*CandidateKey, keyTag string) ([]*Candidate
 	return append([]*CandidateKey{active}, others...), true
 }
 
-func (s *Scheduler) isCandidateAvailableAndIdle(c *CandidateKey) bool {
+// isCandidateHealthy reports whether c can take a request now: not cooling
+// down and within its RPM quota. It deliberately ignores in-flight load, so a
+// caller that has just claimed c's lane slot is not refused by its own claim.
+func (s *Scheduler) isCandidateHealthy(c *CandidateKey) bool {
 	if c == nil || c.Provider == nil || c.KeyEntry == nil {
 		return false
 	}
@@ -471,10 +556,42 @@ func (s *Scheduler) isCandidateAvailableAndIdle(c *CandidateKey) bool {
 	if rpmLimit > 0 && s.rpmLimiter != nil && !s.rpmLimiter.Allow(c.KeyTag, rpmLimit) {
 		return false
 	}
-	if s.lanes != nil && s.lanes.ActiveCount(c.KeyTag) > 0 {
+	return true
+}
+
+// candidateHasRoom reports whether c can take another request without passing
+// its soft concurrency cap. A key with no cap (MaxConc == 0) always has room:
+// staying on it is exactly what keeps a shared prompt cache warm, so load alone
+// must never push traffic off an uncapped key.
+func (s *Scheduler) candidateHasRoom(c *CandidateKey) bool {
+	if !s.isCandidateHealthy(c) {
 		return false
 	}
-	return true
+	if c.MaxConc <= 0 {
+		return true
+	}
+	// A request that ordered before this one may not have reached its lane yet.
+	return s.candidateLoad(c) < c.MaxConc
+}
+
+// anyCandidateCapped reports whether any candidate has a concurrency cap. Without
+// one, nothing can fill up, so taking a lane during ordering would be pointless.
+func (s *Scheduler) anyCandidateCapped(candidates []*CandidateKey) bool {
+	for _, c := range candidates {
+		if c != nil && c.MaxConc > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// candidateLoad is a candidate's current load: every request that holds one of
+// its slots, whether it is still being prepared or already on the wire.
+func (s *Scheduler) candidateLoad(c *CandidateKey) int {
+	if s == nil || s.lanes == nil || c == nil {
+		return 0
+	}
+	return s.lanes.BusyCount(c.KeyTag)
 }
 
 // sanitizeHeaders redacts sensitive auth tokens and cleans up headers for observability.
@@ -591,9 +708,21 @@ func (s *Scheduler) Dispatch(
 		}
 	}
 
-	sessionKey := ExtractSessionKey(r, reqBody)
+	ident := ExtractSessionIdentity(r, reqBody)
 	globalStrategy := snap.Config.Settings.AgentRoutingStrategy
-	candidates := s.OrderCandidatesForSession(route, snap.Config.Providers, reqModel, globalStrategy, sessionKey)
+	order := s.orderCandidates(route, snap.Config.Providers, reqModel, globalStrategy, ident, true)
+	candidates := order.List
+	// The claim is a real lane slot, taken while ordering so a burst cannot all
+	// see the same free slot. The attempt loop reuses it for the claimed key; if
+	// this request never reaches that key, the slot is given back on return.
+	claimRelease := order.ClaimRelease
+	if claimRelease != nil {
+		defer func() {
+			if claimRelease != nil {
+				claimRelease()
+			}
+		}()
+	}
 	if len(candidates) == 0 {
 		msg := fmt.Sprintf("no candidate keys available for model %q", reqModel)
 		if notes := DescribeRouteCandidates(route, snap.Config.Providers); len(notes) > 0 {
@@ -676,8 +805,8 @@ func (s *Scheduler) Dispatch(
 		}
 
 		var (
-			done       bool
-			retErr     error
+			done   bool
+			retErr error
 		)
 		func() {
 			// 3. Concurrency tracking: start waiting (guaranteed cleanup via defer)
@@ -741,7 +870,13 @@ func (s *Scheduler) Dispatch(
 			queuedMillis := time.Since(queuedStart).Milliseconds()
 			cancelWait()
 
-			releaseBusy := s.lanes.Acquire(cand.KeyTag, cand.MaxConc)
+			var releaseBusy func()
+			if claimRelease != nil && cand.KeyTag == order.Claim {
+				// Ordering already took this key's slot; the attempt inherits it.
+				releaseBusy, claimRelease = claimRelease, nil
+			} else {
+				releaseBusy = s.lanes.Acquire(cand.KeyTag, cand.MaxConc)
+			}
 			var relOnce sync.Once
 			rel := func() { relOnce.Do(releaseBusy) }
 			defer rel()
@@ -961,7 +1096,7 @@ func (s *Scheduler) Dispatch(
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write(aggBytes)
 					s.latency.Record(cand.KeyTag, tryElapsed)
-					s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
+					s.updateStickyKey(reqModel, ident, route, globalStrategy, cand)
 
 					var usageTracker *StreamUsageTracker
 					if hasObs {
@@ -1055,25 +1190,25 @@ func (s *Scheduler) Dispatch(
 					}
 					if usageTracker != nil {
 						s.recordFinalTrace(types.RequestTrace{
-							ID:          traceID,
-							Timestamp:   time.Now().Unix(),
-							Mode:        "agent",
-							Endpoint:    endpoint,
-							ReqModel:    reqModel,
-							ServedModel: cand.TargetModel,
+							ID:             traceID,
+							Timestamp:      time.Now().Unix(),
+							Mode:           "agent",
+							Endpoint:       endpoint,
+							ReqModel:       reqModel,
+							ServedModel:    cand.TargetModel,
 							WinnerProvider: cand.Provider.ID,
-							WinnerKey:   cand.KeyEntry.Label,
-							Status:      http.StatusOK,
-							Stream:      true,
-							InTokens:    usageTracker.InTokens,
-							OutTokens:   usageTracker.OutTokens,
-							StopReason:  usageTracker.StopReason,
-							TTFTMillis:  ttftMillis,
-							TotalMillis: totalMillis,
-							UpBytes:     len(mutatedBody),
-							DownBytes:   len(synthBytes),
-							ReqHeaders:  reqHeaders,
-							Tries:       tries,
+							WinnerKey:      cand.KeyEntry.Label,
+							Status:         http.StatusOK,
+							Stream:         true,
+							InTokens:       usageTracker.InTokens,
+							OutTokens:      usageTracker.OutTokens,
+							StopReason:     usageTracker.StopReason,
+							TTFTMillis:     ttftMillis,
+							TotalMillis:    totalMillis,
+							UpBytes:        len(mutatedBody),
+							DownBytes:      len(synthBytes),
+							ReqHeaders:     reqHeaders,
+							Tries:          tries,
 						})
 					} else {
 						s.recordFinalTrace(types.RequestTrace{
@@ -1168,7 +1303,7 @@ func (s *Scheduler) Dispatch(
 				rel()
 
 				s.latency.Record(cand.KeyTag, tryTTFT)
-				s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
+				s.updateStickyKey(reqModel, ident, route, globalStrategy, cand)
 
 				if usageTracker != nil {
 					usageTracker.Finish()
@@ -1242,7 +1377,7 @@ func (s *Scheduler) Dispatch(
 			_, _ = w.Write(respBody)
 
 			s.latency.Record(cand.KeyTag, tryElapsed)
-			s.updateStickyKey(reqModel, sessionKey, route, globalStrategy, cand)
+			s.updateStickyKey(reqModel, ident, route, globalStrategy, cand)
 			if hasObs {
 				usageTracker := NewStreamUsageTracker(reqStart, tryElapsed)
 				var respMap map[string]any
@@ -1353,7 +1488,7 @@ func (s *Scheduler) Dispatch(
 	return ErrAllRetriesExhausted
 }
 
-func (s *Scheduler) updateStickyKey(reqModel, sessionKey string, route *types.AgentModelRoute, globalStrategy string, cand *CandidateKey) {
+func (s *Scheduler) updateStickyKey(reqModel string, ident SessionIdentity, route *types.AgentModelRoute, globalStrategy string, cand *CandidateKey) {
 	if route == nil || cand == nil || s.sessionSticky == nil {
 		return
 	}
@@ -1367,8 +1502,18 @@ func (s *Scheduler) updateStickyKey(reqModel, sessionKey string, route *types.Ag
 	if strategy != "sticky_failover" {
 		return
 	}
-	if sessionKey != "" {
-		s.sessionSticky.Set(reqModel, sessionKey, cand.KeyTag)
+	// A lead request also teaches the prefix binding: the next conversation on the
+	// same project starts on this key and reads the prefix already cached here. A
+	// subagent is skipped — it inherits the lead's key, so it adds no information
+	// and would only move the shared binding onto whichever key it failed over to.
+	if ident.PrefixKey != "" && ident.AgentID == "" {
+		s.sessionSticky.SetPrefix(reqModel, ident.PrefixKey, cand.KeyTag)
+	}
+	if ident.Key != "" {
+		// A subagent's answer binds the subagent slot only. Writing the lead's
+		// slot here is what moved a lead conversation to whichever account a
+		// subagent happened to reach, throwing away the cache it had built.
+		s.sessionSticky.Set(reqModel, ident.Key, ident.AgentID, cand.KeyTag)
 		return
 	}
 	s.sessionSticky.SetModelFallback(reqModel, cand.KeyTag)

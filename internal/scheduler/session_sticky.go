@@ -26,7 +26,20 @@ var sessionHeaders = []string{
 	"Conversation-Id",
 	"Conversation_id",
 	"X-Thread-Id",
+	"X-Session-Affinity",
 }
+
+// agentHeaders identify a subagent within a conversation. Claude Code sends its
+// session id on subagent requests too, so without this dimension a subagent's
+// answer would re-bind the lead conversation to another Key and throw away the
+// cache it had been building there.
+var agentHeaders = []string{
+	"X-Claude-Code-Agent-Id",
+	"X-Subagent-Id",
+	"X-Agent-Id",
+}
+
+const agentKeySeparator = "|agent:"
 
 type stickyEntry struct {
 	compositeKey string
@@ -34,47 +47,35 @@ type stickyEntry struct {
 	lastUsed     time.Time
 }
 
-// SessionStickyCache maintains thread-safe per-session sticky key bindings
-// (with sliding TTL and bounded LRU eviction) plus a model-level fallback key
-// for requests that carry no session identity.
-type SessionStickyCache struct {
-	mu          sync.Mutex
-	ttl         time.Duration
-	maxEntries  int
-	nowFunc     func() time.Time
-	items       map[string]*list.Element
-	lru         *list.List
-	modelSticky map[string]string
+// stickySet is a bounded, TTL-evicted string -> KeyTag map with LRU eviction.
+// Session bindings and prefix bindings keep separate instances so that a burst of
+// new conversations cannot evict the conversations already being served.
+type stickySet struct {
+	mu         sync.Mutex
+	ttl        time.Duration
+	maxEntries int
+	now        func() time.Time
+	items      map[string]*list.Element
+	lru        *list.List
 }
 
-// NewSessionStickyCache creates a bounded, TTL-aware sticky session cache.
-func NewSessionStickyCache(ttl time.Duration, maxEntries int) *SessionStickyCache {
+func newStickySet(ttl time.Duration, maxEntries int, now func() time.Time) *stickySet {
 	if ttl <= 0 {
 		ttl = defaultSessionStickyTTL
 	}
 	if maxEntries <= 0 {
 		maxEntries = defaultSessionStickyMaxSize
 	}
-	return &SessionStickyCache{
-		ttl:         ttl,
-		maxEntries:  maxEntries,
-		nowFunc:     time.Now,
-		items:       make(map[string]*list.Element),
-		lru:         list.New(),
-		modelSticky: make(map[string]string),
+	return &stickySet{
+		ttl:        ttl,
+		maxEntries: maxEntries,
+		now:        now,
+		items:      make(map[string]*list.Element),
+		lru:        list.New(),
 	}
 }
 
-func makeStickyCompositeKey(model, sessionKey string) string {
-	return model + "\x00" + sessionKey
-}
-
-// Get returns the active sticky KeyTag for (model, sessionKey) if present and unexpired.
-func (c *SessionStickyCache) Get(model, sessionKey string) (string, bool) {
-	if c == nil || sessionKey == "" || model == "" {
-		return "", false
-	}
-	k := makeStickyCompositeKey(model, sessionKey)
+func (c *stickySet) get(k string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -83,7 +84,7 @@ func (c *SessionStickyCache) Get(model, sessionKey string) (string, bool) {
 		return "", false
 	}
 	ent := elem.Value.(*stickyEntry)
-	if c.ttl > 0 && c.nowFunc().Sub(ent.lastUsed) > c.ttl {
+	if c.ttl > 0 && c.now().Sub(ent.lastUsed) > c.ttl {
 		c.lru.Remove(elem)
 		delete(c.items, k)
 		return "", false
@@ -92,13 +93,8 @@ func (c *SessionStickyCache) Get(model, sessionKey string) (string, bool) {
 	return ent.keyTag, true
 }
 
-// Set binds (model, sessionKey) to keyTag and refreshes its sliding expiration timestamp.
-func (c *SessionStickyCache) Set(model, sessionKey, keyTag string) {
-	if c == nil || sessionKey == "" || model == "" || keyTag == "" {
-		return
-	}
-	k := makeStickyCompositeKey(model, sessionKey)
-	now := c.nowFunc()
+func (c *stickySet) set(k, keyTag string) {
+	now := c.now()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -121,15 +117,18 @@ func (c *SessionStickyCache) Set(model, sessionKey, keyTag string) {
 		delete(c.items, evicted.compositeKey)
 	}
 
-	ent := &stickyEntry{
-		compositeKey: k,
-		keyTag:       keyTag,
-		lastUsed:     now,
-	}
+	ent := &stickyEntry{compositeKey: k, keyTag: keyTag, lastUsed: now}
 	c.items[k] = c.lru.PushFront(ent)
 }
 
-func (c *SessionStickyCache) pruneExpiredLocked(now time.Time) {
+func (c *stickySet) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pruneExpiredLocked(c.now())
+	return len(c.items)
+}
+
+func (c *stickySet) pruneExpiredLocked(now time.Time) {
 	if c.ttl <= 0 {
 		return
 	}
@@ -143,6 +142,120 @@ func (c *SessionStickyCache) pruneExpiredLocked(now time.Time) {
 		delete(c.items, ent.compositeKey)
 		back = prev
 	}
+}
+
+// SessionStickyCache maintains thread-safe per-session sticky key bindings
+// (with sliding TTL and bounded LRU eviction), the key already serving each
+// cacheable prompt prefix, plus a model-level fallback key for requests that
+// carry no session identity.
+type SessionStickyCache struct {
+	// nowFunc is read on every operation so a test can move the clock after
+	// construction.
+	nowFunc     func() time.Time
+	sessions    *stickySet
+	prefixes    *stickySet
+	mu          sync.Mutex
+	modelSticky map[string]string
+}
+
+// NewSessionStickyCache creates a bounded, TTL-aware sticky session cache.
+func NewSessionStickyCache(ttl time.Duration, maxEntries int) *SessionStickyCache {
+	c := &SessionStickyCache{
+		nowFunc:     time.Now,
+		modelSticky: make(map[string]string),
+	}
+	now := func() time.Time { return c.nowFunc() }
+	c.sessions = newStickySet(ttl, maxEntries, now)
+	c.prefixes = newStickySet(ttl, maxEntries, now)
+	return c
+}
+
+func makeStickyCompositeKey(model, sessionKey, agentID string) string {
+	k := model + "\x00" + sessionKey
+	if agentID != "" {
+		k += agentKeySeparator + agentID
+	}
+	return k
+}
+
+// SessionIdentity is a request's conversation identity: the session key every
+// turn of the conversation shares, the subagent id when the request comes from
+// one, and the fingerprint of the prompt prefix any conversation on the same
+// project can reuse from cache.
+type SessionIdentity struct {
+	Key       string
+	AgentID   string
+	PrefixKey string
+}
+
+// ExtractAgentID returns the subagent id a request names, or "" for a lead
+// conversation. Only explicit headers are trusted.
+func ExtractAgentID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	for _, h := range agentHeaders {
+		if v := strings.TrimSpace(r.Header.Get(h)); v != "" && len(v) <= 256 {
+			return v
+		}
+	}
+	return ""
+}
+
+// Get returns the active sticky KeyTag for (model, sessionKey, agentID) if
+// present and unexpired. A lead conversation uses agentID "".
+func (c *SessionStickyCache) Get(model, sessionKey, agentID string) (string, bool) {
+	if c == nil || sessionKey == "" || model == "" {
+		return "", false
+	}
+	return c.sessions.get(makeStickyCompositeKey(model, sessionKey, agentID))
+}
+
+// GetWithLead returns the binding for the request's own identity, and for a
+// subagent that has none, its lead conversation's: a subagent shares the lead's
+// prefix, so starting where the lead already warms the cache costs nothing and
+// saves the first cache write. Callers must write back only the subagent slot
+// (Set with its own agentID), never the lead's.
+func (c *SessionStickyCache) GetWithLead(model, sessionKey, agentID string) (string, bool) {
+	if tag, ok := c.Get(model, sessionKey, agentID); ok {
+		return tag, true
+	}
+	if agentID == "" {
+		return "", false
+	}
+	return c.Get(model, sessionKey, "")
+}
+
+// Set binds (model, sessionKey, agentID) to keyTag and refreshes its sliding
+// expiration timestamp.
+func (c *SessionStickyCache) Set(model, sessionKey, agentID, keyTag string) {
+	if c == nil || sessionKey == "" || model == "" || keyTag == "" {
+		return
+	}
+	c.sessions.set(makeStickyCompositeKey(model, sessionKey, agentID), keyTag)
+}
+
+func makePrefixKey(model, prefixKey string) string {
+	return model + "\x00" + prefixKey
+}
+
+// GetPrefix returns the KeyTag already serving conversations that share the given
+// cacheable prompt prefix, or "" when none is known.
+func (c *SessionStickyCache) GetPrefix(model, prefixKey string) string {
+	if c == nil || model == "" || prefixKey == "" {
+		return ""
+	}
+	tag, _ := c.prefixes.get(makePrefixKey(model, prefixKey))
+	return tag
+}
+
+// SetPrefix records the key a conversation with this cacheable prefix was served
+// by, so the next conversation sharing the prefix starts where the cache is warm.
+func (c *SessionStickyCache) SetPrefix(model, prefixKey, keyTag string) {
+	if c == nil || model == "" || prefixKey == "" || keyTag == "" {
+		return
+	}
+	c.prefixes.set(makePrefixKey(model, prefixKey), keyTag)
 }
 
 // GetModelFallback returns the last successful KeyTag recorded for a model without session identity.
@@ -170,10 +283,67 @@ func (c *SessionStickyCache) Len() int {
 	if c == nil {
 		return 0
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pruneExpiredLocked(c.nowFunc())
-	return len(c.items)
+	return c.sessions.len()
+}
+
+// ExtractSessionIdentity derives a request's full sticky identity: the session
+// key shared by every turn of the conversation, the subagent id when the request
+// is one of a conversation's subagents, and the fingerprint of the prompt prefix
+// other conversations on the same project can reuse from cache.
+func ExtractSessionIdentity(r *http.Request, reqBody []byte) SessionIdentity {
+	return SessionIdentity{
+		Key:       ExtractSessionKey(r, reqBody),
+		AgentID:   ExtractAgentID(r),
+		PrefixKey: ExtractCachePrefix(reqBody),
+	}
+}
+
+// ExtractCachePrefix fingerprints the part of a request an upstream can serve to
+// any conversation from cache: the system/instructions block and the tool
+// catalog. Agents working on one project share those and differ only in their
+// task, so binding them to one key lets the second agent read the first agent's
+// cached tokens instead of paying for the same prefix twice.
+//
+// Returns "" when the request carries no reusable prefix.
+func ExtractCachePrefix(reqBody []byte) string {
+	if len(reqBody) == 0 {
+		return ""
+	}
+	fields := scanTopLevelJSONFields(reqBody)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	h := sha256.New()
+	hasSignal := false
+	for _, key := range []string{"instructions", "system", "tools"} {
+		if raw := fields[key]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+			writeHashedSection(h, key, raw)
+			hasSignal = true
+		}
+	}
+
+	// OpenAI-style requests put the system prompt in the message list. Only a
+	// leading system/developer turn is shared by every conversation; a leading
+	// user turn is the task itself and must not join the shared prefix.
+	if !hasSignal {
+		if msgsRaw := fields["messages"]; len(msgsRaw) > 0 && msgsRaw[0] == '[' {
+			items := extractFirstArrayItems(msgsRaw, 2)
+			if len(items) > 0 && isSystemOrDevMessage(items[0]) {
+				writeHashedSection(h, "m0", items[0])
+				hasSignal = true
+				if len(items) > 1 && isSystemOrDevMessage(items[1]) {
+					writeHashedSection(h, "m1", items[1])
+				}
+			}
+		}
+	}
+
+	if !hasSignal {
+		return ""
+	}
+	sum := h.Sum(nil)
+	return "cpy:" + hex.EncodeToString(sum[:12])
 }
 
 // ExtractSessionKey derives a stable conversation/session key for sticky routing:

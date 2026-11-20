@@ -56,9 +56,65 @@ func (lt *LaneTracker) StartWaiting(who string) func() {
 	}
 }
 
-// Acquire increments busy count and sets lane limit. Returns a release func.
-func (lt *LaneTracker) Acquire(who string, limit int) func() {
+// LaneChoice is one key a new request may be placed on: its lane tag and the
+// soft concurrency cap it must stay under (0 = unlimited).
+type LaneChoice struct {
+	Tag string
+	Cap int
+}
+
+// TryAcquire picks and occupies a lane in one step, so two simultaneous arrivals
+// cannot both see room under the last free slot. It walks choices in preference
+// order and takes the first lane still under its cap; when every lane is full it
+// takes the least busy one, so a burst beyond total capacity spreads evenly
+// instead of stacking up on a single key.
+//
+// The taken slot is an ordinary busy slot: the caller passes the returned release
+// func to the request. One lane count is therefore the only accounting, for both
+// admitted and reserved traffic, and nothing can be counted twice.
+func (lt *LaneTracker) TryAcquire(choices []LaneChoice) (string, func(), bool) {
+	if lt == nil || len(choices) == 0 {
+		return "", nil, false
+	}
 	lt.mu.Lock()
+	defer lt.mu.Unlock()
+
+	bestTag, bestLoad := "", -1
+	for _, ch := range choices {
+		if ch.Tag == "" {
+			continue
+		}
+		n := 0
+		if st := lt.lanes[ch.Tag]; st != nil {
+			// Only held slots count. `waiting` covers a request still preparing its
+			// call, and a request that already holds a slot also sits in `waiting`
+			// while it prepares — counting both would halve every cap.
+			n = st.busy
+		}
+		if ch.Cap <= 0 || n < ch.Cap {
+			return ch.Tag, lt.acquireLocked(ch.Tag, ch.Cap), true
+		}
+		if bestLoad < 0 || n < bestLoad {
+			bestTag, bestLoad = ch.Tag, n
+		}
+	}
+	if bestTag == "" {
+		return "", nil, false
+	}
+	return bestTag, lt.acquireLocked(bestTag, capFor(choices, bestTag)), true
+}
+
+func capFor(choices []LaneChoice, tag string) int {
+	for _, ch := range choices {
+		if ch.Tag == tag {
+			return ch.Cap
+		}
+	}
+	return 0
+}
+
+// acquireLocked increments busy for who, recording limit when it is set.
+func (lt *LaneTracker) acquireLocked(who string, limit int) func() {
 	st, ok := lt.lanes[who]
 	if !ok {
 		st = &laneState{}
@@ -68,7 +124,6 @@ func (lt *LaneTracker) Acquire(who string, limit int) func() {
 	if limit > 0 {
 		st.limit = limit
 	}
-	lt.mu.Unlock()
 
 	var once sync.Once
 	return func() {
@@ -84,10 +139,29 @@ func (lt *LaneTracker) Acquire(who string, limit int) func() {
 	}
 }
 
+// Acquire increments busy count and sets lane limit. Returns a release func.
+func (lt *LaneTracker) Acquire(who string, limit int) func() {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	return lt.acquireLocked(who, limit)
+}
+
 func (lt *LaneTracker) cleanupLocked(who string, st *laneState) {
 	if st.busy <= 0 && st.waiting <= 0 {
 		delete(lt.lanes, who)
 	}
+}
+
+// BusyCount returns the number of slots a lane has handed out: requests admitted
+// to it, whether they are being prepared or already on the wire. This is the
+// count caps are enforced against.
+func (lt *LaneTracker) BusyCount(who string) int {
+	lt.mu.RLock()
+	defer lt.mu.RUnlock()
+	if st, ok := lt.lanes[who]; ok && st != nil {
+		return st.busy
+	}
+	return 0
 }
 
 // ActiveCount returns busy + waiting request count for a lane.
