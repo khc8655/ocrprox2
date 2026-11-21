@@ -25,6 +25,12 @@ const (
 	defaultMaxConcWait = 300 * time.Second
 )
 
+// laneQueueWait bounds how long a request waits for a lane at its
+// max_concurrency to free a slot before giving up on the whole route. A variable
+// so tests can shrink it; zero or negative means wait until the request budget
+// runs out.
+var laneQueueWait = defaultMaxConcWait
+
 // LatencyTracker records smoothed EWMA latencies (ms) per candidate KeyTag
 // to power Magpie-style "fast" adaptive routing under high concurrency.
 type LatencyTracker struct {
@@ -350,15 +356,21 @@ func applyRouteNormalization(body []byte, noReasoning, forceNonStream bool) ([]b
 // endpoints (/v1/ocr, /v1/embeddings, /v1/rerank) so they share Scheduler's
 // routing strategies, cooldowns, RPM/concurrency tracking, OAuth, and observability.
 type EndpointRequestSpec struct {
-	Endpoint         string
-	Category         string // "ocr" | "embedding" | "reranker" | "chat"
-	ReqModel         string
-	TraceMode        string // "kb" | "agent"
-	RawBody          []byte
-	ForceStrategy    string // optional fallback strategy if route does not specify one (e.g. "round_robin")
-	TimeoutSec       int    // optional per-request timeout (defaults to settings or 60s)
-	BuildRequest     func(cand *CandidateKey) (targetURL string, body []byte, extraHeaders map[string]string, err error)
-	TransformBody    func(cand *CandidateKey, respBody []byte) []byte
+	Endpoint      string
+	Category      string // "ocr" | "embedding" | "reranker" | "chat"
+	ReqModel      string
+	TraceMode     string // "kb" | "agent"
+	RawBody       []byte
+	ForceStrategy string // optional fallback strategy if route does not specify one (e.g. "round_robin")
+	TimeoutSec    int    // optional per-request timeout (defaults to settings or 60s)
+	// QueueWait bounds how long this request waits for a lane at its max_concurrency
+	// when every candidate is full; zero uses laneQueueWait.
+	QueueWait time.Duration
+	// BuildRequest turns the route-normalized body into the upstream call. The body
+	// argument is RawBody after applyRouteNormalization, not the caller's slice, so a
+	// builder cannot silently resurrect the thinking controls the route asked to drop.
+	BuildRequest  func(cand *CandidateKey, body []byte) (targetURL string, reqBody []byte, extraHeaders map[string]string, err error)
+	TransformBody func(cand *CandidateKey, respBody []byte) []byte
 }
 
 // ExecuteEndpoint executes an EndpointRequestSpec through the unified Scheduler:
@@ -405,6 +417,12 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 		})
 		return ErrNoCandidateAvailable
 	}
+
+	// A route's no_reasoning / force_non_stream applies to this path too. It used to
+	// be honoured only by Dispatch, so an ingestion route configured to drop thinking
+	// controls still sent them — the OCR vision branch rebuilds its own body, and the
+	// builder here now receives this normalized one.
+	normBody, _ := applyRouteNormalization(spec.RawBody, route.NoReasoning, route.ForceNonStream)
 
 	fallbackStrat := spec.ForceStrategy
 	if fallbackStrat == "" {
@@ -457,6 +475,46 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 		}
 	)
 
+	// One admission decision up front: take the first lane still under its
+	// max_concurrency, and when there is none, wait for the preferred lane instead of
+	// piling onto a full one. An uncapped lane is always claimable, so a nil claim
+	// here means every candidate is capped and full.
+	//
+	// The claimed slot is used by whichever attempt reaches that lane and released
+	// when that attempt finishes; lanes reached in a different order are claimed on
+	// arrival. Every release is once-guarded, so the outer release below is harmless.
+	laneChoices := make([]LaneChoice, 0, len(candidates))
+	for _, c := range candidates {
+		// A key in cooldown will be skipped by the walk below, so claiming a slot on
+		// it would only take capacity away from the keys that can serve the request.
+		cid := c.KeyEntry.ID
+		if cid == "" {
+			cid = c.KeyEntry.Label
+		}
+		if s.cooldowns.IsCooledDown(c.Provider.ID, c.TargetModel, cid) {
+			continue
+		}
+		laneChoices = append(laneChoices, LaneChoice{Tag: c.KeyTag, Cap: c.MaxConc})
+	}
+	claimTag, claimRel, _ := s.lanes.TryAcquireFirst(laneChoices)
+	if claimRel == nil && len(laneChoices) > 0 {
+		wait := spec.QueueWait
+		if wait <= 0 {
+			wait = laneQueueWait
+		}
+		// Queue on the preferred key, but take any candidate that frees up first:
+		// otherwise a sibling slot stays idle for as long as the preferred key's
+		// turn runs, which under a closed batch is the whole request's latency.
+		if tag, rel, ok := s.lanes.WaitAcquireChoices(budgetCtx, laneChoices, wait); ok {
+			claimTag, claimRel = tag, rel
+		} else {
+			skips = append(skips, fmt.Sprintf("%s (max concurrency, queue wait exhausted)", laneChoices[0].Tag))
+		}
+	}
+	if claimRel != nil {
+		defer claimRel()
+	}
+
 	for _, cand := range candidates {
 		if budgetCtx.Err() != nil {
 			break
@@ -472,11 +530,29 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			continue
 		}
 
+		// Lane admission before the RPM token: a lane at its cap cannot take this
+		// request, and spending a token on it would waste quota on an attempt that is
+		// never made. The claim from above is used where it applies; any other lane is
+		// claimed on arrival and passed over when full, so the walk moves to a sibling
+		// key with room.
+		var releaseBusy func()
+		if claimTag == cand.KeyTag && claimRel != nil {
+			releaseBusy = claimRel
+		} else {
+			rel, ok := s.lanes.TryAcquireOne(cand.KeyTag, cand.MaxConc)
+			if !ok {
+				skips = append(skips, fmt.Sprintf("%s (max concurrency)", keyID))
+				continue
+			}
+			releaseBusy = rel
+		}
+
 		rpmLimit := cand.KeyEntry.MaxRPM
 		if rpmLimit <= 0 && cand.Provider != nil {
 			rpmLimit = cand.Provider.RPMPerKey
 		}
 		if rpmLimit > 0 && !s.rpmLimiter.TryAcquire(cand.KeyTag, rpmLimit) {
+			releaseBusy()
 			skips = append(skips, fmt.Sprintf("%s (RPM limit)", keyID))
 			continue
 		}
@@ -486,6 +562,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			abortLoop bool
 		)
 		func() {
+			defer releaseBusy()
 			queuedStart := time.Now()
 			cancelWait := s.lanes.StartWaiting(cand.KeyTag)
 			defer cancelWait()
@@ -520,9 +597,9 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 				buildErr     error
 			)
 			if spec.BuildRequest != nil {
-				targetURL, reqBytes, extraHeaders, buildErr = spec.BuildRequest(cand)
+				targetURL, reqBytes, extraHeaders, buildErr = spec.BuildRequest(cand, normBody)
 			} else {
-				reqBytes, extraHeaders, _, buildErr = s.engine.PrepareRequest(spec.Endpoint, spec.RawBody, cand.Provider, cand.TargetModel, false)
+				reqBytes, extraHeaders, _, buildErr = s.engine.PrepareRequest(spec.Endpoint, normBody, cand.Provider, cand.TargetModel, false)
 				targetURL = upstream.JoinUpstream(cand.Provider.BaseURL, strings.TrimPrefix(spec.Endpoint, "/v1/"))
 			}
 			if buildErr != nil {
@@ -538,10 +615,6 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 
 			queuedMillis := time.Since(queuedStart).Milliseconds()
 			cancelWait()
-			releaseBusy := s.lanes.Acquire(cand.KeyTag, cand.MaxConc)
-			var relOnce sync.Once
-			rel := func() { relOnce.Do(releaseBusy) }
-			defer rel()
 
 			sendStart := time.Now()
 			resp, callErr := client.Do(upReq)
@@ -576,7 +649,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			if resp.StatusCode != http.StatusOK {
 				errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 				_ = resp.Body.Close()
-				rel()
+				releaseBusy()
 				lastErrSnippet = string(errBytes)
 
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
@@ -623,11 +696,52 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 			_ = resp.Body.Close()
-			rel()
+			releaseBusy()
 			if readErr != nil {
 				lastStatus = http.StatusBadGateway
 				lastErrSnippet = readErr.Error()
 				trailParts = append(trailParts, fmt.Sprintf("%s=read_err", cand.KeyTag))
+				return
+			}
+
+			// A 200 can still be an error: a relay that reports failure in the body
+			// after its headers are out. Counted as success it would hand the caller an
+			// error object — for ingestion that means storing a failure as the answer.
+			// It fails as the status the body names, so the walk moves on.
+			if errStatus, errSnippet, isErr := errInSuccessBody(respBody); isErr {
+				lastStatus = errStatus
+				lastErrSnippet = errSnippet
+				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, errStatus, durRateLimit, durServerError, durNetwork, durAuth)
+				currAttempt := TryAttempt{
+					Provider:     cand.Provider.ID,
+					KeyID:        keyID,
+					Model:        cand.TargetModel,
+					Status:       errStatus,
+					ErrorSnippet: errSnippet,
+				}
+				tries = append(tries, types.Try{
+					Attempt:            len(tries) + 1,
+					Provider:           cand.Provider.ID,
+					KeyID:              cand.KeyEntry.Label,
+					Model:              cand.TargetModel,
+					Status:             errStatus,
+					Millis:             tryElapsed,
+					Reason:             classifyFailureReason(errStatus),
+					CooldownAppliedSec: cooldownSec,
+					ErrorSnippet:       obs.ScrubString(errSnippet),
+					RespHeaders:        tryRespHeaders,
+				})
+				trailParts = append(trailParts, fmt.Sprintf("%s=%d", cand.KeyTag, errStatus))
+				if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) {
+					passthrough4xx = &struct {
+						status  int
+						body    []byte
+						headers http.Header
+					}{status: errStatus, body: respBody, headers: resp.Header}
+					abortLoop = true
+					return
+				}
+				attempts = append(attempts, currAttempt)
 				return
 			}
 

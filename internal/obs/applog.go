@@ -1,4 +1,7 @@
 // Package obs provides observability: log scrubbing with 5MB rotation, request tracing, and usage accounting.
+//
+// applog.go adapts magpie's internal/applog (scrub rules and rotation kept, GUI lifecycle dropped):
+// see docs/MAGPIE_UPSTREAM_SYNC.md §3.3.
 package obs
 
 import (

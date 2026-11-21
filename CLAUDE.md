@@ -21,27 +21,36 @@
 ## 2. “只取冻结级基石，拒引高频变动泥球”：Magpie 源码复用强制准则
 
 本项目是 **1 代 (`ocrprox`) 已验证的稳定业务模型（80%）** 与 **`yetone/magpie` 底层冻结级标准库微模块（20%）** 的结合体。
-实测 `magpie` 在 7 天内提交了 1,000 次（734 个版本），其变更高度集中在 `gui`、`provider` 以及 `gateway/{gateway,fallback,routing}.go` 等逆向订阅与硬编码特例大泥球中；而其底层标准库微模块在 734 个版本中几乎 **0 修改**（详见 [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md)）。因此必须严格执行以下红白名单：
+实测 `magpie` 在最近 7 天提交了 721 次（共 4,618 个 tag），其变更高度集中在 `gateway/gateway.go`（7 天 59 次）以及 `routing.go`/`fallback.go` 等逆向订阅与硬编码特例大泥球中；而其底层标准库微模块同期 **0 修改**（`lastgood` 已 37 天未动）。**现状台账与升级流程见 [`docs/MAGPIE_UPSTREAM_SYNC.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_UPSTREAM_SYNC.md)，机器可读基线见 [`docs/magpie-baseline.json`](file:///Users/xk/Documents/llmproxy2/docs/magpie-baseline.json)，核对命令 `node scripts/magpie-sync.mjs check`。**（[`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md) 是 2026-11-08 的决策审计，仅供背景，其中个别条目与代码不符已在该文顶部标出。）
 
-1. **🟢 白名单：直接搬运的 Magpie 冻结级标准库微模块（共约 1,880 行，734 版本 0 缺陷，0 第三方依赖）**：
-   - SSRF 防护与 DNS Pinning：`magpie/internal/netguard` (97 行，0 修改) + `magpie/internal/gateway/image_fetch_guard.go` (361 行，0 修改)。
-   - 原子文件存储与防损坏（Full 模式）：`magpie/internal/steady` (225 行)、`lastgood` (276 行，0 修改)、`filelock` (116 行，0 修改)、`filememo` (317 行，0 修改)。
-   - 标准库加解密：`magpie/internal/backup/crypto.go` 的 `PBKDF2-SHA256 + AES-256-GCM` 实现（~100 行，0 修改）。
-   - 路由只读白名单守卫与流扫描器：`magpie/internal/gateway/readonly.go` (108 行，含 `routeMux` 未登记路由单测报错机制) 与 `sse.go` (148 行)。
-   - 日志脱敏与三层可观测性：`magpie/internal/applog/applog.go` (234 行，0 修改，20 行 `scrub` 正则脱敏 + 5MB 双文件轮转)、`trace.go` (`traceKeep = 60` 多跳故障转移轨迹回放)、`usage.jsonl` 单句柄追加写账本。
-   - 局部算法借鉴：`access` 的 SHA-256 常量时间比对、`gemini_schema.go` 的 Schema 递归清洗函数、`routing.go` 的 `forbiddenAlike` 双账号同错免误封思想（约 30 行）。
-2. **🔴 黑名单：严禁搬运的 Magpie 高频变动模块（Red Zone）**：
+复用关系必须按下面四类登记，**A/B 类要出现在 `docs/magpie-baseline.json`，C 类要在代码注释里写上游文件 + 函数名**，否则视为来源不明代码：
+
+1. **🟢 A 类 · 逐字节搬运（可直接覆盖升级，10 个文件 + 3 个手工 main_test）**：
+   - 原子文件存储与防损坏（Full 模式）：`magpie/internal/steady` (225 行)、`lastgood` (276 行)、`filelock` (94+22+23 行) 及其测试 —— 目前与本仓**逐字节一致**（`lastgood.go` 仅 import 路径改写 1 行）。
+   - 注意：**不存在** `filememo`（早期文档误记，本仓从未引入）。
+2. **🟡 B 类 · 搬运后本地改造（升级需三路合并）**：
+   - `internal/obs/applog.go` ← `magpie/internal/applog`：保留 `scrub` 规则表 + 5MB 双文件轮转；去掉 `appdir`/GUI 生命周期；新增 `lite` 零落盘。
+   - `internal/netguard/netguard.go` ← `magpie/internal/netguard` + `gateway/image_fetch_guard.go`：保留地址段判定；新增 DNS Pinning + Happy Eyeballs；去掉供应商 client / Loon 配对逻辑。
+   - `internal/router/readonly.go` ← `magpie/internal/gateway/readonly.go`：保留 `routeMux` 未登记路由即报错 + 只读守卫；白名单以本仓为准。
+3. **🟠 C 类 · 语义同源（独立实现，禁止整文件拷贝，只读上游提交后改我们自己的实现）**：
+   - `scheduler/lanes.go` ← `gateway/concurrency.go`（lane 结构 + 「满则排队、排队不算失败」+ `laneMate`/`waitMate` 等价物：排队中被唤醒即重走候选表、取第一个有余量的 key）
+   - `scheduler/rpm.go` ← `gateway/rpm.go`；`scheduler/errorbody.go` ← `routing.go` `carriedStatus` + `fallback.go` `namedStatus`；`scheduler/cooldown.go` ← `forbiddenAlike`；`scheduler/peek.go` ← `gateway/sse.go`
+   - `obs/trace.go` ← `gateway/trace.go`（仅 60 条环形回放思想）；`obs/usage.go` ← `internal/usage`（jsonl 账本思想）
+   - `crypto` ← `internal/backup` 的信封**算法**（格式串不同、互不兼容，无跟随义务）
+   - 标准库加解密：`magpie/internal/backup` 的 `PBKDF2-SHA256 + AES-256-GCM` 实现（本仓 `internal/crypto`，另有 50 行 1 代 Fernet 兼容解密）。
+   - 局部算法借鉴：`routing.go` 的 `forbiddenAlike` 双账号同错免误封思想（约 30 行）、`gemini_schema.go` 的 Schema 递归清洗函数。
+4. **🔴 D 类 · 严禁搬运的 Magpie 高频变动模块（Red Zone）**：
    - **严禁搬运** `magpie/internal/gateway/{gateway,fallback,routing,ir,chat,anthropic,claude_subscription}.go`（1.7 万行巨型文件，7 天改动 160+ 次，充斥硬编码逆向补丁）；
    - **严禁搬运** `magpie/internal/netproxy`（其自定义 10s HTTP/2 Ping 刚引发慢思考模型 `GOAWAY too_many_pings` 断流 Bug；NAT VM 出站 IPv6 黑洞回退直接使用 Go 标准库原生 `net.Dialer{FallbackDelay: 300ms}` RFC 6555 Happy Eyeballs）；
    - **严禁通过 `go.mod` 动态依赖上游 `magpie` 仓库**：白名单微模块一次性静态考入本仓 `internal/`，由本仓测试锁定，彻底隔绝上游日更百次的波动。
-3. **1 代 (`ocrprox`) 核心业务的 1:1 干净 Go 转译**：
+5. **1 代 (`ocrprox`) 核心业务的 1:1 干净 Go 转译**：
    - `adapters`（1:1 转译 1 代 `proxy_routes.py` 声明式 `adapter_rules` + `gemini_compat.py` 374 行，**完整支持 Google/Vertex/Anthropic/AMD，严禁搞 `unsupported[]` 阉割**）；
    - `scheduler`（1:1 转译 1 代 `scheduler.py` 300s 预算、Sticky/RR/Manual、三级冷却、流式首包 `_peek_until_payload` + 45s 预提交保活）；
    - `hubsync`（EdgeOne `lazy-once + lease` 零轮询按需拉取 + ETag/304 续租 + 401 `PurgeMemory` 内存销毁）；
    - `kb`（预读入场信号量 `ocr_max_inflight` + 20MB 零拷贝分片流式 OCR + `/v1/embeddings` + `/v1/rerank`）；
    - `modesched`（`agent` ↔ `kb` 时段边沿切换 + 活跃请求优雅排空 + HMAC Webhook）；
    - `oauth`（MiniMax Code Plan RFC 8628 OAuth Device Flow + PKCE + 6h 保活 + 401 强制刷新重试）。
-4. **开源许可合规**：凡复用 `yetone/magpie` 白名单微模块源码，必须在仓库根目录 `THIRD_PARTY_NOTICES` 及二进制 `//go:embed` 中保留 MIT License 声明（见 [`docs/EXTERNAL_REFERENCES.md`](file:///Users/xk/Documents/llmproxy2/docs/EXTERNAL_REFERENCES.md)）。
+6. **开源许可合规**：凡复用 `yetone/magpie` A/B 类源码，必须在仓库根目录 `THIRD_PARTY_NOTICES` 及二进制 `//go:embed` 中保留 MIT License 声明（见 [`docs/EXTERNAL_REFERENCES.md`](file:///Users/xk/Documents/llmproxy2/docs/EXTERNAL_REFERENCES.md)）。升级前先跑 `node scripts/magpie-sync.mjs check`，流程见 `docs/MAGPIE_UPSTREAM_SYNC.md` §4。
 
 ---
 

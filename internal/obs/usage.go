@@ -1,5 +1,8 @@
 package obs
 
+// The usage.jsonl ledger follows the shape of magpie's internal/usage; implemented here
+// independently: see docs/MAGPIE_UPSTREAM_SYNC.md §3.4.
+
 import (
 	"bufio"
 	"encoding/json"

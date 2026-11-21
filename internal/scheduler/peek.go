@@ -1,5 +1,8 @@
 package scheduler
 
+// Behaviour follows magpie internal/gateway/sse.go (first-payload peek, bare JSON error in a
+// 200 stream, keepalive); this is an independent implementation: see docs/MAGPIE_UPSTREAM_SYNC.md §3.4.
+
 import (
 	"bufio"
 	"bytes"

@@ -1,5 +1,7 @@
 // Package scheduler provides routing strategies, multi-level cooldowns,
 // the Magpie forbiddenAlike algorithm, persistent long bans, and streaming first-byte peeking.
+// Upstream anchors: magpie internal/gateway/routing.go `forbiddenAlike`. Everything here is our
+// own implementation; the full table is docs/MAGPIE_UPSTREAM_SYNC.md §3.4.
 package scheduler
 
 import (

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
@@ -36,6 +37,11 @@ var (
 	ErrBodyTooLarge     = errors.New("kb: request body exceeds 20MB limit")
 	ErrNoCandidate      = errors.New("kb: no enabled candidate found for kb category")
 )
+
+// ocrQueueWait bounds how long an OCR request waits for an inflight slot before it
+// is answered with 429. A variable so tests can shrink it; zero means wait until
+// the client goes away.
+var ocrQueueWait = 90 * time.Second
 
 type dynamicLimiter struct {
 	mu       sync.Mutex
@@ -521,7 +527,7 @@ func extractAssistantText(respData map[string]any) string {
 	return ""
 }
 
-// HandleOCR handles /v1/ocr with pre-read semaphore guard to prevent 20MB OOM
+// HandleOCR handles /v1/ocr with a pre-read concurrency guard to prevent 20MB OOM
 // and delegates candidate scheduling, cooldowns, RPM, and tracing to Scheduler.
 func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 	if p.configSrc != nil {
@@ -530,9 +536,19 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pre-read semaphore acquisition: REJECT WITH 429 BEFORE READING BODY!
-	releaseOCR, acquiredOCR := p.ocrLimiter.tryAcquire()
+	// Slot taken before the body is read, because parsing and decoding a 20 MB image
+	// is the expensive part. A full limiter used to answer 429 straight away, so a
+	// normal ingestion burst — 5 documents against a budget of 4 — dropped one
+	// request that would have started a moment later. Waiting is not failing: it
+	// queues for up to ocrQueueWait and only then answers 429 with Retry-After, as
+	// Magpie's lane queue does.
+	queueCtx, cancelQueue := context.WithTimeout(r.Context(), ocrQueueWait)
+	releaseOCR, acquiredOCR := p.ocrLimiter.acquireContext(queueCtx)
+	cancelQueue()
 	if !acquiredOCR {
+		if r.Context().Err() != nil {
+			return // the client is gone; nobody is left to read a 429
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -589,17 +605,18 @@ func (p *Pipeline) HandleOCR(w http.ResponseWriter, r *http.Request) {
 		RawBody:       bodyBytes,
 		ForceStrategy: "round_robin",
 		TimeoutSec:    60,
-		BuildRequest: func(cand *scheduler.CandidateKey) (string, []byte, map[string]string, error) {
+		QueueWait:     ocrQueueWait,
+		BuildRequest: func(cand *scheduler.CandidateKey, routeBody []byte) (string, []byte, map[string]string, error) {
 			if isNativeOCR(cand.TargetModel, cand.Provider, parsed.Model) {
 				targetModel := cand.TargetModel
 				if targetModel == "" {
 					targetModel = "ocr"
 				}
 				targetURL := upstream.JoinUpstream(cand.Provider.BaseURL, "ocr")
-				reqPayloadBytes := bodyBytes
+				reqPayloadBytes := routeBody
 				if cand.TargetModel != "" && cand.TargetModel != "ocr" {
 					var parsedBody map[string]any
-					if json.Unmarshal(bodyBytes, &parsedBody) == nil {
+					if json.Unmarshal(routeBody, &parsedBody) == nil {
 						parsedBody["model"] = cand.TargetModel
 						if mutated, mErr := json.Marshal(parsedBody); mErr == nil {
 							reqPayloadBytes = mutated
@@ -763,14 +780,15 @@ func (p *Pipeline) dispatchKBRequest(category, endpoint string, w http.ResponseW
 		RawBody:       bodyBytes,
 		ForceStrategy: "round_robin",
 		TimeoutSec:    timeoutSec,
-		BuildRequest: func(cand *scheduler.CandidateKey) (string, []byte, map[string]string, error) {
-			reqBytes := bodyBytes
+		QueueWait:     time.Duration(timeoutSec) * time.Second,
+		BuildRequest: func(cand *scheduler.CandidateKey, routeBody []byte) (string, []byte, map[string]string, error) {
+			reqBytes := routeBody
 			targetModel := cand.TargetModel
 			if targetModel == "" {
 				targetModel = reqModel
 			}
 			var parsed map[string]any
-			if json.Unmarshal(bodyBytes, &parsed) == nil {
+			if json.Unmarshal(routeBody, &parsed) == nil {
 				mutatedFlag := false
 				if cand.TargetModel != "" && cand.TargetModel != category && parsed["model"] != cand.TargetModel {
 					parsed["model"] = cand.TargetModel

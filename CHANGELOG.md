@@ -4,6 +4,26 @@
 
 ---
 
+## [v20261121-01] - 2026-11-21
+
+### Added
+- **排队请求的跨 Key 迁移（magpie `laneMate`/`waitMate` 的等价物）**：此前一个请求只有在**所有**候选都满时才排队，且只盯自己首选的那把 Key——兄弟 Key 先空出来也视而不见，闭集批量下空槽白白晾着，直到首选 Key 的回合走完。新增 `LaneTracker.WaitAcquireChoices(ctx, choices, maxWait)`：park 在首选 Key，每次被 `freed` 唤醒都重走整张候选表，取第一个有余量的 Key；`WaitAcquire` 保留为单候选包装，旧调用语义不变。同一闭集用例（30 请求 / 10 槽位，1 把慢 Key 120ms、4 把 15ms）：**1.815s → 120ms**（约 15×）；端到端排队请求在兄弟 Key 释放后 **0.3ms** 到达上游（改前 500ms 内都没到达）。`busy` 仍是唯一准入计数，`waiting` 仍只做观测。
+- **Magpie 上游同步基线**：新增 [`docs/MAGPIE_UPSTREAM_SYNC.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_UPSTREAM_SYNC.md)（A 逐字节 / B 改造 / C 语义同源 / D 不搬 四类关系、逐文件台账、升级流程）、[`docs/magpie-baseline.json`](file:///Users/xk/Documents/llmproxy2/docs/magpie-baseline.json)（10 个逐字节文件的 sha256）与 `scripts/magpie-sync.mjs`（`check`/`apply`/`rebaseline`，`npm run magpie:check`）。同步校正复用矩阵中 8 处与代码不符的描述（`filememo`/`access`/`sse.go` 实际不存在等）。
+
+### Fixed
+- **KB 入库 OCR 预读并发**：并发占满时此前立刻回 429（5 个文档 / 4 个槽位必然丢一个），现在排队等待（默认 90s，超时才 429 + `Retry-After`）；客户端断开即退出，不写无意义的 429。
+- **端点路径绕过请求归一化**：`ExecuteEndpoint` 现在与 `Dispatch` 一样执行 `applyRouteNormalization`（`thinking` / `reasoning_effort` 剥离、`no_reasoning`），KB 等端点请求不再把思考参数透传给上游。
+- **HTTP 200 裹着错误体被当成成功**：非流式与流式两条路径都识别 200 响应体里的错误对象（`{"error":{...}}`、顶层数字 `code`、流内错误帧），按错误状态码冷却、按 `forbiddenAlike` 判定失败转移，不再把错误对象当回答返回。
+- **`max_concurrency` 未真正限流**：达到上限的 lane 不再接收超限请求，改为跳过该候选；全部候选全满时进入短队列，超时才放弃。
+- **lane 观测计数泄漏**：等待中的请求每次被唤醒都 `waiting++` 却没有配对递减，唤醒风暴下 `waiting` 虚高（2 个等待者显示为 4）；现在唤醒即配对递减。
+
+### Verified
+- 单元/回归：新增 5 个 lane 用例（跨 Key 迁移、单道对照、`waiting` 不虚高、闭集 makespan、端点路径迁移），改前均红、改后均绿；`go build ./...`、`go test ./...`（20 包）与 `go test -race ./internal/scheduler/` 全绿。
+- 真机验收（VM-A，Debian 12 x86_64，full 角色 + 本地 mock 上游）：健康检查、管理端登录、配置读写、chat/embeddings/OCR、双 Key 并发迁移、`max_concurrency` 上限、200 错误体失败转移、连接数/内存回归全部通过；详见发版轮报告。
+- `verify:release` G1–G6 全绿。
+
+---
+
 ## [v20261120-01] - 2026-11-20
 
 ### Added

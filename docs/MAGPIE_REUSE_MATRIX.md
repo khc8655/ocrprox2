@@ -1,5 +1,20 @@
 # Magpie 源码稳定性审计与“白名单级”复用矩阵
 
+> ⚠️ **本文是 2026-11-08 的「要不要搬」决策审计，不是现状清单。**
+> 本仓实际搬运了什么、本地改了什么、上游改到哪一步、如何跟着升级，一律以
+> **[`MAGPIE_UPSTREAM_SYNC.md`](./MAGPIE_UPSTREAM_SYNC.md)** 和机器可读的
+> [`magpie-baseline.json`](./magpie-baseline.json) 为准（核对工具：`node scripts/magpie-sync.mjs check`）。
+> 本文正文保留当时的论证与数据；下表列出与代码不符之处（§7 有完整清单）。
+>
+> | 本文中的说法 | 2026-11-21 核对结果 |
+> |---|---|
+> | 搬运了 `internal/filememo/` | 本仓从未有此包 |
+> | 精简提取 `internal/access` | 本仓从未有此包 |
+> | `internal/upstream/sse.go` 来自 `gateway/sse.go` | 无此文件；SSE 语义在 `internal/scheduler/peek.go`，独立实现 |
+> | `internal/obs/usage.go` ~250 行 | 实际 1,245 行，思想借鉴、实现独立 |
+> | `internal/crypto` ~100 行 | 实际 254 行，且信封格式与上游**不兼容** |
+> | `internal/netguard` 458 行 | 实际 277 行 |
+
 > **核心结论（基于 Git 历史实证审计）**：
 > 通过对 `yetone/magpie` 最近 **1,000 次提交（仅 7 天内就发布了 `v0.1.2560` ~ `v0.1.3294` 共 734 个版本，日均 >100 次提交）** 进行文件级变更频率（Churn Rate）与缺陷分析，我们发现 `magpie` 内部呈现极端的**“两极分化”**：
 > 1. **上层业务与网关大泥球（Red Zone · 严禁搬运）**：`internal/gui`（7 天 387 次提交）、`internal/gateway/gateway.go`（单文件 10,321 行，7 天改 109 次）、`fallback.go`（4,631 行，7 天改 32 次）、`routing.go`（2,471 行，7 天改 26 次）、`provider`（7 天 252 次提交）。**原因**：它们把各家逆向订阅（Claude Code/Kiro/Antigravity/ZCode）和厂商特例全部用 `if/else` 硬编码在万行巨型文件里，天天破防、天天打补丁；甚至 `netproxy` 自定义的 10s HTTP/2 Ping 昨天刚引发 `GOAWAY too_many_pings` 断流事故（`#970a86ff`）。

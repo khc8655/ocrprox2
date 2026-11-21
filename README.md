@@ -107,7 +107,8 @@ llmproxy2/
 | **多 Agent 协同蓝图** | [`docs/MULTI_AGENT_BLUEPRINT.md`](file:///Users/xk/Documents/llmproxy2/docs/MULTI_AGENT_BLUEPRINT.md) | **多 Agent 并行必读**：`internal/types` 全局接口锁死、W0~W6 物理文件所有权矩阵（零冲突） |
 | **架构标准** | [`ARCHITECTURE_STANDARDS.md`](file:///Users/xk/Documents/llmproxy2/ARCHITECTURE_STANDARDS.md) | 七大工程铁律（SSOT、Magpie 复用、零轮询、零落盘、四权分立等） |
 | **核心系统设计** | [`docs/SYSTEM_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SYSTEM_DESIGN_SPEC.md) | 完整重构设计方案（含前任方案缺陷诊断、三端架构、状态机、数据流） |
-| **Magpie 复用矩阵** | [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md) | `yetone/magpie` 85 个包与 1 代 17 个模块的逐文件搬运/裁剪对照表 |
+| **Magpie 上游同步（必读）** | [`docs/MAGPIE_UPSTREAM_SYNC.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_UPSTREAM_SYNC.md) | **搬运了什么 / 本地改了什么 / 上游改了怎么跟**：A 逐字节（10 文件）、B 改造（3 文件）、C 语义同源（9 模块）、D 拒绝搬运；基线 `18cfe278`（v0.1.4624），核对 `node scripts/magpie-sync.mjs check` |
+| **Magpie 复用决策审计** | [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md) | 2026-11-08 的「要不要搬」论证与变更热度实测（历史背景；现状以同步手册为准） |
 | **安全与凭据规范** | [`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md) | 节点签发/吊销、极简模式内存安全、SSRF DNS Pinning、密钥隔离 |
 | **前后端与节点契约** | [`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md) | `POST /api/node/config` 协议、`HOST.capabilities`、设置项生效契约 |
 | **Web 管理端 UI 规范** | [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) | **Magpie 极简风格 UI 标准**：安静表面、列表行内原地展开编辑（零抽屉）、零内联样式门禁 |

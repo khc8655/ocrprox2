@@ -1,5 +1,8 @@
 package obs
 
+// The idea of replaying the last N tries is magpie's internal/gateway/trace.go; this is a
+// 60-entry ring buffer of our own: see docs/MAGPIE_UPSTREAM_SYNC.md §3.4.
+
 import (
 	"sync"
 

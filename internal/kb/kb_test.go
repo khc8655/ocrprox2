@@ -52,35 +52,80 @@ func (m *mockObsSink) QueryUsage(period string, tzName string) (map[string]any, 
 }
 
 func TestPipeline_OCR_PreReadSemaphore(t *testing.T) {
-	// Set maxOCR = 1
-	pipe := NewPipeline(&mockKBSource{}, 1, 10, true)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"ok"}`))
+	}))
+	defer ts.Close()
 
-	// Block the 1 semaphore slot
+	cfg := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"prov-native": {
+				ID: "prov-native", BaseURL: ts.URL, Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "k1", Label: "k1", Key: "key-1", Enabled: true}},
+			},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"ocr": {{Provider: "prov-native", Model: "ocr", KeyLabel: "k1", Enabled: true}},
+		},
+	}
+	// One OCR slot: a second request must queue, not fail.
+	pipe := NewPipeline(&mockKBSource{config: cfg}, 1, 10, true)
+
 	rel, ok := pipe.ocrLimiter.tryAcquire()
 	if !ok {
 		t.Fatalf("expected initial OCR slot acquisition to succeed")
 	}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader("some image bytes"))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader(`{"image":"raw-img-payload"}`))
+		req.Header.Set("Content-Type", "application/json")
+		pipe.HandleOCR(rec, req)
+		done <- rec
+	}()
 
-	pipe.HandleOCR(rec, req)
-
-	// Must be rejected with 429
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 when OCR semaphore is full, got %d", rec.Code)
+	select {
+	case rec := <-done:
+		t.Fatalf("expected the OCR request to wait for a slot, got %d: %s", rec.Code, rec.Body.String())
+	case <-time.After(150 * time.Millisecond):
 	}
 
-	// Release semaphore
 	rel()
 
-	// Now should proceed past semaphore check
-	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader(`{"image_base64":"some-data"}`))
-	pipe.HandleOCR(rec2, req2)
-	// It will return 404 or 503 because mock config has no KB models, but NOT 429
-	if rec2.Code == http.StatusTooManyRequests {
-		t.Fatalf("did not expect 429 after semaphore released, got %d", rec2.Code)
+	select {
+	case rec := <-done:
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("queued OCR request was rejected with 429 instead of being served")
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 after the slot freed, got %d: %s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued OCR request did not resume after the slot was released")
+	}
+}
+
+func TestPipeline_OCR_QueueWaitTimeoutStill429(t *testing.T) {
+	prev := ocrQueueWait
+	ocrQueueWait = 80 * time.Millisecond
+	defer func() { ocrQueueWait = prev }()
+
+	pipe := NewPipeline(&mockKBSource{}, 1, 10, true)
+	rel, ok := pipe.ocrLimiter.tryAcquire()
+	if !ok {
+		t.Fatalf("expected initial OCR slot acquisition to succeed")
+	}
+	defer rel()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/ocr", strings.NewReader(`{"image":"raw-img-payload"}`))
+	req.Header.Set("Content-Type", "application/json")
+	pipe.HandleOCR(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after the queue wait elapsed, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -565,11 +610,18 @@ func TestPipeline_OCR_ConcurrentInflightGating(t *testing.T) {
 
 	// We create a server that blocks until a channel signal is sent
 	holdGate := make(chan struct{})
-	var inFlightCount int32
+	var inFlight, peak, served int32
 
 	tsSlow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&inFlightCount, 1)
-		defer atomic.AddInt32(&inFlightCount, -1)
+		n := atomic.AddInt32(&inFlight, 1)
+		for {
+			p := atomic.LoadInt32(&peak)
+			if n <= p || atomic.CompareAndSwapInt32(&peak, p, n) {
+				break
+			}
+		}
+		defer atomic.AddInt32(&inFlight, -1)
+		atomic.AddInt32(&served, 1)
 
 		<-holdGate // wait until released
 
@@ -600,52 +652,51 @@ func TestPipeline_OCR_ConcurrentInflightGating(t *testing.T) {
 
 	pipe := NewPipeline(&mockKBSource{config: cfg}, maxOCR, 16, true)
 
-	var wg sync.WaitGroup
 	reqBytes, _ := json.Marshal(map[string]any{"image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="})
 
-	// Start 2 concurrent requests that will occupy both semaphore slots
-	wg.Add(2)
-	for i := 0; i < 2; i++ {
+	// Three requests for two slots: the first two take the slots, and the third
+	// waits for one instead of being refused with 429. Waiting is the point — it is
+	// how a 5-document ingestion burst against a budget of 4 loses nothing.
+	codes := make(chan int, 3)
+	for i := 0; i < 3; i++ {
 		go func() {
-			defer wg.Done()
 			req := httptest.NewRequest("POST", "/v1/ocr", bytes.NewReader(reqBytes))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			pipe.HandleOCR(rec, req)
+			codes <- rec.Code
 		}()
 	}
 
-	// Give goroutines a moment to acquire the semaphore slots
-	time.Sleep(50 * time.Millisecond)
-
-	// Now send a 3rd request - MUST be rejected immediately with 429
-	rec3 := httptest.NewRecorder()
-	req3 := httptest.NewRequest("POST", "/v1/ocr", bytes.NewReader(reqBytes))
-	req3.Header.Set("Content-Type", "application/json")
-	pipe.HandleOCR(rec3, req3)
-
-	if rec3.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 3rd concurrent request to get 429 Too Many Requests, got %d: %s", rec3.Code, rec3.Body.String())
+	// Give the first two goroutines time to reach the upstream and the third to park.
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&served) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(rec3.Body.String(), "ocr_max_inflight_exceeded") {
-		t.Errorf("expected error code ocr_max_inflight_exceeded, got %s", rec3.Body.String())
+	time.Sleep(100 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&served); got != 2 {
+		t.Fatalf("expected exactly the 2 slot holders upstream while the gate is held, got %d", got)
 	}
-	if rec3.Header().Get("Retry-After") == "" {
-		t.Errorf("expected Retry-After header on 429 response")
+	if got := len(codes); got != 0 {
+		t.Fatalf("expected the queued request to still be waiting, but %d request(s) already finished", got)
 	}
 
-	// Release the active slow requests
+	// Release the active slow requests: the queued one takes the freed slot.
 	close(holdGate)
-	wg.Wait()
 
-	// 4th request should now succeed after semaphore slots are released
-	rec4 := httptest.NewRecorder()
-	req4 := httptest.NewRequest("POST", "/v1/ocr", bytes.NewReader(reqBytes))
-	req4.Header.Set("Content-Type", "application/json")
-	pipe.HandleOCR(rec4, req4)
-
-	if rec4.Code != http.StatusOK {
-		t.Fatalf("expected 4th request to succeed with 200 OK after slots released, got %d: %s", rec4.Code, rec4.Body.String())
+	for i := 0; i < 3; i++ {
+		select {
+		case code := <-codes:
+			if code != http.StatusOK {
+				t.Fatalf("expected every request to end 200 OK, got %d", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("request %d never finished after slots were released", i)
+		}
+	}
+	if got := atomic.LoadInt32(&peak); got > int32(maxOCR) {
+		t.Errorf("upstream saw %d concurrent OCR requests, limit is %d", got, maxOCR)
 	}
 }
 

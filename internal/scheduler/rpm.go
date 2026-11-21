@@ -1,5 +1,8 @@
 package scheduler
 
+// Behaviour follows magpie internal/gateway/rpm.go (sliding window per key); this is an
+// independent implementation: see docs/MAGPIE_UPSTREAM_SYNC.md §3.4.
+
 import (
 	"sync"
 	"time"

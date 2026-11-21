@@ -1,5 +1,8 @@
 package upstream
 
+// This transport deliberately replaces magpie's internal/netproxy (rejected) with the standard
+// library dialer plus netguard pinning: see docs/MAGPIE_UPSTREAM_SYNC.md §3.5.
+
 import (
 	"crypto/tls"
 	"errors"

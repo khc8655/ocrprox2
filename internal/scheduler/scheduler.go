@@ -1366,6 +1366,72 @@ func (s *Scheduler) Dispatch(
 				return
 			}
 
+			// A 200 can still be an error the upstream wrote into the body after its
+			// headers were out. Read as success it would be returned to the caller as
+			// the answer; it fails as the status it names instead.
+			if errStatus, errSnippet, isErr := errInSuccessBody(respBody); isErr {
+				lastErrSnippet = errSnippet
+				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, errStatus, durRateLimit, durServerError, durNetwork, durAuth)
+				currAttempt := TryAttempt{
+					Provider:     cand.Provider.ID,
+					KeyID:        keyID,
+					Model:        cand.TargetModel,
+					Status:       errStatus,
+					ErrorSnippet: errSnippet,
+				}
+				tries = append(tries, types.Try{
+					Attempt:            i + 1,
+					Provider:           cand.Provider.ID,
+					KeyID:              cand.KeyEntry.Label,
+					Model:              cand.TargetModel,
+					Status:             errStatus,
+					Millis:             tryElapsed,
+					Reason:             classifyFailureReason(errStatus),
+					CooldownAppliedSec: cooldownSec,
+					ErrorSnippet:       obs.ScrubString(errSnippet),
+					RespHeaders:        tryRespHeaders,
+				})
+
+				if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) {
+					scrubbedErr := obs.Scrub(respBody)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(errStatus)
+					_, _ = w.Write(scrubbedErr)
+
+					totalMillis := time.Since(reqStart).Milliseconds()
+					ownMillis := totalMillis - (sentMillis + tryElapsed)
+					if ownMillis < 0 {
+						ownMillis = 0
+					}
+					s.recordFinalTrace(types.RequestTrace{
+						ID:             traceID,
+						Timestamp:      time.Now().Unix(),
+						Mode:           "agent",
+						Endpoint:       endpoint,
+						ReqModel:       reqModel,
+						ServedModel:    cand.TargetModel,
+						WinnerProvider: cand.Provider.ID,
+						WinnerKey:      cand.KeyEntry.Label,
+						Status:         errStatus,
+						Stream:         clientStream,
+						OwnMillis:      ownMillis,
+						QueuedMillis:   queuedMillis,
+						SentMillis:     sentMillis,
+						TotalMillis:    totalMillis,
+						UpBytes:        len(mutatedBody),
+						DownBytes:      len(scrubbedErr),
+						ReqHeaders:     reqHeaders,
+						Tries:          tries,
+					})
+					done = true
+					retErr = nil
+					return
+				}
+
+				attempts = append(attempts, currAttempt)
+				return
+			}
+
 			transformed, transErr := s.engine.TransformNonStreamResponse(endpoint, respBody, cand.Provider, reqModel)
 			if transErr == nil {
 				respBody = transformed

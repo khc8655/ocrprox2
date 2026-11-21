@@ -1,16 +1,16 @@
 {
-  "version": "v20261120-01",
-  "semver": "2.6.2",
-  "release_date": "2026-11-20",
+  "version": "v20261121-01",
+  "semver": "2.7.0",
+  "release_date": "2026-11-21",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.6.2 — 会话粘性子代理隔离与多 Agent 共享缓存",
+  "title": "LLMProxy2 (OCRProxy v2) 2.7.0 — 排队请求跨 Key 迁移、KB 入库限流修正与 Magpie 上游同步基线",
   "changelog": [
-    "新增可缓存前缀键 cpy：把 instructions / system / tools（及 OpenAI 风格前导 system / developer messages[0]、messages[1]）单独哈希、不含任务本体，同项目多个 Agent 共用一把 Key（实测 6 Agent 同前缀 hits=[6,0,0]），修掉此前按完整首轮消息拆成 k1:2 k2:2 k3:2、前缀 token 成本约 2.3 倍的问题",
-    "修复子代理劫持主会话粘性绑定：子代理沿用同一 session id 会在另一把 Key 上成功后把主会话一并重绑，导致已累积的 prompt 前缀缓存整段重写；现按 X-Claude-Code-Agent-Id / X-Subagent-Id / X-Agent-Id 拆出子代理维度，回写只动自身槽位，新子代理继承主会话所在 Key",
-    "修复无会话标识的多 agent 全部挤在同一把 Key：modelSticky 兜底改为提示而非预留，首选 Key 忙时同供应商空闲兄弟 Key 接管",
-    "修复同时到达的并发突发全落同一 Key：改为饱和驱动 + 原子占位，摊开只在 Key 达到 max_concurrency 后发生，LaneTracker.TryAcquire 在同一把锁内挑第一个有余量的 Key 并占位（6 独立会话 [2,2,2]，共享前缀上限 2 → [2,1,0]）",
-    "摊开触发条件收紧为「达到上限才分流」，未设 max_concurrency 的 Key 永不因负载分流；lane 计数的 busy 是唯一准入依据、waiting 仅供观测；会话头新增 X-Session-Affinity",
-    "修掉两个让上限失效的计数缺陷：预留表与 lane 重复计数（上限实际减半）、准入用 busy+waiting 重复计数且排序第 3/4 步早返回绕过认领；删掉预留表，认领即 lane 槽位本身",
-    "验证：6 个单元用例 + 突发精确性用例（300/300 轮严格 2/2/2、无 lane 泄漏）；真实二进制 lite 黑盒 E2E 7/7（[6,0,0] / [2,1,0] / [2,2,2] / 绑定会话 k1:4）；go test -race 与 verify:release G1–G6 全绿；排序路径约 563–590ns / 10 allocs，完整 dispatch 37–46µs/op 无回归"
+    "新增排队请求的跨 Key 迁移（magpie laneMate/waitMate 等价物）：LaneTracker.WaitAcquireChoices 在任一道释放时重走整张候选表，取第一个有余量的 Key，而不是死等首选 Key；闭集 30 请求 / 10 槽位实测 1.815s → 120ms，端到端排队请求在兄弟 Key 释放后 0.3ms 到达上游",
+    "修复 KB 入库 OCR 预读并发：并发占满时不再立刻 429，而是排队等待（默认 90s，超时才 429 + Retry-After），5 并发 / 4 槽位不再丢请求；客户端断开即退出，不写 429",
+    "修复端点路径绕过归一化：ExecuteEndpoint 现在也执行 applyRouteNormalization（thinking / reasoning_effort 剥离、no_reasoning），与 Dispatch 路径一致",
+    "修复 HTTP 200 裹错误体被当成功：非流式与流式两条路径都识别 200 响应体里的错误对象，按错误状态码冷却并按 forbiddenAlike 判定失败转移，不再把错误对象当成回答返回",
+    "修复 max_concurrency 未真正限流：满的 lane 不再被塞入超限请求，改为跳过该候选；全部候选全满时进入短队列，超时才放弃",
+    "修复 lane 观测计数泄漏：等待中的请求每次被 freed 唤醒都 waiting++ 而未配对递减，唤醒风暴下 waiting 虚高（2 个等待者显示为 4）",
+    "新增 Magpie 上游同步基线：docs/MAGPIE_UPSTREAM_SYNC.md（A/B/C/D 四类关系与升级流程）、docs/magpie-baseline.json（10 个逐字节文件的 sha256 基线）、scripts/magpie-sync.mjs（check/apply/rebaseline），并校正复用矩阵中 8 处与代码不符的描述"
   ]
 }

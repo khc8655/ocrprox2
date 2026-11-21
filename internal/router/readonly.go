@@ -1,4 +1,7 @@
 // Package router provides HTTP routing guards and middleware.
+//
+// readonly.go adapts magpie's internal/gateway/readonly.go (registered-route audit and the
+// read-only guard); the route whitelist is this project's: see docs/MAGPIE_UPSTREAM_SYNC.md §3.3.
 package router
 
 import (

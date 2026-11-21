@@ -1,0 +1,167 @@
+{
+  "_comment": "Upstream baseline for the vendored yetone/magpie code. Read by scripts/magpie-sync.mjs; the narrative is in docs/MAGPIE_UPSTREAM_SYNC.md. Update reference_commit + verified_at only after a sync round passes the release gates.",
+  "upstream_repo": "https://github.com/yetone/magpie",
+  "upstream_module": "github.com/yetone/magpie",
+  "our_module": "github.com/khc8655/llmproxy2",
+  "reference_commit": "18cfe278b99c50c8f0756447125a2f2c83f715b3",
+  "reference_release": "v0.1.4624",
+  "reference_date": "2026-11-21",
+  "vendored_at": "2026-11-08",
+  "verified_at": "2026-11-21",
+  "verbatim": [
+    {
+      "ours": "internal/steady/steady.go",
+      "upstream": "internal/steady/steady.go",
+      "sha256": "faa4728fd951311177298d086420723b66f16406495ec46c3c8c3f86268b2a55"
+    },
+    {
+      "ours": "internal/steady/steady_test.go",
+      "upstream": "internal/steady/steady_test.go",
+      "sha256": "4bf1e87f84771f27ed9a7d8de3e88a2c30a6599c0e30f7d9388f67d9e6c7cf3d"
+    },
+    {
+      "ours": "internal/steady/write_test.go",
+      "upstream": "internal/steady/write_test.go",
+      "sha256": "0188ec390e605dd4e6548d39feda92e10d24aa75278e51da73f7fbf05f8c936c"
+    },
+    {
+      "ours": "internal/steady/steady_windows_test.go",
+      "upstream": "internal/steady/steady_windows_test.go",
+      "sha256": "fc5f54fa644093ecdb506154fa44c4427c97e9e897633bcdb9b0633f63d4f0dd"
+    },
+    {
+      "ours": "internal/lastgood/lastgood.go",
+      "upstream": "internal/lastgood/lastgood.go",
+      "sha256": "ef21f2cb8fb5b6c2017cf3b89182be1ce853c7edf86c58498fcd28fced8dcbad",
+      "rewrite_module": true,
+      "note": "唯一本地改动：import github.com/yetone/magpie/internal/steady -> 本仓路径"
+    },
+    {
+      "ours": "internal/lastgood/lastgood_test.go",
+      "upstream": "internal/lastgood/lastgood_test.go",
+      "sha256": "2fc5ba2a873467ac3f16da83d8060c9f8854f8c915ae8a174cf4450f4e8a179e"
+    },
+    {
+      "ours": "internal/filelock/filelock.go",
+      "upstream": "internal/filelock/filelock.go",
+      "sha256": "bbe40d4117ad84bcdbc205ab92c070d39bc080be14b2007ee9c684714253bf37"
+    },
+    {
+      "ours": "internal/filelock/lock_unix.go",
+      "upstream": "internal/filelock/lock_unix.go",
+      "sha256": "6eadc28a1e14c172b36d75cebbf0a858e98c2399738d62d4e1c53165e377addb"
+    },
+    {
+      "ours": "internal/filelock/lock_windows.go",
+      "upstream": "internal/filelock/lock_windows.go",
+      "sha256": "5fcad2c5e435b10749856d91a578fb45c4c104ab4ad207ee2e983428a4ce45d0"
+    },
+    {
+      "ours": "internal/filelock/filelock_test.go",
+      "upstream": "internal/filelock/filelock_test.go",
+      "sha256": "7787bb1d602bb8b4f1199f9e78f4cca0f623c2c7ae9d4c061854a8707de9d4a4"
+    }
+  ],
+  "verbatim_manual": [
+    {
+      "ours": "internal/steady/main_test.go",
+      "upstream": "internal/steady/main_test.go",
+      "sha256": "82f4b3c24d3052a481be2a6305c4ca0de062abaf51afb020175d9e42ba3c01c9",
+      "note": "上游用 internal/testenv 隔离 HOME；本项目全部测试已用 t.TempDir()，改为 os.Exit(m.Run())，不做自动覆盖"
+    },
+    {
+      "ours": "internal/lastgood/main_test.go",
+      "upstream": "internal/lastgood/main_test.go",
+      "sha256": "e0907dc9367cac4d3889f6be5fe1d6fee3d32ad046152510817a51495ebefd74",
+      "note": "同上"
+    },
+    {
+      "ours": "internal/filelock/main_test.go",
+      "upstream": "internal/filelock/main_test.go",
+      "sha256": "f7e63790d98138c1452ef019074761ac2e3fcd40fc7a2c7c44906f39894983e2",
+      "note": "同上"
+    }
+  ],
+  "adapted": [
+    {
+      "ours": "internal/obs/applog.go",
+      "upstream": ["internal/applog/applog.go"],
+      "note": "保留 scrub 规则表 + 5MiB 双文件轮转；去掉 appdir.Path/Current/Start/Stop，改为 InitAppLog(role, logDir) 且 lite 模式零落盘；logFile 替代 file"
+    },
+    {
+      "ours": "internal/netguard/netguard.go",
+      "upstream": ["internal/netguard/netguard.go", "internal/gateway/image_fetch_guard.go"],
+      "note": "保留 Public/私有段判定；去掉供应商 Client/Loon/FakeIP 配对逻辑；加入 DNS 解析后 IP Pinning + Happy Eyeballs 拨号（自研）"
+    },
+    {
+      "ours": "internal/router/readonly.go",
+      "upstream": ["internal/gateway/readonly.go"],
+      "note": "保留 routeMux 未登记路由即报错 + 只读守卫；RouteMux 公开化并加 Patterns/Validate，ReadOnlyGuard 取 types.Role"
+    }
+  ],
+  "semantic": [
+    {
+      "ours": "internal/scheduler/lanes.go",
+      "upstream": ["internal/gateway/concurrency.go"],
+      "note": "lane{Busy,Waiting,Limit} 结构与 tryTake/take/await（排队不返失败）语义同源；laneMate/waitMate 等价物已于 2026-11-21 补齐（WaitAcquireChoices 唤醒时重走候选表）；上游的 per-lane FIFO 与 QueueLimit 尚未对齐"
+    },
+    {
+      "ours": "internal/scheduler/rpm.go",
+      "upstream": ["internal/gateway/rpm.go"],
+      "note": "滑动窗口每 key RPM，语义同源，独立实现"
+    },
+    {
+      "ours": "internal/scheduler/errorbody.go",
+      "upstream": ["internal/gateway/routing.go", "internal/gateway/fallback.go"],
+      "note": "carriedStatus / namedStatus / namedStatusOf：HTTP 200 里裹错误体按错误处理，语义同源，独立实现"
+    },
+    {
+      "ours": "internal/scheduler/cooldown.go",
+      "upstream": ["internal/gateway/routing.go"],
+      "note": "仅吸收 forbiddenAlike（两把 key 同一客户端错误不误封）思想，约 30 行"
+    },
+    {
+      "ours": "internal/scheduler/peek.go",
+      "upstream": ["internal/gateway/sse.go"],
+      "note": "SSE 首包 Peek、裸 JSON 错误行识别、keepalive，语义同源，独立实现（文档旧版误记为 internal/upstream/sse.go）"
+    },
+    {
+      "ours": "internal/obs/trace.go",
+      "upstream": ["internal/gateway/trace.go"],
+      "note": "仅取最近 60 条 Tries 环形回放的思想（上游 1206 行，我们 72 行）"
+    },
+    {
+      "ours": "internal/obs/usage.go",
+      "upstream": ["internal/usage/usage.go"],
+      "note": "usage.jsonl 单句柄追加账本 + today/7d/30d 聚合的思想同源；实现独立（上游 1322 行，我们 1245 行）"
+    },
+    {
+      "ours": "internal/crypto/crypto.go",
+      "upstream": ["internal/backup/backup.go", "internal/backup/data.go"],
+      "note": "PBKDF2-SHA256 + AES-256-GCM 信封算法同构，但格式串不同（llmproxy-encrypted vs magpie-data/magpie-backup），互不兼容，无跟随义务；额外含 1 代 Fernet 兼容"
+    },
+    {
+      "ours": "internal/upstream/transport.go",
+      "upstream": ["internal/netproxy"],
+      "note": "反向：上游 netproxy 明确拒绝搬运，用 Go 标准库 net.Dialer{FallbackDelay} + netguard Pinning 替代"
+    }
+  ],
+  "watch": [
+    "internal/steady",
+    "internal/lastgood",
+    "internal/filelock",
+    "internal/netguard",
+    "internal/applog",
+    "internal/gateway/readonly.go",
+    "internal/gateway/sse.go",
+    "internal/gateway/concurrency.go",
+    "internal/gateway/rpm.go",
+    "internal/gateway/routing.go",
+    "internal/gateway/fallback.go",
+    "internal/gateway/trace.go",
+    "internal/gateway/image_fetch_guard.go",
+    "internal/usage",
+    "internal/backup",
+    "internal/netproxy"
+  ]
+}

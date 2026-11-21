@@ -8,6 +8,8 @@
     "build:admin": "node shared/admin/build.mjs",
     "build:presets": "node shared/presets/build-catalog.mjs",
     "build:release": "node scripts/build-release.mjs",
+    "magpie:check": "node scripts/magpie-sync.mjs check",
+    "magpie:apply": "node scripts/magpie-sync.mjs apply",
     "test:hub": "node --test edgeone-hub/test/hub.test.mjs",
     "test:admin": "node shared/admin/build.mjs",
     "test:t1": "node --test tests/t1_contracts/verify_contracts.test.mjs",
