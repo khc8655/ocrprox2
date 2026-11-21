@@ -3,6 +3,7 @@ package hubsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -453,5 +454,95 @@ func TestHubSource_SingleflightCaller1CancelResilience(t *testing.T) {
 	r1 := <-c1Ch
 	if r1.err != nil || r1.snap == nil || r1.snap.Config.Version != 9 {
 		t.Fatalf("expected detached Hub fetch to succeed cleanly, got snap=%v err=%v", r1.snap, r1.err)
+	}
+}
+
+func TestHubSource_RejectsInsecureHTTPWithoutAllowPrivate(t *testing.T) {
+	var hits atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("X-Lease-Until", time.Now().Add(time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(types.ProxyConfig{Version: 1})
+	}))
+	defer ts.Close()
+
+	// 1. allowPrivate=false must reject cleartext http:// before dialing
+	srcBlocked := NewHubSource("http://hub.example.com", "stk_node_0123456789abcdef", false)
+	_, err := srcBlocked.Current(context.Background(), false)
+	if !errors.Is(err, ErrInsecureHubURL) {
+		t.Fatalf("expected ErrInsecureHubURL when allowPrivate=false on http://, got %v", err)
+	}
+	_, state, _, _ := srcBlocked.HealthState()
+	if state != StateError {
+		t.Fatalf("expected StateError on insecure hub URL, got %q", state)
+	}
+
+	// Even pointing at a local HTTP server must be rejected with 0 network hits when allowPrivate=false
+	srcLocalBlocked := NewHubSource(ts.URL, "stk_node_0123456789abcdef", false)
+	_, err = srcLocalBlocked.Current(context.Background(), false)
+	if !errors.Is(err, ErrInsecureHubURL) {
+		t.Fatalf("expected ErrInsecureHubURL for local http:// when allowPrivate=false, got %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("expected 0 network calls on rejected http:// hub URL, got %d", hits.Load())
+	}
+
+	// 2. allowPrivate=true permits httptest HTTP server
+	srcAllowed := NewHubSource(ts.URL, "stk_node_0123456789abcdef", true)
+	snap, err := srcAllowed.Current(context.Background(), false)
+	if err != nil || snap == nil || snap.Config.Version != 1 {
+		t.Fatalf("expected allowPrivate=true to fetch http:// test hub, got snap=%v err=%v", snap, err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected 1 hub call when allowPrivate=true, got %d", hits.Load())
+	}
+}
+
+func TestHubSource_RefreshForAuthDebounce(t *testing.T) {
+	var hits atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("X-Lease-Until", time.Now().Add(time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(types.ProxyConfig{
+			Version: 1,
+			Settings: types.RuntimeSettings{
+				ClientKey: "sk-hub-auth-debounce",
+			},
+		})
+	}))
+	defer ts.Close()
+
+	src := NewHubSource(ts.URL, "stk_node_0123456789abcdef", true)
+	ctx := context.Background()
+
+	// 1. Cold start via RefreshForAuth(ctx, false) fetches once
+	snap, err := src.RefreshForAuth(ctx, false)
+	if err != nil || snap == nil || snap.Config.Version != 1 {
+		t.Fatalf("expected cold start RefreshForAuth to succeed, got snap=%v err=%v", snap, err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected 1 hub call on cold start, got %d", hits.Load())
+	}
+
+	// 2. Repeated RefreshForAuth(ctx, true) within MinRefreshDebounce makes 0 additional calls
+	for i := 0; i < 5; i++ {
+		s2, err := src.RefreshForAuth(ctx, true)
+		if err != nil || s2 == nil {
+			t.Fatalf("unexpected error on debounced RefreshForAuth #%d: %v", i, err)
+		}
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected debounced RefreshForAuth(true) to make 0 extra hub calls, got %d", hits.Load())
+	}
+
+	// 3. Authenticated Current(ctx, true) still forces an immediate refresh
+	if _, err := src.Current(ctx, true); err != nil {
+		t.Fatalf("Current(ctx, true) err: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("expected authenticated Current(ctx, true) to trigger refresh, got %d hub calls", hits.Load())
 	}
 }

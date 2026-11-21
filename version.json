@@ -1,16 +1,13 @@
 {
-  "version": "v20261121-01",
-  "semver": "2.7.0",
+  "version": "v20261121-02",
+  "semver": "2.7.1",
   "release_date": "2026-11-21",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.7.0 — 排队请求跨 Key 迁移、KB 入库限流修正与 Magpie 上游同步基线",
+  "title": "LLMProxy2 (OCRProxy v2) 2.7.1 — Lite 模式安全加固（防未鉴权强刷 Hub、强制 HTTPS、动态 Key 脱敏）",
   "changelog": [
-    "新增排队请求的跨 Key 迁移（magpie laneMate/waitMate 等价物）：LaneTracker.WaitAcquireChoices 在任一道释放时重走整张候选表，取第一个有余量的 Key，而不是死等首选 Key；闭集 30 请求 / 10 槽位实测 1.815s → 120ms，端到端排队请求在兄弟 Key 释放后 0.3ms 到达上游",
-    "修复 KB 入库 OCR 预读并发：并发占满时不再立刻 429，而是排队等待（默认 90s，超时才 429 + Retry-After），5 并发 / 4 槽位不再丢请求；客户端断开即退出，不写 429",
-    "修复端点路径绕过归一化：ExecuteEndpoint 现在也执行 applyRouteNormalization（thinking / reasoning_effort 剥离、no_reasoning），与 Dispatch 路径一致",
-    "修复 HTTP 200 裹错误体被当成功：非流式与流式两条路径都识别 200 响应体里的错误对象，按错误状态码冷却并按 forbiddenAlike 判定失败转移，不再把错误对象当成回答返回",
-    "修复 max_concurrency 未真正限流：满的 lane 不再被塞入超限请求，改为跳过该候选；全部候选全满时进入短队列，超时才放弃",
-    "修复 lane 观测计数泄漏：等待中的请求每次被 freed 唤醒都 waiting++ 而未配对递减，唤醒风暴下 waiting 虚高（2 个等待者显示为 4）",
-    "新增 Magpie 上游同步基线：docs/MAGPIE_UPSTREAM_SYNC.md（A/B/C/D 四类关系与升级流程）、docs/magpie-baseline.json（10 个逐字节文件的 sha256 基线）、scripts/magpie-sync.mjs（check/apply/rebaseline），并校正复用矩阵中 8 处与代码不符的描述"
+    "防未鉴权强刷 EdgeOne Hub：新增 HubSource.RefreshForAuth，并在数据面鉴权封装 newDataPlaneAuthWrapper 中接入；冷启动与租约过期仍正常同步，未通过 CLIENT_KEY 校验的 X-Node-Refresh: 1 请求在 MinRefreshDebounce（5 分钟）内不再回源请求 Hub",
+    "强制 Hub 通信走 HTTPS 与缓冲清理：未开启 allowPrivate 时拒绝非 https:// 的 hubURL（ErrInsecureHubURL）；解码配置载荷后通过 clear 清零原始 JSON 缓冲，吊销节点时同步清空 nodeToken，宽限期耗尽丢弃快照后触发 runtime.GC()",
+    "上游报错动态脱敏与非 sk- 前缀覆盖：applog 新增 nvapi-、gsk_、xai-、pplx- 正则脱敏及 ScrubWithSecrets/ScrubStringWithSecrets；scheduler（Dispatch 与 ExecuteEndpoint）在返回错误响应及记录 Try.ErrorSnippet 前精确脱敏本次使用过的任意格式上游 Key",
+    "验证：新增 hubsync/main/obs/scheduler 回归单测；go test -race ./... 与 npm run test:t3 全部通过"
   ]
 }

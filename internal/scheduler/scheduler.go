@@ -769,6 +769,7 @@ func (s *Scheduler) Dispatch(
 
 	var tries []types.Try
 	var attempts []TryAttempt
+	var usedSecrets []string
 	var lastStatus int
 	var lastErrSnippet string
 	// Why candidates were skipped before any upstream attempt. Surfaced when every
@@ -832,7 +833,7 @@ func (s *Scheduler) Dispatch(
 						Millis:             time.Since(tryStart).Milliseconds(),
 						Reason:             "auth_error",
 						CooldownAppliedSec: cooldownSec,
-						ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					})
 					return
 				}
@@ -864,6 +865,9 @@ func (s *Scheduler) Dispatch(
 			}
 
 			rawKey := resolveCandidateKeySecret(cand, refresher)
+			if rawKey != "" {
+				usedSecrets = append(usedSecrets, rawKey)
+			}
 			applyUpstreamHeaders(upReq, r, endpoint, cand.Provider, rawKey, extraHeaders)
 
 			// Concurrency tracking: acquire busy slot with MaxConc (guaranteed release via defer)
@@ -900,7 +904,7 @@ func (s *Scheduler) Dispatch(
 					Millis:             tryElapsed,
 					Reason:             "network_error",
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 				})
 				return
 			}
@@ -951,14 +955,14 @@ func (s *Scheduler) Dispatch(
 					Millis:             tryElapsed,
 					Reason:             reason,
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
 				})
 
 				// Check Magpie forbiddenAlike
 				if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) {
 					// Immediate abort: it's a client error, don't burn other keys!
-					scrubbedErr := obs.Scrub(errBytes)
+					scrubbedErr := obs.ScrubWithSecrets(errBytes, usedSecrets...)
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(resp.StatusCode)
 					_, _ = w.Write(scrubbedErr)
@@ -1045,14 +1049,14 @@ func (s *Scheduler) Dispatch(
 						TTFTMillis:         tryTTFT,
 						Reason:             "stream_peek_error",
 						CooldownAppliedSec: cooldownSec,
-						ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 						RespHeaders:        tryRespHeaders,
 					})
 					if streamHeadersCommitted {
 						// Stream headers already flushed via keepalive: emit SSE error event and abort cleanly
 						errPayload, _ := json.Marshal(map[string]any{
 							"error": map[string]any{
-								"message": obs.ScrubString(lastErrSnippet),
+								"message": obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 								"type":    "upstream_error",
 							},
 						})
@@ -1388,12 +1392,12 @@ func (s *Scheduler) Dispatch(
 					Millis:             tryElapsed,
 					Reason:             classifyFailureReason(errStatus),
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(errSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(errSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
 				})
 
 				if CheckForbiddenAlike(attempts, currAttempt, s.cooldowns) {
-					scrubbedErr := obs.Scrub(respBody)
+					scrubbedErr := obs.ScrubWithSecrets(respBody, usedSecrets...)
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(errStatus)
 					_, _ = w.Write(scrubbedErr)
@@ -1534,7 +1538,7 @@ func (s *Scheduler) Dispatch(
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{
-			"message": fmt.Sprintf("all candidate keys failed: %s", obs.ScrubString(reason)),
+			"message": fmt.Sprintf("all candidate keys failed: %s", obs.ScrubStringWithSecrets(reason, usedSecrets...)),
 			"type":    "upstream_error",
 		},
 	})

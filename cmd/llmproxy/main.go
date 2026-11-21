@@ -37,9 +37,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261121-01"
+	version    = "v20261121-02"
 	commit     = "dev"
-	AppVersion = "2.7.0"
+	AppVersion = "2.7.1"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -312,31 +312,7 @@ func main() {
 	mux.HandleFunc("GET /health", handleHealth)
 
 	// 2. Client Key Enforcement Wrapper for Data Plane
-	wrapAuth := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if !authMgr.VerifyClientKey(r) {
-				// In Lite mode, client_key/proxy_keys can be projected from EdgeOne Hub.
-				// If a request carries a client token before the first lazy Hub sync (or after
-				// X-Node-Refresh: 1), pull/refresh the snapshot once and re-verify.
-				if role == types.RoleLite && hubSrc != nil && auth.ExtractToken(r) != "" {
-					_, _ = configSrc.Current(r.Context(), r.Header.Get("X-Node-Refresh") == "1")
-				}
-			}
-			if !authMgr.VerifyClientKey(r) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error": map[string]any{
-						"message": "Invalid client proxy API key",
-						"type":    "invalid_request_error",
-						"code":    "invalid_api_key",
-					},
-				})
-				return
-			}
-			next(w, r)
-		}
-	}
+	wrapAuth := newDataPlaneAuthWrapper(role, authMgr, hubSrc)
 
 	// 3. /v1/models (with X-Node-Refresh: 1; unified Agent + built-in KB 4 slots)
 	handleModels := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -622,6 +598,34 @@ func syncAuthKeysForRole(role types.Role, cliClientKey string, cfg *types.ProxyC
 		extras = append(extras, cfg.Settings.ProxyKeys...)
 	}
 	authMgr.UpdateClientKeys(primary, extras)
+}
+
+func newDataPlaneAuthWrapper(role types.Role, authMgr *auth.Authenticator, hubSrc *hubsync.HubSource) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !authMgr.VerifyClientKey(r) {
+				// In Lite mode, client_key/proxy_keys can be projected from EdgeOne Hub.
+				// RefreshForAuth preserves cold-start and expired-lease sync while ignoring
+				// unauthenticated X-Node-Refresh: 1 floods within MinRefreshDebounce.
+				if role == types.RoleLite && hubSrc != nil && auth.ExtractToken(r) != "" {
+					_, _ = hubSrc.RefreshForAuth(r.Context(), r.Header.Get("X-Node-Refresh") == "1")
+				}
+			}
+			if !authMgr.VerifyClientKey(r) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"message": "Invalid client proxy API key",
+						"type":    "invalid_request_error",
+						"code":    "invalid_api_key",
+					},
+				})
+				return
+			}
+			next(w, r)
+		}
+	}
 }
 
 func envOr(key, fallback string) string {

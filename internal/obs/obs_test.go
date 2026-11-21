@@ -14,6 +14,10 @@ func TestScrub(t *testing.T) {
 		mustNotSee string
 	}{
 		{"Authorization: Bearer sk-1234567890abcdef", "sk-1234567890abcdef"},
+		{"nvidia error key nvapi-1234567890abcdef", "nvapi-1234567890abcdef"},
+		{"groq error key gsk_1234567890abcdef", "gsk_1234567890abcdef"},
+		{"xai error key xai-1234567890abcdef", "xai-1234567890abcdef"},
+		{"pplx error key pplx-1234567890abcdef", "pplx-1234567890abcdef"},
 		{"https://api.openai.com/v1?key=AIzaSyA12345678901234567890", "AIzaSyA12345678901234567890"},
 		{"https://generativelanguage.googleapis.com/v1beta/models?key=shortSecretKey99&alt=sse", "shortSecretKey99"},
 		{"node_token=stk_node_0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"},
@@ -31,6 +35,31 @@ func TestScrub(t *testing.T) {
 		if strings.Contains(got, tc.mustNotSee) {
 			t.Errorf("Scrub(%q) leaked %q in %q", tc.input, tc.mustNotSee, got)
 		}
+	}
+}
+
+func TestScrubWithSecrets(t *testing.T) {
+	rawInput := "upstream error: invalid key my-raw-provider-secret-99887766 for ok1"
+	got := ScrubStringWithSecrets(rawInput, "my-raw-provider-secret-99887766", "ok1", "short")
+	if strings.Contains(got, "my-raw-provider-secret-99887766") {
+		t.Fatalf("expected ScrubStringWithSecrets to mask arbitrary secret, got %q", got)
+	}
+	if !strings.Contains(got, "ok1") {
+		t.Fatalf("expected ScrubStringWithSecrets to ignore short strings (<8 chars), got %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Fatalf("expected ScrubStringWithSecrets output to contain ellipsis marker, got %q", got)
+	}
+
+	// Ensure caller byte slice is not mutated when secret is masked
+	orig := []byte("echoed my-raw-provider-secret-99887766 in error")
+	origCopy := append([]byte(nil), orig...)
+	scrubbed := ScrubWithSecrets(orig, "my-raw-provider-secret-99887766")
+	if strings.Contains(string(scrubbed), "my-raw-provider-secret-99887766") {
+		t.Fatalf("expected ScrubWithSecrets to mask secret, got %q", string(scrubbed))
+	}
+	if string(orig) != string(origCopy) {
+		t.Fatalf("expected ScrubWithSecrets not to mutate caller buffer")
 	}
 }
 

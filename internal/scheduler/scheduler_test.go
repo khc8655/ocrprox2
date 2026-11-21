@@ -621,3 +621,44 @@ func TestScheduler_MessagesHeaders_AuthPrefixNone_CooldownBeforeRPM_AndErrorScru
 		t.Errorf("expected upstream error body scrubbed before returning to client, got %s", rec.Body.String())
 	}
 }
+
+func TestScheduler_ScrubsArbitraryUnprefixedKeyInUpstreamError(t *testing.T) {
+	unprefixedKey := "9f8e7d6c5b4a3210fedcba9876543210"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided: ` + unprefixedKey + `"}}`))
+	}))
+	defer ts.Close()
+
+	cfg := &types.ProxyConfig{
+		Providers: map[string]*types.ProviderConfig{
+			"custom": {
+				ID:      "custom",
+				BaseURL: ts.URL,
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "k1", Label: "k1", Key: unprefixedKey, Enabled: true},
+				},
+			},
+		},
+		AgentModels: map[string]*types.AgentModelRoute{
+			"test-model": {
+				Enabled:    true,
+				Candidates: []*types.RouteCandidate{{Provider: "custom", KeyLabel: "k1", Enabled: true}},
+			},
+		},
+	}
+
+	sched := NewScheduler(&mockConfigSource{config: cfg}, nil, true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`))
+	_ = sched.Dispatch(context.Background(), "/v1/chat/completions", []byte(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`), "test-model", false, rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 status, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), unprefixedKey) {
+		t.Fatalf("client error response leaked unprefixed upstream API key: %s", rec.Body.String())
+	}
+}

@@ -5,6 +5,7 @@
 package obs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -60,6 +62,10 @@ var secrets = []struct {
 	{regexp.MustCompile(`(?i)((?:x-api-key|x-goog-api-key|api-key)["']?\s*[:=]\s*["']?)[^\s"',;&<>}{]+`), "${1}…"},
 	{regexp.MustCompile(`\b(stk_node_)[a-fA-F0-9]{16,}`), "${1}…"},
 	{regexp.MustCompile(`\b(sk-(?:ant-|proj-)?)[A-Za-z0-9_-]{12,}`), "${1}…"},
+	{regexp.MustCompile(`\b(nvapi-)[A-Za-z0-9_-]{12,}`), "${1}…"},
+	{regexp.MustCompile(`\b(gsk_)[A-Za-z0-9_-]{12,}`), "${1}…"},
+	{regexp.MustCompile(`\b(xai-)[A-Za-z0-9_-]{12,}`), "${1}…"},
+	{regexp.MustCompile(`\b(pplx-)[A-Za-z0-9_-]{12,}`), "${1}…"},
 	{regexp.MustCompile(`\b(AIza)[0-9A-Za-z_-]{20,}`), "${1}…"},
 	{regexp.MustCompile(`\b(gh[opsur]_)[A-Za-z0-9]{20,}`), "${1}…"},
 	{regexp.MustCompile(`\b(eyJ)[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), "${1}…"},
@@ -76,6 +82,26 @@ func Scrub(p []byte) []byte {
 // ScrubString scrubs sensitive substrings in a string.
 func ScrubString(s string) string {
 	return string(Scrub([]byte(s)))
+}
+
+// ScrubWithSecrets scrubs both exact runtime secret literals (>= 8 chars) and standard token patterns.
+func ScrubWithSecrets(p []byte, extraSecrets ...string) []byte {
+	out := p
+	for _, sec := range extraSecrets {
+		s := strings.TrimSpace(sec)
+		if len(s) < 8 {
+			continue
+		}
+		if needle := []byte(s); bytes.Contains(out, needle) {
+			out = bytes.ReplaceAll(out, needle, []byte("…"))
+		}
+	}
+	return Scrub(out)
+}
+
+// ScrubStringWithSecrets scrubs both exact runtime secret literals (>= 8 chars) and standard token patterns in a string.
+func ScrubStringWithSecrets(s string, extraSecrets ...string) string {
+	return string(ScrubWithSecrets([]byte(s), extraSecrets...))
 }
 
 // InitAppLog initializes logging for lite or full mode.

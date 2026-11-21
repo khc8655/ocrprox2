@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ var (
 	ErrNodeUnauthorized  = errors.New("hubsync: node token unauthorized or revoked (401/403)")
 	ErrSourceUnavailable = errors.New("hubsync: hub unavailable and grace period expired")
 	ErrInvalidPayload    = errors.New("hubsync: invalid configuration payload from hub")
+	ErrInsecureHubURL    = errors.New("hubsync: hub URL must use https:// unless allowPrivate is enabled")
 )
 
 const (
@@ -42,9 +44,10 @@ const (
 
 // HubSource coordinates fetching and caching configuration from EdgeOne Hub.
 type HubSource struct {
-	hubURL      string
-	nodeToken   string
-	nodeVersion string
+	hubURL       string
+	nodeToken    string
+	allowPrivate bool
+	nodeVersion  string
 	// usageProvider supplies a compact usage digest reported with each sync so the
 	// hub can show which models a VM actually serves. Nil in tests/older wiring.
 	usageProvider func() any
@@ -100,13 +103,29 @@ func (s *HubSource) notifyCallbacks(cfg *types.ProxyConfig) {
 // NewHubSource creates a new HubSource. Zero network calls occur during creation.
 func NewHubSource(hubURL, nodeToken string, allowPrivate bool) *HubSource {
 	s := &HubSource{
-		hubURL:    strings.TrimRight(hubURL, "/"),
-		nodeToken: strings.TrimSpace(nodeToken),
-		client:    upstream.DefaultClient(15*time.Second, allowPrivate),
+		hubURL:       strings.TrimRight(hubURL, "/"),
+		nodeToken:    strings.TrimSpace(nodeToken),
+		allowPrivate: allowPrivate,
+		client:       upstream.DefaultClient(15*time.Second, allowPrivate),
 	}
 	s.refreshCond = sync.NewCond(&s.mu)
 	s.state.Store(StateWaitingFirstRequest)
 	return s
+}
+
+func validateHubURL(rawURL string, allowPrivate bool) error {
+	u, err := url.Parse(rawURL)
+	if err != nil || u == nil || u.Host == "" {
+		return ErrInsecureHubURL
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme == "https" {
+		return nil
+	}
+	if scheme == "http" && allowPrivate {
+		return nil
+	}
+	return ErrInsecureHubURL
 }
 
 // HealthState returns status for /healthz.
@@ -156,6 +175,32 @@ func (s *HubSource) Current(ctx context.Context, forceRefresh bool) (*types.Runt
 
 	// Needs refresh (first request, lease expired, or forced)
 	return s.syncWithHub(ctx, snap, forceRefresh)
+}
+
+// RefreshForAuth refreshes configuration during data-plane client authentication.
+// Cold starts and expired leases always trigger a normal sync so Hub-projected client_key
+// remains discoverable, while unauthenticated X-Node-Refresh: 1 requests within
+// MinRefreshDebounce are ignored to prevent Hub request flooding.
+func (s *HubSource) RefreshForAuth(ctx context.Context, forceRequested bool) (*types.RuntimeSnapshot, error) {
+	if st, _ := s.state.Load().(string); st == StateRevoked {
+		return nil, ErrNodeUnauthorized
+	}
+
+	snap := s.snapshot.Load()
+	if snap == nil || !time.Now().Before(snap.LeaseUntil) {
+		return s.Current(ctx, false)
+	}
+	if !forceRequested {
+		return snap, nil
+	}
+
+	s.mu.Lock()
+	recent := !s.lastRefresh.IsZero() && time.Since(s.lastRefresh) < MinRefreshDebounce
+	s.mu.Unlock()
+	if recent {
+		return snap, nil
+	}
+	return s.Current(ctx, true)
 }
 
 // TriggerAllKeysFailed is invoked by scheduler when all keys for a request fail with 401/403.
@@ -209,6 +254,11 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 		s.refreshCond.Broadcast()
 		s.mu.Unlock()
 	}()
+
+	if err := validateHubURL(s.hubURL, s.allowPrivate); err != nil {
+		s.state.Store(StateError)
+		return nil, err
+	}
 
 	// Detach Hub fetch context from Caller #1's request context so Caller #1
 	// disconnecting never cancels the shared Hub fetch for concurrent waiters.
@@ -271,6 +321,7 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 		if err != nil {
 			return s.handleSyncError(err, currentSnap)
 		}
+		defer clear(body)
 
 		var cfg types.ProxyConfig
 		var env struct {
@@ -284,6 +335,7 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 		}
 
 		if err := json.Unmarshal(body, &env); err == nil && len(env.Payload) > 0 && string(env.Payload) != "null" {
+			defer clear(env.Payload)
 			if err := json.Unmarshal(env.Payload, &cfg); err != nil {
 				return s.handleSyncError(ErrInvalidPayload, currentSnap)
 			}
@@ -291,6 +343,9 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 				cfg.Version = env.ConfigVersion
 			}
 		} else {
+			if len(env.Payload) > 0 {
+				defer clear(env.Payload)
+			}
 			if err := json.Unmarshal(body, &cfg); err != nil {
 				return s.handleSyncError(ErrInvalidPayload, currentSnap)
 			}
@@ -351,6 +406,7 @@ func (s *HubSource) purgeAndRevoke() {
 	if snap != nil {
 		snap.PurgeSecrets()
 	}
+	s.nodeToken = ""
 	s.state.Store(StateRevoked)
 	runtime.GC()
 }
@@ -368,6 +424,7 @@ func (s *HubSource) handleSyncError(_ error, currentSnap *types.RuntimeSnapshot)
 	// recoverable StateError (NOT StateRevoked) so node automatically heals when Hub recovers.
 	if currentSnap != nil {
 		s.snapshot.Store(nil)
+		runtime.GC()
 	}
 	s.state.Store(StateError)
 	return nil, ErrSourceUnavailable

@@ -4,6 +4,19 @@
 
 ---
 
+## [v20261121-02] - 2026-11-21
+
+### Security
+- **防未鉴权 `X-Node-Refresh: 1` 刷爆 EdgeOne Hub**：新增 `(*HubSource).RefreshForAuth` 并接入 `newDataPlaneAuthWrapper`；未通过 `CLIENT_KEY` 校验的请求仅允许冷启动与租约过期时正常同步，在 `MinRefreshDebounce`（5 分钟）内携 `X-Node-Refresh: 1` 不再触发回源拉取（已鉴权请求仍可立即强刷）。
+- **强制 Hub 通信走 HTTPS 与原始缓冲清零**：未开启 `allowPrivate` 时拒绝非 `https://` 的 `hubURL`（`ErrInsecureHubURL`），避免明文发送 `NODE_TOKEN` 或明文接收上游密钥；拉取配置解码后立即通过 `clear` 清零原始 JSON 缓冲，节点被吊销时同步清空 `nodeToken`，宽限期耗尽丢弃快照后触发 `runtime.GC()`。
+- **上游报错动态脱敏与非 `sk-` 前缀覆盖**：`obs.Scrub` 新增 `nvapi-`、`gsk_`、`xai-`、`pplx-` 等前缀规则，并新增 `ScrubWithSecrets` / `ScrubStringWithSecrets`；`Scheduler.Dispatch` 与 `Scheduler.ExecuteEndpoint` 在返回错误响应体与写入 `Try.ErrorSnippet` 前精确脱敏本次请求使用过的任意格式上游密钥。
+
+### Verified
+- 新增单测：`TestHubSource_RejectsInsecureHTTPWithoutAllowPrivate`、`TestHubSource_RefreshForAuthDebounce`、`TestLiteMode_UnauthRefreshCannotFloodHub`、`TestScrubWithSecrets`、`TestScheduler_ScrubsArbitraryUnprefixedKeyInUpstreamError`。
+- `go test -race ./...`、`npm run test:t3`、`npm run verify:release`（G1–G6）全绿。
+
+---
+
 ## [v20261121-01] - 2026-11-21
 
 ### Added

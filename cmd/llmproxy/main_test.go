@@ -796,3 +796,80 @@ func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
 		t.Fatalf("expected Hub-synced proxy_keys to authenticate")
 	}
 }
+
+func TestLiteMode_UnauthRefreshCannotFloodHub(t *testing.T) {
+	var hubCalls atomic.Int32
+	mockHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hubCalls.Add(1)
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("X-Lease-Until", time.Now().Add(time.Hour).Format(time.RFC3339Nano))
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":             true,
+			"config_version": 1,
+			"payload": types.ProxyConfig{
+				Version: 1,
+				Settings: types.RuntimeSettings{
+					ClientKey: "sk-valid-lite-client",
+				},
+			},
+		})
+	}))
+	defer mockHub.Close()
+
+	hubSrc := hubsync.NewHubSource(mockHub.URL, "stk_node_0123456789abcdef", true)
+	authMgr := auth.NewAuthenticator("", "")
+	hubSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
+		syncAuthKeysForRole(types.RoleLite, "", cfg, authMgr)
+	})
+
+	wrapAuth := newDataPlaneAuthWrapper(types.RoleLite, authMgr, hubSrc)
+	handler := wrapAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Node-Refresh") == "1" {
+			_, _ = hubSrc.Current(r.Context(), true)
+		} else {
+			_, _ = hubSrc.Current(r.Context(), false)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// (a) Cold start with valid Hub-projected key triggers 1 Hub call and returns 200
+	reqValid := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	reqValid.Header.Set("Authorization", "Bearer sk-valid-lite-client")
+	recValid := httptest.NewRecorder()
+	handler(recValid, reqValid)
+	if recValid.Code != http.StatusOK {
+		t.Fatalf("expected 200 on cold start with valid Hub-projected key, got %d", recValid.Code)
+	}
+	if hubCalls.Load() != 1 {
+		t.Fatalf("expected 1 hub call after cold start, got %d", hubCalls.Load())
+	}
+
+	// (b) 10 unauthenticated requests with bogus token + X-Node-Refresh: 1 must all return 401 and leave hubCalls == 1
+	for i := 0; i < 10; i++ {
+		reqBogus := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		reqBogus.Header.Set("Authorization", "Bearer sk-bogus-attacker-token")
+		reqBogus.Header.Set("X-Node-Refresh", "1")
+		recBogus := httptest.NewRecorder()
+		handler(recBogus, reqBogus)
+		if recBogus.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated request #%d expected 401, got %d", i, recBogus.Code)
+		}
+	}
+	if hubCalls.Load() != 1 {
+		t.Fatalf("expected unauthenticated X-Node-Refresh: 1 flood to leave hubCalls == 1, got %d", hubCalls.Load())
+	}
+
+	// (c) Authenticated request with valid key + X-Node-Refresh: 1 returns 200 and increments hubCalls to 2
+	reqAuthRefresh := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	reqAuthRefresh.Header.Set("Authorization", "Bearer sk-valid-lite-client")
+	reqAuthRefresh.Header.Set("X-Node-Refresh", "1")
+	recAuthRefresh := httptest.NewRecorder()
+	handler(recAuthRefresh, reqAuthRefresh)
+	if recAuthRefresh.Code != http.StatusOK {
+		t.Fatalf("expected 200 on authenticated X-Node-Refresh: 1, got %d", recAuthRefresh.Code)
+	}
+	if hubCalls.Load() != 2 {
+		t.Fatalf("expected hubCalls == 2 after authenticated refresh, got %d", hubCalls.Load())
+	}
+}

@@ -464,6 +464,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 	var (
 		tries          []types.Try
 		attempts       []TryAttempt
+		usedSecrets    []string
 		trailParts     []string
 		skips          []string
 		lastStatus     int
@@ -583,7 +584,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 						Millis:             time.Since(tryStart).Milliseconds(),
 						Reason:             "auth_error",
 						CooldownAppliedSec: cooldownSec,
-						ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					})
 					trailParts = append(trailParts, fmt.Sprintf("%s=401", cand.KeyTag))
 					return
@@ -611,6 +612,9 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 				return
 			}
 			rawKey := resolveCandidateKeySecret(cand, refresher)
+			if rawKey != "" {
+				usedSecrets = append(usedSecrets, rawKey)
+			}
 			applyUpstreamHeaders(upReq, r, spec.Endpoint, cand.Provider, rawKey, extraHeaders)
 
 			queuedMillis := time.Since(queuedStart).Milliseconds()
@@ -634,7 +638,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Millis:             tryElapsed,
 					Reason:             "network_error",
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 				})
 				trailParts = append(trailParts, fmt.Sprintf("%s=net_err", cand.KeyTag))
 				return
@@ -676,7 +680,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Millis:             tryElapsed,
 					Reason:             reason,
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(lastErrSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
 				})
 				trailParts = append(trailParts, fmt.Sprintf("%s=%d", cand.KeyTag, resp.StatusCode))
@@ -686,7 +690,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 						status  int
 						body    []byte
 						headers http.Header
-					}{status: resp.StatusCode, body: obs.Scrub(errBytes), headers: resp.Header}
+					}{status: resp.StatusCode, body: obs.ScrubWithSecrets(errBytes, usedSecrets...), headers: resp.Header}
 					abortLoop = true
 					return
 				}
@@ -728,7 +732,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Millis:             tryElapsed,
 					Reason:             classifyFailureReason(errStatus),
 					CooldownAppliedSec: cooldownSec,
-					ErrorSnippet:       obs.ScrubString(errSnippet),
+					ErrorSnippet:       obs.ScrubStringWithSecrets(errSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
 				})
 				trailParts = append(trailParts, fmt.Sprintf("%s=%d", cand.KeyTag, errStatus))
@@ -826,7 +830,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 	if passthrough4xx != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(passthrough4xx.status)
-		_, _ = w.Write(obs.Scrub(passthrough4xx.body))
+		_, _ = w.Write(obs.ScrubWithSecrets(passthrough4xx.body, usedSecrets...))
 		s.recordFinalTrace(types.RequestTrace{
 			ID:          traceID,
 			Timestamp:   time.Now().Unix(),
@@ -857,7 +861,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{
-			"message": fmt.Sprintf("all candidate keys failed: %s", obs.ScrubString(reason)),
+			"message": fmt.Sprintf("all candidate keys failed: %s", obs.ScrubStringWithSecrets(reason, usedSecrets...)),
 			"type":    "upstream_error",
 		},
 	})
