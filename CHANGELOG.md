@@ -4,6 +4,30 @@
 
 ---
 
+## [v20261122-03] - 2026-11-22
+
+### Added
+
+- **full 模式中枢内容改「按需拉取」（对齐 1 代语义，砍掉一键全量同步）**：移除全量同步端点 `POST /api/vault/sync` 与对应合并逻辑 `MergeHubSync`，中枢托管内容不再一键整批落地，改为三步按需：清单 `GET|POST /api/vault/manifest`（仅元数据 + Key 标签，绝无明文）→ 单供应商整体拉取 `POST /api/vault/fetch`（适配规则 + 全部 Key）→ 按 Key 标签补拉（`key_label`/`keys` 参数，增量合并、不影响其它 vault Key）。整体拉取对已存在的 vault 供应商执行**整体替换**：中枢托管字段（name/base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name/rule_hash）与 vault Key 列表整体落库——本地删过的 Key 重新拉取即恢复，中枢删掉的 Key 本地随之消失；本地仍存在 Key 的启用开关与本地刷新的 OAuth 状态不被回退，供应商 `Enabled` 属本地运维开关、永不取自中枢载荷。
+- **清单新增 `agent_models` 路由模板段**：中枢 manifest 下发按需路由模板——仅收录 `enabled` 的路由，按调用方模型 scope（节点 Token 的 `scope.models`，管理员视为 `["*"]`）过滤；候选必须引用清单 `providers` 段**存活**的供应商（禁用/死亡候选剔除、候选清零的路由整条丢弃），候选携带 `key_label` 与 `max_concurrency`（与运行时投影同字段名），绝不携带明文 Key 材料。控制台新增「从模板导入」弹层按需导入；模板路由不再随同步整批落地，本地路由完全自由、一条不用也可以。`providers` 段同步收紧：只列出启用且有 Key 材料（与运行时投影同口径）的 Key 标签，避免「清单可拉、运行时投影丢弃」的空转。
+- **中枢规则漂移检测**：新增 `edgeone-hub/lib/rulehash.js`（FNV-1a 32-bit 内容哈希），manifest 与 fetch 对解析后的 `adapter_rules` 打同一 `rule_hash`；节点存储拉取时的哈希，与清单哈希不一致即规则漂移，控制台显示「中枢规则已更新」横幅提示重新拉取。fetch 载荷同步补 `api_type` 与 `rule_hash`（同为中枢托管字段，旧中枢不下发时重拉不回退为空）。
+- **添加供应商不以预设为主**：预设退为适配文件模板——按输入的名称/ID 自动匹配并填充适配规则与 api_type（「已按预设 xxx 自动填充」），不再做头牌下拉；中枢托管供应商在新增弹层中直接从清单点选整体拉取，名称/URL 以中枢为准。
+
+### Fixed
+
+- **防管理密码泄露后把明文 Key 外送（供应商级锁定 + 拉取目标锁定）**：`enforceVaultProviderKeyLock` 升级为 `enforceVaultLock`——外部 SaveConfig 提交时，vault 供应商的 `base_url`/`anthropic_base_url`/`adapter_rules`/`preset_id`/`api_type`/`hide_client_name` 由后端**强制还原**为存储值（中枢托管内容不可本地改），vault Key 按标签/ID 匹配、篡改值或标签即还原，提交中缺失的 Key 视为本地删除（允许，重拉即恢复）；锁定范围由 Key 级扩展到供应商级。`POST /api/vault/fetch` 同时不再接受调用方传入的 `hub_url`/`node_token`——拉取目标永远是节点已配置的 Vault（存储配置或 CLI 默认值），调用方只能选择「拉取什么」，不能选择「从哪里拉」；上游请求体最小化，调用方凭据与 providers 一律不透传。
+- **本地同名供应商冲突显式 409**：对已存在且 `origin=local`（或历史空 origin）的同 ID 供应商发起按需拉取，返回 `409 provider_exists_local`，并在配置锁内复核（拉取往返期间被并发改为本地供应商同样失败关闭），绝不把 vault Key 静默并入本地供应商。
+- **按需拉取响应不再外泄明文**：full 节点自动导入后回显管理端前，对 `provider_config`/`providers` 中的明文 Key 掩码（控制台只读 `ok`/`provider` 后重载脱敏配置，明文不走管理端响应）；200 但响应体非 JSON 对象的中枢异常回包不再原样回显，改 502 `vault_fetch_invalid_response`。
+- **杂项收紧**：中枢下发的供应商 ID 按字符白名单校验（`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`，ID 会成为 map key、调度标识与 DOM 元素 id，防注入与选择器破坏）；`/api/vault/manifest` 支持 POST（凭据走请求体，节点 Token 不进 URL/CDN 日志，GET + 查询串保留为兼容形态）；`mergeProviderKeys` 补齐本地刷新 OAuth 状态的整体采纳（元数据 + token 字符串一并采纳，避免「新过期时间配旧令牌」的半新状态），按 Key 补拉不再回退已存 Key 的本地启停开关；启动加载时一次性迁移 `origin=vault` 的模板路由为本地路由（不再视为中枢托管状态）。
+
+### Verified
+
+- `npm run verify:release` G1–G6 全绿（版本一致性、确定性构建零漂移、T1 契约守卫、Hub 单测、`go test -race ./...`、T3 黑盒 E2E）。
+- 新增单测：Go 侧 `TestLocalSource_MergeVaultConfig_ReplaceBranch` / `TestLocalSource_MergeVaultConfig_PreservesLocalState` / `TestLocalSource_EnforceVaultLock` / `TestLocalSource_LoadFromDisk_MigratesVaultRoutesToLocal`、`TestAdminServer_VaultFetch_CannotBeRepointed` / `TestAdminServer_OnDemandVaultFetch_And_ExportStripsVaultState` / `TestDecodeVaultProviderConfig_RefusesUnsafeProviderIDs`；Hub 侧新增「12. Vault manifest agent_models」套件（scope 过滤、禁用路由与死候选剔除、明文 Key 零出现）与 fetch/manifest `rule_hash` 一致性断言。
+- 契约同步：`shared/contracts/admin-ui-backend.json` 升 v3/v3.1（`vault_sync` 端点移除、`vault_fetch` 409/替换语义/`imported_keys`、manifest `agent_models`、manifest 双角色），`docs/ADMIN_UI_BACKEND_CONTRACT.md` §7.3.1 重写为按需拉取契约，`docs/AGENT_DEPLOY_GUIDE.md` 与 `README.md` 的全量同步描述改为按需拉取。
+
+---
+
 ## [v20261122-02] - 2026-11-22
 
 ### Fixed

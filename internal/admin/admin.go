@@ -1,6 +1,6 @@
 // Package admin provides administrative HTTP API handlers for Full mode:
 // configuration management with CAS 409, embedded web console, usage queries, traces,
-// cooldown diagnostics, key verification, model probing, and vault sync.
+// cooldown diagnostics, key verification, model probing, and on-demand vault fetch.
 package admin
 
 import (
@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,16 +45,16 @@ type RouteRegistrar interface {
 
 // Server coordinates admin management endpoints.
 type Server struct {
-	authMgr       *auth.Authenticator
-	localSrc      *config.LocalSource
-	obsSink       types.ObservabilitySink
-	scheduler     *scheduler.Scheduler
-	oauthMgr      *oauth.Manager
-	httpClient    *http.Client
-	allowPrivate  bool
-	adminPassword string
-	buildVersion  string
-	buildSemver   string
+	authMgr          *auth.Authenticator
+	localSrc         *config.LocalSource
+	obsSink          types.ObservabilitySink
+	scheduler        *scheduler.Scheduler
+	oauthMgr         *oauth.Manager
+	httpClient       *http.Client
+	allowPrivate     bool
+	adminPassword    string
+	buildVersion     string
+	buildSemver      string
 	buildCommit      string
 	updateAPIBase    string
 	defaultVault     *types.VaultClientConfig
@@ -220,8 +221,8 @@ func (s *Server) RegisterRoutes(r any) {
 	register("POST /api/admin/verify-key", s.handleVerifyKey)
 	register("POST /api/admin/probe-models", s.handleProbeModels)
 	register("GET /api/vault/manifest", s.handleVaultManifest)
+	register("POST /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/fetch", s.handleVaultFetch)
-	register("POST /api/vault/sync", s.handleVaultSync)
 	register("POST /api/admin/oauth/start", s.handleOAuthStart)
 	register("GET /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/oauth/poll", s.handleOAuthPoll)
@@ -1891,8 +1892,23 @@ func (s *Server) handleVaultManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 
+	// Credentials may arrive as POST JSON body (preferred: keeps NODE_TOKEN out of the
+	// query string, where access/CDN logs would retain it) or as GET query params
+	// (legacy test-connection shape). This endpoint only proxies manifest METADATA —
+	// it never imports anything, so the overrides here are safe.
+	hubOverride, tokenOverride := r.URL.Query().Get("hub_url"), r.URL.Query().Get("node_token")
+	if r.Method == http.MethodPost {
+		var body struct {
+			HubURL    string `json:"hub_url"`
+			NodeToken string `json:"node_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			hubOverride, tokenOverride = body.HubURL, body.NodeToken
+		}
+	}
+
 	snap, _ := s.localSrc.Current(r.Context(), false)
-	hubURL, nodeToken := s.resolveVaultCredentials(snap, r.URL.Query().Get("hub_url"), r.URL.Query().Get("node_token"))
+	hubURL, nodeToken := s.resolveVaultCredentials(snap, hubOverride, tokenOverride)
 
 	if hubURL == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -1928,7 +1944,17 @@ func (s *Server) handleVaultManifest(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// vaultProviderIDPattern gates hub-supplied provider IDs at the adoption boundary. The ID
+// becomes map keys, scheduler identifiers, and DOM element ids in the console
+// (ed_p_name_<id> ...), so anything outside this conservative slug charset is refused
+// rather than adopted (a compromised/misbehaving hub must not inject markup or break
+// selectors on the node).
+var vaultProviderIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
 func decodeVaultProviderConfig(provID string, raw json.RawMessage) (*types.ProviderConfig, error) {
+	if !vaultProviderIDPattern.MatchString(provID) {
+		return nil, fmt.Errorf("admin: refusing vault provider with unsafe id %q", provID)
+	}
 	var pc types.ProviderConfig
 	if err := json.Unmarshal(raw, &pc); err != nil {
 		return nil, err
@@ -1941,6 +1967,9 @@ func decodeVaultProviderConfig(provID string, raw json.RawMessage) (*types.Provi
 	if pc.ID == "" {
 		pc.ID = provID
 	}
+	// The hub fetch payload carries no "enabled" flag: a newly adopted provider starts
+	// enabled. For existing providers MergeVaultConfig preserves the local toggle, so
+	// this defaulting never re-enables anything already on the node.
 	if extra.Enabled == nil {
 		pc.Enabled = true
 	}
@@ -1980,6 +2009,86 @@ func decodeVaultProviderConfig(provID string, raw json.RawMessage) (*types.Provi
 	return &pc, nil
 }
 
+// importedKeyLabels lists the labels of vault keys that landed with this fetch (for the UI toast).
+func importedKeyLabels(provs map[string]*types.ProviderConfig) []string {
+	labels := make([]string, 0, 8)
+	for _, p := range provs {
+		if p == nil {
+			continue
+		}
+		for _, k := range p.APIKeys {
+			if k == nil {
+				continue
+			}
+			lbl := strings.TrimSpace(k.Label)
+			if lbl == "" {
+				lbl = strings.TrimSpace(k.ID)
+			}
+			if lbl == "" {
+				continue
+			}
+			dup := false
+			for _, e := range labels {
+				if e == lbl {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				labels = append(labels, lbl)
+			}
+		}
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+// vaultFetchWantsSpecificKeys reports whether the request targets a key-label subset
+// (按 Key 标签补拉) rather than a full provider fetch (规则+全部 Key).
+func vaultFetchWantsSpecificKeys(reqBody map[string]any) bool {
+	if lbl, _ := reqBody["key_label"].(string); strings.TrimSpace(lbl) != "" {
+		return true
+	}
+	if keysRaw, ok := reqBody["keys"].([]any); ok && len(keysRaw) > 0 {
+		return true
+	}
+	return false
+}
+
+// maskHubFetchSecrets masks plaintext vault key secrets in the Hub fetch response before
+// echoing it to the admin client. The console only reads ok/provider and reloads the
+// (masked) config afterwards, so plaintext secrets must not transit the admin response.
+func maskHubFetchSecrets(respBody map[string]any) {
+	maskProviderCfg := func(pc map[string]any) {
+		if keys, ok := pc["keys"].(map[string]any); ok {
+			for lbl, v := range keys {
+				if s, isStr := v.(string); isStr && s != "" && !config.IsMaskedSecret(s) {
+					keys[lbl] = maskSecret(s)
+				}
+			}
+		}
+		if apiKeys, ok := pc["api_keys"].([]any); ok {
+			for _, item := range apiKeys {
+				if km, ok := item.(map[string]any); ok {
+					if s, isStr := km["key"].(string); isStr && s != "" && !config.IsMaskedSecret(s) {
+						km["key"] = maskSecret(s)
+					}
+				}
+			}
+		}
+	}
+	if pc, ok := respBody["provider_config"].(map[string]any); ok {
+		maskProviderCfg(pc)
+	}
+	if provs, ok := respBody["providers"].(map[string]any); ok {
+		for _, v := range provs {
+			if pc, ok := v.(map[string]any); ok {
+				maskProviderCfg(pc)
+			}
+		}
+	}
+}
+
 func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAuth(w, r) {
 		return
@@ -1993,39 +2102,13 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. If payload directly provides "providers", merge into local source
-	if provsRaw, ok := reqBody["providers"]; ok {
-		provsData, _ := json.Marshal(provsRaw)
-		var rawProvs map[string]json.RawMessage
-		if err := json.Unmarshal(provsData, &rawProvs); err == nil && len(rawProvs) > 0 {
-			provs := make(map[string]*types.ProviderConfig, len(rawProvs))
-			for pID, rawP := range rawProvs {
-				if pc, decErr := decodeVaultProviderConfig(pID, rawP); decErr == nil && pc != nil {
-					provs[pID] = pc
-				}
-			}
-			if len(provs) > 0 {
-				savedSnap, err := s.localSrc.MergeVaultConfig(provs)
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-					return
-				}
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"ok":       true,
-					"_version": savedSnap.Config.Version,
-					"merged":   len(provs),
-				})
-				return
-			}
-		}
-	}
-
-	// 2. Otherwise forward fetch to Hub
+	// The caller may only choose WHAT to fetch (provider / key_label / keys). WHERE to
+	// fetch from is always the configured Vault (stored config URL + token, or CLI
+	// defaults): an admin-password leak must not be able to point the fetch — and with
+	// it the auto-import of hub-managed fields like base_url — at an attacker hub.
 	snap, _ := s.localSrc.Current(r.Context(), false)
-	reqHubURL, _ := reqBody["hub_url"].(string)
-	reqNodeToken, _ := reqBody["node_token"].(string)
-	hubURL, nodeToken := s.resolveVaultCredentials(snap, reqHubURL, reqNodeToken)
+	reqProvider, _ := reqBody["provider"].(string)
+	hubURL, nodeToken := s.resolveVaultCredentials(snap, "", "")
 
 	if hubURL == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -2033,8 +2116,34 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// On-demand rule: a provider that already exists locally with a non-vault origin
+	// ("local" or a legacy empty origin) is not re-fetchable; the operator must delete
+	// it first (gen-1 semantic). MergeVaultConfig re-checks this under the config mutex,
+	// so a same-ID provider flipped local during the hub round-trip still fails closed.
+	if reqProvider != "" && snap != nil && snap.Config != nil {
+		if p, ok := snap.Config.Providers[reqProvider]; ok && p != nil && p.Origin != "vault" {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":       false,
+				"error":    "provider_exists_local",
+				"provider": reqProvider,
+			})
+			return
+		}
+	}
+
+	// Forward a minimal upstream body: caller-supplied hub_url/node_token/providers are
+	// never relayed to the hub.
+	upBody := map[string]any{"provider": reqProvider}
+	if lbl, _ := reqBody["key_label"].(string); strings.TrimSpace(lbl) != "" {
+		upBody["key_label"] = lbl
+	}
+	if keysRaw, ok := reqBody["keys"].([]any); ok && len(keysRaw) > 0 {
+		upBody["keys"] = keysRaw
+	}
+
 	target := strings.TrimRight(hubURL, "/") + "/api/vault/fetch"
-	reqData, _ := json.Marshal(reqBody)
+	reqData, _ := json.Marshal(upBody)
 	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(reqData))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -2063,13 +2172,17 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-merge fetched providers into local configuration if Hub returned 200 OK
+	// Auto-import fetched providers into local configuration if Hub returned 200 OK.
+	// A full provider fetch replaces the hub-managed fields and the vault key list
+	// wholesale; a key-label subset fetch (按 Key 标签补拉) merges without dropping
+	// the other vault keys.
 	var hubResp struct {
 		OK             bool                       `json:"ok"`
 		Provider       string                     `json:"provider"`
 		ProviderConfig json.RawMessage            `json:"provider_config"`
 		Providers      map[string]json.RawMessage `json:"providers"`
 	}
+	importedKeys := []string{}
 	if err := json.Unmarshal(respBytes, &hubResp); err == nil && hubResp.OK {
 		toMerge := make(map[string]*types.ProviderConfig)
 		if hubResp.Provider != "" && len(hubResp.ProviderConfig) > 0 && string(hubResp.ProviderConfig) != "null" {
@@ -2085,143 +2198,45 @@ func (s *Server) handleVaultFetch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(toMerge) > 0 {
-			_, _ = s.localSrc.MergeVaultConfig(toMerge)
+			_, mergeErr := s.localSrc.MergeVaultConfig(toMerge, !vaultFetchWantsSpecificKeys(reqBody))
+			if mergeErr != nil {
+				var lc *config.LocalProviderConflictError
+				if errors.As(mergeErr, &lc) {
+					w.WriteHeader(http.StatusConflict)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"ok":       false,
+						"error":    "provider_exists_local",
+						"provider": lc.Provider,
+					})
+					return
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": mergeErr.Error()})
+				return
+			}
+			importedKeys = importedKeyLabels(toMerge)
 		}
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var respBody map[string]any
+		if err := json.Unmarshal(respBytes, &respBody); err == nil && respBody != nil {
+			maskHubFetchSecrets(respBody)
+			respBody["imported_keys"] = importedKeys
+			out, _ := json.Marshal(respBody)
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(out)
+			return
+		}
+		// A 200 response that is not a JSON object cannot be masked — echoing it raw
+		// would let plaintext secrets transit the admin response when the hub misbehaves.
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "vault_fetch_invalid_response"})
+		return
 	}
 
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(respBytes)
-}
-
-func (s *Server) handleVaultSync(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAuth(w, r) {
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-
-	var reqBody struct {
-		HubURL    string `json:"hub_url"`
-		NodeToken string `json:"node_token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil && !errors.Is(err, io.EOF) {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid json"})
-		return
-	}
-
-	snap, _ := s.localSrc.Current(r.Context(), false)
-	hubURL, nodeToken := s.resolveVaultCredentials(snap, reqBody.HubURL, reqBody.NodeToken)
-	if hubURL == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "vault hub url not configured"})
-		return
-	}
-	if nodeToken == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "vault node token not configured"})
-		return
-	}
-
-	target := strings.TrimRight(hubURL, "/") + "/api/node/config"
-	upReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, strings.NewReader("{}"))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	upReq.Header.Set("Content-Type", "application/json")
-	upReq.Header.Set("Authorization", "Bearer "+nodeToken)
-	appVer, _, _ := s.systemBuildInfo()
-	upReq.Header.Set("X-Node-Version", appVer)
-
-	client := s.outboundClient(15 * time.Second)
-	resp, err := client.Do(upReq)
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		w.WriteHeader(resp.StatusCode)
-		if len(respBytes) > 0 {
-			_, _ = w.Write(respBytes)
-		} else {
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": fmt.Sprintf("hub returned HTTP %d", resp.StatusCode)})
-		}
-		return
-	}
-
-	var hubResp struct {
-		OK            bool            `json:"ok"`
-		ConfigVersion int64           `json:"config_version"`
-		PayloadRaw    json.RawMessage `json:"payload"`
-		Error         any             `json:"error"`
-	}
-	if err := json.Unmarshal(respBytes, &hubResp); err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid hub response JSON"})
-		return
-	}
-	if !hubResp.OK || len(hubResp.PayloadRaw) == 0 || string(hubResp.PayloadRaw) == "null" {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "hub returned empty sync payload"})
-		return
-	}
-
-	var payload types.ProxyConfig
-	if err := json.Unmarshal(hubResp.PayloadRaw, &payload); err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid hub payload structure: " + err.Error()})
-		return
-	}
-	// Support optional providers.<id>.keys map[string]string if Hub emitted legacy keys map alongside/instead of api_keys
-	var rawPayload struct {
-		Providers map[string]json.RawMessage `json:"providers"`
-	}
-	if err := json.Unmarshal(hubResp.PayloadRaw, &rawPayload); err == nil && len(rawPayload.Providers) > 0 {
-		if payload.Providers == nil {
-			payload.Providers = make(map[string]*types.ProviderConfig, len(rawPayload.Providers))
-		}
-		for pID, rawP := range rawPayload.Providers {
-			if pc, decErr := decodeVaultProviderConfig(pID, rawP); decErr == nil && pc != nil {
-				payload.Providers[pID] = pc
-			}
-		}
-	}
-
-	merged, err := s.localSrc.MergeHubSync(&payload)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
-		return
-	}
-
-	masked := maskConfigSecrets(merged)
-	if dv := s.maskedEffectiveVault(merged.Vault); dv != nil {
-		masked.Vault = dv
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":               true,
-		"_version":         merged.Version,
-		"config_version":   hubResp.ConfigVersion,
-		"synced_providers": len(payload.Providers),
-		"synced_models":    len(payload.AgentModels),
-		"config":           masked,
-	})
 }
 
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {

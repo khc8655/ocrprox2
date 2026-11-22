@@ -37,6 +37,8 @@
     batchVerifying: false,
     probedModelsByProvider: {},
     probeFilterByProvider: {},
+    vaultManifest: null,
+    addProvVaultPick: '',
   };
 
   function byIdIn(root, id) {
@@ -205,6 +207,33 @@
     return window.HOST?.kind === 'hub';
   }
 
+  // --- Vault On-Demand Manifest (Full) ---
+  // Silent by design: the manifest is a background cache for the add-provider
+  // form and the template-import dialog. A missing hub link must never block
+  // the rest of the console — the settings page offers an explicit「测试连接」.
+  async function loadVaultManifest(opts = {}) {
+    if (isHubMode() || !window.HOST.capabilities.vaultClient) return null;
+    if (state.vaultManifest && !opts.force) return state.vaultManifest;
+    try {
+      const res = await window.HOST.fetchVaultManifest();
+      if (res && res.ok && res.providers && typeof res.providers === 'object') {
+        state.vaultManifest = res;
+        return state.vaultManifest;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function vaultManifestProviders() {
+    const raw = state.vaultManifest?.providers;
+    return raw && typeof raw === 'object' ? raw : {};
+  }
+
+  function vaultManifestModels() {
+    const raw = state.vaultManifest?.agent_models;
+    return raw && typeof raw === 'object' ? raw : {};
+  }
+
   function nextKeyLabel(keys = [], prefix = 'k') {
     const used = new Set((keys || []).map((k) => k?.label || k?.id).filter(Boolean));
     let i = 1;
@@ -314,6 +343,9 @@
 
   function ensureUnifiedFixedRoutes(cfg) {
     if (!cfg || typeof cfg !== 'object') return;
+    // Hub templates no longer carry KB fixed-4-channel routes (Full nodes stopped
+    // pulling them), so the hub console must not resurrect them from kb_models.
+    if (window.HOST && window.HOST.kind === 'hub') return;
     cfg.agent_models = cfg.agent_models || {};
     const kb = cfg.kb_models || {};
     for (const cat of FIXED_SLOT_IDS) {
@@ -485,21 +517,25 @@
     const navNodes = $('navNodes');
     const navActivity = $('navActivity');
     const topVersionBox = $('topVersionBox');
-    const vaultSyncBar = $('vaultSyncBar');
     const cfgVaultLinkBox = $('cfgVaultLinkBox');
     const hubOverviewBox = $('hubOverviewBox');
     const fullOverviewBox = $('fullOverviewBox');
     const btnClearAllCooldowns = $('btnClearAllCooldowns');
+    const btnImportFromTemplate = $('btnImportFromTemplate');
+    const modelPipelineSeg = $('modelPipelineSeg');
 
     if (navModels) navModels.hidden = false;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
     if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
-    if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
     if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
     if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
     if (fullOverviewBox) fullOverviewBox.hidden = isHub;
     if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
+    if (btnImportFromTemplate) btnImportFromTemplate.hidden = !caps.vaultClient;
+    // Hub templates no longer carry KB fixed-4-channel routes: hide the submode
+    // switch instead of showing an always-empty「固定 4 通道」filter.
+    if (modelPipelineSeg) modelPipelineSeg.hidden = isHub;
     const guardBox = $('concurrencyGuardBox');
     if (guardBox) guardBox.hidden = false;
     const sysBox = $('systemUpdateBox');
@@ -509,7 +545,7 @@
     if (provSub) {
       provSub.textContent = isHub
         ? '统一维护共享供应商与密钥池，按节点权限范围安全下发至接入的 Full / Lite 节点'
-        : '集中管理本地私有供应商与从中枢同步的共享密钥池';
+        : '集中管理本地私有供应商；中枢托管供应商按需拉取（清单 → 整体拉取 → 按 Key 补拉）';
     }
     const modelsTitle = $('modelsTitle');
     const modelsSub = $('modelsSubtitle');
@@ -518,7 +554,7 @@
     }
     if (modelsSub) {
       modelsSub.textContent = isHub
-        ? '中枢只做编排与下发模板，不参与流量中转。固定 4 通道（chat / embedding / reranker / ocr）仅对 Full 节点生效，Lite 节点自动忽略。'
+        ? '中枢只做编排与下发模板，不参与流量中转；节点侧按需拉取供应商与模板路由。'
         : '管理当前网关对外暴露的模型路由、多密钥粘性/轮询策略及固定 4 通道并发编排。';
     }
     const rpTitle = $('routingPolicyTitle');
@@ -605,6 +641,8 @@
         if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
         const installOverlay = $('nodeInstallOverlay');
         if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
+        const tplImportOverlay = $('templateImportOverlay');
+        if (tplImportOverlay && !tplImportOverlay.hidden) { closeTemplateImportOverlay(); closedSomething = true; }
         if (state.activeEditorKey) {
           state.activeEditorKey = null;
           closedSomething = true;
@@ -738,7 +776,10 @@
 
     const btnIssueNode = $('btnIssueNode');
     if (btnIssueNode) {
-      clk(btnIssueNode, () => toggle('issueNodeForm'));
+      clk(btnIssueNode, () => {
+        toggle('issueNodeForm');
+        mountIssueScopeLists();
+      });
     }
 
     const btnDoIssue = $('btnDoIssue');
@@ -761,8 +802,21 @@
       });
     }
 
-    clk($('btnSyncVault'), handleSyncVault);
-    clk($('btnSyncVaultFromSettings'), handleSyncVault);
+    clk($('btnImportFromTemplate'), async () => {
+      // Force a reload: the cached manifest is a snapshot, and template routes newly
+      // published on the hub must be importable without a full page refresh.
+      await loadVaultManifest({ force: true });
+      openTemplateImportOverlay();
+    });
+    clk($('btnCloseTemplateImport'), closeTemplateImportOverlay);
+    clk($('btnConfirmImportRoutes'), handleConfirmImportRoutes);
+    const templateImportOverlay = $('templateImportOverlay');
+    if (templateImportOverlay) {
+      templateImportOverlay.addEventListener('click', (ev) => {
+        if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
+      });
+    }
+    clk($('btnTestVaultLink'), handleTestVaultLink);
 
     // Analytics Period Selector
     const periodSeg = $('activityPeriodSeg');
@@ -995,36 +1049,21 @@
     return { url, base, protocol, key, model };
   }
 
-  function populatePresetDropdown(extraPresets = []) {
-    const sel = $('newProvPreset');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
-    const seenIds = new Set(['gemini']);
-    for (const [key, meta] of Object.entries(PRESETS_META)) {
-      seenIds.add(key);
-      if (meta.preset_id) seenIds.add(meta.preset_id);
-      const opt = ce('option');
-      opt.value = key;
-      opt.textContent = meta.label;
-      sel.appendChild(opt);
-    }
-    if (Array.isArray(extraPresets)) {
-      for (const p of extraPresets) {
-        if (!p || !p.id || seenIds.has(p.id)) continue;
-        PRESETS_META[p.id] = {
-          id: p.id,
-          preset_id: p.id,
-          label: p.name || p.id,
-          base_url: p.base_url || '',
-          anthropic_base_url: p.anthropic_base_url || '',
-          api_type: normalizeApiType(p.protocol),
-        };
-        seenIds.add(p.id);
-        const opt = ce('option');
-        opt.value = p.id;
-        opt.textContent = p.name || p.id;
-        sel.appendChild(opt);
-      }
+  // Presets are no longer surfaced as a head-of-form dropdown: PRESETS_META is
+  // only the matching source for「按输入的名称/ID 自动匹配」(see
+  // applyPresetAutoMatch). Server-side extra presets still join the source.
+  function mergeExtraPresets(extraPresets = []) {
+    if (!Array.isArray(extraPresets)) return;
+    for (const p of extraPresets) {
+      if (!p || !p.id || PRESETS_META[p.id]) continue;
+      PRESETS_META[p.id] = {
+        id: p.id,
+        preset_id: p.id,
+        label: p.name || p.id,
+        base_url: p.base_url || '',
+        anthropic_base_url: p.anthropic_base_url || '',
+        api_type: normalizeApiType(p.protocol),
+      };
     }
   }
 
@@ -1229,14 +1268,140 @@
     });
   }
 
+  // --- Add Provider: source select (custom vs vault on-demand) ---
+  // Vault mode locks the hub-managed fields (the hub is authoritative) and only
+  // lists manifest providers that are not configured locally yet. The hub console
+  // itself hosts the vault, so the on-demand option only exists on Full nodes.
+  function applyNewProvSourceMode() {
+    const vaultOption = $('newProvSource')?.querySelector('option[value="vault"]');
+    if (isHubMode() && vaultOption) vaultOption.hidden = true;
+    const vaultMode = ($('newProvSource')?.value || 'custom') === 'vault';
+    const setDisabled = (id, dis) => {
+      const el = $(id);
+      if (el) el.disabled = dis;
+    };
+    setDisabled('newProvId', vaultMode);
+    setDisabled('newProvName', vaultMode);
+    setDisabled('newProvBaseUrl', vaultMode);
+    setDisabled('newProvApiType', vaultMode);
+    toggle('newProvVaultGroup', vaultMode);
+    toggle('newProvKeyAliasGroup', !vaultMode);
+    toggle('newProvApiKeyGroup', !vaultMode);
+    toggle('btnDetectProvider', !vaultMode);
+    toggle('btnToggleCurlPaste', !vaultMode);
+    if (vaultMode) {
+      const curlWrap = $('curlPasteWrap');
+      if (curlWrap && !curlWrap.hidden) toggle(curlWrap, false);
+      state.addProvVaultPick = '';
+      renderVaultProviderPicks();
+    } else {
+      state.addProvVaultPick = '';
+      applyPresetAutoMatch();
+    }
+    const hintEl = $('newProvSourceHint');
+    if (hintEl) {
+      hintEl.textContent = vaultMode
+        ? '选中后整体拉取该供应商的适配规则与全部 Key，名称 / URL 以中枢为准'
+        : '手动填写端点信息；输入名称或 ID 会自动匹配预设适配规则';
+    }
+  }
+
+  function renderVaultProviderPicks() {
+    const box = $('newProvVaultPick');
+    if (!box) return;
+    box.innerHTML = '';
+    const hintEl = $('newProvVaultHint');
+    if (hintEl) hintEl.textContent = '';
+    const localProviders = state.config?.providers || {};
+    const manifestProvs = vaultManifestProviders();
+    const entries = Object.entries(manifestProvs).filter(([pId]) => !localProviders[pId]);
+    if (entries.length === 0) {
+      const empty = ce('span');
+      empty.className = 'text-xs text-muted';
+      // Three distinct empty states: manifest not loaded / loaded but hub hosts nothing /
+      // loaded and every hub provider already exists locally.
+      empty.textContent = !state.vaultManifest
+        ? '中枢清单未加载（请在系统设置配置 Vault 连接并点击「测试连接」）'
+        : Object.keys(manifestProvs).length === 0
+          ? '中枢清单为空：中枢暂未托管任何可拉取的供应商'
+          : '中枢清单中的供应商均已配置在本地，无需重复添加';
+      box.appendChild(empty);
+      return;
+    }
+    for (const [pId, meta] of entries) {
+      const keyCount = Array.isArray(meta.keys) ? meta.keys.length : 0;
+      const pill = ce('button');
+      pill.type = 'button';
+      pill.className = `probe-pill${state.addProvVaultPick === pId ? ' probe-pill--managed' : ''}`;
+      pill.innerHTML = `${eh(meta.name || pId)} · ${keyCount} Key${meta.preset_id ? ` <span class="pill">预设 ${eh(meta.preset_id)}</span>` : ''}`;
+      clk(pill, () => {
+        state.addProvVaultPick = pId;
+        box.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
+        const idEl = $('newProvId');
+        const nameEl = $('newProvName');
+        const baseEl = $('newProvBaseUrl');
+        if (idEl) idEl.value = pId;
+        if (nameEl) nameEl.value = meta.name || pId;
+        if (baseEl) baseEl.value = meta.base_url || '';
+        if (hintEl) {
+          hintEl.textContent = `中枢 ${keyCount} 个 Key · 适配规则${meta.preset_id ? ` · 预设 ${meta.preset_id}` : ''}`;
+        }
+      });
+      box.appendChild(pill);
+    }
+  }
+
+  // --- Preset auto-match (custom source): presets are matched by the typed
+  // name / ID instead of a dropdown (aligned with v1 applyPresetForProviderName:
+  // only fill Base URL when it is still empty, always align the protocol).
+  function matchPresetMeta(idOrName) {
+    const key = String(idOrName || '').trim().toLowerCase();
+    if (!key) return null;
+    for (const meta of Object.values(PRESETS_META)) {
+      if (String(meta.id || '').toLowerCase() === key || String(meta.label || '').toLowerCase() === key) {
+        return meta;
+      }
+    }
+    return null;
+  }
+
+  function applyPresetAutoMatch() {
+    if (($('newProvSource')?.value || 'custom') !== 'custom') return;
+    const hintEl = $('newProvPresetHint');
+    const meta = matchPresetMeta($('newProvName')?.value) || matchPresetMeta($('newProvId')?.value);
+    if (hintEl) {
+      hintEl.textContent = meta ? `已按预设 ${meta.label} 自动填充` : '';
+      hintEl.hidden = !meta;
+      hintEl.classList.toggle('hidden', !meta);
+    }
+    if (!meta) return;
+    const apiSel = $('newProvApiType');
+    const apiType = normalizeApiType(meta.api_type);
+    if (apiSel && [...apiSel.options].some((o) => o.value === apiType)) apiSel.value = apiType;
+    const baseEl = $('newProvBaseUrl');
+    if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
+  }
+
   function setupCreationForms() {
-    populatePresetDropdown();
     const pForm = $('addProviderForm');
     const mForm = $('addModelForm');
 
 
-    clk($('btnAddProvider'), () => toggle(pForm));
+    clk($('btnAddProvider'), async () => {
+      toggle(pForm);
+      if (pForm && !pForm.hidden) {
+        applyNewProvSourceMode();
+        // Force a reload so hub-side key/template changes since page load are visible.
+        await loadVaultManifest({ force: true });
+        if (($('newProvSource')?.value || '') === 'vault') renderVaultProviderPicks();
+      }
+    });
     clk($('btnCancelAddProvider'), () => toggle(pForm, false));
+
+    const srcSel = $('newProvSource');
+    if (srcSel) srcSel.addEventListener('change', applyNewProvSourceMode);
+    $('newProvName')?.addEventListener('input', applyPresetAutoMatch);
+    $('newProvId')?.addEventListener('input', applyPresetAutoMatch);
 
     // cURL Paste Toggle & Input (M3)
     const btnToggleCurl = $('btnToggleCurlPaste');
@@ -1303,37 +1468,49 @@
       });
     }
 
-    $('newProvPreset')?.addEventListener('change', (e) => {
-      const m = PRESETS_META[e.target.value];
-      const hintEl = $('newProvPresetHint');
-      if (m) {
-        $('newProvId').value = m.id;
-        $('newProvName').value = m.label;
-        $('newProvBaseUrl').value = m.base_url;
-        $('newProvApiType').value = normalizeApiType(m.api_type);
-        if (hintEl) {
-          hintEl.textContent = m.hint || '';
-          hintEl.hidden = !m.hint;
-          hintEl.classList.toggle('hidden', !m.hint);
-        }
-      } else if (hintEl) {
-        hintEl.textContent = '';
-        hintEl.hidden = true;
-        hintEl.classList.add('hidden');
-      }
-    });
-
     clk($('btnConfirmAddProvider'), async () => {
+      const sourceVal = $('newProvSource')?.value || 'custom';
+
+      // Vault on-demand path: one-shot fetch (rules + all keys). The gateway
+      // merges the hub response server-side, so we only refresh afterwards.
+      if (sourceVal === 'vault') {
+        const pickId = state.addProvVaultPick;
+        if (!pickId) return toast('请先选择一个中枢托管供应商', 'warn');
+        if (state.config?.providers?.[pickId]) {
+          // The existing provider may be vault-origin (editor offers「重新拉取」) or
+          // locally created (no such button — it must be deleted or renamed first).
+          return toast(`供应商 ${pickId} 已存在：中枢托管供应商可在其编辑器中「重新拉取」，本地创建的供应商请先删除或改名`, 'warn');
+        }
+        const btn = $('btnConfirmAddProvider');
+        if (btn) btn.disabled = true;
+        toast(`正在从中枢拉取供应商 ${pickId}（规则与全部 Key）...`, 'info');
+        try {
+          const res = await window.HOST.fetchVaultCredentials(pickId);
+          if (res && res.ok) {
+            state.activeEditorKey = `p_${pickId}`;
+            toggle(pForm, false);
+            await loadData();
+            toast(`已拉取中枢供应商 ${pickId}`, 'ok');
+          } else {
+            toast(`从中枢拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+          }
+        } catch (e) {
+          toast(`从中枢拉取异常: ${e.message}`, 'err');
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+        return;
+      }
+
       const id = ($('newProvId')?.value || '').trim();
       const name = ($('newProvName')?.value || '').trim() || id;
       const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
       const apiType = normalizeApiType($('newProvApiType')?.value);
       const keyAlias = ($('newProvKeyAlias')?.value || '').trim() || 'k1';
       const apiKey = ($('newProvApiKey')?.value || '').trim();
-      const selectedPresetKey = $('newProvPreset')?.value || '';
-      const selectedMeta = PRESETS_META[selectedPresetKey];
-      const resolvedPresetId = selectedMeta
-        ? (selectedMeta.preset_id || selectedMeta.id)
+      const matchedMeta = matchPresetMeta(name) || matchPresetMeta(id);
+      const resolvedPresetId = matchedMeta
+        ? (matchedMeta.preset_id || matchedMeta.id)
         : (PRESETS_META[id]?.preset_id || '');
 
       if (!id) return toast('请输入供应商标识 ID', 'warn');
@@ -1356,8 +1533,8 @@
         origin: defOrigin,
         api_keys: parsed.keys,
       };
-      if (selectedMeta?.anthropic_base_url) {
-        newProv.anthropic_base_url = selectedMeta.anthropic_base_url;
+      if (matchedMeta?.anthropic_base_url) {
+        newProv.anthropic_base_url = matchedMeta.anthropic_base_url;
       }
       state.config.providers[id] = newProv;
       state.activeEditorKey = `p_${id}`;
@@ -1450,6 +1627,16 @@
         loadActivityData();
       }
     }
+
+    if (tab === 'providers' && !isHubMode() && window.HOST.capabilities.vaultClient) {
+      loadVaultManifest().then((manifest) => {
+        const srcSel = $('newProvSource');
+        const pForm = $('addProviderForm');
+        if (manifest && srcSel && srcSel.value === 'vault' && pForm && !pForm.hidden) {
+          renderVaultProviderPicks();
+        }
+      });
+    }
   }
 
   async function loadData() {
@@ -1469,15 +1656,20 @@
 
       if (window.HOST.capabilities.nodeManager) {
         await loadNodesData();
+        mountIssueScopeLists();
       }
 
       if (!isHubMode() && !state.extraPresetsLoaded && window.HOST.getPresetsExtra) {
         state.extraPresetsLoaded = true;
         window.HOST.getPresetsExtra().then((res) => {
           if (res && res.ok && Array.isArray(res.presets)) {
-            populatePresetDropdown(res.presets);
+            mergeExtraPresets(res.presets);
           }
         }).catch(() => {});
+      }
+
+      if (!isHubMode() && window.HOST.capabilities.vaultClient) {
+        loadVaultManifest();
       }
 
       if (window.HOST.capabilities.systemUpdate && !state.systemVersion && window.HOST.getSystemVersion) {
@@ -1787,54 +1979,29 @@
     }
   }
 
-  // --- Unified Vault Hub Sync Handler (Full Role, Decision #1) ---
-  async function handleSyncVault() {
-    let hubUrl = (state.config?.vault?.url || ($('cfgVaultUrl')?.value || '')).trim();
-    let nodeToken = (state.config?.vault?.node_token || ($('cfgVaultToken')?.value || '')).trim();
-
-    if (!hubUrl) {
-      const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
-      if (!inputUrl) return;
-      hubUrl = inputUrl.trim();
-      const inputToken = prompt('请输入 Full 节点专属 NODE_TOKEN:', '') || '';
-      nodeToken = inputToken.trim();
-    }
-
-    const btn = $('btnSyncVault');
-    const btnSettings = $('btnSyncVaultFromSettings');
+  // --- Vault Link Connectivity Test (Full, settings page) ---
+  // Uses the credentials currently typed into the settings form (NOT the saved
+  // ones), so the operator can validate a new hub URL / NODE_TOKEN before
+  // pressing「保存全部设置」.
+  async function handleTestVaultLink() {
+    const hubUrl = ($('cfgVaultUrl')?.value || '').trim();
+    const nodeToken = ($('cfgVaultToken')?.value || '').trim();
+    if (!hubUrl) return toast('请先填写 Vault 中枢地址', 'warn');
+    const btn = $('btnTestVaultLink');
     if (btn) btn.disabled = true;
-    if (btnSettings) btnSettings.disabled = true;
-
-    toast('正在从中枢同步供应商与模型路由...', 'info');
+    toast('正在测试 Vault 中枢连接...', 'info');
     try {
       const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
-      const syncFn = window.HOST.api?.syncFromVault || window.HOST.syncFromVault;
-      const res = await syncFn({ hubUrl, nodeToken: tokenForReq });
-      if (res && res.ok) {
-        if (res.config && typeof res.config === 'object') {
-          ensureUnifiedFixedRoutes(res.config);
-          state.config = res.config;
-        }
-        if (typeof res._version === 'number' && state.config) {
-          state.config._version = res._version;
-        }
-        const verEl = $('configVersionDisplay');
-        if (verEl && state.config?._version !== undefined) {
-          verEl.textContent = `v${state.config._version}`;
-        }
-        refreshDatalists();
-        renderProvidersList();
-        renderModelsList();
-        renderSettingsView();
-        toast(`已从中枢同步 ${res.synced_providers ?? 0} 个供应商与 ${res.synced_models ?? 0} 个模型路由`, 'ok');
+      const res = await window.HOST.fetchVaultManifest(hubUrl, tokenForReq);
+      if (res && res.ok && res.providers && typeof res.providers === 'object') {
+        toast(`连接成功：中枢可用供应商 ${Object.keys(res.providers).length} 个`, 'ok');
       } else {
-        toast(`从中枢同步失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+        toast(`连接失败: ${scrubUiText(res?.error || `HTTP ${res?.status || '请求未成功'}`)}`, 'err');
       }
     } catch (e) {
-      toast(`从中枢同步异常: ${scrubUiText(e.message)}`, 'err');
+      toast(`连接失败: ${scrubUiText(e.message)}`, 'err');
     } finally {
       if (btn) btn.disabled = false;
-      if (btnSettings) btnSettings.disabled = false;
     }
   }
 
@@ -2037,6 +2204,12 @@
     const curApiType = normalizeApiType(p.api_type);
     const isMiniMax = String(p.preset_id || pId || '').toLowerCase().startsWith('minimax');
     const showOAuth = Boolean(window.HOST.capabilities.oauthLogin && !isVaultProv && isMiniMax);
+    // Hub-authoritative fields (base_url / adapter_rules / preset_id / api_type)
+    // are locked for vault providers; the manifest rule_hash detects drift.
+    const manifestProv = isVaultProv ? vaultManifestProviders()[pId] || null : null;
+    const ruleHashDrift = Boolean(
+      manifestProv && manifestProv.rule_hash && p.rule_hash && manifestProv.rule_hash !== p.rule_hash
+    );
 
     const aliasText = Object.entries(p.model_aliases || {})
       .map(([k, v]) => `${k}=${v}`)
@@ -2045,7 +2218,8 @@
       ? JSON.stringify(p.adapter_rules, null, 2)
       : '';
 
-    const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}">`
+    const lockAttr = isVaultProv ? ' disabled' : '';
+    const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAttr}>`
       + `<option value="openai-completions" ${curApiType === 'openai-completions' ? 'selected' : ''}>OpenAI 兼容 (/v1/chat/completions)</option>`
       + `<option value="anthropic-messages" ${curApiType === 'anthropic-messages' ? 'selected' : ''}>Anthropic 原生 (/v1/messages)</option>`
       + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
@@ -2070,19 +2244,27 @@
       }
     };
 
+    const vaultNotice = isVaultProv
+      ? `<div class="notice-strip mb-3"><span>中枢托管供应商：名称、URL、协议与适配规则由中枢统一管理（只读）。如需修改请在中枢控制台操作后点击「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-3"><span>中枢规则已更新：本地适配规则与中枢清单不一致，请点击「重新拉取」同步最新规则与 Key。</span></div>' : ''}`
+      : '';
+    const vaultKeyPickHtml = isVaultProv
+      ? `<div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（仅列出本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
+      : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`;
+    const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div>${isVaultProv ? '' : `<div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div>`}</div>`;
+
     wrap.innerHTML = `<div class="form-grid">${[
-      fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">`),
-      fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() ? 'hidden' : ''}>自动探测</button></div>`),
+      fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
+      fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"${lockAttr}><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`),
       fg('上游协议类型', apiTypeSelectHtml),
-      fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
-      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
-      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端 User-Agent</span></label></div>`,
+      fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
+      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>`),
+      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
     ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
       fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
-      fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div>${isVaultProv ? '<div class="notice-strip mb-3"><span>中枢下发供应商密钥由中枢统一管理（只读）；如需挂载私有 Key，请点击右上角「添加供应商」新建本地供应商</span></div>' : ''}<div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${isVaultProv ? '' : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
+      fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
+    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     if (tbody && !tbody.dataset.revealWired) {
@@ -2131,7 +2313,7 @@
         <td>
           <div class="fields">
             <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
-            ${vaultKey ? '<span class="text-xs text-muted">由中枢管理</span>' : `<button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>`}
+            <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
           </div>
         </td>
       `;
@@ -2198,7 +2380,7 @@
 
       const delKeyBtn = tr.querySelector('.btn_del_k');
       if (delKeyBtn) {
-        clk(delKeyBtn, () => {
+        clk(delKeyBtn, async () => {
           const refs = routesUsingKey(pId, keyLabel);
           if (refs.length > 0) {
             const ok = window.confirm(
@@ -2208,7 +2390,14 @@
           }
           syncDraftFields();
           p.api_keys.splice(idx, 1);
-          renderProvidersList();
+          if (isVaultProv || vaultKey) {
+            // Vault provider has no「保存供应商配置」button: the deletion must
+            // land immediately. The hub copy is untouched —「从中枢添加」or a
+            // full refetch restores the key locally.
+            await persistConfig(`本地已删除 Key [${keyLabel}]（中枢不受影响，可经「从中枢添加」或「重新拉取」恢复）`);
+          } else {
+            renderProvidersList();
+          }
         });
       }
 
@@ -2357,6 +2546,113 @@
       });
     }
 
+    // Vault provider: pull missing key labels from the hub manifest on demand.
+    if (isVaultProv) {
+      const pickBtn = q(`#btn_vault_add_keys_${pId}`);
+      const pickBox = q(`#vault_keys_pick_${pId}`);
+      const actionsBox = q(`#vault_keys_actions_${pId}`);
+      const fetchBtn = q(`#btn_vault_fetch_keys_${pId}`);
+      const pickedLabels = new Set();
+      const hideActions = () => {
+        if (actionsBox) {
+          actionsBox.hidden = true;
+          actionsBox.classList.add('hidden');
+        }
+      };
+      const renderKeyPick = () => {
+        if (!pickBox) return;
+        pickBox.innerHTML = '';
+        pickedLabels.clear();
+        hideActions();
+        if (!manifestProv) {
+          const empty = ce('span');
+          empty.className = 'text-xs text-muted';
+          empty.textContent = '中枢清单未加载，无法补拉（请稍后重试或检查 Vault 连接）';
+          pickBox.appendChild(empty);
+          return;
+        }
+        const localLabels = new Set(keys.map((k) => k.label || k.id).filter(Boolean));
+        const missing = (Array.isArray(manifestProv.keys) ? manifestProv.keys : []).filter((lbl) => !localLabels.has(lbl));
+        if (missing.length === 0) {
+          const empty = ce('span');
+          empty.className = 'text-xs text-muted';
+          empty.textContent = '中枢清单中没有本地缺失的 Key 标签';
+          pickBox.appendChild(empty);
+          return;
+        }
+        for (const lbl of missing) {
+          const pill = ce('button');
+          pill.type = 'button';
+          pill.className = 'probe-pill';
+          pill.textContent = lbl;
+          clk(pill, () => {
+            if (pickedLabels.has(lbl)) pickedLabels.delete(lbl);
+            else pickedLabels.add(lbl);
+            pill.classList.toggle('probe-pill--managed', pickedLabels.has(lbl));
+            if (actionsBox) {
+              actionsBox.hidden = pickedLabels.size === 0;
+              actionsBox.classList.toggle('hidden', pickedLabels.size === 0);
+            }
+          });
+          pickBox.appendChild(pill);
+        }
+      };
+      if (pickBtn && pickBox) {
+        clk(pickBtn, () => {
+          renderKeyPick();
+          toggle(pickBox);
+          if (pickBox.hidden) hideActions();
+        });
+      }
+      if (fetchBtn) {
+        clk(fetchBtn, async () => {
+          if (pickedLabels.size === 0) return toast('请先勾选要补拉的 Key 标签', 'warn');
+          fetchBtn.disabled = true;
+          toast(`正在补拉 ${pickedLabels.size} 个 Key 标签...`, 'info');
+          try {
+            const res = await window.HOST.fetchVaultCredentials(pId, undefined, undefined, undefined, [...pickedLabels]);
+            if (res && res.ok) {
+              toast(`已补拉 ${pickedLabels.size} 个 Key 标签`, 'ok');
+              await loadData();
+            } else {
+              toast(`补拉失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+            }
+          } catch (e) {
+            toast(`补拉异常: ${e.message}`, 'err');
+          } finally {
+            fetchBtn.disabled = false;
+            if (pickBox) {
+              pickBox.hidden = true;
+              pickBox.classList.add('hidden');
+            }
+            hideActions();
+          }
+        });
+      }
+    }
+
+    // Vault provider: one-shot refetch (rules + all keys), then reload.
+    const refetchBtn = q(`#btn_refetch_prov_${pId}`);
+    if (refetchBtn) {
+      clk(refetchBtn, async () => {
+        refetchBtn.disabled = true;
+        toast(`正在重新拉取供应商 ${pId}（规则与全部 Key）...`, 'info');
+        try {
+          const res = await window.HOST.fetchVaultCredentials(pId);
+          if (res && res.ok) {
+            toast(`供应商 ${pId} 已按中枢最新内容重新拉取`, 'ok');
+            await loadData();
+          } else {
+            toast(`重新拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+          }
+        } catch (e) {
+          toast(`重新拉取异常: ${e.message}`, 'err');
+        } finally {
+          refetchBtn.disabled = false;
+        }
+      });
+    }
+
     clk(q(`#btn_save_prov_${pId}`), async () => {
       syncDraftFields();
       delete p.refresh_every;
@@ -2400,23 +2696,90 @@
       delete state.probedModelsByProvider[pId];
       delete state.probeFilterByProvider[pId];
       state.activeEditorKey = null;
-      await persistConfig('供应商已删除');
+      await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
     });
 
     return wrap;
   }
 
-  function parseScopeInput(rawStr) {
-    const s = String(rawStr || '').trim();
-    if (!s || s === '*') return ['*'];
-    if (s === '[]' || s.toLowerCase() === 'none') return [];
-    return s.split(',').map((item) => item.trim()).filter(Boolean);
+  // --- Hub Node Scope: checkbox groups (issue form + node editor) ---
+  // Master「全量 (*)」checked = scope ['*'] with the list collapsed; unchecked =
+  // expanded explicit checkboxes (empty selection = scope [], i.e. nothing).
+  function renderScopeCheckboxGroup(container, optionList) {
+    if (!container) return;
+    container.innerHTML = '';
+    for (const opt of optionList || []) {
+      const lbl = ce('label');
+      lbl.className = 'form-label form-label--check';
+      const cb = ce('input');
+      cb.type = 'checkbox';
+      cb.value = opt;
+      const txt = ce('span');
+      txt.textContent = opt;
+      lbl.appendChild(cb);
+      lbl.appendChild(txt);
+      container.appendChild(lbl);
+    }
   }
 
-  function formatScopeInput(arr) {
-    if (!Array.isArray(arr)) return '*';
-    if (arr.length === 0) return '[]';
-    return arr.join(', ');
+  function collectScopeSelection(container) {
+    const vals = [];
+    container?.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      if (cb.checked) vals.push(cb.value);
+    });
+    return vals;
+  }
+
+  function mountScopeControls(masterEl, listEl, options, selected) {
+    renderScopeCheckboxGroup(listEl, options || []);
+    const isAll = Array.isArray(selected) && selected.includes('*');
+    if (masterEl) {
+      masterEl.checked = isAll;
+      masterEl.onchange = () => {
+        if (listEl) listEl.hidden = masterEl.checked;
+      };
+    }
+    if (listEl) {
+      listEl.hidden = isAll;
+      if (!isAll && Array.isArray(selected)) {
+        listEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+          cb.checked = selected.includes(cb.value);
+        });
+      }
+    }
+  }
+
+  function templateScopeOptions() {
+    return {
+      providers: Object.keys(state.config?.providers || {}).sort(),
+      models: Object.keys(state.config?.agent_models || {}).sort(),
+    };
+  }
+
+  function currentScopeSelection(listEl, masterEl) {
+    // Preserve uncommitted operator picks across re-mounts: loadData fires on login,
+    // config import, and conflict rollbacks — none of them may reset an open issue
+    // form back to「全量」. First mount (no checkboxes rendered yet) defaults to ['*'].
+    if (!listEl || !listEl.querySelector('input[type="checkbox"]')) return ['*'];
+    if (masterEl?.checked) return ['*'];
+    return collectScopeSelection(listEl);
+  }
+
+  function mountIssueScopeLists() {
+    if (!isHubMode()) return;
+    const opts = templateScopeOptions();
+    mountScopeControls(
+      $('issueNodeProvAll'),
+      $('issueNodeProvs'),
+      opts.providers,
+      currentScopeSelection($('issueNodeProvs'), $('issueNodeProvAll'))
+    );
+    mountScopeControls(
+      $('issueNodeModelAll'),
+      $('issueNodeModels'),
+      opts.models,
+      currentScopeSelection($('issueNodeModels'), $('issueNodeModelAll'))
+    );
   }
 
   // --- View: Nodes (Hub mode) ---
@@ -2814,12 +3177,24 @@
       fg('节点角色', `<select class="select" id="ed_node_role_${id}"><option value="full" ${node.role === 'full' ? 'selected' : ''}>Full (全功能代理网关)</option><option value="lite" ${node.role === 'lite' ? 'selected' : ''}>Lite (轻量本地代理)</option></select>`),
       fg('租约时长 (秒 lease_ttl)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || 86400}">`),
       fg('断网宽限期 (秒 grace_ttl)', `<input class="input tabular" id="ed_node_grace_${id}" type="number" value="${node.grace_ttl || 3600}">`),
-      fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" list="datalistProviders" value="${eh(formatScopeInput(node.scope?.providers))}">`),
-      fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" list="datalistModels" value="${eh(formatScopeInput(node.scope?.models))}">`),
+      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_prov_all_${id}"><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="ed_node_provs_${id}"></div></div>`,
+      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_model_all_${id}"><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="ed_node_models_${id}"></div></div>`,
     ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
       fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
       fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
     ].join('')}</div><div class="mt-3" id="node_cmd_panel_${id}"></div></div>`;
+
+    const tmplOpts = templateScopeOptions();
+    // Scope entries that no longer match the current template options (providers/models
+    // deleted on the hub since the node was scoped) have no checkbox to render. Preserve
+    // them on save: dropping them silently would narrow the node's scope without the
+    // operator seeing or choosing it.
+    const staleScope = (scopeArr, options) =>
+      [...new Set((Array.isArray(scopeArr) ? scopeArr : []).filter((v) => v !== '*' && !options.includes(v)))];
+    const staleProviders = staleScope(node.scope?.providers, tmplOpts.providers);
+    const staleModels = staleScope(node.scope?.models, tmplOpts.models);
+    mountScopeControls(q(`#ed_node_prov_all_${id}`), q(`#ed_node_provs_${id}`), tmplOpts.providers, node.scope?.providers);
+    mountScopeControls(q(`#ed_node_model_all_${id}`), q(`#ed_node_models_${id}`), tmplOpts.models, node.scope?.models);
 
     clk(q(`#btn_save_node_${id}`), async () => {
       const name = q(`#ed_node_name_${id}`).value.trim();
@@ -2828,8 +3203,12 @@
       const graceTtl = Number(q(`#ed_node_grace_${id}`)?.value) || 3600;
 
       const scope = {
-        providers: parseScopeInput(q(`#ed_node_provs_${id}`).value),
-        models: parseScopeInput(q(`#ed_node_models_${id}`).value),
+        providers: q(`#ed_node_prov_all_${id}`)?.checked
+          ? ['*']
+          : [...new Set([...staleProviders, ...collectScopeSelection(q(`#ed_node_provs_${id}`))])],
+        models: q(`#ed_node_model_all_${id}`)?.checked
+          ? ['*']
+          : [...new Set([...staleModels, ...collectScopeSelection(q(`#ed_node_models_${id}`))])],
       };
 
       try {
@@ -2897,14 +3276,14 @@
     // falsy, so the || default chain below handles both.
     const leaseTtl = Number($('issueNodeTTL').value) || 86400;
     const graceTtl = Number($('issueNodeGraceTTL')?.value) || 3600;
-    const provsRaw = $('issueNodeProvs')?.value;
-    const modelsRaw = $('issueNodeModels')?.value;
 
     if (!name) return toast('请输入节点名称', 'warn');
 
+    // Master「全量 (*)」checked = ['*']; unchecked = explicit checkbox picks
+    // (empty = [], i.e. nothing allowed).
     const scope = {
-      providers: parseScopeInput(provsRaw),
-      models: parseScopeInput(modelsRaw),
+      providers: $('issueNodeProvAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeProvs')),
+      models: $('issueNodeModelAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeModels')),
     };
 
     try {
@@ -2943,9 +3322,11 @@
     }
 
     ensureUnifiedFixedRoutes(state.config);
+    const isHub = isHubMode();
     const models = state.config?.agent_models || {};
     const q = state.modelQuery || '';
-    const sub = state.modelSubMode || 'all';
+    let sub = state.modelSubMode || 'all';
+    if (isHub && sub === 'fixed') sub = 'all';
 
     // Always list built-in fixed channels first, followed by custom models sorted alphabetically
     const customKeys = Object.keys(models).filter((k) => !FIXED_SLOT_META[k]).sort();
@@ -2957,6 +3338,8 @@
     } else {
       orderedKeys = [...FIXED_SLOT_IDS, ...customKeys];
     }
+    // Hub model page has no KB 4-channel block: only the custom template routes.
+    if (isHub) orderedKeys = orderedKeys.filter((mName) => !FIXED_SLOT_META[mName]);
 
     orderedKeys = orderedKeys.filter((mName) => {
       if (!q) return true;
@@ -3008,7 +3391,6 @@
           ${brandIcon}
           <span>${eh(mName)}</span>
           ${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
-          ${isFixed && isHubMode() ? '<span class="pill pill--amber">仅 Full 节点生效 · Lite 节点自动忽略</span>' : ''}
           <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
           ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
         </div>
@@ -3279,6 +3661,138 @@
     }
 
     return wrap;
+  }
+
+  // --- Template Route Import (Full, on-demand) ---
+  // Local model routes are fully free; the hub template is only an optional
+  // import source. Routes whose candidates reference a provider missing locally
+  // are blocked until that provider is pulled.
+  function openTemplateImportOverlay() {
+    const overlay = $('templateImportOverlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.classList.remove('hidden');
+    renderTemplateImportList();
+  }
+
+  function closeTemplateImportOverlay() {
+    const overlay = $('templateImportOverlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+  }
+
+  function templateRouteMissingProviders(mName, tpl, localProviders) {
+    const cands = Array.isArray(tpl?.candidates) ? tpl.candidates : [];
+    return [...new Set(cands.map((c) => c.provider).filter((pId) => pId && !localProviders[pId]))];
+  }
+
+  // Key labels a template binds its candidates to that are missing locally: importing
+  // such a route yields a dead route (every candidate is skipped at dispatch time and
+  // the request ends in 503), so it is validated like a missing provider.
+  function templateRouteMissingKeyLabels(mName, tpl, localProviders) {
+    const cands = Array.isArray(tpl?.candidates) ? tpl.candidates : [];
+    const missing = new Set();
+    for (const c of cands) {
+      const lbl = String(c?.key_label || '').trim();
+      if (!lbl) continue; // 空 = 展开该供应商全部启用 Key
+      const keys = localProviders[c?.provider]?.api_keys || [];
+      const hasKey = keys.some((k) => k && (k.label === lbl || k.id === lbl));
+      if (!hasKey) missing.add(`${c.provider}:${lbl}`);
+    }
+    return [...missing];
+  }
+
+  function renderTemplateImportList() {
+    const listEl = $('templateImportList');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    const manifestModels = vaultManifestModels();
+    const localModels = state.config?.agent_models || {};
+    const localProviders = state.config?.providers || {};
+    // Hub templates no longer carry the KB fixed-4-channel routes (chat/ocr/embedding/
+    // reranker). If an old hub config still holds them, they are invisible on the hub
+    // model page — do not surface them here either.
+    const entries = Object.entries(manifestModels).filter(
+      ([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName] && !FIXED_SLOT_META[mName]
+    );
+    if (entries.length === 0) {
+      const empty = ce('div');
+      empty.className = 'row row--static text-muted';
+      if (!state.vaultManifest) {
+        empty.textContent = '中枢清单未加载，无法导入模板路由';
+      } else if (!state.vaultManifest.agent_models || typeof state.vaultManifest.agent_models !== 'object') {
+        empty.textContent = '中枢清单未包含模板路由（中枢版本较旧或未发布任何模板）';
+      } else {
+        empty.textContent = '中枢模板中没有本地缺失的模型路由';
+      }
+      listEl.appendChild(empty);
+      return;
+    }
+    for (const [mName, tpl] of entries) {
+      const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
+      const missing = templateRouteMissingProviders(mName, tpl, localProviders);
+      const missingKeys = templateRouteMissingKeyLabels(mName, tpl, localProviders);
+      const candText = cands.map((c) => `${c.provider}:${c.key_label || '*'}→${c.target_model || mName}`).join(' · ');
+      const row = ce('div');
+      row.className = 'mb-2';
+      row.innerHTML = `
+        <label class="form-label form-label--check">
+          <input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${missing.length || missingKeys.length ? 'disabled' : ''}>
+          <span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span>
+        </label>
+        ${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
+        ${missing.length ? `<div class="text-xs"><span class="pill pill--red">需先拉取供应商 ${eh(missing.join(', '))}</span></div>` : ''}
+        ${missingKeys.length ? `<div class="text-xs"><span class="pill pill--red">候选绑定的 Key 标签本地缺失：${eh(missingKeys.join(', '))}（请重新拉取对应供应商或调整模板）</span></div>` : ''}
+      `;
+      listEl.appendChild(row);
+    }
+  }
+
+  async function handleConfirmImportRoutes() {
+    const listEl = $('templateImportList');
+    const picked = [...(listEl?.querySelectorAll('.tpl_import_cb:checked') || [])]
+      .map((cb) => cb.getAttribute('data-model'))
+      .filter(Boolean);
+    if (picked.length === 0) return toast('请先勾选要导入的模型路由', 'warn');
+    const manifestModels = vaultManifestModels();
+    const localModels = state.config?.agent_models || {};
+    const localProviders = state.config?.providers || {};
+    let imported = 0;
+    for (const mName of picked) {
+      const tpl = manifestModels[mName];
+      if (!tpl || localModels[mName]) continue;
+      if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) continue;
+      if (templateRouteMissingKeyLabels(mName, tpl, localProviders).length > 0) continue;
+      const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
+      state.config = state.config || { providers: {}, agent_models: {} };
+      state.config.agent_models = state.config.agent_models || {};
+      // Import the template verbatim (strategy, key pin, flags, per-candidate weight and
+      // concurrency cap): the local model editor supports every one of these fields, and
+      // silently degrading them would make the imported route behave differently from
+      // what the hub operator configured.
+      state.config.agent_models[mName] = {
+        origin: 'local',
+        routing_strategy: tpl.routing_strategy || 'sticky_failover',
+        active_key: tpl.active_key || '',
+        no_reasoning: Boolean(tpl.no_reasoning),
+        force_non_stream: Boolean(tpl.force_non_stream),
+        allow_key_fallback: Boolean(tpl.allow_key_fallback),
+        enabled: true,
+        candidates: cands.map((c) => ({
+          provider: c.provider || '',
+          key_label: c.key_label || '',
+          target_model: c.target_model || mName,
+          enabled: c.enabled !== false,
+          weight: Number(c.weight) || 0,
+          max_concurrency: Number(c.max_concurrency) || 0,
+        })),
+      };
+      imported++;
+    }
+    if (imported === 0) return toast('没有可导入的路由（候选供应商或 Key 缺失，或路由已存在）', 'warn');
+    closeTemplateImportOverlay();
+    await persistConfig(`已从模板导入 ${imported} 条模型路由`);
   }
 
   // --- View: Activity & Traces (M7~M10, M12) ---
@@ -3586,6 +4100,9 @@
         delete s.mode_schedule_webhook_secret;
 
         await persistConfig('设置保存成功');
+        // Vault URL/token may have just changed: drop the stale manifest snapshot so the
+        // add-provider and template-import flows talk to the newly configured hub.
+        await loadVaultManifest({ force: true });
       };
     }
   }

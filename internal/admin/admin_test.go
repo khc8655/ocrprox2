@@ -401,11 +401,12 @@ func TestAdminServer_VaultSync(t *testing.T) {
 
 	srv := NewServer(authMgr, localSrc, obsMgr, sched)
 	srv.SetHTTPClient(hubServer.Client())
+	srv.SetDefaultVault(hubServer.URL, "tok1")
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
-	// 1. GET /api/vault/manifest
+	// 1. GET /api/vault/manifest (query overrides still supported for test-connection)
 	req := httptest.NewRequest("GET", "/api/vault/manifest?hub_url="+hubServer.URL+"&node_token=tok1", nil)
 	req.Header.Set("Authorization", "Bearer admin-pass")
 	rec := httptest.NewRecorder()
@@ -418,8 +419,19 @@ func TestAdminServer_VaultSync(t *testing.T) {
 		t.Errorf("expected vault-p1 in manifest response, got %s", rec.Body.String())
 	}
 
-	// 2. POST /api/vault/fetch (fetches and auto-merges into localSrc)
-	fetchBody := strings.NewReader(`{"hub_url":"` + hubServer.URL + `","node_token":"tok1","provider":"vault-p1"}`)
+	// 1b. POST /api/vault/manifest with credentials in the body (token stays out of the query string)
+	postReq := httptest.NewRequest("POST", "/api/vault/manifest",
+		strings.NewReader(`{"hub_url":"`+hubServer.URL+`","node_token":"tok1"}`))
+	postReq.Header.Set("Authorization", "Bearer admin-pass")
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK || !strings.Contains(postRec.Body.String(), "vault-p1") {
+		t.Errorf("expected 200 + vault-p1 for POST manifest, got %d: %s", postRec.Code, postRec.Body.String())
+	}
+
+	// 2. POST /api/vault/fetch (fetches and auto-merges into localSrc; the fetch target is
+	// the configured vault — caller-supplied hub_url/node_token no longer exist)
+	fetchBody := strings.NewReader(`{"provider":"vault-p1"}`)
 	req = httptest.NewRequest("POST", "/api/vault/fetch", fetchBody)
 	req.Header.Set("Authorization", "Bearer admin-pass")
 	rec = httptest.NewRecorder()
@@ -716,9 +728,13 @@ func TestAdminServer_VaultFetchKeysMap_SSRFDefault_And_BaseURLLock(t *testing.T)
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
+	// The fetch target is the configured vault (CLI default here) — caller-supplied
+	// hub_url/node_token are no longer part of the /api/vault/fetch contract.
+	srv.SetDefaultVault(hubServer.URL, "tok")
+
 	// 1. SEC-04: By default (allowPrivate=false), 127.0.0.1 hubServer is blocked by SSRF guard!
 	fetchReq := httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
-		strings.NewReader(`{"hub_url":"`+hubServer.URL+`","node_token":"tok","provider":"deepseek"}`))
+		strings.NewReader(`{"provider":"deepseek"}`))
 	fetchReq.Header.Set("Authorization", "Bearer ap")
 	fetchRec := httptest.NewRecorder()
 	mux.ServeHTTP(fetchRec, fetchReq)
@@ -729,7 +745,7 @@ func TestAdminServer_VaultFetchKeysMap_SSRFDefault_And_BaseURLLock(t *testing.T)
 	// 2. F-08: Enable SetAllowPrivate(true) for local test server -> Vault fetch converts keys map[string]string into APIKeys!
 	srv.SetAllowPrivate(true)
 	fetchReq2 := httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
-		strings.NewReader(`{"hub_url":"`+hubServer.URL+`","node_token":"tok","provider":"deepseek"}`))
+		strings.NewReader(`{"provider":"deepseek"}`))
 	fetchReq2.Header.Set("Authorization", "Bearer ap")
 	fetchRec2 := httptest.NewRecorder()
 	mux.ServeHTTP(fetchRec2, fetchReq2)
@@ -762,44 +778,23 @@ func TestAdminServer_VaultFetchKeysMap_SSRFDefault_And_BaseURLLock(t *testing.T)
 	}
 }
 
-func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) {
-	var seenAuth, seenNodeVer string
+func TestAdminServer_OnDemandVaultFetch_And_ExportStripsVaultState(t *testing.T) {
+	var seenAuth string
 	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/node/config" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/vault/fetch" && r.Method == http.MethodPost {
 			seenAuth = r.Header.Get("Authorization")
-			seenNodeVer = r.Header.Get("X-Node-Version")
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
 				"ok": true,
-				"config_version": 42,
-				"payload": {
-					"providers": {
-						"hub-deepseek": {
-							"id": "hub-deepseek",
-							"name": "DeepSeek Hub",
-							"base_url": "https://api.deepseek.com/v1",
-							"enabled": true,
-							"api_keys": [
-								{"id": "hk-01", "label": "hk-01", "key": "sk-hub-ds-secret-9999", "enabled": true}
-							]
-						}
-					},
-					"agent_models": {
-						"deepseek-v3": {
-							"enabled": true,
-							"candidates": [
-								{"provider": "hub-deepseek", "key_label": "hk-01", "target_model": "deepseek-chat", "enabled": true}
-							]
-						}
-					},
-					"kb_models": {
-						"ocr": [
-							{"provider": "hub-deepseek", "model": "deepseek-vl", "key_label": "hk-01", "enabled": true}
-						]
-					},
-					"settings": {
-						"client_key": "sk-llmproxy-hub-seeded"
-					}
+				"provider": "hub-deepseek",
+				"provider_config": {
+					"name": "DeepSeek Hub",
+					"preset_id": "deepseek",
+					"base_url": "https://api.deepseek.com/v1",
+					"anthropic_base_url": "",
+					"hide_client_name": false,
+					"adapter_rules": {"auth_prefix": "Bearer "},
+					"keys": {"hk-01": "sk-hub-ds-secret-9999"}
 				}
 			}`))
 			return
@@ -809,18 +804,15 @@ func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) 
 	defer hubServer.Close()
 
 	authMgr := auth.NewAuthenticator("", "ap")
-	src, _ := config.NewLocalSource(t.TempDir(), "ap")
-	// Pre-seed 1 local provider + 1 local model + 1 stale vault provider
+	cfgDir := t.TempDir()
+	src, _ := config.NewLocalSource(cfgDir, "ap")
+	// Pre-seed 1 local provider + 1 local model + 1 vault-origin route (sync legacy)
 	_, _ = src.SaveConfig(&types.ProxyConfig{
 		Version: 1,
 		Providers: map[string]*types.ProviderConfig{
 			"my-local": {
 				ID: "my-local", BaseURL: "https://local.example/v1", Origin: "local", Enabled: true,
 				APIKeys: []*types.KeyEntry{{ID: "lk1", Label: "lk1", Key: "sk-local-plain-1234", Origin: "local", Enabled: true}},
-			},
-			"old-vault": {
-				ID: "old-vault", BaseURL: "https://old.vault/v1", Origin: "vault", Enabled: true,
-				APIKeys: []*types.KeyEntry{{ID: "ov1", Label: "ov1", Key: "sk-old-vault-0000", Origin: "vault", Enabled: true}},
 			},
 		},
 		AgentModels: map[string]*types.AgentModelRoute{
@@ -829,6 +821,16 @@ func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) 
 				Origin:     "local",
 				Candidates: []*types.RouteCandidate{{Provider: "my-local", KeyLabel: "lk1", Enabled: true}},
 			},
+			"vault-template-route": {
+				Enabled:    true,
+				Origin:     "vault",
+				Candidates: []*types.RouteCandidate{{Provider: "hub-deepseek", KeyLabel: "hk-01", TargetModel: "deepseek-chat", Enabled: true}},
+			},
+		},
+		KBModels: map[string][]*types.KBCandidate{
+			"ocr": {
+				{Provider: "hub-deepseek", Model: "deepseek-vl", KeyLabel: "hk-01", Enabled: true},
+			},
 		},
 	})
 
@@ -836,48 +838,67 @@ func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) 
 	srv.SetAllowPrivate(true)
 	srv.SetAdminPassword("ap")
 	srv.SetBuildInfo("v20261118-02", "2.4.4", "abcdef")
-	srv.SetDefaultVault(hubServer.URL, "stk_node_sync_tok")
+	srv.SetDefaultVault(hubServer.URL, "stk_node_fetch_tok")
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
-	// 1. POST /api/vault/sync
-	req := httptest.NewRequest(http.MethodPost, "/api/vault/sync", strings.NewReader(`{}`))
+	// 1. POST /api/vault/fetch (on-demand: fetch single provider and auto-import)
+	req := httptest.NewRequest(http.MethodPost, "/api/vault/fetch", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer ap")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /api/vault/sync status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("POST /api/vault/fetch status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if seenAuth != "Bearer stk_node_sync_tok" || seenNodeVer != "v20261118-02" {
-		t.Fatalf("unexpected hub request headers: auth=%q ver=%q", seenAuth, seenNodeVer)
+	if seenAuth != "Bearer stk_node_fetch_tok" {
+		t.Fatalf("unexpected hub request headers: auth=%q", seenAuth)
 	}
 	if strings.Contains(rec.Body.String(), "sk-hub-ds-secret-9999") {
-		t.Fatalf("POST /api/vault/sync leaked plaintext vault key in response: %s", rec.Body.String())
+		t.Fatalf("POST /api/vault/fetch leaked plaintext vault key in response: %s", rec.Body.String())
 	}
 
-	var syncResp struct {
-		OK              bool               `json:"ok"`
-		Version         int64              `json:"_version"`
-		SyncedProviders int                `json:"synced_providers"`
-		SyncedModels    int                `json:"synced_models"`
-		Config          *types.ProxyConfig `json:"config"`
+	var fetchResp struct {
+		OK           bool     `json:"ok"`
+		Version      int64    `json:"_version"`
+		Provider     string   `json:"provider"`
+		ImportedKeys []string `json:"imported_keys"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &syncResp); err != nil {
-		t.Fatalf("decode syncResp: %v", err)
+	if err := json.Unmarshal(rec.Body.Bytes(), &fetchResp); err != nil {
+		t.Fatalf("decode fetchResp: %v", err)
 	}
-	if !syncResp.OK || syncResp.SyncedProviders != 1 || syncResp.SyncedModels != 1 || syncResp.Config == nil {
-		t.Fatalf("unexpected syncResp: %+v", syncResp)
+	if !fetchResp.OK || fetchResp.Provider != "hub-deepseek" {
+		t.Fatalf("unexpected fetchResp: %+v", fetchResp)
 	}
-	if _, hasOld := syncResp.Config.Providers["old-vault"]; hasOld {
-		t.Fatalf("expected old-vault removed")
-	}
-	if syncResp.Config.AgentModels["deepseek-v3"] == nil || syncResp.Config.AgentModels["my-local-model"] == nil {
-		t.Fatalf("expected both deepseek-v3 and my-local-model in merged config")
+	if len(fetchResp.ImportedKeys) != 1 || fetchResp.ImportedKeys[0] != "hk-01" {
+		t.Fatalf("expected imported_keys=[hk-01], got %+v", fetchResp.ImportedKeys)
 	}
 
-	// 2. GET /api/admin/config/export must omit hub-deepseek AND omit vault-only deepseek-v3 + vault ocr candidate!
+	// Verify the fetched provider landed as a vault provider with the masked key hidden on readback
+	snapCfg, err := src.Current(context.Background(), false)
+	if err != nil || snapCfg == nil || snapCfg.Config == nil {
+		t.Fatalf("failed to get local config snapshot: %v", err)
+	}
+	vp, exists := snapCfg.Config.Providers["hub-deepseek"]
+	if !exists || vp.Origin != "vault" || len(vp.APIKeys) != 1 || vp.APIKeys[0].Key != "sk-hub-ds-secret-9999" {
+		t.Fatalf("expected hub-deepseek imported as vault provider with fetched key, got %+v", vp)
+	}
+
+	// On fresh disk load, the legacy vault-origin route must migrate to local
+	reloadedSrc, err := config.NewLocalSource(cfgDir, "ap")
+	if err != nil {
+		t.Fatalf("reload NewLocalSource err: %v", err)
+	}
+	reloadedSnap, err := reloadedSrc.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("reloaded Current err: %v", err)
+	}
+	if r := reloadedSnap.Config.AgentModels["vault-template-route"]; r == nil || r.Origin != "local" {
+		t.Fatalf("expected legacy vault route migrated to local on disk load, got %+v", r)
+	}
+
+	// 2. GET /api/admin/config/export must omit hub-deepseek AND omit vault artifacts!
 	expReq := httptest.NewRequest(http.MethodGet, "/api/admin/config/export", nil)
 	expReq.Header.Set("Authorization", "Bearer ap")
 	expRec := httptest.NewRecorder()
@@ -886,13 +907,148 @@ func TestAdminServer_UnifiedVaultSync_And_ExportStripsVaultRoutes(t *testing.T) 
 		t.Fatalf("export status=%d", expRec.Code)
 	}
 	expStr := expRec.Body.String()
-	for _, forbidden := range []string{"hub-deepseek", "deepseek-v3", "deepseek-vl", "sk-hub-ds-secret-9999"} {
+	for _, forbidden := range []string{"hub-deepseek", "deepseek-vl", "sk-hub-ds-secret-9999", "hk-01"} {
 		if strings.Contains(expStr, forbidden) {
 			t.Fatalf("export leaked vault artifact %q:\n%s", forbidden, expStr)
 		}
 	}
 	if !strings.Contains(expStr, "my-local-model") || !strings.Contains(expStr, "sk-local-plain-1234") {
 		t.Fatalf("export missing local provider/model:\n%s", expStr)
+	}
+}
+
+// Regression: the vault fetch channel must not be repointable. Neither a caller-supplied
+// hub_url/node_token aimed at an attacker hub, nor a direct "providers" payload, may
+// rewrite an existing vault provider's hub-managed fields (base_url) while the real
+// vault keys stay stored — that combination is exactly the exfiltration route the
+// hub-managed lock exists to close. All credentials here are synthetic test values.
+func TestAdminServer_VaultFetch_CannotBeRepointed(t *testing.T) {
+	const storedKey = "sk-test-real-vault-0123456789abcdef"
+	const storedToken = "stk_node_test_0123456789abcdef"
+
+	goodHits, evilHits := 0, 0
+	goodHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodHits++
+		if r.URL.Path != "/api/vault/fetch" || r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			Provider string `json:"provider"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Provider == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"error":"provider_required"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"provider": "ds",
+			"provider_config": {
+				"name": "DeepSeek",
+				"base_url": "https://vault-hub.example/v1",
+				"adapter_rules": {"auth_prefix": "Bearer "},
+				"keys": {"k1": "` + storedKey + `"}
+			}
+		}`))
+	}))
+	defer goodHub.Close()
+
+	evilHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		evilHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"provider": "ds",
+			"provider_config": {
+				"name": "Pwned",
+				"base_url": "https://evil.example/v1",
+				"keys": {"k1": "●●●●●●"}
+			}
+		}`))
+	}))
+	defer evilHub.Close()
+
+	authMgr := auth.NewAuthenticator("ck", "ap")
+	src, _ := config.NewLocalSource(t.TempDir(), "ap")
+	if _, err := src.SaveConfig(&types.ProxyConfig{
+		Version: 1,
+		Providers: map[string]*types.ProviderConfig{
+			"ds": {
+				ID: "ds", Name: "DeepSeek", BaseURL: "https://vault-hub.example/v1", Origin: "vault", Enabled: true,
+				APIKeys: []*types.KeyEntry{{ID: "k1", Label: "k1", Key: storedKey, Origin: "vault", Enabled: true}},
+			},
+		},
+		Vault: &types.VaultClientConfig{URL: goodHub.URL, NodeToken: storedToken},
+	}); err != nil {
+		t.Fatalf("seed err: %v", err)
+	}
+
+	srv := NewServer(authMgr, src, nil, nil)
+	srv.SetAllowPrivate(true)
+	srv.SetAdminPassword("ap")
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// 1. Route 2 with evil hub_url/node_token overrides: ignored — the fetch goes to the
+	// stored hub, and the evil hub is never contacted.
+	req := httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
+		strings.NewReader(`{"provider":"ds","hub_url":"`+evilHub.URL+`","node_token":"stk_node_evil_override_token"}`))
+	req.Header.Set("Authorization", "Bearer ap")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 via stored vault credentials, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if evilHits != 0 {
+		t.Fatalf("SEC: caller-supplied hub_url reached the attacker hub (%d hits)", evilHits)
+	}
+	if goodHits != 1 {
+		t.Fatalf("expected the stored vault hub to be contacted once, got %d", goodHits)
+	}
+
+	// 2. Route 1 with a direct "providers" payload: no longer importable at all — the
+	// request is forwarded as a provider fetch (provider="") and rejected by the hub.
+	req = httptest.NewRequest(http.MethodPost, "/api/vault/fetch",
+		strings.NewReader(`{"providers":{"ds":{"name":"Pwned","base_url":"https://evil.example/v1","keys":{"k1":"●●●●●●"}}}}`))
+	req.Header.Set("Authorization", "Bearer ap")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if evilHits != 0 {
+		t.Fatalf("SEC: direct providers payload reached the attacker hub (%d hits)", evilHits)
+	}
+
+	snap, err := src.Current(context.Background(), false)
+	if err != nil || snap == nil || snap.Config == nil {
+		t.Fatalf("current snap err: %v", err)
+	}
+	ds := snap.Config.Providers["ds"]
+	if ds == nil || ds.Origin != "vault" {
+		t.Fatalf("expected vault provider ds to survive, got %+v", ds)
+	}
+	if strings.Contains(ds.BaseURL, "evil.example") {
+		t.Fatalf("SEC: vault provider base_url was repointed to the attacker URL: %q", ds.BaseURL)
+	}
+	if len(ds.APIKeys) != 1 || ds.APIKeys[0].Key != storedKey {
+		t.Fatalf("SEC: stored vault key damaged: %+v", ds.APIKeys)
+	}
+}
+
+// Vault provider IDs come from the hub and become map keys, scheduler identifiers, and
+// console DOM element ids — anything outside the conservative slug charset is refused at
+// the adoption boundary instead of being stored.
+func TestDecodeVaultProviderConfig_RefusesUnsafeProviderIDs(t *testing.T) {
+	for _, good := range []string{"ds", "openrouter", "minimax.m2", "prov_alpha-1", "a"} {
+		if _, err := decodeVaultProviderConfig(good, []byte(`{"name":"x"}`)); err != nil {
+			t.Errorf("expected %q to be accepted, got %v", good, err)
+		}
+	}
+	for _, bad := range []string{"", "bad id", `x"><script>`, "-leading", ".hidden", "a/b", "超话"} {
+		if _, err := decodeVaultProviderConfig(bad, []byte(`{"name":"x"}`)); err == nil {
+			t.Errorf("expected %q to be refused, got nil error", bad)
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { touchNodeLastSeen } from '../../lib/nodes.js';
+import { ruleHash } from '../../lib/rulehash.js';
 export async function handleVaultFetchRequest(request, env, kv) {
 const auth = await checkVaultAuth(request, env, kv);
 if (!auth.ok) return auth.response;
@@ -76,10 +77,12 @@ provider,
 provider_config: {
 name: pData.name || provider,
 preset_id: pData.preset_id || '',
+api_type: pData.api_type || '',
 base_url: pData.base_url || '',
 anthropic_base_url: pData.anthropic_base_url || '',
 hide_client_name: Boolean(pData.hide_client_name),
 adapter_rules: rules || {},
+rule_hash: ruleHash(rules || {}),
 keys: matchedKeys,
 },
 }),

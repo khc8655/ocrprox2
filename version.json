@@ -1,11 +1,13 @@
 {
-  "version": "v20261122-02",
-  "semver": "2.8.1",
+  "version": "v20261122-03",
+  "semver": "2.9.0",
   "release_date": "2026-11-22",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.8.1 — 安装完成横幅显示真实版本号",
+  "title": "LLMProxy2 (OCRProxy v2) 2.9.0 — 中枢托管内容改按需拉取与供应商级锁定",
   "changelog": [
-    "安装完成横幅此前硬编码 SCRIPT_VERSION=v20261118-02，与实际安装的二进制版本脱节（2.8.0 装好后仍打印 v20261118-02）。现在优先执行已安装二进制的 --version 并从输出中提取 vYYYYMMDD-NN 作为展示版本，仅在无法执行时回退到脚本常量；脚本常量同步更新到 v20261122-01",
-    "验证：HK NAT 真实 VM 全新安装后横幅显示 v20261122-01，与 llmproxy --version 输出一致；llmproxy-ctl uninstall -y 后零残留"
+    "full 模式移除「一键全量同步」（POST /api/vault/sync 与 MergeHubSync 下线），改为按需拉取：清单 /api/vault/manifest（仅元数据 + Key 标签，新增 agent_models 路由模板段）→ 单供应商整体拉取 /api/vault/fetch（适配规则 + 全部 Key，整体替换中枢托管字段与 vault Key 列表）→ 按 Key 标签补拉（增量合并，不动其它 vault Key）；模板路由不再随同步整批落地，本地路由完全自由，控制台提供「从模板导入」按需入口",
+    "安全收紧：POST /api/vault/fetch 不再接受调用方传入的 hub_url/node_token（拉取目标恒为节点已配置的 Vault，防管理密码泄露后把自动导入 base_url 的拉取指向恶意中枢外送明文 Key）；外部保存时后端强制还原 vault 供应商的 base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name（Key 级锁定扩展为供应商级）；本地同名非 vault 供应商拉取返回 409 provider_exists_local；中枢下发供应商 ID 按字符白名单校验；fetch 响应回显管理端前掩码明文 Key；清单凭据改走 POST 请求体（Token 不进 URL 日志）",
+    "添加供应商不以预设为主：预设退为适配文件模板，按输入名称/ID 自动匹配填充；新增中枢规则漂移检测（manifest 与 fetch 以同一 rule_hash 标注解析后的 adapter_rules，不一致时控制台提示「中枢规则已更新」）",
+    "验证：npm run verify:release G1–G6 全绿（版本一致性、确定性构建零漂移、T1 契约、Hub 单测、go test -race、T3 黑盒 E2E）；新增 Go/Hub 单测覆盖整体拉取替换语义、vault 锁定、拉取目标不可重指向、模板路由 scope 过滤与明文 Key 零泄露"
   ]
 }

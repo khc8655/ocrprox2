@@ -25,6 +25,17 @@ var (
 	ErrEmptyConfig     = errors.New("config: configuration is empty")
 )
 
+// LocalProviderConflictError reports that an on-demand vault fetch targeted a provider
+// that already exists locally with a non-vault origin ("local" or a legacy empty origin).
+// Such a provider is never re-fetchable — the operator must delete or rename it first.
+type LocalProviderConflictError struct {
+	Provider string
+}
+
+func (e *LocalProviderConflictError) Error() string {
+	return fmt.Sprintf("config: provider %q already exists locally and is not vault-managed (delete it first)", e.Provider)
+}
+
 // VersionConflictError reports a CAS 409 version mismatch during config updates.
 type VersionConflictError struct {
 	CurrentVersion   int64
@@ -313,287 +324,25 @@ func (s *LocalSource) PersistKeyEntry(ctx context.Context, updatedKey *types.Key
 	return err
 }
 
-// MergeHubSync performs a unified one-click Hub sync into LocalSource:
-//  1. Removes stale Origin=="vault" providers absent from payload.Providers, inserts/replaces
-//     payload.Providers as Origin=="vault" with stable deduplicated keys, and preserves 100%
-//     of Origin!="vault" ("local") providers and their keys.
-//  2. Removes stale Origin=="vault" AgentModels absent from payload.AgentModels (preserving
-//     Origin!="vault" local models and any local-provider candidates), and inserts/updates
-//     payload.AgentModels as Origin=="vault".
-//  3. Replaces vault-provider KBCandidates with payload.KBModels while preserving local-provider KBCandidates.
-//  4. Adopts payload.Settings.ClientKey if local Settings.ClientKey is empty.
-func (s *LocalSource) MergeHubSync(payload *types.ProxyConfig) (*types.ProxyConfig, error) {
-	if payload == nil {
-		return nil, errors.New("config: nil hub sync payload")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	currentSnap := s.snapshot.Load()
-	var currentCfg *types.ProxyConfig
-	if currentSnap != nil {
-		currentCfg = currentSnap.Config
-	}
-
-	var clonedCfg types.ProxyConfig
-	if currentCfg != nil {
-		raw, err := json.Marshal(currentCfg)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(raw, &clonedCfg); err != nil {
-			return nil, err
-		}
-	} else {
-		clonedCfg = types.ProxyConfig{
-			Providers:   make(map[string]*types.ProviderConfig),
-			AgentModels: make(map[string]*types.AgentModelRoute),
-			KBModels:    make(map[string][]*types.KBCandidate),
-			Settings:    DefaultRuntimeSettings(),
-		}
-	}
-
-	// 1. Providers: preserve 100% of Origin != "vault" providers, replace all vault providers from payload.
-	newProviders := make(map[string]*types.ProviderConfig)
-	localProvIDs := make(map[string]bool)
-	oldVaultProviders := make(map[string]*types.ProviderConfig)
-
-	for pID, existingP := range clonedCfg.Providers {
-		if existingP == nil {
-			continue
-		}
-		if existingP.Origin == "vault" {
-			oldVaultProviders[pID] = existingP
-			continue
-		}
-		if existingP.Origin == "" {
-			existingP.Origin = "local"
-		}
-		if existingP.ID == "" {
-			existingP.ID = pID
-		}
-		newProviders[pID] = existingP
-		localProvIDs[pID] = true
-	}
-
-	for pID, vp := range payload.Providers {
-		if vp == nil || localProvIDs[pID] {
-			continue
-		}
-		rawP, err := json.Marshal(vp)
-		if err != nil {
-			continue
-		}
-		var newP types.ProviderConfig
-		if err := json.Unmarshal(rawP, &newP); err != nil {
-			continue
-		}
-		if newP.ID == "" {
-			newP.ID = pID
-		}
-		newP.Origin = "vault"
-
-		oldVP := oldVaultProviders[pID]
-		dedupKeys := make([]*types.KeyEntry, 0, len(vp.APIKeys))
-		for _, vk := range vp.APIKeys {
-			sk := stabilizeVaultKey(vk)
-			if sk == nil {
-				continue
-			}
-			// Preserve newer locally refreshed OAuth token if matching key existed
-			if oldVP != nil {
-				for _, ok := range oldVP.APIKeys {
-					if keyEntriesMatch(ok, sk) {
-						if IsMaskedSecret(sk.Key) && !IsMaskedSecret(ok.Key) {
-							sk.Key = ok.Key
-						}
-						if ok.OAuthMeta != nil && sk.OAuthMeta != nil && ok.OAuthMeta.ExpiresAt > sk.OAuthMeta.ExpiresAt {
-							sk.Key = ok.Key
-							m := *ok.OAuthMeta
-							sk.OAuthMeta = &m
-						} else if ok.OAuthMeta != nil && sk.OAuthMeta == nil {
-							m := *ok.OAuthMeta
-							sk.OAuthMeta = &m
-						}
-						break
-					}
-				}
-			}
-
-			replaced := false
-			for idx, existing := range dedupKeys {
-				if keyEntriesMatch(existing, sk) {
-					dedupKeys[idx] = sk
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				dedupKeys = append(dedupKeys, sk)
-			}
-		}
-		newP.APIKeys = dedupKeys
-		newProviders[pID] = &newP
-	}
-	clonedCfg.Providers = newProviders
-
-	// 2. AgentModels: replace vault models with payload.AgentModels while preserving local models & local candidates.
-	newAgentModels := make(map[string]*types.AgentModelRoute)
-	extractLocalAgentCands := func(route *types.AgentModelRoute) []*types.RouteCandidate {
-		if route == nil {
-			return nil
-		}
-		var out []*types.RouteCandidate
-		for _, c := range route.Candidates {
-			if c != nil && localProvIDs[c.Provider] {
-				cp := *c
-				out = append(out, &cp)
-			}
-		}
-		return out
-	}
-
-	for mName, oldRoute := range clonedCfg.AgentModels {
-		if oldRoute == nil {
-			continue
-		}
-		if _, inHub := payload.AgentModels[mName]; inHub && payload.AgentModels[mName] != nil {
-			// Will be merged in the payload.AgentModels loop below
-			continue
-		}
-		localCands := extractLocalAgentCands(oldRoute)
-		if oldRoute.Origin != "vault" {
-			// Local-only model: preserve intact, dropping only dead references to deleted vault providers
-			keptCands := make([]*types.RouteCandidate, 0, len(oldRoute.Candidates))
-			for _, c := range oldRoute.Candidates {
-				if c != nil && clonedCfg.Providers[c.Provider] != nil {
-					cp := *c
-					keptCands = append(keptCands, &cp)
-				}
-			}
-			// If local model referenced an uncreated/custom provider name, keep localCands or original if none were vault
-			if len(keptCands) == 0 && len(oldRoute.Candidates) > 0 {
-				for _, c := range oldRoute.Candidates {
-					if c != nil && oldVaultProviders[c.Provider] == nil {
-						cp := *c
-						keptCands = append(keptCands, &cp)
-					}
-				}
-			}
-			cpRoute := *oldRoute
-			if cpRoute.Origin == "" {
-				cpRoute.Origin = "local"
-			}
-			cpRoute.Candidates = keptCands
-			newAgentModels[mName] = &cpRoute
-		} else if len(localCands) > 0 {
-			// Vault model removed on Hub, but operator had attached local-provider candidates: retain local candidates
-			cpRoute := *oldRoute
-			cpRoute.Origin = "local"
-			cpRoute.Candidates = localCands
-			newAgentModels[mName] = &cpRoute
-		}
-	}
-
-	for mName, hubRoute := range payload.AgentModels {
-		if hubRoute == nil {
-			continue
-		}
-		rawR, err := json.Marshal(hubRoute)
-		if err != nil {
-			continue
-		}
-		var mergedRoute types.AgentModelRoute
-		if err := json.Unmarshal(rawR, &mergedRoute); err != nil {
-			continue
-		}
-		mergedRoute.Origin = "vault"
-
-		if oldRoute := clonedCfg.AgentModels[mName]; oldRoute != nil {
-			for _, lc := range extractLocalAgentCands(oldRoute) {
-				dup := false
-				for _, mc := range mergedRoute.Candidates {
-					if mc != nil && mc.Provider == lc.Provider && mc.KeyLabel == lc.KeyLabel && mc.TargetModel == lc.TargetModel {
-						dup = true
-						break
-					}
-				}
-				if !dup {
-					mergedRoute.Candidates = append(mergedRoute.Candidates, lc)
-				}
-			}
-		}
-		newAgentModels[mName] = &mergedRoute
-	}
-	clonedCfg.AgentModels = newAgentModels
-
-	// 3. KBModels: replace vault candidates with payload.KBModels[ch], preserving local-provider candidates.
-	newKBModels := make(map[string][]*types.KBCandidate)
-	kbChannels := map[string]bool{
-		"chat":      true,
-		"ocr":       true,
-		"embedding": true,
-		"reranker":  true,
-	}
-	for ch := range clonedCfg.KBModels {
-		kbChannels[ch] = true
-	}
-	for ch := range payload.KBModels {
-		kbChannels[ch] = true
-	}
-	for ch := range kbChannels {
-		var combined []*types.KBCandidate
-		for _, hc := range payload.KBModels[ch] {
-			if hc == nil {
-				continue
-			}
-			cp := *hc
-			combined = append(combined, &cp)
-		}
-		for _, lc := range clonedCfg.KBModels[ch] {
-			if lc == nil || !localProvIDs[lc.Provider] {
-				continue
-			}
-			dup := false
-			for _, ex := range combined {
-				if ex.Provider == lc.Provider && ex.Model == lc.Model && ex.KeyLabel == lc.KeyLabel {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				cp := *lc
-				combined = append(combined, &cp)
-			}
-		}
-		if len(combined) > 0 {
-			newKBModels[ch] = combined
-		}
-	}
-	clonedCfg.KBModels = newKBModels
-
-	// 4. Adopt ClientKey if local Settings.ClientKey is empty.
-	if strings.TrimSpace(clonedCfg.Settings.ClientKey) == "" && strings.TrimSpace(payload.Settings.ClientKey) != "" {
-		clonedCfg.Settings.ClientKey = strings.TrimSpace(payload.Settings.ClientKey)
-		if strings.TrimSpace(clonedCfg.Settings.ProxyAPIKey) == "" {
-			clonedCfg.Settings.ProxyAPIKey = clonedCfg.Settings.ClientKey
-		}
-	}
-
-	snap, err := s.saveConfigLocked(&clonedCfg, true)
-	if err != nil {
-		return nil, err
-	}
-	return snap.Config, nil
-}
-
-// MergeVaultConfig merges vault-provided providers and keys into local configuration.
+// MergeVaultConfig merges (or replaces) vault-provided providers and keys into local
+// configuration. It is the only hub-merge path since full sync was removed.
 // Origin isolation rules:
-// - Existing local providers (Origin == "local") are never overwritten or deleted.
-// - Existing local keys (Origin == "local") within any provider are strictly preserved.
-// - Only vault keys (Origin == "vault") are updated or appended.
-func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.ProviderConfig) (*types.RuntimeSnapshot, error) {
+//   - An incoming provider whose ID already exists locally with a non-vault origin
+//     ("local" or legacy empty) is rejected with LocalProviderConflictError — it must be
+//     deleted or renamed first, never silently merged or overwritten.
+//   - Existing local keys (Origin == "local") within any provider are strictly preserved.
+//   - Only vault keys (Origin == "vault") are updated or appended; their local Enabled
+//     toggle survives both merge and replace.
+//
+// With replace=true (on-demand re-fetch of an existing vault provider), the hub-managed
+// fields (name/base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name)
+// and the vault key list are replaced wholesale with the fetched payload: keys deleted
+// locally reappear and keys removed on the Hub disappear, while locally refreshed OAuth
+// token state (newer ExpiresAt / real secret) is never clobbered by an older Hub copy.
+// Provider Enabled is local operational state and is never taken from the payload;
+// api_type/rule_hash move only when the payload actually carries them (older hubs omit
+// both, so a re-fetch must not wipe them to "").
+func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.ProviderConfig, replace bool) (*types.RuntimeSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -661,19 +410,67 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			continue
 		}
 
-		// Existing provider
-		if existingP.Origin == "local" {
-			// Iron Rule: Local provider is never overwritten or deleted!
-			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys, true)
-		} else {
-			// Origin is vault: update provider attributes & enforce vault-only keys (no mixed keys)
+		// Existing provider with a non-vault origin ("local" or a legacy empty origin):
+		// never merged or overwritten — the fetch must fail with a conflict (gen-1 semantic).
+		// The check lives here (inside the config mutex), not only at the admin layer,
+		// so a same-ID provider flipped to local during the hub round-trip still trips 409
+		// instead of silently merging vault keys into a local provider.
+		if existingP.Origin != "vault" {
+			return nil, &LocalProviderConflictError{Provider: vpID}
+		}
+		if replace {
+			// Origin is vault + on-demand re-fetch: hub-managed fields and the vault key
+			// list are replaced wholesale with the fetched payload. Enabled is a local
+			// operational toggle (enforceVaultLock passes it through for the same reason):
+			// the hub fetch payload carries no enabled flag, so a re-fetch must never
+			// re-enable a locally disabled provider. api_type/rule_hash are hub-managed
+			// but only adopted when actually present in the payload (older hubs omit them).
 			existingP.Name = vp.Name
 			existingP.PresetID = vp.PresetID
 			existingP.BaseURL = vp.BaseURL
 			existingP.AnthropicBaseURL = vp.AnthropicBaseURL
-			existingP.Enabled = vp.Enabled
+			if vp.APIType != "" {
+				existingP.APIType = vp.APIType
+			}
 			existingP.Origin = "vault"
-			existingP.RuleHash = vp.RuleHash
+			if vp.RuleHash != "" {
+				existingP.RuleHash = vp.RuleHash
+			}
+			existingP.HideClientName = vp.HideClientName
+			if vp.RPMPerKey > 0 {
+				existingP.RPMPerKey = vp.RPMPerKey
+			}
+			if vp.QuotaResetAt != "" {
+				existingP.QuotaResetAt = vp.QuotaResetAt
+			}
+			if vp.ModelAliases != nil {
+				existingP.ModelAliases = make(map[string]string)
+				for k, v := range vp.ModelAliases {
+					existingP.ModelAliases[k] = v
+				}
+			}
+			if vp.AdapterRules != nil {
+				rulesCopy := *vp.AdapterRules
+				existingP.AdapterRules = &rulesCopy
+			} else {
+				existingP.AdapterRules = nil
+			}
+			existingP.APIKeys = replaceVaultKeyList(existingP.APIKeys, incomingKeys)
+		} else {
+			// Origin is vault: update provider attributes & enforce vault-only keys (no mixed keys).
+			// Same Enabled/api_type/rule_hash rules as the replace branch above: Enabled stays a
+			// local toggle, api_type/rule_hash only move when the payload actually carries them.
+			existingP.Name = vp.Name
+			existingP.PresetID = vp.PresetID
+			existingP.BaseURL = vp.BaseURL
+			existingP.AnthropicBaseURL = vp.AnthropicBaseURL
+			if vp.APIType != "" {
+				existingP.APIType = vp.APIType
+			}
+			existingP.Origin = "vault"
+			if vp.RuleHash != "" {
+				existingP.RuleHash = vp.RuleHash
+			}
 			existingP.HideClientName = vp.HideClientName
 			if vp.RPMPerKey > 0 {
 				existingP.RPMPerKey = vp.RPMPerKey
@@ -696,6 +493,55 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 	}
 
 	return s.saveConfigLocked(&clonedCfg, true)
+}
+
+// replaceVaultKeyList rebuilds the vault key list from the fetched keys: keys deleted
+// locally reappear and keys no longer on the Hub disappear, while a locally refreshed
+// OAuth token state (newer ExpiresAt / real secret) is never clobbered by an older Hub
+// copy (same stabilization rules as the removed MergeHubSync). A key that still exists
+// locally keeps its local Enabled toggle; only keys that were locally deleted come back
+// enabled with the Hub payload.
+func replaceVaultKeyList(oldKeys, incomingKeys []*types.KeyEntry) []*types.KeyEntry {
+	replaced := make([]*types.KeyEntry, 0, len(incomingKeys))
+	for _, sk := range incomingKeys {
+		if sk == nil {
+			continue
+		}
+		for _, ok := range oldKeys {
+			if ok == nil || ok.Origin != "vault" || !keyEntriesMatch(ok, sk) {
+				continue
+			}
+			if IsMaskedSecret(sk.Key) && !IsMaskedSecret(ok.Key) {
+				sk.Key = ok.Key
+			}
+			sk.Enabled = ok.Enabled
+			if ok.OAuthMeta != nil && sk.OAuthMeta != nil && ok.OAuthMeta.ExpiresAt > sk.OAuthMeta.ExpiresAt {
+				sk.Key = ok.Key
+				m := *ok.OAuthMeta
+				sk.OAuthMeta = &m
+			} else if ok.OAuthMeta != nil && sk.OAuthMeta == nil {
+				// Adopt the locally refreshed OAuth state as a whole: metadata AND the
+				// matching access-token string, so the key never ends up half-fresh
+				// (new ExpiresAt on a stale token string).
+				sk.Key = ok.Key
+				m := *ok.OAuthMeta
+				sk.OAuthMeta = &m
+			}
+			break
+		}
+		dup := false
+		for idx, existing := range replaced {
+			if keyEntriesMatch(existing, sk) {
+				replaced[idx] = sk
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			replaced = append(replaced, sk)
+		}
+	}
+	return replaced
 }
 
 func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*types.KeyEntry, allowLocalKeys bool) []*types.KeyEntry {
@@ -758,12 +604,17 @@ func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*type
 			if IsMaskedSecret(vkCopy.Key) && !IsMaskedSecret(updatedVaultKeys[foundIndex].Key) {
 				vkCopy.Key = updatedVaultKeys[foundIndex].Key
 			}
+			// The local Enabled toggle on an existing vault key survives a merge
+			// (a key-label refetch must not re-enable a locally disabled key).
+			vkCopy.Enabled = updatedVaultKeys[foundIndex].Enabled
 			if updatedVaultKeys[foundIndex].OAuthMeta != nil && vkCopy.OAuthMeta != nil {
 				if updatedVaultKeys[foundIndex].OAuthMeta.ExpiresAt > vkCopy.OAuthMeta.ExpiresAt {
 					vkCopy.Key = updatedVaultKeys[foundIndex].Key
 					*vkCopy.OAuthMeta = *updatedVaultKeys[foundIndex].OAuthMeta
 				}
 			} else if updatedVaultKeys[foundIndex].OAuthMeta != nil && vkCopy.OAuthMeta == nil {
+				// Adopt the locally refreshed OAuth state as a whole (metadata AND token string).
+				vkCopy.Key = updatedVaultKeys[foundIndex].Key
 				m := *updatedVaultKeys[foundIndex].OAuthMeta
 				vkCopy.OAuthMeta = &m
 			}
@@ -806,11 +657,17 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig, fromVaultSync 
 		recoverMaskedKeys(newCfg, currentCfg)
 	}
 
-	// 2b. Strict No-Mixed-Keys Rule (User Decision #3):
+	// 2b. Hub-Managed Lock (Strict No-Mixed-Keys Rule (User Decision #3) + provider field lock):
 	// Vault providers are strictly read-only for keys during external SaveConfig submissions;
-	// never allow Origin=="local" or unstored keys to be added onto an Origin=="vault" provider.
+	// never allow Origin=="local" or unstored keys to be added onto an Origin=="vault" provider,
+	// and force-restore hub-managed provider fields (base_url/anthropic_base_url/adapter_rules/
+	// preset_id/api_type/hide_client_name) so a leaked admin password cannot repoint a vault
+	// provider at an attacker-controlled endpoint to exfiltrate the vault keys. The
+	// fromVaultSync bypass keeps the on-demand fetch landing path unaffected — that path is
+	// hub-originated (the server itself talked to the hub at the stored URL with the stored
+	// token) and never accepts caller-supplied credentials or caller-supplied providers.
 	if !fromVaultSync {
-		enforceVaultProviderKeyLock(newCfg, currentCfg)
+		enforceVaultLock(newCfg, currentCfg)
 	}
 
 	// 3. Vault URL-Change Guard (SECURITY_SPEC §4.4 / SEC-07):
@@ -870,7 +727,16 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig, fromVaultSync 
 	return newSnap, nil
 }
 
-func enforceVaultProviderKeyLock(target, source *types.ProxyConfig) {
+// enforceVaultLock enforces hub ownership on Origin=="vault" providers during external
+// SaveConfig submissions:
+//   - Provider field lock: base_url/anthropic_base_url/adapter_rules/preset_id/api_type/
+//     hide_client_name are force-restored to the stored values (hub-hosted content is not
+//     locally editable).
+//   - Key value lock: vault keys are matched by Label/ID; a tampered value or label is
+//     restored from storage; a key missing from the submission counts as a local deletion
+//     (allowed, the Hub copy is unaffected).
+//   - No mixing: local keys are rejected inside a vault provider (Strict No-Mixed-Keys).
+func enforceVaultLock(target, source *types.ProxyConfig) {
 	if target == nil {
 		return
 	}
@@ -888,6 +754,23 @@ func enforceVaultProviderKeyLock(target, source *types.ProxyConfig) {
 		p.Origin = "vault"
 
 		if srcP != nil && srcP.Origin == "vault" {
+			// Provider field lock: restore hub-managed fields from storage.
+			p.BaseURL = srcP.BaseURL
+			p.AnthropicBaseURL = srcP.AnthropicBaseURL
+			p.PresetID = srcP.PresetID
+			p.APIType = srcP.APIType
+			p.HideClientName = srcP.HideClientName
+			if srcP.AdapterRules != nil {
+				rulesCopy := *srcP.AdapterRules
+				p.AdapterRules = &rulesCopy
+			} else {
+				p.AdapterRules = nil
+			}
+
+			// Key lock: vault keys are matched by Label/ID; a tampered value or label is
+			// restored from storage, and the Enabled toggle from the submission passes
+			// through. A stored key missing from the submission counts as a local deletion
+			// (allowed — the Hub copy is unaffected and a re-fetch restores it).
 			var storedVaultKeys []*types.KeyEntry
 			for _, sk := range srcP.APIKeys {
 				if sk != nil && sk.Origin == "vault" {
@@ -896,18 +779,22 @@ func enforceVaultProviderKeyLock(target, source *types.ProxyConfig) {
 			}
 			kept := make([]*types.KeyEntry, 0, len(storedVaultKeys))
 			for _, sk := range storedVaultKeys {
+				var submitted *types.KeyEntry
+				for _, tk := range p.APIKeys {
+					if tk != nil && tk.Origin != "local" && keyEntriesMatch(tk, sk) {
+						submitted = tk
+						break
+					}
+				}
+				if submitted == nil {
+					continue // locally deleted by this submission
+				}
 				cp := *sk
 				if sk.OAuthMeta != nil {
 					m := *sk.OAuthMeta
 					cp.OAuthMeta = &m
 				}
-				// Allow Enabled toggle from target if matching vault key was submitted
-				for _, tk := range p.APIKeys {
-					if tk != nil && tk.Origin != "local" && keyEntriesMatch(tk, sk) {
-						cp.Enabled = tk.Enabled
-						break
-					}
-				}
+				cp.Enabled = submitted.Enabled
 				kept = append(kept, &cp)
 			}
 			p.APIKeys = kept
@@ -1037,6 +924,14 @@ func (s *LocalSource) loadFromDisk() (*types.RuntimeSnapshot, error) {
 		return nil, fmt.Errorf("config: json unmarshal: %w", err)
 	}
 	normalizeProviderIDs(&cfg)
+	// One-time migration for the removed one-click full sync: AgentModelRoutes materialized
+	// from the Hub (Origin == "vault") become local routes, so they are no longer treated as
+	// hub-owned state. kb_models stay untouched.
+	for _, route := range cfg.AgentModels {
+		if route != nil && route.Origin == "vault" {
+			route.Origin = "local"
+		}
+	}
 	if cfg.Version == 0 {
 		ApplyColdStartSettingsDefaults(&cfg.Settings)
 	}

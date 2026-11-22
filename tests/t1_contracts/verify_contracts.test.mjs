@@ -168,7 +168,6 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
         'nodes_list',
         'nodes_issue',
         'node_config',
-        'vault_sync',
       ];
       for (const ep of requiredEndpoints) {
         assert.ok(contract.endpoints[ep], `contract must declare endpoint '${ep}'`);

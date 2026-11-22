@@ -512,15 +512,19 @@
 
     async fetchVaultManifest(customHubUrl, customToken) {
       if (hostKind === 'full') {
-        const params = new URLSearchParams();
+        // POST body: the node token must not ride in the URL, where access/CDN logs
+        // would retain it (the /api/vault/fetch proxy already uses the same shape).
+        const payload = {};
         const hubUrl = typeof customHubUrl === 'string' ? customHubUrl.trim() : '';
         const nodeToken = typeof customToken === 'string' ? customToken.trim() : '';
-        if (hubUrl) params.set('hub_url', hubUrl);
+        if (hubUrl) payload.hub_url = hubUrl;
         if (nodeToken && !isMaskedVaultToken(nodeToken)) {
-          params.set('node_token', nodeToken);
+          payload.node_token = nodeToken;
         }
-        const qs = params.toString();
-        const res = await HOST.request(qs ? `/api/vault/manifest?${qs}` : '/api/vault/manifest');
+        const res = await HOST.request('/api/vault/manifest', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
         try {
           return await res.json();
         } catch (_) {
@@ -560,25 +564,6 @@
       if (key_label !== undefined) payload.key_label = key_label;
       if (Array.isArray(keys)) payload.keys = keys;
       const res = await HOST.request('/api/vault/fetch', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      try {
-        return await res.json();
-      } catch (_) {
-        return { ok: res.ok, status: res.status };
-      }
-    },
-
-    async syncFromVault(opts = {}) {
-      const hubUrl = typeof opts.hubUrl === 'string' ? opts.hubUrl.trim() : '';
-      const nodeToken = typeof opts.nodeToken === 'string' ? opts.nodeToken.trim() : '';
-      const payload = {};
-      if (hubUrl) payload.hub_url = hubUrl;
-      if (nodeToken && !isMaskedVaultToken(nodeToken)) {
-        payload.node_token = nodeToken;
-      }
-      const res = await HOST.request('/api/vault/sync', {
         method: 'POST',
         body: JSON.stringify(payload),
       });

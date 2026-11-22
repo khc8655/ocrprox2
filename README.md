@@ -29,7 +29,7 @@
                        │  ✗ 不中转 /v1/* 流量   ✗ 不主动连 VM   ✗ 不收定时心跳 │
                        └───────────────┬──────────────────────┬─────────────┘
                                        │                      │
-            真实请求触发 · Lazy-Once + Lease (304 续租)         │ 仅管理员在 Web UI 显式点击“拉取/同步”
+            真实请求触发 · Lazy-Once + Lease (304 续租)         │ 仅管理员在 Web UI 显式按需拉取
                                        ▼                      ▼
             ┌────────────────────────────────────┐  ┌────────────────────────────────────┐
             │  VM 客户端 A：极简模式 (--role=lite) │  │  VM 客户端 B：完整模式 (--role=full) │
@@ -82,7 +82,7 @@ llmproxy2/
 │   ├── kb/                          # [移植自 1代 (Full专属)] 预读信号量 + 20MB 零拷贝分片流式 OCR + Emb/Rerank
 │   ├── modesched/                   # [移植自 1代 (Full专属)] Agent <-> KB 时段自动切换器与活跃请求优雅排空
 │   ├── oauth/                       # [移植自 1代 (Full专属)] MiniMax OAuth 2.0 Device Flow (PKCE) + 6h 保活
-│   └── admin/                       # [移植自 1代 (Full专属)] 本地管理 API、Vault 手动同步与内嵌静态控制台
+│   └── admin/                       # [移植自 1代 (Full专属)] 本地管理 API、Vault 按需拉取与内嵌静态控制台
 ├── edgeone-hub/                     # EdgeOne Makers 轻中枢代码
 │   ├── edge-functions/              # 仅保留 api/vault/*、api/node/*、api/admin/*、api/config、admin.js
 │   └── scripts/                     # 预设与单文件管理端打包脚本
@@ -192,7 +192,7 @@ curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \
 ```
 
 **3. 标准 VM 完整节点 (`--role=full`) 一键安装**：
-> 适用于自有主力云主机，具备本地 AES-256-GCM 加密落盘、离线可用、Agent + KB 双模时段切换、20MB 零拷贝 OCR 队列与本地 Web 控制台；传入 `--hub-url` 与 `--node-token` 可预绑定 Vault 同步源，登录后台直接同步中枢密钥。
+> 适用于自有主力云主机，具备本地 AES-256-GCM 加密落盘、离线可用、Agent + KB 双模时段切换、20MB 零拷贝 OCR 队列与本地 Web 控制台；传入 `--hub-url` 与 `--node-token` 可预绑定 Vault 拉取源，登录后台按需拉取中枢供应商（清单 → 整体拉取 → 按 Key 标签补拉）与路由模板，无一键全量同步。
 
 ```bash
 curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \

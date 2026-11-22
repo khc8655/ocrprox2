@@ -12,8 +12,7 @@
 |---|:---:|:---:|:---:|---|
 | `vaultHub` | `true` | `false` | — | 供应商与 Key 中枢管理、区分 `origin: vault/local` |
 | `nodeManager` | `true` | `false` | — | **2代新增**：VM 节点的 Token 签发、Scope 配置、注销与 `last_seen` 状态查看 |
-| `vaultClient` | `false` | `true` | — | Full 节点手动从 EdgeOne 中枢拉取供应商、增量加 Key、同步规则 |
-| `runModes` | `false` | `true` | — | `agent` ↔ `kb` 运行模式切换与时段自动调度器 |
+| `vaultClient` | `false` | `true` | — | Full 节点按需从 EdgeOne 中枢拉取供应商（整体拉取 / 按 Key 标签补拉）与路由模板；中枢托管字段不可本地改 |
 | `kbModels` | `false` | `true` | — | KB 模式的 `chat`/`embedding`/`reranker`/`ocr` 四分类候选池管理 |
 | `oauthLogin` | `false` | `true` | — | MiniMax Code Plan 等 OAuth 2.0 Device Flow 扫码授权与保活状态 |
 | `usageAndTraces` | `false` | `true` | — | **借鉴 Magpie**：本地 `usage.jsonl` 周期统计聚合与最近 60 次请求 `Tries[]` 故障转移轨迹回放（EdgeOne 中枢不走流量，零统计负担） |
@@ -393,10 +392,65 @@
 }
 ```
 
-### 7.3.1 Vault 同步的鉴权（`/api/vault/manifest`、`/api/vault/fetch`）
-- 同时接受两种凭据：Hub **管理员密码**（控制台/人工同步）与节点 **`NODE_TOKEN`**（full 节点自助同步）。
+### 7.3.1 Vault 按需拉取契约（`/api/vault/manifest`、`/api/vault/fetch`）
+
+> **v3 契约变更**：全量同步端点 `POST /api/vault/sync` 已移除——中枢托管内容不再一键整批落地，一律按需拉取。`hub` 与 `full` 两个角色都暴露这两条端点：hub 上是中枢本体，full 上是 Go 节点的透传代理（`ADMIN_PASSWORD` 保护）。
+>
+> **v3.1 安全收紧**：`POST /api/vault/fetch` **不再接受调用方传入的 `hub_url` / `node_token`**——拉取目标永远是节点已配置的 Vault（存储配置或 CLI 默认值）。这是防外送的关键：即便管理密码泄露，攻击者也无法把「自动导入 base_url」的拉取指向恶意中枢。清单端点的覆盖参数仅用于「测试连接」（只读元数据、绝不导入），且 `POST` 请求体传 token（不再进 URL 查询串）。
+
+- 同时接受两种凭据：Hub **管理员密码**（控制台/人工拉取）与节点 **`NODE_TOKEN`**（full 节点自助拉取）。
 - 节点 Token 只读，且只暴露 `origin="vault"` 的供应商与 Key；`origin="local"` 一律物理阻断。
 - 禁止把 Hub 管理员密码写入节点配置：节点只需要自己的 `NODE_TOKEN`（最小权限）。
+
+#### 7.3.1.1 清单 `GET | POST /api/vault/manifest`（元数据 + Key 标签，绝无明文）
+```json
+{
+  "ok": true,
+  "_version": 137,
+  "providers": {
+    "minimax": {
+      "name": "MiniMax",
+      "preset_id": "minimax",
+      "base_url": "https://api.minimax.chat/v1",
+      "anthropic_base_url": "",
+      "keys": ["hk-pool-01", "hk-pool-02"],
+      "rule_hash": "a1b2c3d4e5f6",
+      "adapter_rules": {}
+    }
+  },
+  "agent_models": {
+    "claude-sonnet-4-20250514": {
+      "routing_strategy": "sticky_failover",
+      "active_key": "minimax:hk-pool-01",
+      "no_reasoning": false,
+      "force_non_stream": false,
+      "allow_key_fallback": false,
+      "candidates": [
+        { "provider": "minimax", "key_label": "hk-pool-01", "target_model": "MiniMax-M2.5", "enabled": true, "weight": 3, "max_concurrency": 8 }
+      ]
+    }
+  }
+}
+```
+- `providers` 只收录 vault 供应商（`origin="local"` 物理阻断），`keys` 为启用且有 Key 材料（与运行时投影同口径）的**标签**数组；节点 Token 额外受 `scope.providers` 过滤。
+- `rule_hash` 由中枢按解析后的 `adapter_rules` 内容实时计算（与 `/api/vault/fetch` 下发的同一哈希）：节点存储拉取时的哈希，清单哈希与之不一致即规则漂移，控制台出现「中枢规则已更新」提示。
+- `agent_models` 为**按需路由模板**：仅收录 `enabled` 的路由；按调用方模型 scope（节点 Token 的 `scope.models`，管理员视为 `["*"]`）过滤；候选必须引用在本清单 `providers` 段**存活**的供应商——已禁用或已死亡的候选被剔除，候选清零的路由整条丢弃。
+- 候选携带 Key 标签（`key_label`）与单候选并发上限 `max_concurrency`（与运行时投影、节点 `RouteCandidate` 字段名一致），绝不携带明文 Key 材料。
+- full 节点支持 `POST`（`hub_url`/`node_token` 走请求体，token 不进 URL 日志）；`GET` + 查询串为兼容形态。
+
+#### 7.3.1.2 单供应商按需拉取 `POST /api/vault/fetch`
+- **Request**（`key_label` / `keys` 可选——按 Key 标签补拉；**不含** `hub_url`/`node_token`，拉取目标恒为节点已配置的 Vault）:
+```json
+{ "provider": "minimax", "key_label": "hk-pool-01" }
+```
+- **Response (`200 OK`)**：`provider_config` 携带中枢托管字段（`name`/`preset_id`/`api_type`/`base_url`/`anthropic_base_url`/`hide_client_name`/`adapter_rules`/`rule_hash`）与 `keys`（标签→Key材料 映射；hub 本体返回明文供中枢控制台管理，full 节点自动导入并在回显前掩码）；`imported_keys` 为本次落地的 vault Key 标签数组（full 节点附加）。**不下发 `enabled`**——供应商与 Key 的启停是节点本地运维开关。
+- **`409 Conflict`（仅 full 节点）**：目标供应商本地已存在且 `origin=local`（或历史空 origin）—— 本地新建的供应商不可再从中枢拉取，须先删除/改名：
+```json
+{ "ok": false, "error": "provider_exists_local", "provider": "minimax" }
+```
+该冲突在导入时于配置锁内复核（合并前快照与落地之间同 ID 被并发改为本地供应商也会失败，不会把 vault Key 静默并入本地供应商）。
+- **替换语义**：整体拉取（不带 `key_label`/`keys`）时，full 节点对已存在的 vault 供应商**整体替换中枢托管字段**（`name`/`base_url`/`anthropic_base_url`/`adapter_rules`/`preset_id`/`api_type`/`hide_client_name`/`rule_hash`）与 vault Key 列表——本地删过的 Key 重新拉取即恢复，中枢删掉的 Key 本地随之消失；本地仍存在的 Key 保留其启用开关。按 Key 标签补拉则为增量合并，不影响其它 vault Key，也不改动已存 Key 的启用开关。`origin="local"`（及历史空 origin）的供应商与本地 Key 永不被覆盖。
+- **其它错误**：`400 invalid_json` / `400 provider_required` / `400 vault hub url not configured`、`403 provider_out_of_node_scope`（hub、节点越权）、`404 provider_not_found_or_local`（hub）、`502`（中枢不可达，或 200 响应体非 JSON 对象——该形态绝不原样回显给管理端）。
 
 ### 7.3.2 `GET /healthz`（Hub）版本可观测
 - 返回 `version` / `semver` / `release_date`，用于判断线上 Hub 部署是否落后于仓库/节点版本。

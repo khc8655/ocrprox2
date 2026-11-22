@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><title>LLMProxy2 控制台</title><style>
 :root{--khc-primary-500:#1664FF;--khc-primary-600:#0F54E0;--khc-primary-50:#E6EEFF;--khc-primary-100:#D1E0FF;--khc-surface-page:#F8FAFC;--khc-surface-card:#FFFFFF;--khc-surface-hover:#F1F5F9;--khc-surface-muted:#F1F5F9;--khc-border-1:#E2E8F0;--khc-border-2:#CBD5E1;--khc-text-1:#0F172A;--khc-text-2:#475569;--khc-text-3:#94A3B8;--khc-success-500:#10B981;--khc-success-bg:#ECFDF5;--khc-success-text:#047857;--khc-warning-500:#F59E0B;--khc-warning-bg:#FFFBEB;--khc-warning-text:#B45309;--khc-danger-500:#EF4444;--khc-danger-bg:#FEF2F2;--khc-danger-text:#B91C1C;--khc-radius-sm:4px;--khc-radius-md:6px;--khc-radius-lg:8px;--khc-radius-xl:12px;--khc-shadow-sm:0 1px 2px rgba(15,23,42,0.04);--khc-shadow-md:0 4px 12px rgba(15,23,42,0.08);--khc-shadow-lg:0 12px 32px rgba(15,23,42,0.14);--khc-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--khc-font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--khc-weight-body:400;--khc-weight-medium:500;--khc-weight-strong:600;--khc-text-xs:12px;--khc-text-sm:13px;--khc-text-md:14px;--khc-header-h:48px;--khc-ctrl-h:32px}:root[data-theme="dark"]{--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;background-color:var(--khc-surface-page);color:var(--khc-text-1);font-family:var(--khc-font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}[hidden],.hidden{display:none !important}.tabular{font-variant-numeric:tabular-nums;font-family:var(--khc-font-mono)}.mono{font-family:var(--khc-font-mono)}.app-header{position:sticky;top:0;z-index:40;background-color:var(--khc-surface-card);border-bottom:1px solid var(--khc-border-1)}.header-inner{max-width:1120px;margin:0 auto;height:var(--khc-header-h);padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}.brand-mark{width:24px;height:24px;border-radius:var(--khc-radius-md);background:var(--khc-primary-500);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}.brand-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--khc-text-1)}.badge-role{font-size:11px;font-weight:500;padding:2px 6px;border-radius:var(--khc-radius-sm);background-color:var(--khc-primary-50);color:var(--khc-primary-500)}.nav-wrap{display:flex;align-items:center;min-width:0;flex:1;justify-content:center}.seg{display:inline-flex;align-items:center;gap:2px;background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:2px}.seg-btn{appearance:none;border:none;background:transparent;color:var(--khc-text-2);font-family:inherit;font-size:12px;font-weight:500;height:26px;padding:0 12px;border-radius:var(--khc-radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;transition:color 0.15s ease,background-color 0.15s ease}.seg-btn:hover{color:var(--khc-text-1)}.seg-btn.active{background-color:var(--khc-surface-card);color:var(--khc-text-1);font-weight:500;box-shadow:var(--khc-shadow-sm)}.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.version-pill{font-size:11px;font-weight:500;padding:0 8px;height:26px;display:inline-flex;align-items:center;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);color:var(--khc-text-2)}.main-wrap{max-width:1120px;margin:0 auto;padding:20px}.view-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}.view-title{margin:0;font-size:18px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.01em}.view-sub{margin:2px 0 0 0;font-size:12px;color:var(--khc-text-2)}.view-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}.search-box{position:relative;flex:1;min-width:200px;max-width:320px}.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--khc-text-3);pointer-events:none;display:inline-flex}.search-input{padding-left:30px !important}.btn{appearance:none;border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;font-weight:500;height:var(--khc-ctrl-h);padding:0 12px;border-radius:var(--khc-radius-md);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;transition:background-color 0.15s ease,border-color 0.15s ease}.btn:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:var(--khc-border-2)}.btn:disabled{opacity:0.5;cursor:not-allowed}.btn--primary{background-color:var(--khc-primary-500);border-color:var(--khc-primary-500);color:#FFFFFF}.btn--primary:hover:not(:disabled){background-color:var(--khc-primary-600);border-color:var(--khc-primary-600)}.btn--danger{color:var(--khc-danger-text);border-color:var(--khc-border-1)}.btn--danger:hover:not(:disabled){background-color:var(--khc-danger-bg);border-color:var(--khc-danger-500)}.btn--sm{height:26px;padding:0 10px;font-size:11px}.btn--icon{width:var(--khc-ctrl-h);padding:0}.btn--ghost{background-color:transparent;border-color:transparent;color:var(--khc-text-2)}.btn--ghost:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:transparent;color:var(--khc-text-1)}.btn.active{background-color:var(--khc-primary-50);border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.input,.select,.textarea{width:100%;height:var(--khc-ctrl-h);padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;outline:none;transition:border-color 0.15s ease}.input:focus,.select:focus,.textarea:focus{border-color:var(--khc-primary-500)}.input--code{font-family:var(--khc-font-mono);font-size:12px}.textarea{height:auto;min-height:76px;padding:8px 10px;resize:vertical;line-height:1.45}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}.form-group{display:flex;flex-direction:column;gap:5px;min-width:0}.form-group--span2{grid-column:span 2}.form-group--full{grid-column:1 / -1}.form-label{font-size:12px;font-weight:500;color:var(--khc-text-2);display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px;line-height:18px}.input-row{display:flex;align-items:center;gap:8px;min-width:0}.input-row > .input,.input-row > .select{flex:1 1 auto;min-width:0;width:auto}.input-row > .btn{flex-shrink:0}input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:var(--khc-primary-500);cursor:pointer;flex-shrink:0}.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--khc-border-1)}.form-actions--split{justify-content:space-between;flex-wrap:wrap}.form-actions-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);box-shadow:var(--khc-shadow-sm);overflow:hidden;margin-bottom:16px}.card-pad{padding:16px 20px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);flex-wrap:wrap}.card-title{margin:0;font-size:14px;font-weight:500;color:var(--khc-text-1);display:flex;align-items:center;gap:8px}.card-sub{font-size:12px;color:var(--khc-text-2)}.row{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);cursor:pointer;transition:background-color 0.12s ease}.row:last-child{border-bottom:none}.row:hover{background-color:var(--khc-surface-hover)}.row.expanded{background-color:var(--khc-surface-hover)}.row--static{cursor:default}.row--static:hover{background-color:transparent}.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:var(--khc-text-3)}.dot--ok{background-color:var(--khc-success-500)}.dot--warn{background-color:var(--khc-warning-500)}.dot--err{background-color:var(--khc-danger-500)}.ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--khc-text-2)}.ico svg{width:16px;height:16px}.who{flex:1;min-width:0}.name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:500;color:var(--khc-text-1)}.sub{font-size:11px;color:var(--khc-text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fields{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}.caret{font-size:11px;color:var(--khc-text-3);transition:transform 0.15s ease}.row.expanded .caret{transform:rotate(180deg)}.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--khc-radius-sm);font-size:11px;font-weight:500;background-color:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);white-space:nowrap}.pill--accent{background-color:var(--khc-primary-50);border-color:var(--khc-primary-100);color:var(--khc-primary-500)}.pill--green{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.pill--amber{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.pill--red{background-color:var(--khc-danger-bg);border-color:transparent;color:var(--khc-danger-text)}.editor{padding:16px 20px;background-color:var(--khc-surface-muted);border-bottom:1px solid var(--khc-border-1)}.editor-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--khc-border-1)}.section-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th{text-align:left;font-size:12px;font-weight:500;color:var(--khc-text-2);padding:9px 12px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);white-space:nowrap}.data-table td{padding:9px 12px;border-bottom:1px solid var(--khc-border-1);color:var(--khc-text-1);vertical-align:middle}.data-table th:first-child,.data-table td:first-child{padding-left:20px}.data-table th:last-child,.data-table td:last-child{padding-right:20px;white-space:nowrap}.data-table tr:last-child td{border-bottom:none}.data-table tr:hover td{background-color:var(--khc-surface-hover)}.health-bar{display:flex;align-items:center;gap:8px}.health-track{width:72px;height:6px;border-radius:3px;background-color:var(--khc-border-1);overflow:hidden;flex-shrink:0}.health-fill{height:100%;fill:var(--khc-primary-500);background-color:var(--khc-primary-500);border-radius:3px}.health-fill--ok{fill:var(--khc-success-500);background-color:var(--khc-success-500)}.health-fill--warn{fill:var(--khc-warning-500);background-color:var(--khc-warning-500)}.health-fill--err{fill:var(--khc-danger-500);background-color:var(--khc-danger-500)}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);padding:14px 16px;box-shadow:var(--khc-shadow-sm);display:flex;flex-direction:column;gap:4px}.kpi-label{font-size:12px;font-weight:500;color:var(--khc-text-2)}.kpi-value{font-size:20px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.kpi-sub{font-size:11px;color:var(--khc-text-3)}.chart-svg{width:100%;height:auto;display:block}.chart-axis{stroke:var(--khc-border-1);stroke-width:1}.chart-rect--in{fill:var(--khc-primary-500)}.chart-rect--cache{fill:var(--khc-success-500)}.chart-rect--write{fill:var(--khc-warning-500)}.chart-rect--out{fill:var(--khc-primary-100)}.chart-rect--req{fill:var(--khc-primary-500)}.chart-rect--fail{fill:var(--khc-danger-500)}.chart-rect--ttft{fill:var(--khc-warning-500)}.chart-gridline{stroke:var(--khc-border-1);stroke-width:1;stroke-dasharray:3 3}.chart-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;color:var(--khc-text-2)}.legend-item{display:inline-flex;align-items:center;gap:5px}.legend-swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}.legend-swatch--in{background-color:var(--khc-primary-500)}.legend-swatch--cache{background-color:var(--khc-success-500)}.legend-swatch--write{background-color:var(--khc-warning-500)}.legend-swatch--out{background-color:var(--khc-primary-100)}.legend-swatch--fail{background-color:var(--khc-danger-500)}.legend-swatch--own{background-color:#64748B}.legend-swatch--queued{background-color:#8B5CF6}.legend-swatch--sent{background-color:#06B6D4}.legend-swatch--ttft{background-color:var(--khc-warning-500)}.legend-swatch--flow{background-color:var(--khc-primary-500)}.legend-swatch--retried{background-color:var(--khc-danger-500)}.chart-empty{padding:20px 12px;text-align:center;color:var(--khc-text-3);font-size:12px}.chart-label{font-size:10px;fill:var(--khc-text-3);font-family:var(--khc-font-mono)}.heatmap-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.heatmap-svg{width:100%;min-width:580px;height:auto;display:block}.heatmap-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;font-size:11px;color:var(--khc-text-2);flex-wrap:wrap}.heatmap-legend{display:inline-flex;align-items:center;gap:4px}.heat-swatch{width:10px;height:10px;border-radius:2px;display:inline-block}.heat-swatch--l0{background-color:var(--khc-surface-muted)}.heat-swatch--l1{background-color:#DBEAFE}.heat-swatch--l2{background-color:#93C5FD}.heat-swatch--l3{background-color:#3B82F6}.heat-swatch--l4{background-color:#1664FF}:root[data-theme="dark"] .heat-swatch--l1{background-color:#1E3A8A}:root[data-theme="dark"] .heat-swatch--l2{background-color:#1D4ED8}:root[data-theme="dark"] .heat-swatch--l3{background-color:#3B82F6}:root[data-theme="dark"] .heat-swatch--l4{background-color:#60A5FA}.heat-cell{fill:var(--khc-surface-muted)}.heat-l1{fill:#DBEAFE}.heat-l2{fill:#93C5FD}.heat-l3{fill:#3B82F6}.heat-l4{fill:#1664FF}:root[data-theme="dark"] .heat-l1{fill:#1E3A8A}:root[data-theme="dark"] .heat-l2{fill:#1D4ED8}:root[data-theme="dark"] .heat-l3{fill:#3B82F6}:root[data-theme="dark"] .heat-l4{fill:#60A5FA}.probe-pills-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.probe-pill{font-family:var(--khc-font-mono);font-size:11px;padding:4px 8px;border-radius:var(--khc-radius-sm);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);cursor:pointer}.probe-pill:hover{border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.probe-pill--managed{background-color:var(--khc-success-bg);color:var(--khc-success-text);border-color:transparent}.headers-details{border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);padding:8px 12px}.headers-details summary{cursor:pointer;user-select:none;font-weight:500}.headers-pre{margin:8px 0 0 0;padding:10px;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);overflow-x:auto;font-size:11px}.snippet-box{background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:10px 12px}.snippet-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.snippet-code{display:block;font-family:var(--khc-font-mono);font-size:11px;color:var(--khc-text-1);overflow-x:auto;white-space:nowrap}.waterfall-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px 12px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md)}.wf-item{font-size:12px;display:flex;align-items:center;gap:4px}.wf-label{color:var(--khc-text-2)}.try-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);margin-top:6px}.wf-bar-svg{width:100%;height:14px;display:block;border-radius:4px;overflow:hidden;background-color:var(--khc-surface-muted)}.wf-seg--own{fill:#64748B}.wf-seg--queued{fill:#8B5CF6}.wf-seg--sent{fill:#06B6D4}.wf-seg--ttft{fill:var(--khc-warning-500)}.wf-seg--flow{fill:var(--khc-primary-500)}.wf-seg--retried{fill:var(--khc-danger-500)}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric-box{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:8px 10px}.metric-box-label{font-size:11px;color:var(--khc-text-2)}.metric-box-val{font-size:14px;font-weight:600;color:var(--khc-text-1);margin-top:2px}.live-strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.live-strip-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.trace-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.trace-toolbar .search-box{flex:1 1 200px}.trace-toolbar .select{width:auto;min-width:120px}.input--compact{height:26px;padding:0 8px;font-size:11px;min-width:68px}.update-box{padding:12px 14px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.update-notes{margin:8px 0 0 18px;padding:0;font-size:12px;color:var(--khc-text-2);line-height:1.55}.step-num{width:20px;height:20px;border-radius:50%;background-color:var(--khc-primary-50);color:var(--khc-primary-500);font-size:11px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.privacy-masked .privacy-mask{filter:blur(5px);user-select:none}.login-overlay{position:fixed;inset:0;z-index:100;background-color:rgba(15,23,42,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}.login-overlay > .login-card{margin:auto;flex-shrink:0}.login-card{width:100%;max-width:380px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-xl);box-shadow:var(--khc-shadow-lg);padding:24px}.login-card--wide{max-width:680px}.login-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.login-error{margin-top:10px;padding:8px 10px;border-radius:var(--khc-radius-md);background-color:var(--khc-danger-bg);color:var(--khc-danger-text);font-size:12px}.toast-box{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:340px}.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);box-shadow:var(--khc-shadow-md);font-size:12px;color:var(--khc-text-1)}.check-group{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-height:32px}.check-chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);font-size:12px;color:var(--khc-text-1);cursor:pointer;user-select:none;transition:border-color var(--khc-duration-fast) var(--khc-ease-out),background-color var(--khc-duration-fast) var(--khc-ease-out)}.check-chip:hover{border-color:var(--khc-border-2)}.check-chip input{margin:0;cursor:pointer}.textarea--json{min-height:84px;font-family:var(--khc-font-mono);font-size:11px;line-height:1.45;resize:vertical}.notice-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-2);font-size:12px;line-height:1.45}.notice-strip--ok{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.notice-strip--warn{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.code-snippet-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.code-pre{margin:0;padding:12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-1);font-family:var(--khc-font-mono);font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre}.flex-1{flex:1;min-width:0}.flex-end{display:flex;justify-content:flex-end;align-items:flex-end}.gap-2{gap:8px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mr-2{margin-right:8px}.text-sm{font-size:12px}.text-xs{font-size:11px}.text-muted{color:var(--khc-text-2)}.text-danger{color:var(--khc-danger-text)}.text-ok{color:var(--khc-success-text)}@media (max-width:768px){.header-inner{height:auto;min-height:var(--khc-header-h);padding:8px 12px;flex-wrap:wrap;row-gap:8px}.brand{order:1}.header-actions{order:2}.nav-wrap{order:3;flex-basis:100%;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-wrap::-webkit-scrollbar{display:none}.main-wrap{padding:14px 12px}.kpi-grid,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:12px}.kpi-value{font-size:17px}.form-grid,.form-grid--2{grid-template-columns:minmax(0,1fr);gap:10px}.form-group--span2{grid-column:span 1}.search-box{max-width:none;flex-basis:100%}.row{padding:10px 12px;flex-wrap:wrap}.fields{width:100%;justify-content:flex-end;margin-top:4px}.editor{padding:12px}.card-pad{padding:12px 14px}.toast-box{left:12px;right:12px;bottom:12px;max-width:none}}.avatar-initial{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin-right:6px;border-radius:50%;background:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);font-size:11px;font-weight:600;line-height:1;user-select:none}.form-label--check{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer}.key-cell{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div><div id="fullOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">网关运行概览</h1><p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p></div><div class="view-actions"><button class="btn btn--sm" id="btnRefreshActivity" type="button">刷新数据</button><div class="seg" id="activityPeriodSeg"><button class="seg-btn active" data-period="today" type="button">今日</button><button class="seg-btn" data-period="7d" type="button">近 7 天</button><button class="seg-btn" data-period="30d" type="button">近 30 天</button><button class="seg-btn" data-period="all" type="button">全部</button></div></div></div><div class="kpi-grid"><div class="kpi-card"><span class="kpi-label">请求总数</span><span class="kpi-value" id="statRequests">0</span><span class="kpi-sub" id="statRequestsSub">-</span></div><div class="kpi-card"><span class="kpi-label">请求成功率</span><span class="kpi-value" id="statSuccess">-</span><span class="kpi-sub" id="statSuccessSub">-</span></div><div class="kpi-card"><span class="kpi-label">Token 总消耗</span><span class="kpi-value" id="statTokens">0</span><span class="kpi-sub" id="statTokensSub">-</span></div><div class="kpi-card"><span class="kpi-label">缓存命中与写入</span><span class="kpi-value" id="statCacheHit">0%</span><span class="kpi-sub" id="statCacheHitSub">-</span></div><div class="kpi-card"><span class="kpi-label">平均首字 (TTFT)</span><span class="kpi-value" id="statTTFT">-</span><span class="kpi-sub" id="statTTFTSub">-</span></div><div class="kpi-card"><span class="kpi-label">生成速率 (TPS)</span><span class="kpi-value" id="statTPS">-</span><span class="kpi-sub" id="statTPSSub">-</span></div><div class="kpi-card"><span class="kpi-label">上下行流量</span><span class="kpi-value" id="statBandwidth">0 B</span><span class="kpi-sub" id="statBandwidthSub">-</span></div><div class="kpi-card"><span class="kpi-label">活跃路由 / 实时并发</span><span class="kpi-value" id="statActiveScope">-</span><span class="kpi-sub" id="statActiveScopeSub">-</span></div></div><div class="card card-pad" id="liveRuntimeStripCard" hidden><div class="live-strip" id="liveRuntimeStrip"></div></div><div class="card card-pad" id="usageChartWrapper"><div class="section-bar"><div><h2 class="card-title">吞吐与 Token 趋势</h2><div class="chart-legend mt-1" id="usageChartLegend"></div></div><div class="seg" id="usageChartMetricSeg"><button class="seg-btn active" data-metric="tokens" type="button">Token 消耗</button><button class="seg-btn" data-metric="requests" type="button">请求与异常</button></div></div><div id="usageChartBox"></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">多维用量统计</h2><div class="card-sub">聚焦供应商、模型与通道消耗，点击任意行展开详情</div></div><div class="seg" id="usageDimensionSeg"><button class="seg-btn active" data-dim="providers" type="button">按供应商</button><button class="seg-btn" data-dim="models" type="button">按模型</button><button class="seg-btn" data-dim="keys" type="button">按密钥</button><button class="seg-btn" data-dim="endpoints" type="button">按接口通道</button></div></div><div id="usageBreakdownList"></div></div><div class="card"><div class="card-header"><h2 class="card-title">最近请求轨迹 (最多 60 条)</h2><div class="fields"><button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button><button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button></div></div><div class="trace-toolbar"><div class="search-box"><span class="search-ico" id="traceSearchIcon"></span><input class="input search-input" id="traceSearchInput" placeholder="搜索请求模型、实际模型或供应商"></div><select class="select" id="traceModeFilter"><option value="all">全部模式</option><option value="agent">Agent 路由</option><option value="kb">KB 流水线</option></select><select class="select" id="traceEndpointFilter"><option value="all">全部接口</option><option value="/v1/chat/completions">/v1/chat/completions</option><option value="/v1/messages">/v1/messages</option><option value="/v1/responses">/v1/responses</option><option value="/v1/ocr">/v1/ocr</option><option value="/v1/embeddings">/v1/embeddings</option><option value="/v1/rerank">/v1/rerank</option></select></div><div id="tracesList"></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><div class="fields" id="vaultSyncBar" hidden><button class="btn" id="btnSyncVault" type="button">从中枢同步</button></div><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="card card-pad" id="addProviderForm" hidden><div class="section-bar"><h2 class="card-title">新增供应商</h2><button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea></div><div class="form-grid"><div class="form-group"><label class="form-label">快速预设</label><select class="select" id="newProvPreset"></select><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group"><label class="form-label">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="例如 deepseek"></div><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newProvName" placeholder="例如 DeepSeek 官方"></div><div class="form-group form-group--span2"><label class="form-label">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider" type="button">探测协议</button></div></div><div class="form-group"><label class="form-label">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select></div><div class="form-group"><label class="form-label">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="例如 pool-01"></div><div class="form-group form-group--span2"><label class="form-label">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddProvider" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all" type="button">全部</button><button class="seg-btn" data-filter="enabled" type="button">已启用</button><button class="seg-btn" data-filter="healthy" type="button">探活通过</button><button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由、多密钥故障转移及固定 4 通道并发编排</p></div><div class="view-actions"><div class="seg" id="modelPipelineSeg"><button class="seg-btn active" data-submode="all" type="button">全部</button><button class="seg-btn" data-submode="fixed" type="button">固定 4 通道</button><button class="seg-btn" data-submode="custom" type="button">自定义模型</button></div><button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button></div></div><div class="card card-pad" id="addModelForm" hidden><h2 class="card-title mb-3">新增逻辑模型路由</h2><div class="form-grid"><div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5"></div><div class="form-group"><label class="form-label">首选供应商</label><select class="select" id="newModelProvider"></select></div><div class="form-group"><label class="form-label">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddModel" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode" type="button">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label">允许 LLM 供应商 (* 全量)</label><input class="input input--code" id="issueNodeProvs" list="datalistProviders" placeholder="* 或 minimax,deepseek"></div><div class="form-group"><label class="form-label">允许 LLM 模型 (* 全量)</label><input class="input input--code" id="issueNodeModels" list="datalistModels" placeholder="* 或 gpt-4o,claude-sonnet-4"></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue" type="button">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" type="button" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span></div><div class="form-grid form-grid--2"><div class="form-group" id="gwBaseUrlGroup"><label class="form-label">网关入口地址 (Base URL)</label><input class="input input--code" id="gwBaseUrl" readonly></div><div class="form-group"><label class="form-label">主客户端鉴权密钥 (client_key)</label><div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey" type="button">随机生成</button><button class="btn" id="btnSaveClientKey" type="button">保存密钥</button></div></div><div class="form-group form-group--span2"><label class="form-label">附加客户端密钥列表 (proxy_keys，逗号或换行分隔，支持多端分密钥轮换)</label><textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea></div></div><div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox"><div class="snippet-box"><div class="snippet-header"><span class="form-label">Claude Code 环境变量</span><button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetClaude"></code></div><div class="snippet-box"><div class="snippet-header"><span class="form-label">OpenAI / Cursor 配置</span><button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetCursor"></code></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button></div><div class="form-grid"><div class="form-group"><label class="form-label">默认路由策略</label><select class="select" id="cfgRoutingStrategy"><option value="sticky_failover">多路会话粘性优先</option><option value="round_robin">空闲优先轮询</option><option value="weighted">按权重比例分摊</option><option value="least_busy">最少并发优先</option><option value="fast">动态低延迟优先</option><option value="manual">手动直通</option></select></div><div class="form-group"><label class="form-label">首字超时 (秒，5~600)</label><input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120"></div><div class="form-group"><label class="form-label">429 限流冷却 (秒)</label><input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">5xx 服务端异常冷却 (秒)</label><input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30"></div><div class="form-group"><label class="form-label">网络超时冷却 (秒)</label><input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label><input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400"></div></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label><input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4"></div><div class="form-group"><label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label><input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16"></div></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnSyncVaultFromSettings" type="button">从中枢同步</button></div><div class="form-grid form-grid--2"><div class="form-group" id="cfgVaultUrlGroup"><label class="form-label">Vault 中枢地址</label><input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com"></div><div class="form-group" id="cfgVaultTokenGroup"><label class="form-label">节点同步 Token</label><input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN"></div></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">导出当前完整配置 (JSON)</label><div><button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button></div></div><div class="form-group"><label class="form-label">导入 v1 / v2 配置文件</label><div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport" type="button">选择文件导入</button></div></div></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">原始 JSON 配置查看与直接保存 (脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson" type="button">重新载入当前配置</button><button class="btn" id="btnFormatRawJson" type="button">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson" type="button">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate" type="button">检查程序更新</button><button class="btn btn--danger" id="btnRestartService" type="button">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist><datalist id="datalistModels"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
+</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div><div id="fullOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">网关运行概览</h1><p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p></div><div class="view-actions"><button class="btn btn--sm" id="btnRefreshActivity" type="button">刷新数据</button><div class="seg" id="activityPeriodSeg"><button class="seg-btn active" data-period="today" type="button">今日</button><button class="seg-btn" data-period="7d" type="button">近 7 天</button><button class="seg-btn" data-period="30d" type="button">近 30 天</button><button class="seg-btn" data-period="all" type="button">全部</button></div></div></div><div class="kpi-grid"><div class="kpi-card"><span class="kpi-label">请求总数</span><span class="kpi-value" id="statRequests">0</span><span class="kpi-sub" id="statRequestsSub">-</span></div><div class="kpi-card"><span class="kpi-label">请求成功率</span><span class="kpi-value" id="statSuccess">-</span><span class="kpi-sub" id="statSuccessSub">-</span></div><div class="kpi-card"><span class="kpi-label">Token 总消耗</span><span class="kpi-value" id="statTokens">0</span><span class="kpi-sub" id="statTokensSub">-</span></div><div class="kpi-card"><span class="kpi-label">缓存命中与写入</span><span class="kpi-value" id="statCacheHit">0%</span><span class="kpi-sub" id="statCacheHitSub">-</span></div><div class="kpi-card"><span class="kpi-label">平均首字 (TTFT)</span><span class="kpi-value" id="statTTFT">-</span><span class="kpi-sub" id="statTTFTSub">-</span></div><div class="kpi-card"><span class="kpi-label">生成速率 (TPS)</span><span class="kpi-value" id="statTPS">-</span><span class="kpi-sub" id="statTPSSub">-</span></div><div class="kpi-card"><span class="kpi-label">上下行流量</span><span class="kpi-value" id="statBandwidth">0 B</span><span class="kpi-sub" id="statBandwidthSub">-</span></div><div class="kpi-card"><span class="kpi-label">活跃路由 / 实时并发</span><span class="kpi-value" id="statActiveScope">-</span><span class="kpi-sub" id="statActiveScopeSub">-</span></div></div><div class="card card-pad" id="liveRuntimeStripCard" hidden><div class="live-strip" id="liveRuntimeStrip"></div></div><div class="card card-pad" id="usageChartWrapper"><div class="section-bar"><div><h2 class="card-title">吞吐与 Token 趋势</h2><div class="chart-legend mt-1" id="usageChartLegend"></div></div><div class="seg" id="usageChartMetricSeg"><button class="seg-btn active" data-metric="tokens" type="button">Token 消耗</button><button class="seg-btn" data-metric="requests" type="button">请求与异常</button></div></div><div id="usageChartBox"></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">多维用量统计</h2><div class="card-sub">聚焦供应商、模型与通道消耗，点击任意行展开详情</div></div><div class="seg" id="usageDimensionSeg"><button class="seg-btn active" data-dim="providers" type="button">按供应商</button><button class="seg-btn" data-dim="models" type="button">按模型</button><button class="seg-btn" data-dim="keys" type="button">按密钥</button><button class="seg-btn" data-dim="endpoints" type="button">按接口通道</button></div></div><div id="usageBreakdownList"></div></div><div class="card"><div class="card-header"><h2 class="card-title">最近请求轨迹 (最多 60 条)</h2><div class="fields"><button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button><button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button></div></div><div class="trace-toolbar"><div class="search-box"><span class="search-ico" id="traceSearchIcon"></span><input class="input search-input" id="traceSearchInput" placeholder="搜索请求模型、实际模型或供应商"></div><select class="select" id="traceModeFilter"><option value="all">全部模式</option><option value="agent">Agent 路由</option><option value="kb">KB 流水线</option></select><select class="select" id="traceEndpointFilter"><option value="all">全部接口</option><option value="/v1/chat/completions">/v1/chat/completions</option><option value="/v1/messages">/v1/messages</option><option value="/v1/responses">/v1/responses</option><option value="/v1/ocr">/v1/ocr</option><option value="/v1/embeddings">/v1/embeddings</option><option value="/v1/rerank">/v1/rerank</option></select></div><div id="tracesList"></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="card card-pad" id="addProviderForm" hidden><div class="section-bar"><h2 class="card-title">新增供应商</h2><button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea></div><div class="form-grid"><div class="form-group form-group--span2"><label class="form-label">供应商来源</label><select class="select" id="newProvSource"><option value="custom">自定义（手动填写）</option><option value="vault">中枢托管（按需拉取）</option></select><span class="text-xs text-muted mt-1" id="newProvSourceHint"></span></div><div class="form-group form-group--span2 hidden" id="newProvVaultGroup" hidden><label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label><div class="probe-pills-wrap" id="newProvVaultPick"></div><span class="text-xs text-muted mt-1" id="newProvVaultHint"></span></div><div class="form-group"><label class="form-label">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="例如 deepseek"></div><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newProvName" placeholder="例如 DeepSeek 官方"><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group form-group--span2"><label class="form-label">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider" type="button">探测协议</button></div></div><div class="form-group"><label class="form-label">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select></div><div class="form-group" id="newProvKeyAliasGroup"><label class="form-label">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="例如 pool-01"></div><div class="form-group form-group--span2" id="newProvApiKeyGroup"><label class="form-label">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddProvider" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all" type="button">全部</button><button class="seg-btn" data-filter="enabled" type="button">已启用</button><button class="seg-btn" data-filter="healthy" type="button">探活通过</button><button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由、多密钥故障转移及固定 4 通道并发编排</p></div><div class="view-actions"><div class="seg" id="modelPipelineSeg"><button class="seg-btn active" data-submode="all" type="button">全部</button><button class="seg-btn" data-submode="fixed" type="button">固定 4 通道</button><button class="seg-btn" data-submode="custom" type="button">自定义模型</button></div><button class="btn" id="btnImportFromTemplate" type="button" hidden>从模板导入</button><button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button></div></div><div class="card card-pad" id="addModelForm" hidden><h2 class="card-title mb-3">新增逻辑模型路由</h2><div class="form-grid"><div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5"></div><div class="form-group"><label class="form-label">首选供应商</label><select class="select" id="newModelProvider"></select></div><div class="form-group"><label class="form-label">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddModel" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div><div class="login-overlay hidden" id="templateImportOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">从模板导入模型路由</h2><p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p></div><button class="btn btn--sm" id="btnCloseTemplateImport" type="button" aria-label="关闭导入窗口">关闭</button></div><div id="templateImportList"></div><div class="form-actions"><button class="btn btn--primary" id="btnConfirmImportRoutes" type="button">导入选中路由</button></div></div></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode" type="button">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeProvAll" checked><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="issueNodeProvs" hidden></div></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeModelAll" checked><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="issueNodeModels" hidden></div></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue" type="button">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" type="button" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span></div><div class="form-grid form-grid--2"><div class="form-group" id="gwBaseUrlGroup"><label class="form-label">网关入口地址 (Base URL)</label><input class="input input--code" id="gwBaseUrl" readonly></div><div class="form-group"><label class="form-label">主客户端鉴权密钥 (client_key)</label><div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey" type="button">随机生成</button><button class="btn" id="btnSaveClientKey" type="button">保存密钥</button></div></div><div class="form-group form-group--span2"><label class="form-label">附加客户端密钥列表 (proxy_keys，逗号或换行分隔，支持多端分密钥轮换)</label><textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea></div></div><div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox"><div class="snippet-box"><div class="snippet-header"><span class="form-label">Claude Code 环境变量</span><button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetClaude"></code></div><div class="snippet-box"><div class="snippet-header"><span class="form-label">OpenAI / Cursor 配置</span><button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetCursor"></code></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button></div><div class="form-grid"><div class="form-group"><label class="form-label">默认路由策略</label><select class="select" id="cfgRoutingStrategy"><option value="sticky_failover">多路会话粘性优先</option><option value="round_robin">空闲优先轮询</option><option value="weighted">按权重比例分摊</option><option value="least_busy">最少并发优先</option><option value="fast">动态低延迟优先</option><option value="manual">手动直通</option></select></div><div class="form-group"><label class="form-label">首字超时 (秒，5~600)</label><input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120"></div><div class="form-group"><label class="form-label">429 限流冷却 (秒)</label><input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">5xx 服务端异常冷却 (秒)</label><input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30"></div><div class="form-group"><label class="form-label">网络超时冷却 (秒)</label><input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label><input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400"></div></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label><input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4"></div><div class="form-group"><label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label><input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16"></div></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnTestVaultLink" type="button">测试连接</button></div><div class="form-grid form-grid--2"><div class="form-group" id="cfgVaultUrlGroup"><label class="form-label">Vault 中枢地址</label><input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com"></div><div class="form-group" id="cfgVaultTokenGroup"><label class="form-label">节点同步 Token</label><input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN"></div></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">导出当前完整配置 (JSON)</label><div><button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button></div></div><div class="form-group"><label class="form-label">导入 v1 / v2 配置文件</label><div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport" type="button">选择文件导入</button></div></div></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">原始 JSON 配置查看与直接保存 (脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson" type="button">重新载入当前配置</button><button class="btn" id="btnFormatRawJson" type="button">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson" type="button">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate" type="button">检查程序更新</button><button class="btn btn--danger" id="btnRestartService" type="button">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist><datalist id="datalistModels"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
 (function () {
 const ICONS = {
 generic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6v6H9z"/></svg>',
@@ -1087,15 +1087,17 @@ return { ok: res.ok };
 },
 async fetchVaultManifest(customHubUrl, customToken) {
 if (hostKind === 'full') {
-const params = new URLSearchParams();
+const payload = {};
 const hubUrl = typeof customHubUrl === 'string' ? customHubUrl.trim() : '';
 const nodeToken = typeof customToken === 'string' ? customToken.trim() : '';
-if (hubUrl) params.set('hub_url', hubUrl);
+if (hubUrl) payload.hub_url = hubUrl;
 if (nodeToken && !isMaskedVaultToken(nodeToken)) {
-params.set('node_token', nodeToken);
+payload.node_token = nodeToken;
 }
-const qs = params.toString();
-const res = await HOST.request(qs ? `/api/vault/manifest?${qs}` : '/api/vault/manifest');
+const res = await HOST.request('/api/vault/manifest', {
+method: 'POST',
+body: JSON.stringify(payload),
+});
 try {
 return await res.json();
 } catch (_) {
@@ -1134,24 +1136,6 @@ const payload = { provider };
 if (key_label !== undefined) payload.key_label = key_label;
 if (Array.isArray(keys)) payload.keys = keys;
 const res = await HOST.request('/api/vault/fetch', {
-method: 'POST',
-body: JSON.stringify(payload),
-});
-try {
-return await res.json();
-} catch (_) {
-return { ok: res.ok, status: res.status };
-}
-},
-async syncFromVault(opts = {}) {
-const hubUrl = typeof opts.hubUrl === 'string' ? opts.hubUrl.trim() : '';
-const nodeToken = typeof opts.nodeToken === 'string' ? opts.nodeToken.trim() : '';
-const payload = {};
-if (hubUrl) payload.hub_url = hubUrl;
-if (nodeToken && !isMaskedVaultToken(nodeToken)) {
-payload.node_token = nodeToken;
-}
-const res = await HOST.request('/api/vault/sync', {
 method: 'POST',
 body: JSON.stringify(payload),
 });
@@ -1240,6 +1224,8 @@ nodesTimer: null,
 batchVerifying: false,
 probedModelsByProvider: {},
 probeFilterByProvider: {},
+vaultManifest: null,
+addProvVaultPick: '',
 };
 function byIdIn(root, id) {
 if (!root || !id) return null;
@@ -1392,6 +1378,26 @@ toast('请手动复制', 'warn');
 function isHubMode() {
 return window.HOST?.kind === 'hub';
 }
+async function loadVaultManifest(opts = {}) {
+if (isHubMode() || !window.HOST.capabilities.vaultClient) return null;
+if (state.vaultManifest && !opts.force) return state.vaultManifest;
+try {
+const res = await window.HOST.fetchVaultManifest();
+if (res && res.ok && res.providers && typeof res.providers === 'object') {
+state.vaultManifest = res;
+return state.vaultManifest;
+}
+} catch (_) {}
+return null;
+}
+function vaultManifestProviders() {
+const raw = state.vaultManifest?.providers;
+return raw && typeof raw === 'object' ? raw : {};
+}
+function vaultManifestModels() {
+const raw = state.vaultManifest?.agent_models;
+return raw && typeof raw === 'object' ? raw : {};
+}
 function nextKeyLabel(keys = [], prefix = 'k') {
 const used = new Set((keys || []).map((k) => k?.label || k?.id).filter(Boolean));
 let i = 1;
@@ -1478,6 +1484,7 @@ manual: '手动严格直通',
 };
 function ensureUnifiedFixedRoutes(cfg) {
 if (!cfg || typeof cfg !== 'object') return;
+if (window.HOST && window.HOST.kind === 'hub') return;
 cfg.agent_models = cfg.agent_models || {};
 const kb = cfg.kb_models || {};
 for (const cat of FIXED_SLOT_IDS) {
@@ -1617,20 +1624,22 @@ const navModels = $('navModels');
 const navNodes = $('navNodes');
 const navActivity = $('navActivity');
 const topVersionBox = $('topVersionBox');
-const vaultSyncBar = $('vaultSyncBar');
 const cfgVaultLinkBox = $('cfgVaultLinkBox');
 const hubOverviewBox = $('hubOverviewBox');
 const fullOverviewBox = $('fullOverviewBox');
 const btnClearAllCooldowns = $('btnClearAllCooldowns');
+const btnImportFromTemplate = $('btnImportFromTemplate');
+const modelPipelineSeg = $('modelPipelineSeg');
 if (navModels) navModels.hidden = false;
 if (navNodes) navNodes.hidden = !caps.nodeManager;
 if (navActivity) navActivity.hidden = false;
 if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
-if (vaultSyncBar) vaultSyncBar.hidden = !caps.vaultClient;
 if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
 if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
 if (fullOverviewBox) fullOverviewBox.hidden = isHub;
 if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
+if (btnImportFromTemplate) btnImportFromTemplate.hidden = !caps.vaultClient;
+if (modelPipelineSeg) modelPipelineSeg.hidden = isHub;
 const guardBox = $('concurrencyGuardBox');
 if (guardBox) guardBox.hidden = false;
 const sysBox = $('systemUpdateBox');
@@ -1639,7 +1648,7 @@ const provSub = $('providersSubtitle');
 if (provSub) {
 provSub.textContent = isHub
 ? '统一维护共享供应商与密钥池，按节点权限范围安全下发至接入的 Full / Lite 节点'
-: '集中管理本地私有供应商与从中枢同步的共享密钥池';
+: '集中管理本地私有供应商；中枢托管供应商按需拉取（清单 → 整体拉取 → 按 Key 补拉）';
 }
 const modelsTitle = $('modelsTitle');
 const modelsSub = $('modelsSubtitle');
@@ -1648,7 +1657,7 @@ modelsTitle.textContent = isHub ? '模型路由模板（下发编排）' : '模�
 }
 if (modelsSub) {
 modelsSub.textContent = isHub
-? '中枢只做编排与下发模板，不参与流量中转。固定 4 通道（chat / embedding / reranker / ocr）仅对 Full 节点生效，Lite 节点自动忽略。'
+? '中枢只做编排与下发模板，不参与流量中转；节点侧按需拉取供应商与模板路由。'
 : '管理当前网关对外暴露的模型路由、多密钥粘性/轮询策略及固定 4 通道并发编排。';
 }
 const rpTitle = $('routingPolicyTitle');
@@ -1727,6 +1736,8 @@ if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden')
 if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
 const installOverlay = $('nodeInstallOverlay');
 if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
+const tplImportOverlay = $('templateImportOverlay');
+if (tplImportOverlay && !tplImportOverlay.hidden) { closeTemplateImportOverlay(); closedSomething = true; }
 if (state.activeEditorKey) {
 state.activeEditorKey = null;
 closedSomething = true;
@@ -1851,7 +1862,10 @@ window.HOST.showLogin();
 }
 const btnIssueNode = $('btnIssueNode');
 if (btnIssueNode) {
-clk(btnIssueNode, () => toggle('issueNodeForm'));
+clk(btnIssueNode, () => {
+toggle('issueNodeForm');
+mountIssueScopeLists();
+});
 }
 const btnDoIssue = $('btnDoIssue');
 if (btnDoIssue) {
@@ -1867,8 +1881,19 @@ nodeInstallOverlay.addEventListener('click', (ev) => {
 if (ev.target === nodeInstallOverlay) closeNodeInstallOverlay();
 });
 }
-clk($('btnSyncVault'), handleSyncVault);
-clk($('btnSyncVaultFromSettings'), handleSyncVault);
+clk($('btnImportFromTemplate'), async () => {
+await loadVaultManifest({ force: true });
+openTemplateImportOverlay();
+});
+clk($('btnCloseTemplateImport'), closeTemplateImportOverlay);
+clk($('btnConfirmImportRoutes'), handleConfirmImportRoutes);
+const templateImportOverlay = $('templateImportOverlay');
+if (templateImportOverlay) {
+templateImportOverlay.addEventListener('click', (ev) => {
+if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
+});
+}
+clk($('btnTestVaultLink'), handleTestVaultLink);
 const periodSeg = $('activityPeriodSeg');
 if (periodSeg) {
 periodSeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -2078,22 +2103,10 @@ if (typeof parsedBody?.model === 'string') model = parsedBody.model.trim();
 } catch (_) {}
 return { url, base, protocol, key, model };
 }
-function populatePresetDropdown(extraPresets = []) {
-const sel = $('newProvPreset');
-if (!sel) return;
-sel.innerHTML = '<option value="">-- 选择预设模板或手动填写 --</option>';
-const seenIds = new Set(['gemini']);
-for (const [key, meta] of Object.entries(PRESETS_META)) {
-seenIds.add(key);
-if (meta.preset_id) seenIds.add(meta.preset_id);
-const opt = ce('option');
-opt.value = key;
-opt.textContent = meta.label;
-sel.appendChild(opt);
-}
-if (Array.isArray(extraPresets)) {
+function mergeExtraPresets(extraPresets = []) {
+if (!Array.isArray(extraPresets)) return;
 for (const p of extraPresets) {
-if (!p || !p.id || seenIds.has(p.id)) continue;
+if (!p || !p.id || PRESETS_META[p.id]) continue;
 PRESETS_META[p.id] = {
 id: p.id,
 preset_id: p.id,
@@ -2102,12 +2115,6 @@ base_url: p.base_url || '',
 anthropic_base_url: p.anthropic_base_url || '',
 api_type: normalizeApiType(p.protocol),
 };
-seenIds.add(p.id);
-const opt = ce('option');
-opt.value = p.id;
-opt.textContent = p.name || p.id;
-sel.appendChild(opt);
-}
 }
 }
 function setupToolbars() {
@@ -2294,12 +2301,123 @@ toast(`重启失败: ${e.message}`, 'err');
 }
 });
 }
+function applyNewProvSourceMode() {
+const vaultOption = $('newProvSource')?.querySelector('option[value="vault"]');
+if (isHubMode() && vaultOption) vaultOption.hidden = true;
+const vaultMode = ($('newProvSource')?.value || 'custom') === 'vault';
+const setDisabled = (id, dis) => {
+const el = $(id);
+if (el) el.disabled = dis;
+};
+setDisabled('newProvId', vaultMode);
+setDisabled('newProvName', vaultMode);
+setDisabled('newProvBaseUrl', vaultMode);
+setDisabled('newProvApiType', vaultMode);
+toggle('newProvVaultGroup', vaultMode);
+toggle('newProvKeyAliasGroup', !vaultMode);
+toggle('newProvApiKeyGroup', !vaultMode);
+toggle('btnDetectProvider', !vaultMode);
+toggle('btnToggleCurlPaste', !vaultMode);
+if (vaultMode) {
+const curlWrap = $('curlPasteWrap');
+if (curlWrap && !curlWrap.hidden) toggle(curlWrap, false);
+state.addProvVaultPick = '';
+renderVaultProviderPicks();
+} else {
+state.addProvVaultPick = '';
+applyPresetAutoMatch();
+}
+const hintEl = $('newProvSourceHint');
+if (hintEl) {
+hintEl.textContent = vaultMode
+? '选中后整体拉取该供应商的适配规则与全部 Key，名称 / URL 以中枢为准'
+: '手动填写端点信息；输入名称或 ID 会自动匹配预设适配规则';
+}
+}
+function renderVaultProviderPicks() {
+const box = $('newProvVaultPick');
+if (!box) return;
+box.innerHTML = '';
+const hintEl = $('newProvVaultHint');
+if (hintEl) hintEl.textContent = '';
+const localProviders = state.config?.providers || {};
+const manifestProvs = vaultManifestProviders();
+const entries = Object.entries(manifestProvs).filter(([pId]) => !localProviders[pId]);
+if (entries.length === 0) {
+const empty = ce('span');
+empty.className = 'text-xs text-muted';
+empty.textContent = !state.vaultManifest
+? '中枢清单未加载（请在系统设置配置 Vault 连接并点击「测试连接」）'
+: Object.keys(manifestProvs).length === 0
+? '中枢清单为空：中枢暂未托管任何可拉取的供应商'
+: '中枢清单中的供应商均已配置在本地，无需重复添加';
+box.appendChild(empty);
+return;
+}
+for (const [pId, meta] of entries) {
+const keyCount = Array.isArray(meta.keys) ? meta.keys.length : 0;
+const pill = ce('button');
+pill.type = 'button';
+pill.className = `probe-pill${state.addProvVaultPick === pId ? ' probe-pill--managed' : ''}`;
+pill.innerHTML = `${eh(meta.name || pId)} · ${keyCount} Key${meta.preset_id ? ` <span class="pill">预设 ${eh(meta.preset_id)}</span>` : ''}`;
+clk(pill, () => {
+state.addProvVaultPick = pId;
+box.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
+const idEl = $('newProvId');
+const nameEl = $('newProvName');
+const baseEl = $('newProvBaseUrl');
+if (idEl) idEl.value = pId;
+if (nameEl) nameEl.value = meta.name || pId;
+if (baseEl) baseEl.value = meta.base_url || '';
+if (hintEl) {
+hintEl.textContent = `中枢 ${keyCount} 个 Key · 适配规则${meta.preset_id ? ` · 预设 ${meta.preset_id}` : ''}`;
+}
+});
+box.appendChild(pill);
+}
+}
+function matchPresetMeta(idOrName) {
+const key = String(idOrName || '').trim().toLowerCase();
+if (!key) return null;
+for (const meta of Object.values(PRESETS_META)) {
+if (String(meta.id || '').toLowerCase() === key || String(meta.label || '').toLowerCase() === key) {
+return meta;
+}
+}
+return null;
+}
+function applyPresetAutoMatch() {
+if (($('newProvSource')?.value || 'custom') !== 'custom') return;
+const hintEl = $('newProvPresetHint');
+const meta = matchPresetMeta($('newProvName')?.value) || matchPresetMeta($('newProvId')?.value);
+if (hintEl) {
+hintEl.textContent = meta ? `已按预设 ${meta.label} 自动填充` : '';
+hintEl.hidden = !meta;
+hintEl.classList.toggle('hidden', !meta);
+}
+if (!meta) return;
+const apiSel = $('newProvApiType');
+const apiType = normalizeApiType(meta.api_type);
+if (apiSel && [...apiSel.options].some((o) => o.value === apiType)) apiSel.value = apiType;
+const baseEl = $('newProvBaseUrl');
+if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
+}
 function setupCreationForms() {
-populatePresetDropdown();
 const pForm = $('addProviderForm');
 const mForm = $('addModelForm');
-clk($('btnAddProvider'), () => toggle(pForm));
+clk($('btnAddProvider'), async () => {
+toggle(pForm);
+if (pForm && !pForm.hidden) {
+applyNewProvSourceMode();
+await loadVaultManifest({ force: true });
+if (($('newProvSource')?.value || '') === 'vault') renderVaultProviderPicks();
+}
+});
 clk($('btnCancelAddProvider'), () => toggle(pForm, false));
+const srcSel = $('newProvSource');
+if (srcSel) srcSel.addEventListener('change', applyNewProvSourceMode);
+$('newProvName')?.addEventListener('input', applyPresetAutoMatch);
+$('newProvId')?.addEventListener('input', applyPresetAutoMatch);
 const btnToggleCurl = $('btnToggleCurlPaste');
 const curlWrap = $('curlPasteWrap');
 const curlInput = $('curlPasteInput');
@@ -2359,36 +2477,43 @@ toast(`探测完成: ${e.message}`, 'info');
 }
 });
 }
-$('newProvPreset')?.addEventListener('change', (e) => {
-const m = PRESETS_META[e.target.value];
-const hintEl = $('newProvPresetHint');
-if (m) {
-$('newProvId').value = m.id;
-$('newProvName').value = m.label;
-$('newProvBaseUrl').value = m.base_url;
-$('newProvApiType').value = normalizeApiType(m.api_type);
-if (hintEl) {
-hintEl.textContent = m.hint || '';
-hintEl.hidden = !m.hint;
-hintEl.classList.toggle('hidden', !m.hint);
-}
-} else if (hintEl) {
-hintEl.textContent = '';
-hintEl.hidden = true;
-hintEl.classList.add('hidden');
-}
-});
 clk($('btnConfirmAddProvider'), async () => {
+const sourceVal = $('newProvSource')?.value || 'custom';
+if (sourceVal === 'vault') {
+const pickId = state.addProvVaultPick;
+if (!pickId) return toast('请先选择一个中枢托管供应商', 'warn');
+if (state.config?.providers?.[pickId]) {
+return toast(`供应商 ${pickId} 已存在：中枢托管供应商可在其编辑器中「重新拉取」，本地创建的供应商请先删除或改名`, 'warn');
+}
+const btn = $('btnConfirmAddProvider');
+if (btn) btn.disabled = true;
+toast(`正在从中枢拉取供应商 ${pickId}（规则与全部 Key）...`, 'info');
+try {
+const res = await window.HOST.fetchVaultCredentials(pickId);
+if (res && res.ok) {
+state.activeEditorKey = `p_${pickId}`;
+toggle(pForm, false);
+await loadData();
+toast(`已拉取中枢供应商 ${pickId}`, 'ok');
+} else {
+toast(`从中枢拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+}
+} catch (e) {
+toast(`从中枢拉取异常: ${e.message}`, 'err');
+} finally {
+if (btn) btn.disabled = false;
+}
+return;
+}
 const id = ($('newProvId')?.value || '').trim();
 const name = ($('newProvName')?.value || '').trim() || id;
 const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
 const apiType = normalizeApiType($('newProvApiType')?.value);
 const keyAlias = ($('newProvKeyAlias')?.value || '').trim() || 'k1';
 const apiKey = ($('newProvApiKey')?.value || '').trim();
-const selectedPresetKey = $('newProvPreset')?.value || '';
-const selectedMeta = PRESETS_META[selectedPresetKey];
-const resolvedPresetId = selectedMeta
-? (selectedMeta.preset_id || selectedMeta.id)
+const matchedMeta = matchPresetMeta(name) || matchPresetMeta(id);
+const resolvedPresetId = matchedMeta
+? (matchedMeta.preset_id || matchedMeta.id)
 : (PRESETS_META[id]?.preset_id || '');
 if (!id) return toast('请输入供应商标识 ID', 'warn');
 if (!baseUrl) return toast('请输入 Base URL', 'warn');
@@ -2408,8 +2533,8 @@ enabled: true,
 origin: defOrigin,
 api_keys: parsed.keys,
 };
-if (selectedMeta?.anthropic_base_url) {
-newProv.anthropic_base_url = selectedMeta.anthropic_base_url;
+if (matchedMeta?.anthropic_base_url) {
+newProv.anthropic_base_url = matchedMeta.anthropic_base_url;
 }
 state.config.providers[id] = newProv;
 state.activeEditorKey = `p_${id}`;
@@ -2489,6 +2614,15 @@ renderHubOverview();
 loadActivityData();
 }
 }
+if (tab === 'providers' && !isHubMode() && window.HOST.capabilities.vaultClient) {
+loadVaultManifest().then((manifest) => {
+const srcSel = $('newProvSource');
+const pForm = $('addProviderForm');
+if (manifest && srcSel && srcSel.value === 'vault' && pForm && !pForm.hidden) {
+renderVaultProviderPicks();
+}
+});
+}
 }
 async function loadData() {
 try {
@@ -2505,14 +2639,18 @@ renderSettingsView();
 }
 if (window.HOST.capabilities.nodeManager) {
 await loadNodesData();
+mountIssueScopeLists();
 }
 if (!isHubMode() && !state.extraPresetsLoaded && window.HOST.getPresetsExtra) {
 state.extraPresetsLoaded = true;
 window.HOST.getPresetsExtra().then((res) => {
 if (res && res.ok && Array.isArray(res.presets)) {
-populatePresetDropdown(res.presets);
+mergeExtraPresets(res.presets);
 }
 }).catch(() => {});
+}
+if (!isHubMode() && window.HOST.capabilities.vaultClient) {
+loadVaultManifest();
 }
 if (window.HOST.capabilities.systemUpdate && !state.systemVersion && window.HOST.getSystemVersion) {
 window.HOST.getSystemVersion().then((v) => {
@@ -2781,50 +2919,25 @@ renderTracesList();
 toast(`统计加载失败: ${e.message}`, 'err');
 }
 }
-async function handleSyncVault() {
-let hubUrl = (state.config?.vault?.url || ($('cfgVaultUrl')?.value || '')).trim();
-let nodeToken = (state.config?.vault?.node_token || ($('cfgVaultToken')?.value || '')).trim();
-if (!hubUrl) {
-const inputUrl = prompt('请输入 EdgeOne Hub 中枢 URL (例如 https://hub.example.com):', '');
-if (!inputUrl) return;
-hubUrl = inputUrl.trim();
-const inputToken = prompt('请输入 Full 节点专属 NODE_TOKEN:', '') || '';
-nodeToken = inputToken.trim();
-}
-const btn = $('btnSyncVault');
-const btnSettings = $('btnSyncVaultFromSettings');
+async function handleTestVaultLink() {
+const hubUrl = ($('cfgVaultUrl')?.value || '').trim();
+const nodeToken = ($('cfgVaultToken')?.value || '').trim();
+if (!hubUrl) return toast('请先填写 Vault 中枢地址', 'warn');
+const btn = $('btnTestVaultLink');
 if (btn) btn.disabled = true;
-if (btnSettings) btnSettings.disabled = true;
-toast('正在从中枢同步供应商与模型路由...', 'info');
+toast('正在测试 Vault 中枢连接...', 'info');
 try {
 const tokenForReq = isMaskedSecretVal(nodeToken) ? '' : nodeToken;
-const syncFn = window.HOST.api?.syncFromVault || window.HOST.syncFromVault;
-const res = await syncFn({ hubUrl, nodeToken: tokenForReq });
-if (res && res.ok) {
-if (res.config && typeof res.config === 'object') {
-ensureUnifiedFixedRoutes(res.config);
-state.config = res.config;
-}
-if (typeof res._version === 'number' && state.config) {
-state.config._version = res._version;
-}
-const verEl = $('configVersionDisplay');
-if (verEl && state.config?._version !== undefined) {
-verEl.textContent = `v${state.config._version}`;
-}
-refreshDatalists();
-renderProvidersList();
-renderModelsList();
-renderSettingsView();
-toast(`已从中枢同步 ${res.synced_providers ?? 0} 个供应商与 ${res.synced_models ?? 0} 个模型路由`, 'ok');
+const res = await window.HOST.fetchVaultManifest(hubUrl, tokenForReq);
+if (res && res.ok && res.providers && typeof res.providers === 'object') {
+toast(`连接成功：中枢可用供应商 ${Object.keys(res.providers).length} 个`, 'ok');
 } else {
-toast(`从中枢同步失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+toast(`连接失败: ${scrubUiText(res?.error || `HTTP ${res?.status || '请求未成功'}`)}`, 'err');
 }
 } catch (e) {
-toast(`从中枢同步异常: ${scrubUiText(e.message)}`, 'err');
+toast(`连接失败: ${scrubUiText(e.message)}`, 'err');
 } finally {
 if (btn) btn.disabled = false;
-if (btnSettings) btnSettings.disabled = false;
 }
 }
 function renderProvidersList() {
@@ -3005,13 +3118,18 @@ const isVaultProv = !isHubMode() && p.origin === 'vault';
 const curApiType = normalizeApiType(p.api_type);
 const isMiniMax = String(p.preset_id || pId || '').toLowerCase().startsWith('minimax');
 const showOAuth = Boolean(window.HOST.capabilities.oauthLogin && !isVaultProv && isMiniMax);
+const manifestProv = isVaultProv ? vaultManifestProviders()[pId] || null : null;
+const ruleHashDrift = Boolean(
+manifestProv && manifestProv.rule_hash && p.rule_hash && manifestProv.rule_hash !== p.rule_hash
+);
 const aliasText = Object.entries(p.model_aliases || {})
 .map(([k, v]) => `${k}=${v}`)
 .join('\n');
 const adapterText = p.adapter_rules && Object.keys(p.adapter_rules).length > 0
 ? JSON.stringify(p.adapter_rules, null, 2)
 : '';
-const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}">`
+const lockAttr = isVaultProv ? ' disabled' : '';
+const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAttr}>`
 + `<option value="openai-completions" ${curApiType === 'openai-completions' ? 'selected' : ''}>OpenAI 兼容 (/v1/chat/completions)</option>`
 + `<option value="anthropic-messages" ${curApiType === 'anthropic-messages' ? 'selected' : ''}>Anthropic 原生 (/v1/messages)</option>`
 + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
@@ -3034,19 +3152,26 @@ if (rpm > 0) p.rpm_per_key = rpm;
 else delete p.rpm_per_key;
 }
 };
+const vaultNotice = isVaultProv
+? `<div class="notice-strip mb-3"><span>中枢托管供应商：名称、URL、协议与适配规则由中枢统一管理（只读）。如需修改请在中枢控制台操作后点击「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-3"><span>中枢规则已更新：本地适配规则与中枢清单不一致，请点击「重新拉取」同步最新规则与 Key。</span></div>' : ''}`
+: '';
+const vaultKeyPickHtml = isVaultProv
+? `<div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（仅列出本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
+: `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`;
+const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div>${isVaultProv ? '' : `<div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div>`}</div>`;
 wrap.innerHTML = `<div class="form-grid">${[
-fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}">`),
-fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() ? 'hidden' : ''}>自动探测</button></div>`),
+fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
+fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"${lockAttr}><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`),
 fg('上游协议类型', apiTypeSelectHtml),
-fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}">`),
-fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek">`),
-`<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}><span>隐藏客户端 User-Agent</span></label></div>`,
+fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
+fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>`),
+`<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
 ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
 fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
 fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
 fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
-fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'>${eh(adapterText)}</textarea>`),
-].join('')}</div></details><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div>${isVaultProv ? '<div class="notice-strip mb-3"><span>中枢下发供应商密钥由中枢统一管理（只读）；如需挂载私有 Key，请点击右上角「添加供应商」新建本地供应商</span></div>' : ''}<div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${isVaultProv ? '' : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div></div>`;
+fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
+].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
 const tbody = q(`#p_keys_tbody_${pId}`);
 if (tbody && !tbody.dataset.revealWired) {
 tbody.dataset.revealWired = '1';
@@ -3086,9 +3211,7 @@ const vaultKey = !isHubMode() && (isVaultProv || k.origin === 'vault');
 tr.innerHTML = `
 <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td><td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td><td>${renderKeyCell(k, vaultKey, idx)}</td><td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM" ${vaultKey ? 'disabled' : ''}></div></td>
 ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
-<td>${statusHtml}</td><td><div class="fields"><button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
-${vaultKey ? '<span class="text-xs text-muted">由中枢管理</span>' : `<button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>`}
-</div></td>
+<td>${statusHtml}</td><td><div class="fields"><button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button><button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button></div></td>
 `;
 tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
 k.weight = Math.max(1, Number(e.target.value) || 1);
@@ -3149,7 +3272,7 @@ toast(`校验异常: ${e.message}`, 'err');
 });
 const delKeyBtn = tr.querySelector('.btn_del_k');
 if (delKeyBtn) {
-clk(delKeyBtn, () => {
+clk(delKeyBtn, async () => {
 const refs = routesUsingKey(pId, keyLabel);
 if (refs.length > 0) {
 const ok = window.confirm(
@@ -3159,7 +3282,11 @@ if (!ok) return;
 }
 syncDraftFields();
 p.api_keys.splice(idx, 1);
+if (isVaultProv || vaultKey) {
+await persistConfig(`本地已删除 Key [${keyLabel}]（中枢不受影响，可经「从中枢添加」或「重新拉取」恢复）`);
+} else {
 renderProvidersList();
+}
 });
 }
 tbody.appendChild(tr);
@@ -3296,6 +3423,109 @@ p.api_keys.push(...parsed.keys);
 renderProvidersList();
 });
 }
+if (isVaultProv) {
+const pickBtn = q(`#btn_vault_add_keys_${pId}`);
+const pickBox = q(`#vault_keys_pick_${pId}`);
+const actionsBox = q(`#vault_keys_actions_${pId}`);
+const fetchBtn = q(`#btn_vault_fetch_keys_${pId}`);
+const pickedLabels = new Set();
+const hideActions = () => {
+if (actionsBox) {
+actionsBox.hidden = true;
+actionsBox.classList.add('hidden');
+}
+};
+const renderKeyPick = () => {
+if (!pickBox) return;
+pickBox.innerHTML = '';
+pickedLabels.clear();
+hideActions();
+if (!manifestProv) {
+const empty = ce('span');
+empty.className = 'text-xs text-muted';
+empty.textContent = '中枢清单未加载，无法补拉（请稍后重试或检查 Vault 连接）';
+pickBox.appendChild(empty);
+return;
+}
+const localLabels = new Set(keys.map((k) => k.label || k.id).filter(Boolean));
+const missing = (Array.isArray(manifestProv.keys) ? manifestProv.keys : []).filter((lbl) => !localLabels.has(lbl));
+if (missing.length === 0) {
+const empty = ce('span');
+empty.className = 'text-xs text-muted';
+empty.textContent = '中枢清单中没有本地缺失的 Key 标签';
+pickBox.appendChild(empty);
+return;
+}
+for (const lbl of missing) {
+const pill = ce('button');
+pill.type = 'button';
+pill.className = 'probe-pill';
+pill.textContent = lbl;
+clk(pill, () => {
+if (pickedLabels.has(lbl)) pickedLabels.delete(lbl);
+else pickedLabels.add(lbl);
+pill.classList.toggle('probe-pill--managed', pickedLabels.has(lbl));
+if (actionsBox) {
+actionsBox.hidden = pickedLabels.size === 0;
+actionsBox.classList.toggle('hidden', pickedLabels.size === 0);
+}
+});
+pickBox.appendChild(pill);
+}
+};
+if (pickBtn && pickBox) {
+clk(pickBtn, () => {
+renderKeyPick();
+toggle(pickBox);
+if (pickBox.hidden) hideActions();
+});
+}
+if (fetchBtn) {
+clk(fetchBtn, async () => {
+if (pickedLabels.size === 0) return toast('请先勾选要补拉的 Key 标签', 'warn');
+fetchBtn.disabled = true;
+toast(`正在补拉 ${pickedLabels.size} 个 Key 标签...`, 'info');
+try {
+const res = await window.HOST.fetchVaultCredentials(pId, undefined, undefined, undefined, [...pickedLabels]);
+if (res && res.ok) {
+toast(`已补拉 ${pickedLabels.size} 个 Key 标签`, 'ok');
+await loadData();
+} else {
+toast(`补拉失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+}
+} catch (e) {
+toast(`补拉异常: ${e.message}`, 'err');
+} finally {
+fetchBtn.disabled = false;
+if (pickBox) {
+pickBox.hidden = true;
+pickBox.classList.add('hidden');
+}
+hideActions();
+}
+});
+}
+}
+const refetchBtn = q(`#btn_refetch_prov_${pId}`);
+if (refetchBtn) {
+clk(refetchBtn, async () => {
+refetchBtn.disabled = true;
+toast(`正在重新拉取供应商 ${pId}（规则与全部 Key）...`, 'info');
+try {
+const res = await window.HOST.fetchVaultCredentials(pId);
+if (res && res.ok) {
+toast(`供应商 ${pId} 已按中枢最新内容重新拉取`, 'ok');
+await loadData();
+} else {
+toast(`重新拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+}
+} catch (e) {
+toast(`重新拉取异常: ${e.message}`, 'err');
+} finally {
+refetchBtn.disabled = false;
+}
+});
+}
 clk(q(`#btn_save_prov_${pId}`), async () => {
 syncDraftFields();
 delete p.refresh_every;
@@ -3334,20 +3564,77 @@ delete state.config.providers[pId];
 delete state.probedModelsByProvider[pId];
 delete state.probeFilterByProvider[pId];
 state.activeEditorKey = null;
-await persistConfig('供应商已删除');
+await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
 });
 return wrap;
 }
-function parseScopeInput(rawStr) {
-const s = String(rawStr || '').trim();
-if (!s || s === '*') return ['*'];
-if (s === '[]' || s.toLowerCase() === 'none') return [];
-return s.split(',').map((item) => item.trim()).filter(Boolean);
+function renderScopeCheckboxGroup(container, optionList) {
+if (!container) return;
+container.innerHTML = '';
+for (const opt of optionList || []) {
+const lbl = ce('label');
+lbl.className = 'form-label form-label--check';
+const cb = ce('input');
+cb.type = 'checkbox';
+cb.value = opt;
+const txt = ce('span');
+txt.textContent = opt;
+lbl.appendChild(cb);
+lbl.appendChild(txt);
+container.appendChild(lbl);
 }
-function formatScopeInput(arr) {
-if (!Array.isArray(arr)) return '*';
-if (arr.length === 0) return '[]';
-return arr.join(', ');
+}
+function collectScopeSelection(container) {
+const vals = [];
+container?.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+if (cb.checked) vals.push(cb.value);
+});
+return vals;
+}
+function mountScopeControls(masterEl, listEl, options, selected) {
+renderScopeCheckboxGroup(listEl, options || []);
+const isAll = Array.isArray(selected) && selected.includes('*');
+if (masterEl) {
+masterEl.checked = isAll;
+masterEl.onchange = () => {
+if (listEl) listEl.hidden = masterEl.checked;
+};
+}
+if (listEl) {
+listEl.hidden = isAll;
+if (!isAll && Array.isArray(selected)) {
+listEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+cb.checked = selected.includes(cb.value);
+});
+}
+}
+}
+function templateScopeOptions() {
+return {
+providers: Object.keys(state.config?.providers || {}).sort(),
+models: Object.keys(state.config?.agent_models || {}).sort(),
+};
+}
+function currentScopeSelection(listEl, masterEl) {
+if (!listEl || !listEl.querySelector('input[type="checkbox"]')) return ['*'];
+if (masterEl?.checked) return ['*'];
+return collectScopeSelection(listEl);
+}
+function mountIssueScopeLists() {
+if (!isHubMode()) return;
+const opts = templateScopeOptions();
+mountScopeControls(
+$('issueNodeProvAll'),
+$('issueNodeProvs'),
+opts.providers,
+currentScopeSelection($('issueNodeProvs'), $('issueNodeProvAll'))
+);
+mountScopeControls(
+$('issueNodeModelAll'),
+$('issueNodeModels'),
+opts.models,
+currentScopeSelection($('issueNodeModels'), $('issueNodeModelAll'))
+);
 }
 const nodeTokenMem = new Map();
 const nodeAdminPassMem = new Map();
@@ -3635,20 +3922,31 @@ fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(nod
 fg('节点角色', `<select class="select" id="ed_node_role_${id}"><option value="full" ${node.role === 'full' ? 'selected' : ''}>Full (全功能代理网关)</option><option value="lite" ${node.role === 'lite' ? 'selected' : ''}>Lite (轻量本地代理)</option></select>`),
 fg('租约时长 (秒 lease_ttl)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || 86400}">`),
 fg('断网宽限期 (秒 grace_ttl)', `<input class="input tabular" id="ed_node_grace_${id}" type="number" value="${node.grace_ttl || 3600}">`),
-fg('LLM 供应商 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_provs_${id}" list="datalistProviders" value="${eh(formatScopeInput(node.scope?.providers))}">`),
-fg('LLM 模型 (* 全量, [] 无)', `<input class="input input--code" id="ed_node_models_${id}" list="datalistModels" value="${eh(formatScopeInput(node.scope?.models))}">`),
+`<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_prov_all_${id}"><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="ed_node_provs_${id}"></div></div>`,
+`<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_model_all_${id}"><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="ed_node_models_${id}"></div></div>`,
 ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
 fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
 fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
 ].join('')}</div><div class="mt-3" id="node_cmd_panel_${id}"></div></div>`;
+const tmplOpts = templateScopeOptions();
+const staleScope = (scopeArr, options) =>
+[...new Set((Array.isArray(scopeArr) ? scopeArr : []).filter((v) => v !== '*' && !options.includes(v)))];
+const staleProviders = staleScope(node.scope?.providers, tmplOpts.providers);
+const staleModels = staleScope(node.scope?.models, tmplOpts.models);
+mountScopeControls(q(`#ed_node_prov_all_${id}`), q(`#ed_node_provs_${id}`), tmplOpts.providers, node.scope?.providers);
+mountScopeControls(q(`#ed_node_model_all_${id}`), q(`#ed_node_models_${id}`), tmplOpts.models, node.scope?.models);
 clk(q(`#btn_save_node_${id}`), async () => {
 const name = q(`#ed_node_name_${id}`).value.trim();
 const role = q(`#ed_node_role_${id}`)?.value || node.role;
 const leaseTtl = Number(q(`#ed_node_ttl_${id}`).value) || 86400;
 const graceTtl = Number(q(`#ed_node_grace_${id}`)?.value) || 3600;
 const scope = {
-providers: parseScopeInput(q(`#ed_node_provs_${id}`).value),
-models: parseScopeInput(q(`#ed_node_models_${id}`).value),
+providers: q(`#ed_node_prov_all_${id}`)?.checked
+? ['*']
+: [...new Set([...staleProviders, ...collectScopeSelection(q(`#ed_node_provs_${id}`))])],
+models: q(`#ed_node_model_all_${id}`)?.checked
+? ['*']
+: [...new Set([...staleModels, ...collectScopeSelection(q(`#ed_node_models_${id}`))])],
 };
 try {
 const res = await window.HOST.patchNode(id, { name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
@@ -3704,12 +4002,10 @@ const name = $('issueNodeName').value.trim();
 const role = $('issueNodeRole').value;
 const leaseTtl = Number($('issueNodeTTL').value) || 86400;
 const graceTtl = Number($('issueNodeGraceTTL')?.value) || 3600;
-const provsRaw = $('issueNodeProvs')?.value;
-const modelsRaw = $('issueNodeModels')?.value;
 if (!name) return toast('请输入节点名称', 'warn');
 const scope = {
-providers: parseScopeInput(provsRaw),
-models: parseScopeInput(modelsRaw),
+providers: $('issueNodeProvAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeProvs')),
+models: $('issueNodeModelAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeModels')),
 };
 try {
 const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
@@ -3741,9 +4037,11 @@ btnAddModel.hidden = false;
 btnAddModel.classList.remove('hidden');
 }
 ensureUnifiedFixedRoutes(state.config);
+const isHub = isHubMode();
 const models = state.config?.agent_models || {};
 const q = state.modelQuery || '';
-const sub = state.modelSubMode || 'all';
+let sub = state.modelSubMode || 'all';
+if (isHub && sub === 'fixed') sub = 'all';
 const customKeys = Object.keys(models).filter((k) => !FIXED_SLOT_META[k]).sort();
 let orderedKeys = [];
 if (sub === 'fixed') {
@@ -3753,6 +4051,7 @@ orderedKeys = customKeys;
 } else {
 orderedKeys = [...FIXED_SLOT_IDS, ...customKeys];
 }
+if (isHub) orderedKeys = orderedKeys.filter((mName) => !FIXED_SLOT_META[mName]);
 orderedKeys = orderedKeys.filter((mName) => {
 if (!q) return true;
 const m = models[mName] || {};
@@ -3797,7 +4096,6 @@ who.innerHTML = `
 ${brandIcon}
 <span>${eh(mName)}</span>
 ${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
-${isFixed && isHubMode() ? '<span class="pill pill--amber">仅 Full 节点生效 · Lite 节点自动忽略</span>' : ''}
 <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
 ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
 </div><div class="sub">${eh(subDesc)}</div>
@@ -3959,6 +4257,115 @@ await persistConfig('模型已删除');
 });
 }
 return wrap;
+}
+function openTemplateImportOverlay() {
+const overlay = $('templateImportOverlay');
+if (!overlay) return;
+overlay.hidden = false;
+overlay.classList.remove('hidden');
+renderTemplateImportList();
+}
+function closeTemplateImportOverlay() {
+const overlay = $('templateImportOverlay');
+if (!overlay) return;
+overlay.hidden = true;
+overlay.classList.add('hidden');
+}
+function templateRouteMissingProviders(mName, tpl, localProviders) {
+const cands = Array.isArray(tpl?.candidates) ? tpl.candidates : [];
+return [...new Set(cands.map((c) => c.provider).filter((pId) => pId && !localProviders[pId]))];
+}
+function templateRouteMissingKeyLabels(mName, tpl, localProviders) {
+const cands = Array.isArray(tpl?.candidates) ? tpl.candidates : [];
+const missing = new Set();
+for (const c of cands) {
+const lbl = String(c?.key_label || '').trim();
+if (!lbl) continue; // 空 = 展开该供应商全部启用 Key
+const keys = localProviders[c?.provider]?.api_keys || [];
+const hasKey = keys.some((k) => k && (k.label === lbl || k.id === lbl));
+if (!hasKey) missing.add(`${c.provider}:${lbl}`);
+}
+return [...missing];
+}
+function renderTemplateImportList() {
+const listEl = $('templateImportList');
+if (!listEl) return;
+listEl.innerHTML = '';
+const manifestModels = vaultManifestModels();
+const localModels = state.config?.agent_models || {};
+const localProviders = state.config?.providers || {};
+const entries = Object.entries(manifestModels).filter(
+([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName] && !FIXED_SLOT_META[mName]
+);
+if (entries.length === 0) {
+const empty = ce('div');
+empty.className = 'row row--static text-muted';
+if (!state.vaultManifest) {
+empty.textContent = '中枢清单未加载，无法导入模板路由';
+} else if (!state.vaultManifest.agent_models || typeof state.vaultManifest.agent_models !== 'object') {
+empty.textContent = '中枢清单未包含模板路由（中枢版本较旧或未发布任何模板）';
+} else {
+empty.textContent = '中枢模板中没有本地缺失的模型路由';
+}
+listEl.appendChild(empty);
+return;
+}
+for (const [mName, tpl] of entries) {
+const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
+const missing = templateRouteMissingProviders(mName, tpl, localProviders);
+const missingKeys = templateRouteMissingKeyLabels(mName, tpl, localProviders);
+const candText = cands.map((c) => `${c.provider}:${c.key_label || '*'}→${c.target_model || mName}`).join(' · ');
+const row = ce('div');
+row.className = 'mb-2';
+row.innerHTML = `
+<label class="form-label form-label--check"><input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${missing.length || missingKeys.length ? 'disabled' : ''}><span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span></label>
+${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
+${missing.length ? `<div class="text-xs"><span class="pill pill--red">需先拉取供应商 ${eh(missing.join(', '))}</span></div>` : ''}
+${missingKeys.length ? `<div class="text-xs"><span class="pill pill--red">候选绑定的 Key 标签本地缺失：${eh(missingKeys.join(', '))}（请重新拉取对应供应商或调整模板）</span></div>` : ''}
+`;
+listEl.appendChild(row);
+}
+}
+async function handleConfirmImportRoutes() {
+const listEl = $('templateImportList');
+const picked = [...(listEl?.querySelectorAll('.tpl_import_cb:checked') || [])]
+.map((cb) => cb.getAttribute('data-model'))
+.filter(Boolean);
+if (picked.length === 0) return toast('请先勾选要导入的模型路由', 'warn');
+const manifestModels = vaultManifestModels();
+const localModels = state.config?.agent_models || {};
+const localProviders = state.config?.providers || {};
+let imported = 0;
+for (const mName of picked) {
+const tpl = manifestModels[mName];
+if (!tpl || localModels[mName]) continue;
+if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) continue;
+if (templateRouteMissingKeyLabels(mName, tpl, localProviders).length > 0) continue;
+const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
+state.config = state.config || { providers: {}, agent_models: {} };
+state.config.agent_models = state.config.agent_models || {};
+state.config.agent_models[mName] = {
+origin: 'local',
+routing_strategy: tpl.routing_strategy || 'sticky_failover',
+active_key: tpl.active_key || '',
+no_reasoning: Boolean(tpl.no_reasoning),
+force_non_stream: Boolean(tpl.force_non_stream),
+allow_key_fallback: Boolean(tpl.allow_key_fallback),
+enabled: true,
+candidates: cands.map((c) => ({
+provider: c.provider || '',
+key_label: c.key_label || '',
+target_model: c.target_model || mName,
+enabled: c.enabled !== false,
+weight: Number(c.weight) || 0,
+max_concurrency: Number(c.max_concurrency) || 0,
+})),
+};
+imported++;
+}
+if (imported === 0) return toast('没有可导入的路由（候选供应商或 Key 缺失，或路由已存在）', 'warn');
+closeTemplateImportOverlay();
+await persistConfig(`已从模板导入 ${imported} 条模型路由`);
 }
 function renderTracesList() {
 const container = $('tracesList');
@@ -4219,6 +4626,7 @@ delete s.mode_schedule_timezone;
 delete s.mode_schedule_webhook_url;
 delete s.mode_schedule_webhook_secret;
 await persistConfig('设置保存成功');
+await loadVaultManifest({ force: true });
 };
 }
 }

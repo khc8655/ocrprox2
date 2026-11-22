@@ -2,6 +2,7 @@ import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { touchNodeLastSeen } from '../../lib/nodes.js';
+import { ruleHash } from '../../lib/rulehash.js';
 
 export async function handleVaultManifestRequest(request, env, kv) {
   const auth = await checkVaultAuth(request, env, kv);
@@ -35,14 +36,20 @@ export async function handleVaultManifestRequest(request, env, kv) {
   }
   const scopeProvs = !auth.isAdmin ? (auth.node?.scope?.providers || ['*']) : ['*'];
   const allowAllProvs = auth.isAdmin || scopeProvs.includes('*');
+  const scopeModels = !auth.isAdmin ? (auth.node?.scope?.models || ['*']) : ['*'];
+  const allowAllModels = auth.isAdmin || scopeModels.includes('*');
 
   const manifest = {};
   for (const [pId, pData] of Object.entries(config.providers || {})) {
     if (!pData || pData.origin === 'local' || pData.is_local) continue;
     if (!allowAllProvs && !scopeProvs.includes(pId)) continue;
 
+    // Mirror the routing projection in lib/projection.js: enabled, non-local keys with
+    // actual key material are exportable. A key without material would be listed here
+    // as fetchable while the runtime projection drops it (and a per-label fetch would
+    // silently return nothing), so it must not appear in the manifest.
     const exportableKeys = (pData.api_keys || [])
-      .filter((k) => k && k.enabled && k.origin !== 'local' && !k.is_local)
+      .filter((k) => k && k.enabled && k.origin !== 'local' && !k.is_local && k.key)
       .map((k) => k.label || k.id);
 
     if (exportableKeys.length === 0) continue;
@@ -58,8 +65,43 @@ export async function handleVaultManifestRequest(request, env, kv) {
       base_url: pData.base_url || '',
       anthropic_base_url: pData.anthropic_base_url || '',
       keys: exportableKeys,
-      rule_hash: pData.rule_hash || '',
+      rule_hash: ruleHash(rules || {}),
       adapter_rules: rules || {},
+    };
+  }
+
+  // Route templates (agent_models) mirror the routing projection in lib/projection.js:
+  // enabled routes only, filtered by the caller's model scope, and every candidate must
+  // reference a provider that survived into this manifest's providers section — dead
+  // candidates are culled and a route with none left is dropped. Metadata only:
+  // candidates carry key labels, never plaintext key material.
+  const agentModels = {};
+  for (const [mName, mRoute] of Object.entries(config.agent_models || {})) {
+    if (!mRoute || !mRoute.enabled) continue;
+    if (!allowAllModels && !scopeModels.includes(mName)) continue;
+
+    const candidates = (mRoute.candidates || [])
+      .filter((c) => c && c.enabled && Boolean(manifest[c.provider]))
+      .map((c) => ({
+        provider: c.provider,
+        key_label: c.key_label || '',
+        target_model: c.target_model || '',
+        enabled: true,
+        weight: Number(c.weight) || 0,
+        // Same field name as the runtime projection passthrough and the node's
+        // RouteCandidate JSON tag, so template import keeps the per-candidate cap.
+        max_concurrency: Number(c.max_concurrency) || 0,
+      }));
+
+    if (candidates.length === 0) continue;
+
+    agentModels[mName] = {
+      routing_strategy: mRoute.routing_strategy || '',
+      active_key: mRoute.active_key || '',
+      no_reasoning: Boolean(mRoute.no_reasoning),
+      force_non_stream: Boolean(mRoute.force_non_stream),
+      allow_key_fallback: Boolean(mRoute.allow_key_fallback),
+      candidates,
     };
   }
 
@@ -68,6 +110,7 @@ export async function handleVaultManifestRequest(request, env, kv) {
       ok: true,
       _version: config._version || 1,
       providers: manifest,
+      agent_models: agentModels,
     }),
     { status: 200, headers: { 'content-type': 'application/json' } }
   );

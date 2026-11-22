@@ -490,6 +490,13 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(ftResp.status, 200);
       const ftData = await ftResp.json();
       assert.equal(ftData.provider_config.keys['pool-open'], 'sk-or-sec-111');
+      // The fetch response carries the hub-managed protocol type and the same rule hash
+      // the manifest publishes, so the node can store both and detect rule drift.
+      assert.equal(ftData.provider_config.api_type, '', 'provider_config always carries api_type');
+      assert.equal(typeof ftData.provider_config.rule_hash, 'string');
+      assert.ok(ftData.provider_config.rule_hash.length > 0);
+      assert.equal(ftData.provider_config.rule_hash, mfData.providers.openrouter.rule_hash,
+        'manifest and fetch must stamp the same rule_hash for the same provider state');
 
       // 3. Fetch local key -> 404
       const ftPrivReq = makeAdminReq('POST', '/api/vault/fetch', {
@@ -1868,5 +1875,263 @@ describe('11. Full-node issuance carries an admin password', () => {
     const rotated = await rotateRes.json();
     assert.ok(rotated.admin_password, 'rotate must return a fresh admin password');
     assert.ok(rotated.install_command.includes('--admin-password='));
+  });
+});
+
+describe('12. Vault manifest agent_models (on-demand route templates)', () => {
+  // Synthetic credentials only — never real key material.
+  const ALPHA_KEY = 'sk-test-0123456789abcdef';
+  const ALPHA_KEY2 = 'sk-test-fedcba9876543210';
+  const BETA_KEY = 'sk-test-1111222233334444';
+  const GHOST_KEY = 'sk-test-5555666677778888';
+
+  function vaultConfig(agentModels) {
+    return {
+      _version: 1,
+      providers: {
+        prov_alpha: {
+          name: 'Alpha',
+          enabled: true,
+          api_keys: [
+            { id: 'ka1', label: 'alpha-k1', key: ALPHA_KEY, enabled: true },
+            { id: 'ka2', label: 'alpha-k2', key: ALPHA_KEY2, enabled: true },
+          ],
+        },
+        prov_beta: {
+          name: 'Beta',
+          enabled: true,
+          api_keys: [{ id: 'kb1', label: 'beta-k1', key: BETA_KEY, enabled: true }],
+        },
+        local_vault: {
+          name: 'Ghost',
+          origin: 'local',
+          enabled: true,
+          api_keys: [{ id: 'kg1', label: 'ghost-k1', key: GHOST_KEY, enabled: true }],
+        },
+      },
+      agent_models: agentModels,
+    };
+  }
+
+  async function issueFullNode(kv, name, scope) {
+    return (
+      await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', { name, role: 'full', scope }),
+        TEST_ENV,
+        kv
+      )
+    ).json();
+  }
+
+  test('model-scope whitelist filters routes; admin call is treated as scope ["*"]', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq(
+        'POST',
+        '/api/config',
+        vaultConfig({
+          'm-in': {
+            enabled: true,
+            routing_strategy: 'sticky_failover',
+            active_key: 'prov_alpha:alpha-k1',
+            candidates: [
+              {
+                provider: 'prov_alpha',
+                key_label: 'alpha-k1',
+                target_model: 'alpha-prod',
+                enabled: true,
+                weight: 3,
+                max_concurrency: 8,
+              },
+              { provider: 'prov_beta', key_label: 'beta-k1', target_model: 'beta-prod', enabled: true },
+            ],
+          },
+          'm-out': {
+            enabled: true,
+            routing_strategy: 'round_robin',
+            candidates: [{ provider: 'prov_beta', key_label: 'beta-k1', target_model: 'beta-out', enabled: true }],
+          },
+        })
+      ),
+      TEST_ENV,
+      kv
+    );
+
+    const scoped = await issueFullNode(kv, 'zz_route_scope', { providers: ['*'], models: ['m-in'] });
+    const nodeMf = await (
+      await handleVaultManifestRequest(makeNodeReq('GET', '/api/vault/manifest', scoped.node_token), TEST_ENV, kv)
+    ).json();
+    assert.deepEqual(Object.keys(nodeMf.agent_models), ['m-in'], 'out-of-model-scope routes must not be listed');
+    assert.deepEqual(
+      nodeMf.agent_models['m-in'].candidates.map((c) => c.provider),
+      ['prov_alpha', 'prov_beta'],
+      'in-scope route keeps candidates whose providers are alive in the node manifest'
+    );
+
+    const adminMf = await (
+      await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)
+    ).json();
+    assert.deepEqual(Object.keys(adminMf.agent_models).sort(), ['m-in', 'm-out'], 'admin sees every enabled route');
+  });
+
+  test('disabled routes and dead candidates are culled; routes without live candidates are dropped', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq(
+        'POST',
+        '/api/config',
+        vaultConfig({
+          'm-disabled-route': {
+            enabled: false,
+            routing_strategy: 'round_robin',
+            candidates: [{ provider: 'prov_alpha', key_label: 'alpha-k1', target_model: 'never', enabled: true }],
+          },
+          'm-mixed': {
+            enabled: true,
+            routing_strategy: 'weighted',
+            candidates: [
+              { provider: 'local_vault', key_label: 'ghost-k1', target_model: 'ghost-model', enabled: true },
+              { provider: 'prov_nonexistent', key_label: 'nk', target_model: 'nx-model', enabled: true },
+              {
+                provider: 'prov_alpha',
+                key_label: 'alpha-k2',
+                target_model: 'alpha-live',
+                enabled: true,
+                weight: 2,
+                max_concurrency: 4,
+              },
+              { provider: 'prov_alpha', key_label: 'alpha-k1', target_model: 'alpha-off', enabled: false },
+            ],
+          },
+          'm-all-dead': {
+            enabled: true,
+            routing_strategy: 'round_robin',
+            candidates: [
+              { provider: 'local_vault', key_label: 'ghost-k1', target_model: 'dead-only', enabled: true },
+              { provider: 'prov_nonexistent', key_label: 'nk', target_model: 'nx', enabled: true },
+            ],
+          },
+          'm-beta-only': {
+            enabled: true,
+            routing_strategy: 'round_robin',
+            candidates: [{ provider: 'prov_beta', key_label: 'beta-k1', target_model: 'beta-live', enabled: true }],
+          },
+        })
+      ),
+      TEST_ENV,
+      kv
+    );
+
+    const adminMf = await (
+      await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)
+    ).json();
+    assert.equal(adminMf.agent_models['m-disabled-route'], undefined, 'disabled routes must never be listed');
+    assert.equal(adminMf.agent_models['m-all-dead'], undefined, 'routes with zero live candidates must be dropped');
+    assert.deepEqual(
+      adminMf.agent_models['m-mixed'].candidates,
+      [{ provider: 'prov_alpha', key_label: 'alpha-k2', target_model: 'alpha-live', enabled: true, weight: 2, max_concurrency: 4 }],
+      'dead providers and disabled candidates are culled from the surviving route'
+    );
+    assert.ok(adminMf.agent_models['m-beta-only'], 'live routes stay listed for admin');
+
+    // Scoped node: prov_beta is out of provider scope, so it never reaches the node's
+    // manifest providers section — candidates referencing it count as dead.
+    const scoped = await issueFullNode(kv, 'zz_route_dead', { providers: ['prov_alpha'], models: ['*'] });
+    const nodeMf = await (
+      await handleVaultManifestRequest(makeNodeReq('GET', '/api/vault/manifest', scoped.node_token), TEST_ENV, kv)
+    ).json();
+    assert.equal(
+      nodeMf.agent_models['m-beta-only'],
+      undefined,
+      'route whose only candidate is out of provider scope is dropped for the node'
+    );
+    assert.deepEqual(
+      nodeMf.agent_models['m-mixed'].candidates.map((c) => c.provider),
+      ['prov_alpha']
+    );
+  });
+
+  test('agent_models carries metadata only — key labels, never plaintext key material', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq(
+        'POST',
+        '/api/config',
+        vaultConfig({
+          'm-meta': {
+            enabled: true,
+            routing_strategy: 'sticky_failover',
+            active_key: 'prov_alpha:alpha-k1',
+            no_reasoning: true,
+            force_non_stream: true,
+            allow_key_fallback: true,
+            candidates: [
+              {
+                provider: 'prov_alpha',
+                key_label: 'alpha-k1',
+                target_model: 'alpha-prod',
+                enabled: true,
+                weight: 3,
+                max_concurrency: 8,
+              },
+            ],
+          },
+        })
+      ),
+      TEST_ENV,
+      kv
+    );
+
+    const adminMf = await (
+      await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)
+    ).json();
+    assert.deepEqual(
+      adminMf.agent_models['m-meta'],
+      {
+        routing_strategy: 'sticky_failover',
+        active_key: 'prov_alpha:alpha-k1',
+        no_reasoning: true,
+        force_non_stream: true,
+        allow_key_fallback: true,
+        candidates: [
+          { provider: 'prov_alpha', key_label: 'alpha-k1', target_model: 'alpha-prod', enabled: true, weight: 3, max_concurrency: 8 },
+        ],
+      },
+      'route metadata shape is exactly {routing_strategy, active_key, no_reasoning, force_non_stream, allow_key_fallback, candidates}'
+    );
+
+    const scoped = await issueFullNode(kv, 'zz_route_meta', { providers: ['*'], models: ['*'] });
+    const nodeMf = await (
+      await handleVaultManifestRequest(makeNodeReq('GET', '/api/vault/manifest', scoped.node_token), TEST_ENV, kv)
+    ).json();
+
+    for (const [who, body] of [
+      ['admin', JSON.stringify(adminMf)],
+      ['node', JSON.stringify(nodeMf)],
+    ]) {
+      for (const secret of [ALPHA_KEY, ALPHA_KEY2, BETA_KEY, GHOST_KEY]) {
+        assert.ok(!body.includes(secret), `plaintext key material must never appear in the ${who} manifest`);
+      }
+      assert.ok(!body.includes('ghost-k1'), `local provider key label must never appear in the ${who} manifest`);
+    }
+
+    for (const mf of [adminMf, nodeMf]) {
+      assert.ok(mf.providers.prov_alpha, 'providers segment stays intact next to agent_models');
+      for (const route of Object.values(mf.agent_models)) {
+        assert.deepEqual(
+          Object.keys(route).sort(),
+          ['active_key', 'allow_key_fallback', 'candidates', 'force_non_stream', 'no_reasoning', 'routing_strategy'],
+          'routes expose exactly the metadata allowlist'
+        );
+        for (const cand of route.candidates) {
+          assert.deepEqual(
+            Object.keys(cand).sort(),
+            ['enabled', 'key_label', 'max_concurrency', 'provider', 'target_model', 'weight'],
+            'candidates expose exactly the metadata allowlist'
+          );
+          assert.equal(cand.key, undefined, 'candidates must never carry a key field');
+        }
+      }
+    }
   });
 });

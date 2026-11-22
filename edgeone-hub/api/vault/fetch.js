@@ -2,6 +2,7 @@ import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
 import { touchNodeLastSeen } from '../../lib/nodes.js';
+import { ruleHash } from '../../lib/rulehash.js';
 
 export async function handleVaultFetchRequest(request, env, kv) {
   const auth = await checkVaultAuth(request, env, kv);
@@ -81,6 +82,9 @@ export async function handleVaultFetchRequest(request, env, kv) {
     rules = presetsMap[pData.preset_id].adapter_rules;
   }
 
+  // api_type and rule_hash are hub-managed like base_url/adapter_rules: the node stores
+  // them on fetch, and the manifest publishes the same ruleHash so the node console can
+  // flag rule drift. No "enabled" flag here — enabling/disabling is local node state.
   return new Response(
     JSON.stringify({
       ok: true,
@@ -88,10 +92,12 @@ export async function handleVaultFetchRequest(request, env, kv) {
       provider_config: {
         name: pData.name || provider,
         preset_id: pData.preset_id || '',
+        api_type: pData.api_type || '',
         base_url: pData.base_url || '',
         anthropic_base_url: pData.anthropic_base_url || '',
         hide_client_name: Boolean(pData.hide_client_name),
         adapter_rules: rules || {},
+        rule_hash: ruleHash(rules || {}),
         keys: matchedKeys,
       },
     }),

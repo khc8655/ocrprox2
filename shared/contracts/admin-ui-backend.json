@@ -1,6 +1,11 @@
 {
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
-  "version": 2,
+  "version": 3,
+  "$changelog": [
+    "v3: removed POST /api/vault/sync (full sync replaced by on-demand fetch); POST /api/vault/fetch gains 409 provider_exists_local, wholesale replace of hub-managed fields on re-fetch, and imported_keys; GET /api/vault/manifest gains the agent_models route-template section; both endpoints now serve hub and full roles.",
+    "v3.1: vault fetch no longer accepts caller-supplied hub_url/node_token (target is always the stored vault config; anti-exfiltration); provider_config gains api_type/rule_hash and no longer touches enabled; manifest candidates rename max_conc to max_concurrency and rule_hash is hub-computed from adapter_rules; /api/vault/manifest accepts POST (credentials in body instead of the query string); provider IDs with unsafe characters are refused at adoption.",
+    "v2: initial published revision."
+  ],
   "capabilities": {
     "hub": {
       "vaultHub": true,
@@ -236,54 +241,97 @@
       }
     },
     "vault_manifest": {
-      "method": "GET",
+      "method": "GET | POST",
       "path": "/api/vault/manifest",
-      "auth": "ADMIN_PASSWORD",
+      "auth": "ADMIN_PASSWORD | NODE_TOKEN",
       "roles": [
-        "hub"
+        "hub",
+        "full"
       ],
+      "params": {
+        "hub_url": "string (optional, full node only: hub override; POST body on POST, query string on GET)",
+        "node_token": "string (optional, full node only: node token override; POST body on POST, query string on GET — POST preferred so the token stays out of access logs)"
+      },
       "response": {
         "ok": true,
         "_version": "integer",
-        "providers": "object"
-      }
+        "providers": {
+          "<provider_id>": {
+            "name": "string",
+            "preset_id": "string",
+            "base_url": "string",
+            "anthropic_base_url": "string",
+            "keys": "array of key-label strings",
+            "rule_hash": "string (hub-computed content hash of the resolved adapter_rules; the node compares it with the hash it stored on fetch to detect rule drift)",
+            "adapter_rules": "object"
+          }
+        },
+        "agent_models": {
+          "<model>": {
+            "routing_strategy": "string",
+            "active_key": "string",
+            "no_reasoning": "boolean",
+            "force_non_stream": "boolean",
+            "allow_key_fallback": "boolean",
+            "candidates": [
+              {
+                "provider": "string",
+                "key_label": "string",
+                "target_model": "string",
+                "enabled": true,
+                "weight": "integer",
+                "max_concurrency": "integer"
+              }
+            ]
+          }
+        }
+      },
+      "semantics": "hub-managed manifest, metadata only (key labels, never plaintext). providers lists vault providers (origin=local excluded) with enabled key labels that carry key material (mirrors the routing projection); node tokens additionally see only their provider scope. rule_hash is computed hub-side from the same resolved adapter_rules that /api/vault/fetch returns, so a node can detect rule drift. agent_models are on-demand route templates: enabled routes only, filtered by the caller's model scope, and every candidate must reference a provider that survived into this manifest's providers section (dead candidates culled, a route with none left is dropped). Candidates carry key labels (key_label) and the per-candidate max_concurrency cap, not key material."
     },
     "vault_fetch": {
       "method": "POST",
       "path": "/api/vault/fetch",
-      "auth": "ADMIN_PASSWORD",
+      "auth": "ADMIN_PASSWORD | NODE_TOKEN",
       "roles": [
-        "hub"
-      ],
-      "request": {
-        "provider": "string",
-        "key_label": "string (optional)",
-        "keys": "array of strings (optional)"
-      },
-      "response": {
-        "ok": true,
-        "provider": "string",
-        "provider_config": "object"
-      }
-    },
-    "vault_sync": {
-      "method": "POST",
-      "path": "/api/vault/sync",
-      "auth": "ADMIN_PASSWORD",
-      "roles": [
+        "hub",
         "full"
       ],
       "request": {
-        "hub_url": "string (optional)",
-        "node_token": "string (optional)"
+        "provider": "string",
+        "key_label": "string (optional: fetch a single key by label)",
+        "keys": "array of strings (optional: fetch key labels as a subset)"
       },
       "response": {
         "ok": true,
-        "_version": "integer",
-        "synced_providers": "integer",
-        "synced_models": "integer",
-        "config": "object"
-      }
+        "provider": "string",
+        "provider_config": {
+          "name": "string",
+          "preset_id": "string",
+          "api_type": "string",
+          "base_url": "string",
+          "anthropic_base_url": "string",
+          "hide_client_name": "boolean",
+          "adapter_rules": "object",
+          "rule_hash": "string (same hub-computed hash the manifest publishes)",
+          "keys": "object (label -> key material; masked in the full-node echo)"
+        },
+        "imported_keys": "array of key-label strings (added by the full node on 200: vault keys that landed with this fetch)"
+      },
+      "errors": {
+        "400": "invalid_json / provider_required / vault hub url not configured",
+        "403": "provider_out_of_node_scope (hub, node token out of provider scope)",
+        "404": "provider_not_found_or_local (hub)",
+        "409": {
+          "body": {
+            "ok": false,
+            "error": "provider_exists_local",
+            "provider": "string"
+          },
+          "when": "full node only: the target provider already exists locally with origin=local or a legacy empty origin (delete or rename it first); re-checked under the config lock at import time"
+        },
+        "502": "hub unreachable, or hub returned 200 with a body that is not a JSON object (never echoed unmasked)"
+      },
+      "semantics": "on-demand single-provider fetch (replaces the removed full-sync POST /api/vault/sync). The fetch target is ALWAYS the configured vault (stored config URL + node token, or CLI defaults) — callers cannot override hub_url/node_token on this endpoint, so an admin-password leak cannot repoint the auto-import at an attacker hub. A full provider fetch (no key_label/keys) replaces the hub-managed fields (name/base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name/rule_hash) and the vault key list wholesale on the full node: keys deleted locally reappear and keys removed on the hub disappear. Provider enabled and per-key enabled are local operational toggles and are never taken from the payload. A key-label subset fetch (key_label or keys present) merges without dropping the other vault keys. Vault keys land with origin=vault; providers with a local/legacy-empty origin and local keys are never overwritten. The full node auto-imports the fetched provider and masks plaintext key material before echoing the hub response."
     },
     "detect_provider": {
       "method": "POST",
