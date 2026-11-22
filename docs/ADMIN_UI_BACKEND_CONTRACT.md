@@ -498,6 +498,7 @@
 - 拨号前失败回滚：供应商令牌先取、随后 Key 级拒绝（`max_rpm` 打满）、OAuth 刷新失败或请求构建失败时，已取的供应商令牌（及 Key 令牌）经 `TryAcquireToken` 返回的 release 退回——滑动窗口只统计真实发出的请求，幽灵尝试不虚耗供应商额度。
 - Key 级限流 `api_keys[].max_rpm` 语义不变、独立生效：仅约束该 Key 自身的滑动窗口，0=不限；调度顺序为先查供应商窗口、再查 Key 窗口。旧「`RPMPerKey` 作为 Key 级回退」行为已移除——N 把 Key 不会各拿一份整供应商额度（守卫测试 `internal/scheduler/rpm_provider_test.go`）。
 - 中枢托管同步：`rpm_per_key` 属中枢托管字段，vault 供应商重拉（`MergeVaultConfig`）时**全量跟随**中枢值——中枢清 0（放开限制）后节点重拉即恢复不限，不单向只增不减。
+- **载荷必须携带**：`GET /api/vault/manifest` 的 `providers.<id>` 与 `POST /api/vault/fetch` 的 `provider_config` 都必须包含 `rpm_per_key`（数值，缺省 0）——否则中枢配置的限流到不了节点，且任何一次 vault 重拉都会把节点本地已设的值静默重置为 0（full 节点 replace 路径整体采纳载荷）。回归守卫：`edgeone-hub/test/hub.test.mjs` 的 vault manifest/fetch 用例同时断言两侧该字段等值。lite 路径同理经 `lib/projection.js` 的 `projectedProvider.rpm_per_key` 下发。
 
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。

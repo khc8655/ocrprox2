@@ -458,6 +458,9 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
               name: 'OpenRouter',
               preset_id: 'openrouter',
               enabled: true,
+              // Provider-wide RPM ceiling: must ride both manifest and fetch payloads so a
+              // node re-fetch cannot silently reset a configured limit to 0.
+              rpm_per_key: 60,
               api_keys: [{ id: 'k1', label: 'pool-open', key: 'sk-or-sec-111', enabled: true }],
             },
             private_prov: {
@@ -479,6 +482,8 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       const mfData = await mfResp.json();
       assert.ok(mfData.providers.openrouter);
       assert.deepEqual(mfData.providers.openrouter.keys, ['pool-open']);
+      assert.equal(mfData.providers.openrouter.rpm_per_key, 60,
+        'manifest publishes the provider-wide RPM ceiling so the console can show it before a fetch');
       assert.equal(mfData.providers.private_prov, undefined, 'Local provider omitted from manifest');
 
       // 2. Fetch shared key
@@ -497,6 +502,8 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.ok(ftData.provider_config.rule_hash.length > 0);
       assert.equal(ftData.provider_config.rule_hash, mfData.providers.openrouter.rule_hash,
         'manifest and fetch must stamp the same rule_hash for the same provider state');
+      assert.equal(ftData.provider_config.rpm_per_key, 60,
+        'fetch carries the provider-wide RPM ceiling; without it a node re-fetch resets the limit to 0');
 
       // 3. Fetch local key -> 404
       const ftPrivReq = makeAdminReq('POST', '/api/vault/fetch', {

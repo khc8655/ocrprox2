@@ -85,6 +85,9 @@ export async function handleVaultFetchRequest(request, env, kv) {
   // api_type and rule_hash are hub-managed like base_url/adapter_rules: the node stores
   // them on fetch, and the manifest publishes the same ruleHash so the node console can
   // flag rule drift. No "enabled" flag here — enabling/disabling is local node state.
+  // rpm_per_key is the provider-wide ceiling the scheduler enforces; it MUST ride the
+  // payload, otherwise a re-fetch silently resets a node-side limit to 0 (the node adopts
+  // the payload wholesale on replace).
   return new Response(
     JSON.stringify({
       ok: true,
@@ -96,6 +99,7 @@ export async function handleVaultFetchRequest(request, env, kv) {
         base_url: pData.base_url || '',
         anthropic_base_url: pData.anthropic_base_url || '',
         hide_client_name: Boolean(pData.hide_client_name),
+        rpm_per_key: Number(pData.rpm_per_key) || 0,
         adapter_rules: rules || {},
         rule_hash: ruleHash(rules || {}),
         keys: matchedKeys,

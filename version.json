@@ -1,16 +1,14 @@
 {
-  "version": "v20261122-06",
-  "semver": "2.9.3",
-  "release_date": "2026-11-22",
+  "version": "v20261123-01",
+  "semver": "2.9.4",
+  "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.9.3 — 路由编辑器 magpie 重排、供应商级 RPM 限流与测试路由统一",
+  "title": "LLMProxy2 (OCRProxy v2) 2.9.4 — vault 载荷补齐 rpm_per_key（中枢限流到节点的链路打通）",
   "changelog": [
-    "模型路由编辑器按 magpie 骨架重排：「对外模型名 → 模型列表（每行=序号+上游模型+供应商+上移/下移/移除，底部「+ 添加模型」内联面板：选供应商→探测胶囊点选→可手填上游 ID 追加）→ Key 选择（按供应商分行、胶囊多选，默认「任一」=空 key_label 用全部启用 Key，勾选具体标签按 key[i%n] 循环回绑该供应商候选）→ 候选权重/并发上限折叠 → 路由策略平铺胶囊（sticky_failover 显示「会话粘性优先（推荐）」）+ 每策略中文说明 + 当前生效默认值 → 开关类（剥离思考/强制非流式/Key 回退/指定 Key）折叠进「高级」」。不搬 magpie 的上下文徽章、额度优先、模式匹配、压缩阈值、供应商 logo 与「也列出成员模型」开关；候选仍是一条 provider+key_label+target_model",
-    "供应商级 RPM 限流：Provider.RPMPerKey（rpm_per_key）语义改为「该供应商整体 RPM 上限，0=不限」——>0 时调度器先对整个供应商（RPMLimiter 桶 provider:<id>，与 Key 级桶 provider:key_label 命名空间不相交）做一次滑动窗口 TryAcquire，窗口满则该供应商全部 Key 一律跳过（isCandidateHealthy 排序期判不健康 + Dispatch/ExecuteEndpoint 候选遍历两处一致，跳过原因 provider RPM limit）；随后才做 Key 级检查，api_keys[].max_rpm 语义不变、独立生效。旧「RPMPerKey 作为 Key 级回退」移除——N 把 Key 不再各拿一份整供应商额度",
-    "路由行「测试路由」统一为最小真实推理：chat 类路由经 /api/admin/test-agent-model 对每条启用候选发 messages=[{role:user,content:Hi}]+max_tokens=16（anthropic-messages 供应商发 /v1/messages），5 路并发 15s 超时，路由行展示最快通过候选的 延迟+供应商+Key 胶囊；embedding/reranker/ocr 走 /api/admin/test-candidate 单候选探测（embeddings/rerank/1×1 PNG OCR 载荷），两种探测成功均清除该 Key 冷却",
-    "中枢「模型路由模板」页角色降级：副标题改为「仅下发给 lite 节点；full 节点可选导入」——full 节点路由一律本地创建（既有按需拉取+模板导入），中枢不再承担 full 编排",
-    "新增供应商弹层改为居中 overlay 模态（login-card 同款布局、右上角关闭）；icons.js 清理未接线的 generic 图标脚手架",
-    "契约同步：shared/contracts/admin-ui-backend.json 升 v3.3（providers.rpm_per_key 改记供应商整体上限语义并新增 provider_config_semantics 块；probe_models 补 api_type 与已存 Key 解析/vault 403 语义；新增 test_agent_model、test_candidate 端点条目），docs/ADMIN_UI_BACKEND_CONTRACT.md 新增 §6.7/§6.8/§7.3.4",
-    "验证：npm run test:t1 契约守卫全绿；go test -race ./internal/scheduler/ 全绿（新增 rpm_provider_test.go 六例：供应商窗口双 Key 共享额度、Key 级 MaxRPM 在供应商窗口内独立生效、RPMPerKey=0 不装供应商窗口（chat 与 embeddings 两路径）、供应商窗口满排序期即拦截不达上游）；go build 通过"
+    "修复 `/api/vault/fetch` 与 `/api/vault/manifest` 载荷缺 `rpm_per_key`：中枢配置的供应商级 RPM 上限无法到达节点，且 full 节点任何一次 vault 重拉（replace 语义整体采纳载荷）都会把本地已设的限流静默重置为 0——真机 E2E 实测出的链路断裂",
+    "`edgeone-hub/api/vault/fetch.js` 的 `provider_config` 与 `api/vault/manifest.js` 的 `providers.<id>` 均补 `rpm_per_key`（数值，缺省 0）；lite 路径经 `lib/projection.js` 原本已下发该字段，本次未改",
+    "回归守卫：`edgeone-hub/test/hub.test.mjs` 的 vault manifest/fetch 用例断言两侧 `rpm_per_key` 等值（41/41 通过）",
+    "契约文档 §7.3.4 补「载荷必须携带」一条，明确缺该字段的两个后果",
+    "验证：HK NAT + 生产 Hub 真机 E2E 全过（签发→部署 v20261122-06→manifest/fetch→添加模型→真实推理→RPM 限流 [200,200,502,502]→恢复 [200,200,200,200]→删除→零残留）；本补丁后 hub 测试全绿、G1–G6 全绿"
   ]
 }

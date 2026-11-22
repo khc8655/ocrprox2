@@ -67,6 +67,9 @@ export async function handleVaultManifestRequest(request, env, kv) {
       keys: exportableKeys,
       rule_hash: ruleHash(rules || {}),
       adapter_rules: rules || {},
+      // Provider-wide RPM ceiling; the console shows it before a fetch so the operator
+      // knows what the node is about to adopt.
+      rpm_per_key: Number(pData.rpm_per_key) || 0,
     };
   }
 

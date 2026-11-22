@@ -4,6 +4,22 @@
 
 ---
 
+## [v20261123-01] - 2026-11-23
+
+### Fixed
+
+- **vault 载荷缺 `rpm_per_key`，中枢限流到不了节点（真机 E2E 实测发现）**：`/api/vault/fetch` 的 `provider_config` 与 `/api/vault/manifest` 的 `providers.<id>` 都不带这个字段。后果有两个：① 在中枢给某供应商配了整体 RPM 上限，full 节点按需拉取后拿不到，限流完全不生效；② 更隐蔽的是 full 节点重拉走 replace 语义、整体采纳载荷，缺省值 0 会**把节点本地已设的限流静默清掉**——运营在中枢或节点任一侧配好，下一次重拉就丢。
+- 两处载荷均补 `rpm_per_key`（数值，缺省 0）。`lib/projection.js` 的 lite 投影路径原本已携带该字段，未改动。
+
+### Verified
+
+- 回归守卫：`edgeone-hub/test/hub.test.mjs` 的 vault manifest/fetch 用例新增断言（两侧 `rpm_per_key` 等值 60），套件 41/41 通过。
+- 真机 E2E（HK NAT + 生产 Hub）全过：签发 `zz_` 节点 → 部署 v20261122-06 → manifest 19 供应商/8 路由且无明文 Key → 按需拉取 siliconflow 4 Key → 添加模型（勾 2/4 Key）→ 真实推理「你好！有什么可以帮助你的吗？」→ RPM 供应商级限流 `[200,200,502,502]` → 恢复不限 `[200,200,200,200]` → 删除路由后 404 → Hub 节点删除 → VM 卸载零残留。
+- 同轮真机观察（非缺陷，如实记录）：测试路由命中另一把 Key 时上游返回 402 余额不足，路由按 sticky_failover 自动切到可用 Key 成功服务。
+- `go test -race ./...`、`npm run test:hub`、`verify:release` G1–G6 全绿。
+
+---
+
 ## [v20261122-06] - 2026-11-22
 
 ### Added

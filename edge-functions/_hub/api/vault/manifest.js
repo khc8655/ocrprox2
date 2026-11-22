@@ -55,6 +55,7 @@ anthropic_base_url: pData.anthropic_base_url || '',
 keys: exportableKeys,
 rule_hash: ruleHash(rules || {}),
 adapter_rules: rules || {},
+rpm_per_key: Number(pData.rpm_per_key) || 0,
 };
 }
 const agentModels = {};
