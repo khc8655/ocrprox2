@@ -54,13 +54,16 @@ function makeAdminReq(method, path, body = null) {
   return new Request(`https://hub.example.com${path}`, init);
 }
 
-function makeNodeReq(method, path, token, ifNoneMatch = null, body = null) {
+function makeNodeReq(method, path, token, ifNoneMatch = null, body = null, extraHeaders = null) {
   const headers = {
     'authorization': `Bearer ${token}`,
     'content-type': 'application/json',
   };
   if (ifNoneMatch) {
     headers['if-none-match'] = ifNoneMatch;
+  }
+  if (extraHeaders) {
+    Object.assign(headers, extraHeaders);
   }
   const init = {
     method,
@@ -225,6 +228,113 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
 
       const listAfterDel = await (await handleNodesRequest(listReq, TEST_ENV, kv)).json();
       assert.equal(listAfterDel.nodes.length, 0);
+    });
+
+    test('GET install-command re-issues token, rotates old one, and survives last_ip round-trips', async () => {
+      // 1. Issue a node
+      const issueResp = await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', {
+        name: 'Install Cmd 01',
+        role: 'lite',
+      }), TEST_ENV, kv);
+      assert.equal(issueResp.status, 200);
+      const issueData = await issueResp.json();
+      const nodeId = issueData.node.id;
+      const initialToken = issueData.node_token;
+
+      // 2. Simulate the node syncing once with a real client IP header: the
+      // node table renders last_ip, so the full round-trip (sync → KV →
+      // sanitizeNode → list) must carry the actual value, not just the key.
+      const syncResp = await handleNodeConfigRequest(
+        makeNodeReq('POST', '/api/node/config', initialToken, null, null, { 'x-forwarded-for': '203.0.113.77' }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(syncResp.status, 200);
+
+      const listData = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+      const listed = listData.nodes.find((n) => n.id === nodeId);
+      assert.ok(listed, 'node appears in list');
+      assert.equal(listed.last_ip, '203.0.113.77', 'last_ip carries the syncing client IP through sanitizeNode');
+      assert.ok('last_seen' in listed, 'last_seen survives sanitizeNode');
+
+      // 3. GET install-command re-obtains deploy material and rotates the token
+      const cmdResp = await handleNodesRequest(
+        makeAdminReq('GET', `/api/admin/nodes/${nodeId}/install-command`),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(cmdResp.status, 200);
+      assert.equal(cmdResp.headers.get('cache-control'), 'no-store', 'plaintext-token GET must not be cacheable');
+      const cmdData = await cmdResp.json();
+      assert.equal(cmdData.ok, true);
+      assert.match(cmdData.node_token, /^stk_node_[a-f0-9]{48}$/);
+      assert.notEqual(cmdData.node_token, initialToken, 'install-command rotates the token');
+      assert.ok(cmdData.install_command.includes('--node-token='));
+      assert.ok(cmdData.install_command.includes('/install.sh'));
+      assert.ok(cmdData.bootstrap_env.includes('LLMPROXY_HUB_URL='));
+      // The node payload must be sanitized exactly like the list endpoint:
+      // no digest, no reversible ciphertext, no cached secrets.
+      for (const forbidden of ['token_sha256', 'node_token_enc', 'status_url', 'has_status_url', 'cached_status', 'mcp_url', 'telemetry', 'kind', 'service_type']) {
+        assert.equal(cmdData.node[forbidden], undefined, `install-command node payload must not expose ${forbidden}`);
+      }
+      assert.ok(cmdData.node.id && cmdData.node.name, 'sanitized node payload keeps its identity fields');
+      assert.equal(typeof cmdData.client_key, 'string', 'client_key is returned for the deploy panel');
+
+      // 4. Old token is now dead, new token works
+      const oldSync = await handleNodeConfigRequest(
+        makeNodeReq('POST', '/api/node/config', initialToken, null),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(oldSync.status, 401, 'rotated-away token is rejected');
+      const newSync = await handleNodeConfigRequest(
+        makeNodeReq('POST', '/api/node/config', cmdData.node_token, null),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(newSync.status, 200, 'install-command token authenticates');
+
+      // 5. Unknown node id → 404
+      const missingResp = await handleNodesRequest(
+        makeAdminReq('GET', '/api/admin/nodes/node_nope/install-command'),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(missingResp.status, 404);
+
+      // 6. Malformed paths must NOT trigger a rotation: an endsWith-style
+      // match on /install-command would silently invalidate a running node.
+      const beforeList = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+      const beforePrefix = beforeList.nodes.find((n) => n.id === nodeId).token_prefix;
+      for (const badPath of [
+        `/api/admin/nodes/${nodeId}/rotate/install-command`,
+        `/api/admin/nodes/${nodeId}/install-command/rotate`,
+        `/api/admin/nodes/${nodeId}/install-command/extra`,
+      ]) {
+        const badResp = await handleNodesRequest(makeAdminReq('GET', badPath), TEST_ENV, kv);
+        assert.notEqual(badResp.status, 200, `malformed path ${badPath} must not succeed`);
+      }
+      // The working token from step 3 must still authenticate (nothing rotated).
+      const stillOk = await handleNodeConfigRequest(
+        makeNodeReq('POST', '/api/node/config', cmdData.node_token, null),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(stillOk.status, 200, 'malformed paths must not rotate the working token');
+      const afterList = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+      assert.equal(afterList.nodes.find((n) => n.id === nodeId).token_prefix, beforePrefix, 'token unchanged after malformed paths');
+
+      // Cleanup
+      await handleNodesRequest(makeAdminReq('DELETE', `/api/admin/nodes/${nodeId}`), TEST_ENV, kv);
+    });
+
+    test('install-command endpoint rejects unauthenticated callers', async () => {
+      const resp = await handleNodesRequest(
+        new Request('https://hub.example.com/api/admin/nodes/node_x/install-command'),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(resp.status, 401);
     });
   });
 
@@ -1719,5 +1829,44 @@ describe('11. Security Hardening & Flat Preset AdapterRules Gates', () => {
     assert.equal(vData.valid, true);
     assert.equal(typeof vData._version, 'number', 'verify-key must return updated _version to prevent UI 409 CAS conflict');
     assert.equal(vData._version, 3);
+  });
+});
+
+describe('11. Full-node issuance carries an admin password', () => {
+  test('issue returns admin_password and puts it in install_command; lite does not', async () => {
+    const kv = new MockKV();
+
+    const fullRes = await handleNodesRequest(
+      makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_full_pw', role: 'full' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(fullRes.status, 200);
+    const full = await fullRes.json();
+    assert.ok(full.admin_password, 'full issuance must return admin_password');
+    assert.ok(full.admin_password.length >= 16, 'admin password must be long enough');
+    assert.ok(
+      full.install_command.includes(`--admin-password="${full.admin_password}"`),
+      'install_command must carry the generated admin password so the operator can log in'
+    );
+
+    const liteRes = await handleNodesRequest(
+      makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_lite_nopw', role: 'lite' }),
+      TEST_ENV,
+      kv
+    );
+    const lite = await liteRes.json();
+    assert.equal(lite.admin_password, undefined, 'lite nodes have no admin console');
+    assert.ok(!lite.install_command.includes('--admin-password'));
+
+    // Rotating a full node's install material re-issues a password too.
+    const rotateRes = await handleNodesRequest(
+      makeAdminReq('POST', `/api/admin/nodes/${full.node.id}/rotate`),
+      TEST_ENV,
+      kv
+    );
+    const rotated = await rotateRes.json();
+    assert.ok(rotated.admin_password, 'rotate must return a fresh admin password');
+    assert.ok(rotated.install_command.includes('--admin-password='));
   });
 });

@@ -372,70 +372,75 @@
       <div class="view-header">
         <div>
           <h1 class="view-title">中转节点管理</h1>
-          <p class="view-sub">签发、轮换及吊销下游网关节点的 Vault 同步凭证与权限范围</p>
+          <p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p>
         </div>
         <div class="view-actions">
-          <button class="btn btn--primary" id="btnIssueNode" type="button">签发新节点</button>
+          <button class="btn btn--primary" id="btnIssueNode" type="button">添加节点</button>
         </div>
       </div>
 
       <div class="card card-pad" id="issueNodeForm" hidden>
-        <h2 class="card-title mb-3">签发新中转节点凭证</h2>
-        <div class="form-grid">
+        <h2 class="card-title mb-3">添加节点</h2>
+        <div class="form-grid form-grid--2">
           <div class="form-group">
             <label class="form-label">节点名称</label>
             <input class="input" id="issueNodeName" placeholder="例如 hk-edge-01">
           </div>
-          <div class="form-group">
-            <label class="form-label">节点角色</label>
-            <select class="select" id="issueNodeRole">
-              <option value="full">Full (全功能代理网关)</option>
-              <option value="lite">Lite (轻量本地代理)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">租约时长 (秒)</label>
-            <input class="input tabular" id="issueNodeTTL" type="number" value="86400" placeholder="86400">
-          </div>
-          <div class="form-group">
-            <label class="form-label">断网宽限期 (秒 grace_ttl)</label>
-            <input class="input tabular" id="issueNodeGraceTTL" type="number" value="3600" placeholder="3600">
-          </div>
-          <div class="form-group">
-            <label class="form-label">允许 LLM 供应商 (* 全量)</label>
-            <input class="input input--code" id="issueNodeProvs" list="datalistProviders" value="*" placeholder="* 或 minimax,deepseek">
-          </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">允许 LLM 模型 (* 全量)</label>
-            <input class="input input--code" id="issueNodeModels" list="datalistModels" value="*" placeholder="* 或 gpt-4o,claude-sonnet-4">
-          </div>
         </div>
+        <details class="headers-details">
+          <summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary>
+          <div class="form-grid mt-2">
+            <div class="form-group">
+              <label class="form-label">节点角色</label>
+              <select class="select" id="issueNodeRole">
+                <option value="full">Full (全功能代理网关)</option>
+                <option value="lite">Lite (轻量本地代理)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">租约时长 (秒)</label>
+              <input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400">
+            </div>
+            <div class="form-group">
+              <label class="form-label">断网宽限期 (秒 grace_ttl)</label>
+              <input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600">
+            </div>
+            <div class="form-group">
+              <label class="form-label">允许 LLM 供应商 (* 全量)</label>
+              <input class="input input--code" id="issueNodeProvs" list="datalistProviders" placeholder="* 或 minimax,deepseek">
+            </div>
+            <div class="form-group">
+              <label class="form-label">允许 LLM 模型 (* 全量)</label>
+              <input class="input input--code" id="issueNodeModels" list="datalistModels" placeholder="* 或 gpt-4o,claude-sonnet-4">
+            </div>
+          </div>
+        </details>
         <div class="form-actions">
-          <button class="btn btn--primary" id="btnDoIssue" type="button">生成 NODE_TOKEN</button>
-        </div>
-
-        <div class="editor-section" id="issuedTokenDisplay" hidden>
-          <div class="form-grid form-grid--2">
-            <div class="form-group">
-              <label class="form-label">签发凭据 (仅显示一次，请立即保存)</label>
-              <div class="input-row">
-                <input class="input input--code" id="issuedTokenVal" readonly>
-                <button class="btn" id="btnCopyIssuedToken" type="button">复制</button>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">节点启动环境变量</label>
-              <div class="input-row">
-                <input class="input input--code" id="issuedEnvVal" readonly>
-                <button class="btn" id="btnCopyIssuedEnv" type="button">复制</button>
-              </div>
-            </div>
-          </div>
-          <div class="mt-3" id="issuedCmdPanel"></div>
+          <button class="btn btn--primary" id="btnDoIssue" type="button">添加节点</button>
         </div>
       </div>
 
       <div class="card" id="nodesList"></div>
+
+      <!-- Node Install Command Overlay -->
+      <div class="login-overlay hidden" id="nodeInstallOverlay" hidden>
+        <div class="login-card login-card--wide">
+          <div class="login-head">
+            <div>
+              <h2 class="card-title" id="nodeInstallTitle">一键安装</h2>
+              <p class="card-sub" id="nodeInstallSub"></p>
+            </div>
+            <button class="btn btn--sm" id="btnCloseNodeInstall" type="button" aria-label="关闭安装指引">关闭</button>
+          </div>
+          <div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden>
+            <span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span>
+          </div>
+          <div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden>
+            <span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span>
+          </div>
+          <div id="nodeInstallPanel"></div>
+        </div>
+      </div>
     </section>
 
     <!-- 5. 系统设置 -->

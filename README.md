@@ -204,6 +204,24 @@ curl -fsSL https://your-hub.edgeone.app/install.sh | sudo bash -s -- \
   -p 8787 -y
 ```
 
+**监听范围（安装时二选一，默认 `local`）**：
+
+| `--bind=` | 写入的监听地址 | 适用场景 |
+|---|---|---|
+| `local`（默认） | `127.0.0.1:<port>` | 只给本机用；对外发布交给 nginx / caddy 反代或 `ssh -L` 转发 |
+| `public` | `[::]:<port>`（双栈通配） | 直接对外提供服务，IPv4 + IPv6 都能连 |
+
+```bash
+# 默认：仅本机可访问
+curl -fsSL "$HUB/install.sh" | sudo bash -s -- --role=lite ... -y
+
+# 直接对外提供服务
+curl -fsSL "$HUB/install.sh" | sudo bash -s -- --role=lite ... --bind=public -y
+```
+
+> 脚本**不探测也不显示外部 IP**：端口怎么发布（反代、端口映射、防火墙）不属于本程序职责，与 1 代行为一致。
+> 已安装的环境再次执行脚本即走平滑升级，`--bind` 同样会改写监听地址并重启，因此可随时在两种模式间切换。
+
 ---
 
 #### 方式二：单行直跑预编译静态二进制（免安装）

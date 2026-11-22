@@ -33,6 +33,7 @@
     lanesTimer: null,
     oauthPollTimer: null,
     oauthExpireTimer: null,
+    nodesTimer: null,
     batchVerifying: false,
     probedModelsByProvider: {},
     probeFilterByProvider: {},
@@ -418,10 +419,11 @@
     // Only fetch data when a credential is already present. An unauthenticated
     // page load must not issue /api/* requests: every one of those is a 401 and
     // would otherwise burn the anti-bruteforce budget (5 hits = 10 min lockout).
-    if (window.HOST.getToken()) {
-      await loadData();
-    }
+      if (window.HOST.getToken()) {
+        await loadData();
+      }
     startLanesPolling();
+    startNodesPolling();
   }
 
   // --- 1. In-Page Magpie Login Overlay (M14) ---
@@ -601,6 +603,8 @@
         if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
         if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
         if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
+        const installOverlay = $('nodeInstallOverlay');
+        if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
         if (state.activeEditorKey) {
           state.activeEditorKey = null;
           closedSomething = true;
@@ -609,7 +613,7 @@
           else if (state.activeTab === 'nodes') renderNodesList();
           else if (state.activeTab === 'activity') renderTracesList();
         }
-        if (closedSomething) toast('已取消操作并关闭编辑器', 'info');
+        if (closedSomething) toast('已取消操作并关闭弹层', 'info');
       } else if (e.key === '/') {
         const targetTag = (e.target.tagName || '').toLowerCase();
         if (targetTag !== 'input' && targetTag !== 'textarea' && targetTag !== 'select') {
@@ -742,14 +746,19 @@
       clk(btnDoIssue, handleIssueNode);
     }
 
-    const btnCopyIssuedToken = $('btnCopyIssuedToken');
-    if (btnCopyIssuedToken) {
-      clk(btnCopyIssuedToken, () => copyToClipboard($('issuedTokenVal')?.value, 'NODE_TOKEN 已复制'));
+    const btnCloseNodeInstall = $('btnCloseNodeInstall');
+    if (btnCloseNodeInstall) {
+      clk(btnCloseNodeInstall, closeNodeInstallOverlay);
     }
 
-    const btnCopyIssuedEnv = $('btnCopyIssuedEnv');
-    if (btnCopyIssuedEnv) {
-      clk(btnCopyIssuedEnv, () => copyToClipboard($('issuedEnvVal')?.value, '环境变量已复制'));
+    // Esc already closes editors globally; also close the install overlay so the
+    // keyboard story stays "Esc cancels whatever is open". Clicking the dimmed
+    // backdrop does the same.
+    const nodeInstallOverlay = $('nodeInstallOverlay');
+    if (nodeInstallOverlay) {
+      nodeInstallOverlay.addEventListener('click', (ev) => {
+        if (ev.target === nodeInstallOverlay) closeNodeInstallOverlay();
+      });
     }
 
     clk($('btnSyncVault'), handleSyncVault);
@@ -1505,6 +1514,7 @@
     }
   }
 
+
   function renderHubOverview() {
     const kpiGrid = $('hubKpiGrid');
     const nodeBody = $('hubNodeStatsBody');
@@ -1628,7 +1638,7 @@
           <td>${statusHtml}</td>
           <td class="text-sm">${modelText}</td>
           <td class="tabular">${eh(`v${n.last_config_version || 1}`)} · ${n.sync_count || 0} 次</td>
-          <td class="tabular">${eh(lastMs ? formatTime(lastMs) : '从未同步')}</td>
+          <td class="tabular">${eh(lastMs ? formatTime(lastMs / 1000) : '从未同步')}</td>
           <td class="tabular">${eh(n.last_ip || '-')}</td>
         `;
         nodeBody.appendChild(tr);
@@ -2410,6 +2420,98 @@
   }
 
   // --- View: Nodes (Hub mode) ---
+  // In-memory only (never sessionStorage/localStorage): the plaintext NODE_TOKEN
+  // of the most recent issuance/rotation, so the install overlay can be re-opened
+  // within the same session without forcing another rotation. A page refresh
+  // forgets it, and re-opening the overlay then falls back to rotate-and-show.
+  const nodeTokenMem = new Map();
+  // Full-node ADMIN_PASSWORDs are generated client-side (the hub never stores
+  // them), so keep them stable per node within a session: re-opening the install
+  // overlay must not silently mint a different password into the command.
+  const nodeAdminPassMem = new Map();
+  let nodeInstallReturnEl = null;
+
+  function getStableNodeAdminPass(nodeId, role) {
+    if (role !== 'full') return '';
+    let pass = nodeAdminPassMem.get(nodeId);
+    if (!pass) {
+      pass = generateRandomAlphaNum(20);
+      nodeAdminPassMem.set(nodeId, pass);
+    }
+    return pass;
+  }
+
+  function openNodeInstallOverlay(nodeId, material, opts = {}) {
+    const overlay = $('nodeInstallOverlay');
+    if (!overlay) return;
+    const node = (state.nodes || []).find((n) => n.id === nodeId);
+    const role = (material.node && material.node.role) || (node && node.role) || 'lite';
+    const titleEl = $('nodeInstallTitle');
+    const subEl = $('nodeInstallSub');
+    const rotNotice = $('nodeInstallRotateNotice');
+    const staleHint = $('nodeInstallStaleHint');
+    if (titleEl) titleEl.textContent = `一键安装 — ${node?.name || nodeId}`;
+    if (subEl) subEl.textContent = '在目标服务器上以 root 执行以下命令完成安装；安装成功后本列表将显示为在线';
+    if (rotNotice) rotNotice.hidden = !opts.rotated;
+    // A cache-hit open (same tab, no rotation) may still hold a token another
+    // tab has rotated away since; tell the operator what to do when the
+    // command never brings the node online.
+    if (staleHint) staleHint.hidden = !!opts.rotated || !opts.fromCache;
+    mountNodeCommandPanel($('nodeInstallPanel'), {
+      role,
+      hubUrl: window.location.origin,
+      nodeToken: material.node_token,
+      clientKey: material.client_key,
+      bootstrapEnv: material.bootstrap_env,
+      adminPass: getStableNodeAdminPass(nodeId, role),
+    });
+    overlay.hidden = false;
+    overlay.classList.remove('hidden');
+    // Move focus into the overlay so Esc / the close button are reachable
+    // without tabbing through the page behind it, and remember where to
+    // return focus on close.
+    nodeInstallReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const closeBtn = $('btnCloseNodeInstall');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeNodeInstallOverlay() {
+    const overlay = $('nodeInstallOverlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+    const back = nodeInstallReturnEl;
+    nodeInstallReturnEl = null;
+    if (back && document.contains(back)) back.focus();
+  }
+
+  async function handleNodeInstallClick(nodeId) {
+    const cached = nodeTokenMem.get(nodeId);
+    if (cached && cached.node_token) {
+      openNodeInstallOverlay(nodeId, cached, { rotated: false, fromCache: true });
+      return;
+    }
+    // No in-memory token (page was refreshed): the hub only stores the SHA-256
+    // digest, so the only spec-compliant way back to a plaintext install command
+    // is rotating the token. Confirm before invalidating the old credential.
+    const node = (state.nodes || []).find((n) => n.id === nodeId);
+    if (!confirm(`安装命令包含节点 Token，出于安全仅在签发时显示一次。\n现在重新获取将轮换 ${node?.name || nodeId} 的 Token（旧 Token 立即失效），继续吗？`)) {
+      return;
+    }
+    try {
+      const res = await window.HOST.getNodeInstallCommand(nodeId);
+      if (res && res.ok && res.node_token) {
+        nodeTokenMem.set(nodeId, res);
+        openNodeInstallOverlay(nodeId, res, { rotated: true });
+        await loadNodesData();
+      } else {
+        toast((res && res.error) || '获取安装命令失败', 'err');
+      }
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
   function renderNodesList() {
     const container = $('nodesList');
     if (!container) return;
@@ -2418,52 +2520,110 @@
     const nodes = state.nodes || [];
     if (nodes.length === 0) {
       const emptyRow = ce('div');
-      emptyRow.className = 'row text-muted';
-      emptyRow.textContent = '暂无中转节点，点击上方「签发新节点」生成';
+      emptyRow.className = 'row row--static text-muted';
+      emptyRow.textContent = '暂无中转节点，点击上方「添加节点」创建';
       container.appendChild(emptyRow);
       return;
     }
 
+    const table = ce('table');
+    table.className = 'data-table';
+    const thead = ce('thead');
+    thead.innerHTML = '<tr><th>名称</th><th>IP</th><th>状态</th><th>操作</th></tr>';
+    table.appendChild(thead);
+    const tbody = ce('tbody');
+
     for (const node of nodes) {
+      const tr = ce('tr');
+
+      const nameTd = ce('td');
       const isExpanded = state.activeEditorKey === `node_${node.id}`;
-      const row = ce('div');
-      row.className = `row ${isExpanded ? 'expanded' : ''}`;
+      nameTd.innerHTML = `<strong>${eh(node.name || node.id)}</strong> <span class="pill pill--accent">${eh(node.role || 'full')}</span>${node.last_binary_version ? ` <span class="pill tabular">${eh(node.last_binary_version)}</span>` : ''}`;
 
-      const dot = ce('span');
-      dot.className = `dot ${node.enabled ? 'dot--ok' : 'dot--err'}`;
+      const ipTd = ce('td');
+      ipTd.className = 'tabular';
+      ipTd.textContent = node.last_ip || '—';
 
-      const who = ce('div');
-      who.className = 'who';
-      const modelsScope = formatScopeInput(node.scope?.models);
-      const provsScope = formatScopeInput(node.scope?.providers);
       const snap = getNodeSyncSnapshotStatus(node);
-      const binPill = node.last_binary_version ? `<span class="pill tabular">${eh(node.last_binary_version)}</span>` : '';
-      const subText = `模型: ${modelsScope} · 供应商: ${provsScope} · Token: ${node.token_prefix}`;
-      who.innerHTML = `<div class="name"><span>${eh(node.name || node.id)}</span><span class="pill pill--accent">${eh(node.role || 'full')}</span>${binPill}<span class="pill ${snap.pillCls}">${eh(snap.label)}</span></div><div class="sub">${eh(subText)}</div>`;
+      // Two separate clocks by design: the table's "online" follows the hub
+      // overview's liveness bar (15 min since last sync), while the lease state
+      // (synced/grace/expired) keeps the lifetime semantics.
+      const ONLINE_MS = 15 * 60 * 1000;
+      const online = node.enabled !== false && Boolean(snap.syncMs) && (Date.now() - snap.syncMs) <= ONLINE_MS;
+      let statusPill;
+      if (node.enabled === false) statusPill = `<span class="pill ${snap.pillCls}">${eh(snap.label)}</span>`;
+      else if (online) statusPill = '<span class="pill pill--green">在线</span>';
+      else if (snap.syncMs) statusPill = `<span class="pill pill--amber">${snap.key === 'grace' ? '宽限期内' : '离线'}</span>`;
+      else statusPill = '<span class="pill">未安装</span>';
+      const statusTd = ce('td');
+      statusTd.innerHTML = `${statusPill}<div class="text-sm text-muted">${snap.syncMs ? `最后同步 ${formatTime(snap.syncMs / 1000)}` : '尚未安装'}</div>`;
 
-      const fields = ce('div');
-      fields.className = 'fields';
-      fields.innerHTML = `<span class="pill">${snap.syncMs ? '同步: ' + formatTime(snap.syncMs) : '从未同步'} · ${eh(snap.leaseText)}</span><span class="caret">▾</span>`;
+      const actionTd = ce('td');
+      const installBtn = ce('button');
+      installBtn.className = 'btn btn--sm';
+      installBtn.type = 'button';
+      installBtn.textContent = '安装';
+      const editBtn = ce('button');
+      editBtn.className = 'btn btn--sm';
+      editBtn.type = 'button';
+      editBtn.textContent = isExpanded ? '收起' : '编辑';
+      actionTd.appendChild(installBtn);
+      actionTd.appendChild(editBtn);
+      actionTd.appendChild(document.createTextNode(' '));
 
-      row.appendChild(dot);
-      row.appendChild(who);
-      row.appendChild(fields);
-
-      clk(row, (ev) => {
-        if (ev.target.closest('button') || ev.target.closest('input')) return;
+      clk(installBtn, () => handleNodeInstallClick(node.id));
+      clk(editBtn, () => {
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
         renderNodesList();
       });
 
-      container.appendChild(row);
+      tr.appendChild(nameTd);
+      tr.appendChild(ipTd);
+      tr.appendChild(statusTd);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
 
       if (isExpanded) {
+        const editorTr = ce('tr');
+        const editorTd = ce('td');
+        editorTd.colSpan = 4;
         const editor = ce('div');
         editor.className = 'editor';
         editor.appendChild(buildNodeEditor(node));
-        container.appendChild(editor);
+        editorTd.appendChild(editor);
+        editorTr.appendChild(editorTd);
+        tbody.appendChild(editorTr);
       }
     }
+
+    table.appendChild(tbody);
+    const wrap = ce('div');
+    wrap.className = 'table-wrap';
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+  }
+
+  // Node list auto-refresh: the promised UX is "install succeeds → the row turns
+  // online", and a node's only signal is its periodic config sync (last_seen).
+  // 15s mirrors the hub overview's online threshold granularity.
+  function startNodesPolling() {
+    if (state.nodesTimer) clearInterval(state.nodesTimer);
+    if (!window.HOST.capabilities.nodeManager) return;
+    state.nodesTimer = setInterval(async () => {
+      if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
+      if (state.activeTab !== 'nodes') return;
+      // Skip while the install overlay is open: re-rendering under it is fine,
+      // but a failed refresh behind the modal silently resets the editor state.
+      if (!$('nodeInstallOverlay')?.hidden) return;
+      if (state.activeEditorKey && state.activeEditorKey.startsWith('node_')) return;
+      try {
+        const res = await window.HOST.getNodes();
+        if (res && res.ok) {
+          state.nodes = res.nodes || [];
+          renderNodesList();
+        }
+      } catch (_) {}
+    }, 15000);
   }
 
   function buildNodeShellCommands(opts) {
@@ -2525,7 +2685,10 @@
     const role = payload.role === 'full' ? 'full' : 'lite';
     const clientKey = payload.clientKey || (state.config?.settings?.client_key || state.config?.settings?.proxy_api_key || '');
     const hubUrl = payload.hubUrl || window.location.origin;
-    const adminPass = role === 'full' ? generateRandomAlphaNum(20) : '';
+    // Full-node admin password: the caller passes a session-stable one (see
+    // getStableNodeAdminPass); generate only when none was supplied (the
+    // issuance/rotation inline panel mounts once, so a fresh value is right).
+    const adminPass = role === 'full' ? (String(payload.adminPass || '').trim() || generateRandomAlphaNum(20)) : '';
     const panelState = {
       mode: 'install',
       port: 8787,
@@ -2689,6 +2852,7 @@
         const res = await window.HOST.rotateNode(id);
         if (res && res.ok) {
           toast('Token 轮换成功！', 'ok');
+          if (res.node_token) nodeTokenMem.set(id, res);
           q(`#node_token_display_box_${id}`).hidden = false;
           q(`#node_new_token_val_${id}`).value = res.node_token;
           q(`#node_new_env_val_${id}`).value = res.bootstrap_env;
@@ -2710,7 +2874,15 @@
       if (!confirm(`确认永久删除节点 ${node.name} 吗？`)) return;
       try {
         const res = await window.HOST.deleteNode(id);
-        if (res && res.ok) { toast('节点已删除', 'ok'); state.activeEditorKey = null; await loadNodesData(); }
+        if (res && res.ok) {
+          toast('节点已删除', 'ok');
+          state.activeEditorKey = null;
+          // Drop the in-memory token and admin password: the node is gone, and
+          // its plaintext credential must not outlive it in this tab's memory.
+          nodeTokenMem.delete(id);
+          nodeAdminPassMem.delete(id);
+          await loadNodesData();
+        }
       } catch (e) { toast(e.message, 'err'); }
     });
 
@@ -2720,6 +2892,9 @@
   async function handleIssueNode() {
     const name = $('issueNodeName').value.trim();
     const role = $('issueNodeRole').value;
+    // Collapsed advanced fields fall back to the server-side defaults (86400 /
+    // 3600 / *): an empty input gives Number('') === 0, and 0 (like NaN) is
+    // falsy, so the || default chain below handles both.
     const leaseTtl = Number($('issueNodeTTL').value) || 86400;
     const graceTtl = Number($('issueNodeGraceTTL')?.value) || 3600;
     const provsRaw = $('issueNodeProvs')?.value;
@@ -2735,23 +2910,20 @@
     try {
       const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
       if (res && res.ok) {
-        toast('节点签发成功！', 'ok');
-        const tokenDisplay = $('issuedTokenDisplay');
-        if (tokenDisplay) {
-          tokenDisplay.hidden = false;
-          $('issuedTokenVal').value = res.node_token;
-          $('issuedEnvVal').value = res.bootstrap_env;
-          mountNodeCommandPanel($('issuedCmdPanel'), {
-            role: res.node?.role || role,
-            hubUrl: window.location.origin,
-            nodeToken: res.node_token,
-            clientKey: res.client_key,
-            bootstrapEnv: res.bootstrap_env,
-          });
-        }
+        toast('节点已添加，请在一键安装弹窗中获取部署命令', 'ok');
+        // Collapse the form back to the one-field add experience; the advanced
+        // <details> keeps its own open state per browser, so reset it too.
+        toggle('issueNodeForm', false);
+        const adv = $('issueNodeForm').querySelector('details');
+        if (adv) adv.open = false;
+        $('issueNodeName').value = '';
+        if (res.node_token) nodeTokenMem.set(res.node?.id, res);
         await loadNodesData();
+        if (res.node?.id && res.node_token) {
+          openNodeInstallOverlay(res.node.id, res, { rotated: false });
+        }
       } else {
-        toast(res.error || '签发失败', 'err');
+        toast(res.error || '添加失败', 'err');
       }
     } catch (e) {
       toast(e.message, 'err');

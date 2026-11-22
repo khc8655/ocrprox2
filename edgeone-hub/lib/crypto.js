@@ -140,3 +140,17 @@ export function computeEtag(data) {
   const hash = sha256(str).slice(0, 16);
   return `"${hash}"`;
 }
+
+// Alpha-numeric password for a Full node's admin console. Generated at issuance so
+// the install command can carry it; without this the installer would generate one
+// locally, mask it in its banner, and the operator could never learn it.
+export function generateAdminPassword(length = 20) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(length);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < length; i += 1) {
+    out += alphabet[bytes[i] % alphabet.length];
+  }
+  return out;
+}

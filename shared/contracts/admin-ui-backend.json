@@ -126,9 +126,30 @@
       "response": {
         "ok": true,
         "node_token": "string (stk_node_<48hex>)",
+        "client_key": "string",
         "bootstrap_env": "string",
         "install_command": "string"
       }
+    },
+    "nodes_install_command": {
+      "method": "GET",
+      "path": "/api/admin/nodes/:id/install-command",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "response": {
+        "ok": true,
+        "node": "object (sanitized)",
+        "node_token": "string (stk_node_<48hex>)",
+        "client_key": "string",
+        "bootstrap_env": "string",
+        "install_command": "string"
+      },
+      "errors": {
+        "404": "node_not_found"
+      },
+      "semantics": "rotates the node token internally (old token invalidated immediately); Cache-Control: no-store"
     },
     "nodes_delete": {
       "method": "DELETE",

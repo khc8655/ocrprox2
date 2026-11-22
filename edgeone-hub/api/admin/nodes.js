@@ -4,6 +4,7 @@ import {
   issueNode,
   patchNode,
   rotateNodeToken,
+  reissueNodeToken,
   deleteNode,
 } from '../../lib/nodes.js';
 
@@ -26,6 +27,16 @@ export async function handleNodesRequest(request, env, kv, params) {
     (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'rotate') ||
     (params && params.action === 'rotate') ||
     url.pathname.endsWith('/rotate');
+  // GET /api/admin/nodes/:id/install-command — re-obtain the one-click install
+  // command for an existing node. Rotates the token under the hood (KV only
+  // stores the SHA-256 digest), which is the spec-compliant way to re-issue.
+  // Path match is exact (segments after the id, nothing after): an endsWith
+  // fallback would let malformed paths like /:id/rotate/install-command hit
+  // this branch and silently invalidate a running node's credential.
+  const isInstallCommand =
+    method === 'GET' &&
+    ((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'install-command') ||
+      (params && params.action === 'install-command'));
 
   const hubUrl = `${url.protocol}//${url.host}`;
 
@@ -35,6 +46,33 @@ export async function handleNodesRequest(request, env, kv, params) {
     return new Response(
       JSON.stringify({ ok: true, nodes }),
       { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+
+  // 1b. GET /api/admin/nodes/:id/install-command (token rotation + deploy material)
+  if (isInstallCommand && targetId) {
+    const cfg = await loadConfig(kv);
+    const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
+    const res = await reissueNodeToken(targetId, kv, hubUrl, clientKey);
+    if (!res) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'node_not_found' }),
+        { status: 404, headers: { 'content-type': 'application/json' } }
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        node: res.node,
+        node_token: res.node_token,
+        client_key: res.client_key,
+        admin_password: res.admin_password,
+        bootstrap_env: res.bootstrap_env,
+        install_command: res.install_command,
+      }),
+      // no-store: this is the only GET in the repo whose body carries a
+      // plaintext node token; no intermediary may retain it.
+      { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
     );
   }
 
@@ -55,6 +93,7 @@ export async function handleNodesRequest(request, env, kv, params) {
           node: res.node,
           node_token: res.node_token,
           client_key: res.client_key,
+          admin_password: res.admin_password,
           bootstrap_env: res.bootstrap_env,
           install_command: res.install_command,
         }),
@@ -87,6 +126,7 @@ export async function handleNodesRequest(request, env, kv, params) {
         ok: true,
         node_token: res.node_token,
         client_key: res.client_key,
+        admin_password: res.admin_password,
         bootstrap_env: res.bootstrap_env,
         install_command: res.install_command,
       }),

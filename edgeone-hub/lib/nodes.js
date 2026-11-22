@@ -1,5 +1,6 @@
 import {
   generateNodeToken,
+  generateAdminPassword,
   hashToken,
   constantTimeCompare,
 } from './crypto.js';
@@ -27,6 +28,9 @@ function sanitizeNode(n) {
   delete copy.telemetry;
   delete copy.kind;
   delete copy.service_type;
+  // last_ip / last_seen / sync counters stay: the node list table shows
+  // name / IP / status, and install success is observed as last_seen turning
+  // recent (online).
   const scope = n.scope && typeof n.scope === 'object' ? n.scope : {};
   copy.scope = {
     models: Array.isArray(scope.models) ? scope.models : ['*'],
@@ -55,7 +59,7 @@ function buildBootstrapEnv(node, rawToken, hubUrl, clientKey = '') {
   return parts.join(' ');
 }
 
-function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
+function buildInstallCommand(node, rawToken, hubUrl, clientKey = '', adminPassword = '') {
   const cleanHub = sanitizeShellToken(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
   const role = node.role === 'full' ? 'full' : 'lite';
   const args = [
@@ -66,6 +70,12 @@ function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
   const cleanKey = sanitizeShellToken(clientKey);
   if (cleanKey) {
     args.push(`--client-key="${cleanKey}"`);
+  }
+  // A Full node needs an admin console password. Generate it here so the command is
+  // self-contained; the installer then echoes it back instead of masking it.
+  const cleanAdmin = sanitizeShellToken(adminPassword);
+  if (role === 'full' && cleanAdmin) {
+    args.push(`--admin-password="${cleanAdmin}"`);
   }
   args.push('-p 8787', '-y');
   return `curl -fsSL ${cleanHub}/install.sh | sudo bash -s -- ${args.join(' ')}`;
@@ -150,13 +160,15 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', 
   await saveNodes(nodes, kv);
 
   const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+  const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
-  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 
   return {
     node: sanitizeNode(node),
     node_token: rawToken,
     client_key: effectiveClientKey,
+    admin_password: adminPassword || undefined,
     bootstrap_env: bootstrapEnv,
     install_command: installCommand,
   };
@@ -202,6 +214,23 @@ export async function patchNode(nodeId, patch, kv) {
  * Rotate token for an existing node.
  */
 export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
+  const res = await reissueNodeToken(nodeId, kv, hubUrl, clientKey);
+  // Callers of the classic rotate endpoint do not consume the node payload;
+  // keep its historical response shape.
+  if (!res) return null;
+  // admin_password is additive (absent for lite), so the historical shape is kept
+  // while a rotated full node still gets a usable one-click command.
+  const { node_token, client_key, admin_password, bootstrap_env, install_command } = res;
+  return { node_token, client_key, admin_password, bootstrap_env, install_command };
+}
+
+/**
+ * Re-issue (rotate) the token of a node and return the full deployment material
+ * (install command + bootstrap env). This is the only spec-compliant way to
+ * re-obtain a one-click install command after the issuance moment: KV stores
+ * only the SHA-256 digest, so the plaintext must be regenerated.
+ */
+export async function reissueNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
   const nodes = await loadNodes(kv);
   const idx = nodes.findIndex((n) => n.id === nodeId);
   if (idx === -1) return null;
@@ -220,12 +249,15 @@ export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.
   await saveNodes(nodes, kv);
 
   const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+  const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
-  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
+  const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 
   return {
+    node: sanitizeNode(node),
     node_token: rawToken,
     client_key: effectiveClientKey,
+    admin_password: adminPassword || undefined,
     bootstrap_env: bootstrapEnv,
     install_command: installCommand,
   };

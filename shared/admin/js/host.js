@@ -316,6 +316,14 @@
       return res.json();
     },
 
+    // Re-obtain the one-click install command for an existing node. The hub
+    // rotates the NODE_TOKEN (KV keeps only the SHA-256 digest), so the caller
+    // must treat the returned token as the node's new credential.
+    async getNodeInstallCommand(id) {
+      const res = await HOST.request(`/api/admin/nodes/${encodeURIComponent(id)}/install-command`);
+      return res.json();
+    },
+
     async deleteNode(id) {
       const res = await HOST.request(`/api/admin/nodes/${encodeURIComponent(id)}`, {
         method: 'DELETE',

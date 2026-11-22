@@ -4,6 +4,48 @@
 
 ---
 
+## [v20261122-01] - 2026-11-22
+
+### Added
+
+- **一键安装新增监听范围选项 `--bind=<local|public>`**：与 1 代一致的两种模式，安装时二选一。`local`（默认）写入 `LLMPROXY_ADDR=127.0.0.1:<port>`，只有本机能连，对外发布交给使用者自己的 nginx / caddy 反代或 `ssh -L`；`public` 写入 `[::]:<port>`（双栈通配，IPv4 + IPv6 都可连），直接对外提供服务。脚本**不再探测、也不再打印外部 IP**——端口如何暴露不属于本程序职责。已安装环境重复执行脚本即走平滑升级，`--bind` 同样改写监听地址并重启，因此可随时在两种模式间切换；非法取值立即报错退出（`--bind 参数必须为 'local' 或 'public'`）。
+
+### Fixed
+
+- **全新 full 安装必然失败（rc=1）**：`.env` 生成子 shell 的末条命令是 `[[ -n "$LLMPROXY_NODE_TOKEN" ]] && printf ...`，未提供节点令牌时该 `[[ ]]` 返回 1 并成为整个子 shell 的退出码，在 `set -e` 下直接终止安装；改为 `if ...; then ...; fi`。同款写法在升级路径的 `.env` 生成块中一并修掉。
+- **原地升级必然失败（`cp: Text file busy` / ETXTBSY）**：`cp` 覆盖正在运行的二进制会被内核拒绝。改为「同目录临时文件 + `rename`」原子替换（`install.sh` 的二进制落位、`/opt/llmproxy/bin/llmproxy`、`llmproxy-ctl upgrade` 三处）：`rename` 换掉 inode，运行中进程保留旧映射，重启即加载新文件。`llmproxy-ctl` 自身脚本同样改为原子替换，避免覆盖正在被 bash 逐行读取的脚本。
+- **`get_env_val` 的失败状态传播**：读取不存在的 `.env` 时该函数返回 1，`VAR=$(get_env_val ...)` 会继承这个状态并被 `set -e` 捕获，导致「只剩二进制、没有 `.env`」的环境必然安装失败。升级路径的 8 处探测统一加保护。
+- **「只剩二进制、无 systemd 单元」被误判为已安装**：`is_installed` 曾把 `/usr/local/bin/llmproxy` 存在也算已装，于是进入升级分支——而该分支从不写单元文件，最终停在「Unit not found」。现收紧为**只认 systemd 单元文件**，此类残留状态改走全新安装并重建单元。
+
+### Verified
+
+- HK NAT 真实 VM 覆盖 `full`/`lite` × `local`/`public` 四种组合的全新安装：`ss -ltn` 分别显示 `127.0.0.1:PORT` 与 `*:PORT`，`.env` / 单元文件中的 `LLMPROXY_ADDR` 一致，`/healthz` 正常。
+- `public → local → public` 双向升级切换、`llmproxy-ctl upgrade` 自覆盖升级（健康检查通过）、非法 `--bind` 拒绝、`llmproxy-ctl uninstall -y` 卸载后零残留（无单元、无二进制、无目录、端口释放）全部实测通过。
+- `README.md` 与 `docs/AGENT_DEPLOY_GUIDE.md` 同步 `--bind` 语义、两种模式的适用场景，以及用 `ss -ltn` 判断对外可达性的方法。
+
+---
+
+## [Unreleased]
+
+### Added
+- **节点管理四步直装流程（名称 → 列表 → 一键安装脚本 → 在线）**：节点列表改为表格（名称 / IP / 状态 / 操作），每行新增「安装」按钮，弹出一键安装弹层（systemd / Docker / 单行直跑三模式，与签发面板同一组件）。签发表单精简为仅「节点名称」，角色/租约/权限范围折叠进「高级选项」；添加成功后表单收起、节点直接进列表并自动弹出安装指引。节点页每 15 秒自动刷新，安装成功（节点首次 `/api/node/config` 同步）后状态即变「在线」（与总览一致的 15 分钟在线口径）并显示来源 IP。新增 Hub 端点 `GET /api/admin/nodes/:id/install-command`：KV 仅存 `token_sha256`，故重新获取安装命令内部即轮换 Token（旧 Token 立即失效）；前端同一会话内复用内存缓存 Token 免轮换，跨会话重新获取前弹确认提示。节点列表前端现已渲染 `last_ip`（该字段此前已由列表端点返回，本次是前端开始消费）。
+
+### Fixed（独立验收发现的缺陷，1 medium + 6 low）
+- **「最后同步」时间显示为公元 58859 年**：`snap.syncMs`/`lastMs` 为毫秒而 `formatTime` 按秒解释（`x*1000`）；节点列表与 Hub 总览两处均改传秒。
+- **矮视口安装弹层顶部裁切不可滚**：`.login-overlay` 补 `overflow-y: auto` 且卡片 `margin: auto`，667×375 下关闭按钮与命令框恢复可达。
+- **跨标签页死 Token 无警示**：缓存命中打开弹层时新增提示条（命令来自本页签缓存，装完不在线请重新获取）。
+- **Full 节点重开弹层时 ADMIN_PASSWORD 静默变化**：密码改为按节点会话内稳定（`nodeAdminPassMem`），重开不再重新随机。
+- **删除节点后明文 Token 残留内存**：删除成功即清理 `nodeTokenMem`/`nodeAdminPassMem`。
+- **节点表与总览「在线」口径互斥**：节点表改用与总览一致的 15 分钟在线判定，租约状态（宽限期/过期）另行显示。
+- **畸形路径触发轮换**：`isInstallCommand` 改为精确三段路径匹配，`/:id/rotate/install-command` 等不再命中。
+- 其余对齐：install-command 响应补 `Cache-Control: no-store`；`reissueNodeToken`/`rotateNodeToken` 合并去重；Esc 关弹层 toast 文案修正；`Number('')` 注释纠正；弹层焦点管理（打开聚焦关闭键、关闭归还触发按钮）；契约文档补 `client_key`/`node`/`404`/`last_ip`；可执行契约 JSON 新增 `nodes_install_command` 端点。
+
+### Verified
+- Hub 单测强化：last_ip 真值 round-trip（带 `x-forwarded-for` 断言具体 IP）、install-command 响应脱敏断言（9 个敏感键）、`no-store` 头、畸形路径不轮换且工作 Token 存活；套件 37/37 绿；`npm run verify:release` G1–G6 全绿。
+- 独立验收（dynamic workflow，GLM-5.3-Flash max 子代理）：三路代码评审 + 浏览器 7 组断言（登录→添加→列表→安装弹层→模拟同步→在线→轮换确认）全过，20 条发现全部经独立复核证实并于本轮修复；回归 workflow 专项复验矮视口、跨标签页、密码稳定性与时间显示。
+
+---
+
 ## [v20261121-02] - 2026-11-21
 
 ### Security

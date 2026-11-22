@@ -1,5 +1,6 @@
 import {
 generateNodeToken,
+generateAdminPassword,
 hashToken,
 constantTimeCompare,
 } from './crypto.js';
@@ -49,7 +50,7 @@ parts.push(`LLMPROXY_CLIENT_KEY=${cleanKey}`);
 }
 return parts.join(' ');
 }
-function buildInstallCommand(node, rawToken, hubUrl, clientKey = '') {
+function buildInstallCommand(node, rawToken, hubUrl, clientKey = '', adminPassword = '') {
 const cleanHub = sanitizeShellToken(hubUrl || 'https://hub.example.com').replace(/\/+$/, '');
 const role = node.role === 'full' ? 'full' : 'lite';
 const args = [
@@ -60,6 +61,10 @@ const args = [
 const cleanKey = sanitizeShellToken(clientKey);
 if (cleanKey) {
 args.push(`--client-key="${cleanKey}"`);
+}
+const cleanAdmin = sanitizeShellToken(adminPassword);
+if (role === 'full' && cleanAdmin) {
+args.push(`--admin-password="${cleanAdmin}"`);
 }
 args.push('-p 8787', '-y');
 return `curl -fsSL ${cleanHub}/install.sh | sudo bash -s -- ${args.join(' ')}`;
@@ -127,12 +132,14 @@ hit_304_count: 0,
 nodes.push(node);
 await saveNodes(nodes, kv);
 const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
-const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
+const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 return {
 node: sanitizeNode(node),
 node_token: rawToken,
 client_key: effectiveClientKey,
+admin_password: adminPassword || undefined,
 bootstrap_env: bootstrapEnv,
 install_command: installCommand,
 };
@@ -167,6 +174,12 @@ await saveNodes(nodes, kv);
 return sanitizeNode(node);
 }
 export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
+const res = await reissueNodeToken(nodeId, kv, hubUrl, clientKey);
+if (!res) return null;
+const { node_token, client_key, admin_password, bootstrap_env, install_command } = res;
+return { node_token, client_key, admin_password, bootstrap_env, install_command };
+}
+export async function reissueNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
 const nodes = await loadNodes(kv);
 const idx = nodes.findIndex((n) => n.id === nodeId);
 if (idx === -1) return null;
@@ -182,11 +195,14 @@ delete node.cached_status;
 nodes[idx] = node;
 await saveNodes(nodes, kv);
 const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
+const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
-const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey);
+const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 return {
+node: sanitizeNode(node),
 node_token: rawToken,
 client_key: effectiveClientKey,
+admin_password: adminPassword || undefined,
 bootstrap_env: bootstrapEnv,
 install_command: installCommand,
 };

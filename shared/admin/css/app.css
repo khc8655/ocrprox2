@@ -1280,6 +1280,17 @@ input[type="checkbox"] {
   align-items: center;
   justify-content: center;
   padding: 16px;
+  /* Tall content (the node install panel) must stay reachable on short
+     viewports: centering alone would clip the card's top with no way to
+     scroll to it. */
+  overflow-y: auto;
+}
+
+.login-overlay > .login-card {
+  /* flexbox centers and would let the card overflow the clip region above;
+     margin:auto keeps it centered while allowing the overlay to scroll to it. */
+  margin: auto;
+  flex-shrink: 0;
 }
 
 .login-card {
@@ -1290,6 +1301,12 @@ input[type="checkbox"] {
   border-radius: var(--khc-radius-xl);
   box-shadow: var(--khc-shadow-lg);
   padding: 24px;
+}
+
+/* Wider variant for the node install-command overlay: the deploy panel holds a
+   form grid plus a command textarea, 380px would wrap everything awkwardly. */
+.login-card--wide {
+  max-width: 680px;
 }
 
 .login-head {

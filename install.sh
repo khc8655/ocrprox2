@@ -139,16 +139,19 @@ set_systemd_env_val() {
 }
 
 # 公网 IP 探测
-detect_public_ip() {
-    local ip=""
-    ip=$(curl -4 -s --connect-timeout 3 https://api.ipify.org 2>/dev/null || true)
-    if [[ -z "$ip" ]]; then
-        ip=$(curl -6 -s --connect-timeout 3 https://api64.ipify.org 2>/dev/null || true)
+# Bind address selection. Two modes only, like the 1st generation:
+#   local  (default) -> 127.0.0.1:PORT, reachable only from this machine; expose it
+#                       yourself with nginx/caddy/ssh -L if needed.
+#   public           -> [::]:PORT (dual-stack wildcard), reachable from outside.
+# This script never guesses or prints an external IP: publishing a port is out of scope.
+addr_for_mode() {
+    local mode="${1:-local}"
+    local port="$2"
+    if [[ "$mode" == "public" ]]; then
+        echo "[::]:${port}"
+    else
+        echo "127.0.0.1:${port}"
     fi
-    if [[ -z "$ip" ]]; then
-        ip="127.0.0.1"
-    fi
-    echo "$ip"
 }
 
 # 网络出站调优 (IPv4 优先，防止大模型源站 IPv6 黑洞)
@@ -183,6 +186,7 @@ show_help() {
     echo "  --version=<TAG>            指定下载的 GitHub Release 版本标签 [默认: latest]"
     echo "  --mirror=<URL>             前置自定义 GitHub 下载加速镜像 (如 https://ghfast.top)"
     echo "  -p, --port=<PORT>          服务监听端口 [默认: 8787]"
+    echo "      --bind=<local|public>  监听范围: local=仅 127.0.0.1 (默认); public=0.0.0.0 对外"
     echo "  -k, --client-key=<KEY>     客户端接入 API Key (空则自动生成 sk-llmproxy-...)"
     echo "  -w, --admin-password=<PW>  管理控制台密码 (仅 full 模式，空则自动生成)"
     echo "      --admin-pass=<PW>      同 --admin-password"
@@ -206,6 +210,7 @@ CLI_MIRROR=""
 CLI_HUB_URL=""
 CLI_NODE_TOKEN=""
 CLI_PORT=""
+CLI_BIND=""
 CLI_ADMIN_PASS=""
 CLI_CLIENT_KEY=""
 CLI_ENCRYPT_KEY=""
@@ -269,6 +274,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --port=*)
             CLI_PORT="${1#*=}"
+            shift
+            ;;
+        --bind)
+            CLI_BIND="$2"
+            shift 2
+            ;;
+        --bind=*)
+            CLI_BIND="${1#*=}"
             shift
             ;;
         -w|--password|--admin-pass|--admin-password)
@@ -341,13 +354,13 @@ is_installed() {
     if [[ -f "/etc/systemd/system/llmproxy-full.service" || -f "/etc/systemd/system/llmproxy-lite.service" ]]; then
         return 0
     fi
-    if [[ -x "${TARGET_DIR}/${BIN_NAME}" || -x "/opt/llmproxy/bin/llmproxy" ]]; then
-        return 0
-    fi
-    # NOTE: config files alone do NOT mean "installed" — `uninstall --keep-config`
-    # deliberately leaves them behind. Treating that state as installed sends a
-    # later fresh install into the upgrade branch, which never writes a systemd
-    # unit, so the service ends up "Unit not found". Only unit/binary count.
+    # A binary alone is NOT an installation: the upgrade branch needs a unit to
+    # learn the role, port and restart target, and it never writes a unit itself.
+    # Left over binaries (e.g. after a partial uninstall) must go through the
+    # fresh-install path, which recreates the unit.
+    #
+    # NOTE: config files alone are also NOT "installed" — `uninstall --keep-config`
+    # deliberately leaves them behind. Only a unit file counts.
     return 1
 }
 
@@ -374,7 +387,7 @@ detect_existing_env_and_config() {
         EXISTING_CONFIG_DIR="$CLI_CONFIG_DIR"
     elif [[ -n "$EXISTING_ENV_FILE" ]]; then
         local dir_from_env
-        dir_from_env=$(get_env_val "$EXISTING_ENV_FILE" "CONFIG_DIR")
+        dir_from_env=$(get_env_val "$EXISTING_ENV_FILE" "CONFIG_DIR" || true)
         if [[ -n "$dir_from_env" ]]; then
             EXISTING_CONFIG_DIR="$dir_from_env"
         elif [[ "$EXISTING_ENV_FILE" == "/etc/llmproxy/.env" ]]; then
@@ -396,6 +409,22 @@ detect_existing_env_and_config() {
 # ==============================================================================
 # 二进制文件检索与下载
 # ==============================================================================
+
+# Atomically replace the installed binary. `cp` straight onto a binary that is
+# currently running fails with ETXTBSY ("Text file busy"), which broke in-place
+# upgrades. Writing a sibling temp file and renaming over the target swaps the
+# inode instead, so the running process keeps its old mapping and the next start
+# picks up the new file.
+install_binary_atomic() {
+    local src="$1"
+    local dst="$2"
+    local tmp="${dst}.new.$$"
+    run_sudo cp "$src" "$tmp" || { run_sudo rm -f "$tmp"; return 1; }
+    run_sudo chmod 755 "$tmp" || { run_sudo rm -f "$tmp"; return 1; }
+    run_sudo mv -f "$tmp" "$dst" || { run_sudo rm -f "$tmp"; return 1; }
+    return 0
+}
+
 resolve_binary() {
     local target_bin="$1"
     local script_dir
@@ -427,8 +456,7 @@ resolve_binary() {
     # 1. 显式 CLI 参数指定二进制
     if [[ -n "$CLI_BIN" && -f "$CLI_BIN" ]]; then
         info "使用指定的本地二进制: $CLI_BIN"
-        run_sudo cp "$CLI_BIN" "$target_bin"
-        run_sudo chmod +x "$target_bin"
+        install_binary_atomic "$CLI_BIN" "$target_bin"
         ok "二进制已安装至 $target_bin"
         return 0
     fi
@@ -436,14 +464,12 @@ resolve_binary() {
     # 2. 本地项目 dist 目录产物
     if [[ -f "$project_root/dist/$binary_target_name" ]]; then
         info "检测到本地编译产物: $project_root/dist/$binary_target_name"
-        run_sudo cp "$project_root/dist/$binary_target_name" "$target_bin"
-        run_sudo chmod +x "$target_bin"
+        install_binary_atomic "$project_root/dist/$binary_target_name" "$target_bin"
         ok "本地产物已安装至 $target_bin"
         return 0
     elif [[ -f "$project_root/dist/llmproxy" ]]; then
         info "检测到本地编译产物: $project_root/dist/llmproxy"
-        run_sudo cp "$project_root/dist/llmproxy" "$target_bin"
-        run_sudo chmod +x "$target_bin"
+        install_binary_atomic "$project_root/dist/llmproxy" "$target_bin"
         ok "本地产物已安装至 $target_bin"
         return 0
     fi
@@ -532,8 +558,7 @@ resolve_binary() {
     fi
     ok "SHA256 校验通过 ($act_sha)"
 
-    run_sudo cp "$tmp_bin" "$target_bin"
-    run_sudo chmod 755 "$target_bin"
+    install_binary_atomic "$tmp_bin" "$target_bin"
     rm -f "$tmp_bin" "$tmp_sha"
     ok "二进制已成功安装至 $target_bin"
     return 0
@@ -591,6 +616,19 @@ run_cmd() {
     else
         "$@"
     fi
+}
+
+# Atomically replace a running binary: `cp` onto a live inode fails with ETXTBSY
+# ("Text file busy"). Copying to a sibling temp name and renaming over the target
+# swaps the inode, so the running process keeps its mapping and the restart picks
+# up the new file.
+swap_binary() {
+    local src="$1" dst="$2" tmp="${dst}.new.$$"
+    run_cmd cp "$src" "$tmp" \
+        && run_cmd chmod 755 "$tmp" \
+        && run_cmd mv -f "$tmp" "$dst" \
+        || { run_cmd rm -f "$tmp" 2>/dev/null; return 1; }
+    return 0
 }
 
 detect_service() {
@@ -774,11 +812,12 @@ case "$1" in
         echo -e "  ${GREEN}✔ SHA256 校验通过 (${ACTUAL_SHA:0:16}...)${NC}"
 
         echo -e "正在替换二进制并平滑重启服务..."
-        run_cmd cp "$TMP_DIR/llmproxy" /usr/local/bin/llmproxy
-        run_cmd chmod +x /usr/local/bin/llmproxy
+        if ! swap_binary "$TMP_DIR/llmproxy" /usr/local/bin/llmproxy; then
+            echo -e "${RED}错误: 无法替换 /usr/local/bin/llmproxy (文件繁忙或被占用)${NC}"
+            exit 1
+        fi
         if [[ -f /opt/llmproxy/bin/llmproxy ]]; then
-            run_cmd cp "$TMP_DIR/llmproxy" /opt/llmproxy/bin/llmproxy
-            run_cmd chmod +x /opt/llmproxy/bin/llmproxy
+            swap_binary "$TMP_DIR/llmproxy" /opt/llmproxy/bin/llmproxy || true
         fi
 
         if command -v systemctl &>/dev/null; then
@@ -867,10 +906,15 @@ case "$1" in
 esac
 EOF_CTL
 
-    run_sudo cp "$tmp_ctl" "$ctl_path"
+    # Atomic swap: `llmproxy-ctl upgrade` re-runs this installer, so the ctl script
+    # may be the file bash is currently reading. `cp` onto it would truncate the
+    # running script; a rename swaps the inode instead.
+    local tmp_ctl_dst="${ctl_path}.new.$$"
+    run_sudo cp "$tmp_ctl" "$tmp_ctl_dst"
     # llmproxy-ctl is a bash script: non-root users need read permission too
     # (mktemp is 600, so plain `chmod +x` would leave mode 711 and break `llmproxy-ctl status`).
-    run_sudo chmod 755 "$ctl_path"
+    run_sudo chmod 755 "$tmp_ctl_dst"
+    run_sudo mv -f "$tmp_ctl_dst" "$ctl_path"
     rm -f "$tmp_ctl"
     ok "管理命令 llmproxy-ctl 注册就绪 (${ctl_path})"
 }
@@ -885,8 +929,13 @@ print_summary_banner() {
     local env_file="$4"
     local healthy="$5"
 
-    local public_ip
-    public_ip=$(detect_public_ip)
+    local bind_mode="${BIND_MODE:-local}"
+    local reachable_ip="127.0.0.1"
+    local reach_note=" (仅本机可访问；对外发布请用 nginx/caddy 反代或 ssh -L 转发)"
+    if [[ "$bind_mode" == "public" ]]; then
+        reachable_ip="<本机IP>"
+        reach_note=" (已监听 0.0.0.0/${port}，可从外部访问)"
+    fi
 
     local masked_key="sk-llmproxy-****"
     if [[ ${#client_key} -ge 12 ]]; then
@@ -909,18 +958,23 @@ print_summary_banner() {
     echo -e "  🌐 监听端口 (Port)      : ${BOLD}${port}${NC}"
     echo -e "  🔑 客户端密钥 (Client)  : ${YELLOW}${masked_key}${NC} (已脱敏保护)"
     if [[ "$role" == "full" ]]; then
-        echo -e "  🔒 后台密码 (Admin)     : ${YELLOW}********${NC} (已脱敏保护，受限存储于配置文件)"
+        # A password the caller passed in is already known to them; hiding it only
+        # makes the output useless. Only an auto-generated one stays masked (with a
+        # pointer to where it is stored).
         if [[ "$AUTO_GENERATED_ADMIN_PASS" == "true" ]]; then
-            echo -e "  💡 查看后台密码: sudo grep ADMIN_PASSWORD ${env_file:-/etc/llmproxy/.env}"
+            echo -e "  🔒 后台密码 (Admin)     : ${YELLOW}********${NC} (自动生成，已脱敏)"
+            echo -e "  💡 查看后台密码: sudo grep '^ADMIN_PASSWORD=' ${env_file:-/etc/llmproxy/.env} | cut -d= -f2-"
+        else
+            echo -e "  🔒 后台密码 (Admin)     : ${BOLD}${FINAL_ADMIN_PASS}${NC} (你指定的密码)"
         fi
         echo -e "  📁 配置文件 (Config)    : ${BOLD}${env_file}${NC} (权限: 0600)"
         if [[ -n "$FINAL_HUB_URL" ]]; then
             echo -e "  🔗 Vault 中枢 (Hub)     : ${CYAN}${FINAL_HUB_URL}${NC} (已预绑定)"
         fi
         echo ""
-        echo -e "  🌐 管理控制台 (Admin Web) : ${CYAN}http://${public_ip}:${port}/${NC}"
+        echo -e "  🌐 管理控制台 (Admin Web) : ${CYAN}http://${reachable_ip}:${port}/${NC}${reach_note}"
     fi
-    echo -e "  🚀 代理端点 (Proxy Base)  : ${CYAN}http://${public_ip}:${port}/v1${NC}"
+    echo -e "  🚀 代理端点 (Proxy Base)  : ${CYAN}http://${reachable_ip}:${port}/v1${NC}${reach_note}"
     echo ""
     echo -e "  🛠️  运维管理命令 (llmproxy-ctl):"
     echo -e "     查看服务状态与健康: ${BOLD}llmproxy-ctl status${NC}"
@@ -931,6 +985,17 @@ print_summary_banner() {
     echo "=============================================================================="
     echo ""
 }
+
+# 监听范围校验（尽早，避免各分支重复处理）。默认 local：只监听 127.0.0.1，
+# 对外发布交给 nginx/caddy/ssh -L，本脚本不做任何 IP 探测。
+if [[ -n "$CLI_BIND" ]]; then
+    case "$CLI_BIND" in
+        local|public) BIND_MODE="$CLI_BIND" ;;
+        *) error "--bind 参数必须为 'local' 或 'public' (当前为: '$CLI_BIND')" ;;
+    esac
+else
+    BIND_MODE="local"
+fi
 
 # ==============================================================================
 # 分支 1: 安全卸载模式 (UNINSTALL MODE)
@@ -1034,23 +1099,26 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
     FINAL_ROLE="$CURRENT_ROLE"
 
     # 读取旧凭据与端口
-    EXISTING_PORT=$(get_env_val "$ENV_FILE" "PORT")
+    # `|| true` on every probe: `get_env_val` returns 1 when the file is missing
+    # (a fresh box that only still has the binary), and a bare `VAR=$(...)` would
+    # inherit that status and kill the script under `set -e`.
+    EXISTING_PORT=$(get_env_val "$ENV_FILE" "PORT" || true)
     if [[ -z "$EXISTING_PORT" ]]; then
-        EXISTING_PORT=$(get_env_val "$ENV_FILE" "LLMPROXY_ADDR" | sed -n -E 's/.*:([0-9]+).*/\1/p')
+        EXISTING_PORT=$(get_env_val "$ENV_FILE" "LLMPROXY_ADDR" | sed -n -E 's/.*:([0-9]+).*/\1/p' || true)
     fi
     [[ -z "$EXISTING_PORT" ]] && EXISTING_PORT="8787"
 
-    EXISTING_PASS=$(get_env_val "$ENV_FILE" "ADMIN_PASSWORD")
-    EXISTING_ENC=$(get_env_val "$ENV_FILE" "ENCRYPT_KEY")
-    EXISTING_KEY=$(get_env_val "$ENV_FILE" "PROXY_API_KEY")
-    [[ -z "$EXISTING_KEY" ]] && EXISTING_KEY=$(get_env_val "$ENV_FILE" "LLMPROXY_CLIENT_KEY")
+    EXISTING_PASS=$(get_env_val "$ENV_FILE" "ADMIN_PASSWORD" || true)
+    EXISTING_ENC=$(get_env_val "$ENV_FILE" "ENCRYPT_KEY" || true)
+    EXISTING_KEY=$(get_env_val "$ENV_FILE" "PROXY_API_KEY" || true)
+    [[ -z "$EXISTING_KEY" ]] && EXISTING_KEY=$(get_env_val "$ENV_FILE" "LLMPROXY_CLIENT_KEY" || true)
 
     FINAL_PORT="${CLI_PORT:-$EXISTING_PORT}"
     FINAL_ADMIN_PASS="${CLI_ADMIN_PASS:-$EXISTING_PASS}"
     FINAL_ENCRYPT_KEY="${CLI_ENCRYPT_KEY:-$EXISTING_ENC}"
     FINAL_CLIENT_KEY="${CLI_CLIENT_KEY:-$EXISTING_KEY}"
-    EXISTING_HUB_URL=$(get_env_val "$ENV_FILE" "LLMPROXY_HUB_URL")
-    EXISTING_NODE_TOKEN=$(get_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN")
+    EXISTING_HUB_URL=$(get_env_val "$ENV_FILE" "LLMPROXY_HUB_URL" || true)
+    EXISTING_NODE_TOKEN=$(get_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN" || true)
     FINAL_HUB_URL="${CLI_HUB_URL:-$EXISTING_HUB_URL}"
     FINAL_NODE_TOKEN="${CLI_NODE_TOKEN:-$EXISTING_NODE_TOKEN}"
 
@@ -1082,12 +1150,20 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
         # 保留并增量更新 .env 凭证 (umask 077 零暴露窗口)
         run_sudo mkdir -p "$(dirname "$ENV_FILE")"
         if [[ -f "$ENV_FILE" ]]; then
-            [[ -n "$CLI_PORT" ]] && set_env_val "$ENV_FILE" "PORT" "$FINAL_PORT" && set_env_val "$ENV_FILE" "LLMPROXY_ADDR" "[::]:${FINAL_PORT}"
-            [[ -n "$CLI_ADMIN_PASS" ]] && set_env_val "$ENV_FILE" "ADMIN_PASSWORD" "$FINAL_ADMIN_PASS"
-            [[ -n "$CLI_ENCRYPT_KEY" ]] && set_env_val "$ENV_FILE" "ENCRYPT_KEY" "$FINAL_ENCRYPT_KEY"
-            [[ -n "$CLI_CLIENT_KEY" ]] && set_env_val "$ENV_FILE" "PROXY_API_KEY" "$FINAL_CLIENT_KEY" && set_env_val "$ENV_FILE" "LLMPROXY_CLIENT_KEY" "$FINAL_CLIENT_KEY"
-            [[ -n "$CLI_HUB_URL" ]] && set_env_val "$ENV_FILE" "LLMPROXY_HUB_URL" "$FINAL_HUB_URL"
-            [[ -n "$CLI_NODE_TOKEN" ]] && set_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN" "$FINAL_NODE_TOKEN"
+            # `|| true` keeps `set -e` from aborting the upgrade when an optional
+            # flag was not supplied (a false `[[ ]] && cmd` is a non-zero status).
+            if [[ -n "$CLI_PORT" ]]; then
+                set_env_val "$ENV_FILE" "PORT" "$FINAL_PORT"
+                set_env_val "$ENV_FILE" "LLMPROXY_ADDR" "$(addr_for_mode "$BIND_MODE" "$FINAL_PORT")"
+            fi
+            [[ -n "$CLI_ADMIN_PASS" ]] && set_env_val "$ENV_FILE" "ADMIN_PASSWORD" "$FINAL_ADMIN_PASS" || true
+            [[ -n "$CLI_ENCRYPT_KEY" ]] && set_env_val "$ENV_FILE" "ENCRYPT_KEY" "$FINAL_ENCRYPT_KEY" || true
+            if [[ -n "$CLI_CLIENT_KEY" ]]; then
+                set_env_val "$ENV_FILE" "PROXY_API_KEY" "$FINAL_CLIENT_KEY"
+                set_env_val "$ENV_FILE" "LLMPROXY_CLIENT_KEY" "$FINAL_CLIENT_KEY"
+            fi
+            [[ -n "$CLI_HUB_URL" ]] && set_env_val "$ENV_FILE" "LLMPROXY_HUB_URL" "$FINAL_HUB_URL" || true
+            [[ -n "$CLI_NODE_TOKEN" ]] && set_env_val "$ENV_FILE" "LLMPROXY_NODE_TOKEN" "$FINAL_NODE_TOKEN" || true
             set_env_val "$ENV_FILE" "CONFIG_DIR" "$CONFIG_DIR"
             set_env_val "$ENV_FILE" "LLMPROXY_ROLE" "full"
         else
@@ -1096,14 +1172,14 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
                 umask 077
                 printf 'LLMPROXY_ROLE=full\n'
                 printf 'PORT=%s\n' "$FINAL_PORT"
-                printf 'LLMPROXY_ADDR=[::]:%s\n' "$FINAL_PORT"
+                printf 'LLMPROXY_ADDR=%s\n' "$(addr_for_mode "$BIND_MODE" "$FINAL_PORT")"
                 printf 'CONFIG_DIR=%s\n' "$CONFIG_DIR"
                 printf 'ADMIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASS"
                 printf 'ENCRYPT_KEY=%s\n' "$FINAL_ENCRYPT_KEY"
                 printf 'PROXY_API_KEY=%s\n' "$FINAL_CLIENT_KEY"
                 printf 'LLMPROXY_CLIENT_KEY=%s\n' "$FINAL_CLIENT_KEY"
-                [[ -n "$FINAL_HUB_URL" ]] && printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"
-                [[ -n "$FINAL_NODE_TOKEN" ]] && printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"
+                if [[ -n "$FINAL_HUB_URL" ]]; then printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"; fi
+                if [[ -n "$FINAL_NODE_TOKEN" ]]; then printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"; fi
             ) > "$TMP_ENV_FILE"
             run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$TMP_ENV_FILE" "$ENV_FILE"
             rm -f "$TMP_ENV_FILE"
@@ -1111,7 +1187,7 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
         run_sudo chmod 600 "$ENV_FILE" 2>/dev/null || true
     elif [[ "$FINAL_ROLE" == "lite" && -f "/etc/systemd/system/llmproxy-lite.service" ]]; then
         SERVICE_FILE="/etc/systemd/system/llmproxy-lite.service"
-        [[ -n "$CLI_PORT" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_ADDR" "[::]:${CLI_PORT}"
+        [[ -n "$CLI_PORT" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_ADDR" "$(addr_for_mode "$BIND_MODE" "$CLI_PORT")"
         [[ -n "$CLI_HUB_URL" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_HUB_URL" "$CLI_HUB_URL"
         [[ -n "$CLI_NODE_TOKEN" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_NODE_TOKEN" "$CLI_NODE_TOKEN"
         [[ -n "$CLI_CLIENT_KEY" ]] && set_systemd_env_val "$SERVICE_FILE" "LLMPROXY_CLIENT_KEY" "$CLI_CLIENT_KEY"
@@ -1121,8 +1197,7 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
     # 升级二进制
     resolve_binary "${TARGET_DIR}/${BIN_NAME}"
     if [[ -f /opt/llmproxy/bin/llmproxy ]]; then
-        run_sudo cp "${TARGET_DIR}/${BIN_NAME}" /opt/llmproxy/bin/llmproxy
-        run_sudo chmod +x /opt/llmproxy/bin/llmproxy
+        install_binary_atomic "${TARGET_DIR}/${BIN_NAME}" /opt/llmproxy/bin/llmproxy
     fi
 
     # 注册或更新全局 CLI 与免密规则，写入非机密端口提示文件
@@ -1342,6 +1417,9 @@ Group=nogroup'
 NoNewPrivileges=yes'
 fi
 
+# 监听地址由 FINAL_PORT + BIND_MODE 一次性定稿，供下方 .env 与 systemd 单元共用
+BIND_ADDR="$(addr_for_mode "$BIND_MODE" "$FINAL_PORT")"
+
 # 写入配置与服务单元
 if [[ "$FINAL_ROLE" == "full" ]]; then
     CONFIG_DIR="$FINAL_CONFIG_DIR"
@@ -1357,14 +1435,17 @@ if [[ "$FINAL_ROLE" == "full" ]]; then
         umask 077
         printf 'LLMPROXY_ROLE=full\n'
         printf 'PORT=%s\n' "$FINAL_PORT"
-        printf 'LLMPROXY_ADDR=[::]:%s\n' "$FINAL_PORT"
+        printf 'LLMPROXY_ADDR=%s\n' "$(addr_for_mode "$BIND_MODE" "$FINAL_PORT")"
         printf 'CONFIG_DIR=%s\n' "$CONFIG_DIR"
         printf 'ADMIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASS"
         printf 'ENCRYPT_KEY=%s\n' "$FINAL_ENCRYPT_KEY"
         printf 'PROXY_API_KEY=%s\n' "$FINAL_CLIENT_KEY"
         printf 'LLMPROXY_CLIENT_KEY=%s\n' "$FINAL_CLIENT_KEY"
-        [[ -n "$FINAL_HUB_URL" ]] && printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"
-        [[ -n "$FINAL_NODE_TOKEN" ]] && printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"
+        # `if` form, not `[[ ]] && printf`: the optional lines can be skipped, and a
+        # false `[[ ]]` as the subshell's last command would make the whole block
+        # return 1 under `set -e`, aborting a fresh full install with no node token.
+        if [[ -n "$FINAL_HUB_URL" ]]; then printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"; fi
+        if [[ -n "$FINAL_NODE_TOKEN" ]]; then printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"; fi
     ) > "$TMP_ENV_FILE"
     run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$TMP_ENV_FILE" "$ENV_FILE"
     rm -f "$TMP_ENV_FILE"
@@ -1412,7 +1493,7 @@ Wants=network-online.target
 Type=simple
 ${LITE_USER_BLOCK}
 Environment="LLMPROXY_ROLE=lite"
-Environment="LLMPROXY_ADDR=[::]:${FINAL_PORT}"
+Environment="LLMPROXY_ADDR=${BIND_ADDR}"
 Environment="LLMPROXY_HUB_URL=${FINAL_HUB_URL}"
 Environment="LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}"
 Environment="LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}"

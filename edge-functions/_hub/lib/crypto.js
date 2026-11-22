@@ -107,3 +107,13 @@ const str = typeof data === 'string' ? data : JSON.stringify(data);
 const hash = sha256(str).slice(0, 16);
 return `"${hash}"`;
 }
+export function generateAdminPassword(length = 20) {
+const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const bytes = new Uint8Array(length);
+globalThis.crypto.getRandomValues(bytes);
+let out = '';
+for (let i = 0; i < length; i += 1) {
+out += alphabet[bytes[i] % alphabet.length];
+}
+return out;
+}

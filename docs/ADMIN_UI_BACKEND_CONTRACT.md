@@ -44,6 +44,7 @@
       },
       "created_at": "2026-11-08T08:00:00Z",
       "last_seen": "2026-11-08T08:30:12Z",
+      "last_ip": "203.0.113.77",
       "last_config_version": 137,
       "last_binary_version": "v20261108-01"
     }
@@ -65,12 +66,13 @@
   }
 }
 ```
-- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`：
+- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、节点当前生效的客户端鉴权密钥 `client_key`、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`：
 ```json
 {
   "ok": true,
   "node": { "id": "node_jp_02", "name": "日本 NAT 极简节点", "enabled": true },
   "node_token": "stk_node_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a",
+  "client_key": "sk-llmproxy-...",
   "bootstrap_env": "LLMPROXY_ROLE=lite LLMPROXY_HUB_URL=https://hub.example.com LLMPROXY_NODE_TOKEN=stk_node_9f8e... LLMPROXY_CLIENT_KEY=sk-llmproxy-...",
   "install_command": "curl -fsSL https://hub.example.com/install.sh | sudo bash -s -- --role=lite --hub-url=\"https://hub.example.com\" --node-token=\"stk_node_9f8e...\" --client-key=\"sk-llmproxy-...\" -p 8787 -y"
 }
@@ -79,6 +81,7 @@
 ### 2.3 注销/吊销、恢复、轮换与删除节点
 - **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
 - **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`、`bootstrap_env` 与 `install_command`，旧 Token 立即失效。
+- **重新获取安装命令**：`GET /api/admin/nodes/:id/install-command` → 返回与签发/轮换同构的部署材料（`node`（已脱敏）、`node_token`、`client_key`、`bootstrap_env`、`install_command`）；因 KV 仅存 `token_sha256`，内部即执行一次轮换，旧 Token 立即失效（响应带 `Cache-Control: no-store`；节点不存在返回 `404 {ok:false, error:"node_not_found"}`）。节点列表页每行的「安装」按钮即此契约：同一会话内复用内存缓存的 Token 免轮换，跨会话（页面刷新后）调用本端点轮换取新。路径匹配为精确三段（`/:id/install-command`），`/:id/rotate/install-command` 等畸形路径不触发轮换。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
 
 ---

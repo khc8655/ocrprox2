@@ -4,6 +4,7 @@ listNodes,
 issueNode,
 patchNode,
 rotateNodeToken,
+reissueNodeToken,
 deleteNode,
 } from '../../lib/nodes.js';
 export async function handleNodesRequest(request, env, kv, params) {
@@ -19,12 +20,39 @@ const isRotate =
 (nodesIdx >= 0 && pathParts.length > nodesIdx + 2 && pathParts[nodesIdx + 2] === 'rotate') ||
 (params && params.action === 'rotate') ||
 url.pathname.endsWith('/rotate');
+const isInstallCommand =
+method === 'GET' &&
+((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'install-command') ||
+(params && params.action === 'install-command'));
 const hubUrl = `${url.protocol}//${url.host}`;
 if (method === 'GET' && !targetId) {
 const nodes = await listNodes(kv);
 return new Response(
 JSON.stringify({ ok: true, nodes }),
 { status: 200, headers: { 'content-type': 'application/json' } }
+);
+}
+if (isInstallCommand && targetId) {
+const cfg = await loadConfig(kv);
+const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
+const res = await reissueNodeToken(targetId, kv, hubUrl, clientKey);
+if (!res) {
+return new Response(
+JSON.stringify({ ok: false, error: 'node_not_found' }),
+{ status: 404, headers: { 'content-type': 'application/json' } }
+);
+}
+return new Response(
+JSON.stringify({
+ok: true,
+node: res.node,
+node_token: res.node_token,
+client_key: res.client_key,
+admin_password: res.admin_password,
+bootstrap_env: res.bootstrap_env,
+install_command: res.install_command,
+}),
+{ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
 );
 }
 if (method === 'POST' && !targetId) {
@@ -42,6 +70,7 @@ ok: true,
 node: res.node,
 node_token: res.node_token,
 client_key: res.client_key,
+admin_password: res.admin_password,
 bootstrap_env: res.bootstrap_env,
 install_command: res.install_command,
 }),
@@ -72,6 +101,7 @@ JSON.stringify({
 ok: true,
 node_token: res.node_token,
 client_key: res.client_key,
+admin_password: res.admin_password,
 bootstrap_env: res.bootstrap_env,
 install_command: res.install_command,
 }),
