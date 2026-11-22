@@ -20,7 +20,6 @@
     extraPresetsLoaded: false,
     activeTab: 'activity',
     activeEditorKey: null,
-    modelSubMode: 'all',
     providerQuery: '',
     providerFilter: 'all',
     searchQuery: '',
@@ -39,6 +38,9 @@
     probeFilterByProvider: {},
     vaultManifest: null,
     addProvVaultPick: '',
+    addModelProbed: null,
+    // modelSubMode (the「全部/自定义模型」seg toggle) is gone: with the fixed-4-channel
+    // generation removed, every route is a custom route and the toggle filtered nothing.
   };
 
   function byIdIn(root, id) {
@@ -137,11 +139,6 @@
     if (provDl) {
       const pIds = Object.keys(state.config?.providers || {}).sort();
       provDl.innerHTML = pIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
-    }
-    const modDl = $('datalistModels');
-    if (modDl) {
-      const mIds = Object.keys(state.config?.agent_models || {}).sort();
-      modDl.innerHTML = mIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
     }
   }
 
@@ -320,13 +317,10 @@
     return `${Math.round(n / 86400)}d`;
   }
 
-  const FIXED_SLOT_META = {
-    chat: { path: '/v1/chat/completions', desc: '固定 RAG 对话高并发通道' },
-    embedding: { path: '/v1/embeddings', desc: '固定文档向量化高并发通道' },
-    reranker: { path: '/v1/rerank', desc: '固定语义重排高并发通道' },
-    ocr: { path: '/v1/ocr', desc: '固定多模态 OCR 高并发通道' },
-  };
-  const FIXED_SLOT_IDS = ['chat', 'embedding', 'reranker', 'ocr'];
+  // The legacy KB fixed-4-channel metadata map (FIXED_SLOT_META) is gone for good:
+  // chat/embedding/reranker/ocr are ordinary agent_models routes now — they appear
+  // wherever they exist (full and hub alike), are importable from templates, and
+  // carry no special rendering, filtering or search behavior.
 
   // Only two strategies are surfaced by default; the rest stay available but are
   // grouped under "高级策略" because they need operator judgement (weights, latency
@@ -340,34 +334,15 @@
     fast: '动态低延迟优先',
     manual: '手动严格直通',
   };
-
-  function ensureUnifiedFixedRoutes(cfg) {
-    if (!cfg || typeof cfg !== 'object') return;
-    // Hub templates no longer carry KB fixed-4-channel routes (Full nodes stopped
-    // pulling them), so the hub console must not resurrect them from kb_models.
-    if (window.HOST && window.HOST.kind === 'hub') return;
-    cfg.agent_models = cfg.agent_models || {};
-    const kb = cfg.kb_models || {};
-    for (const cat of FIXED_SLOT_IDS) {
-      const kbList = Array.isArray(kb[cat]) ? kb[cat] : [];
-      if (!cfg.agent_models[cat] && kbList.length > 0) {
-        cfg.agent_models[cat] = {
-          enabled: true,
-          routing_strategy: 'round_robin',
-          no_reasoning: cat === 'chat',
-          force_non_stream: cat === 'chat',
-          candidates: kbList.filter(Boolean).map((kc) => ({
-            provider: kc.provider || '',
-            key_label: kc.key_label || kc.key || '',
-            target_model: kc.model || '',
-            enabled: kc.enabled !== false,
-            weight: 1,
-            max_concurrency: Number(kc.max_concurrency || kc.max_conc || 0) || 0,
-          })),
-        };
-      }
-    }
-  }
+  // One-line "what it does + when to use it" copy shown under the strategy pills.
+  const STRATEGY_HINTS = {
+    sticky_failover: '会话固定同一 Key，失败才切换；保上下文缓存（推荐）',
+    round_robin: '优先分给空闲 Key；高并发均摊',
+    weighted: '按权重比例分摊；配额差异大时用',
+    least_busy: '优先分给并发最小 Key；求瞬时均衡',
+    fast: '按实测延迟动态选最快 Key；首字敏感时用',
+    manual: '按候选顺序直通；调试排障用',
+  };
 
   // Which routes reference this provider/key pair? Used to warn before a key is
   // disabled or deleted, since candidates bind to an explicit provider:key_label.
@@ -391,14 +366,6 @@
   }
 
   const eh = escapeHtml;
-  // Model names and provider ids may contain ".", spaces or other CSS-special
-  // characters (e.g. "MiniMax-M3.1-Flash-Preview"). Building "#id_<name>" then
-  // throws SyntaxError and aborts rendering mid-list, which used to wipe the whole
-  // view. Escape every interpolated id fragment before it reaches querySelector.
-  function cssId(value) {
-    const s = String(value == null ? '' : value);
-    return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
-  }
 
   // Shared show/hide helper. Must live at module scope: the node-issue button is
   // wired in setupNavigation while the creation forms are wired later, so a
@@ -522,7 +489,6 @@
     const fullOverviewBox = $('fullOverviewBox');
     const btnClearAllCooldowns = $('btnClearAllCooldowns');
     const btnImportFromTemplate = $('btnImportFromTemplate');
-    const modelPipelineSeg = $('modelPipelineSeg');
 
     if (navModels) navModels.hidden = false;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
@@ -533,9 +499,6 @@
     if (fullOverviewBox) fullOverviewBox.hidden = isHub;
     if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
     if (btnImportFromTemplate) btnImportFromTemplate.hidden = !caps.vaultClient;
-    // Hub templates no longer carry KB fixed-4-channel routes: hide the submode
-    // switch instead of showing an always-empty「固定 4 通道」filter.
-    if (modelPipelineSeg) modelPipelineSeg.hidden = isHub;
     const guardBox = $('concurrencyGuardBox');
     if (guardBox) guardBox.hidden = false;
     const sysBox = $('systemUpdateBox');
@@ -554,8 +517,8 @@
     }
     if (modelsSub) {
       modelsSub.textContent = isHub
-        ? '中枢只做编排与下发模板，不参与流量中转；节点侧按需拉取供应商与模板路由。'
-        : '管理当前网关对外暴露的模型路由、多密钥粘性/轮询策略及固定 4 通道并发编排。';
+        ? '仅下发给 lite 节点；full 节点可选导入'
+        : '管理当前网关对外暴露的模型路由与多密钥粘性/轮询策略。';
     }
     const rpTitle = $('routingPolicyTitle');
     const rpSub = $('routingPolicySub');
@@ -939,33 +902,36 @@
   }
 
   // --- 4. Canonical Presets (1:1 aligned with shared/presets/*.json) & cURL Parser ---
+  // Compact tuple form: [label, base_url, api_type, version, updated_at, anthropic_base_url?].
+  // version / updated_at mirror each adapter file (shared/presets/catalog.json);
+  // anthropic has no adapter file, so it carries no version info. Expanded to the
+  // object shape below (id = key, preset_id = id unless overridden by minimax-cn).
   const PRESETS_META = {
-    openai: { id: 'openai', preset_id: 'openai', label: 'OpenAI 官方', base_url: 'https://api.openai.com/v1', api_type: 'openai-completions' },
-    anthropic: { id: 'anthropic', preset_id: 'anthropic', label: 'Anthropic 官方', base_url: 'https://api.anthropic.com/v1', api_type: 'anthropic-messages' },
-    deepseek: { id: 'deepseek', preset_id: 'deepseek', label: 'DeepSeek 官方开放平台', base_url: 'https://api.deepseek.com/v1', api_type: 'openai-completions' },
-    google: { id: 'google', preset_id: 'google', label: 'Google AI Studio (Gemini)', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', api_type: 'gemini' },
-    vertex: {
-      id: 'vertex',
-      preset_id: 'vertex',
-      label: 'Google Vertex AI',
-      base_url: 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi',
-      api_type: 'openai-completions',
-      hint: '请将 URL 中的 {project} 与 {region}（或 global 端点）替换为实际 GCP 项目与区域',
-    },
-    openrouter: { id: 'openrouter', preset_id: 'openrouter', label: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', anthropic_base_url: 'https://openrouter.ai/api/v1', api_type: 'openai-completions' },
-    minimax: { id: 'minimax', preset_id: 'minimax', label: 'MiniMax (国际 api.minimax.io)', base_url: 'https://api.minimax.io/v1', anthropic_base_url: 'https://api.minimax.io/anthropic', api_type: 'openai-completions' },
-    'minimax-cn': { id: 'minimax-cn', preset_id: 'minimax', label: 'MiniMax (国内 api.minimaxi.com)', base_url: 'https://api.minimaxi.com/v1', anthropic_base_url: 'https://api.minimaxi.com/anthropic', api_type: 'openai-completions' },
-    siliconflow: { id: 'siliconflow', preset_id: 'siliconflow', label: '硅基流动 (SiliconFlow)', base_url: 'https://api.siliconflow.cn/v1', api_type: 'openai-completions' },
-    stepfun: { id: 'stepfun', preset_id: 'stepfun', label: '阶跃星辰 (StepFun)', base_url: 'https://api.stepfun.com/step_plan', api_type: 'openai-completions' },
-    sensenova: { id: 'sensenova', preset_id: 'sensenova', label: '商汤日日新 (SenseNova)', base_url: 'https://token.sensenova.cn/v1', anthropic_base_url: 'https://token.sensenova.cn/v1', api_type: 'openai-completions' },
-    nvidia: { id: 'nvidia', preset_id: 'nvidia', label: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', api_type: 'openai-completions' },
-    opencode: { id: 'opencode', preset_id: 'opencode', label: 'OpenCode Zen', base_url: 'https://opencode.ai/zen/v1', api_type: 'openai-completions' },
-    cline: { id: 'cline', preset_id: 'cline', label: 'Cline 官方 API', base_url: 'https://api.cline.bot/api/v1', api_type: 'openai-completions' },
-    amd: { id: 'amd', preset_id: 'amd', label: 'AMD Radeon Cloud', base_url: 'https://developer.amd.com.cn/radeon/api/v1', anthropic_base_url: 'https://developer.amd.com.cn/radeon/api/v1', api_type: 'openai-completions' },
-    agnes: { id: 'agnes', preset_id: 'agnes', label: 'Agnes AI', base_url: 'https://apihub.agnes-ai.com/v1', anthropic_base_url: 'https://apihub.agnes-ai.com/v1', api_type: 'openai-completions' },
-    bai: { id: 'bai', preset_id: 'bai', label: 'B.AI', base_url: 'https://api.b.ai/v1', anthropic_base_url: 'https://api.b.ai/v1', api_type: 'openai-completions' },
-    tokenrhythm: { id: 'tokenrhythm', preset_id: 'tokenrhythm', label: 'TokenRhythm', base_url: 'https://tokenrhythm.studio/v1', api_type: 'openai-completions' },
+    openai: ['OpenAI 官方', 'https://api.openai.com/v1', 'openai-completions', '1.2.1', '2026-10-19'],
+    anthropic: ['Anthropic 官方', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+    deepseek: ['DeepSeek 官方开放平台', 'https://api.deepseek.com/v1', 'openai-completions', '1.2.0', '2026-10-18'],
+    google: ['Google AI Studio (Gemini)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini', '1.2.0', '2026-10-18'],
+    vertex: ['Google Vertex AI', 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi', 'openai-completions', '1.1.0', '2026-10-18'],
+    openrouter: ['OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions', '1.0.0', '2026-10-18', 'https://openrouter.ai/api/v1'],
+    minimax: ['MiniMax (国际 api.minimax.io)', 'https://api.minimax.io/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.minimax.io/anthropic'],
+    // minimax-cn binds the shared 'minimax' preset but has NO adapter file of its
+    // own (presets-extra omits version for it): carry no version here, or the card
+    // would show a nonexistent adapter's version.
+    'minimax-cn': ['MiniMax (国内 api.minimaxi.com)', 'https://api.minimaxi.com/v1', 'openai-completions', '', '', 'https://api.minimaxi.com/anthropic', 'minimax'],
+    siliconflow: ['硅基流动 (SiliconFlow)', 'https://api.siliconflow.cn/v1', 'openai-completions', '1.2.0', '2026-10-18'],
+    stepfun: ['阶跃星辰 (StepFun)', 'https://api.stepfun.com/step_plan', 'openai-completions', '1.2.0', '2026-10-18'],
+    sensenova: ['商汤日日新 (SenseNova)', 'https://token.sensenova.cn/v1', 'openai-completions', '1.3.0', '2026-10-18', 'https://token.sensenova.cn/v1'],
+    nvidia: ['NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'openai-completions', '2.0.0', '2026-10-18'],
+    opencode: ['OpenCode Zen', 'https://opencode.ai/zen/v1', 'openai-completions', '2.0.0', '2026-10-18'],
+    cline: ['Cline 官方 API', 'https://api.cline.bot/api/v1', 'openai-completions', '1.1.1', '2026-10-30'],
+    amd: ['AMD Radeon Cloud', 'https://developer.amd.com.cn/radeon/api/v1', 'openai-completions', '2026.10.19', '2026-10-19', 'https://developer.amd.com.cn/radeon/api/v1'],
+    agnes: ['Agnes AI', 'https://apihub.agnes-ai.com/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://apihub.agnes-ai.com/v1'],
+    bai: ['B.AI', 'https://api.b.ai/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.b.ai/v1'],
+    tokenrhythm: ['TokenRhythm', 'https://tokenrhythm.studio/v1', 'openai-completions', '1.2.0', '2026-10-18'],
   };
+  for (const [k, a] of Object.entries(PRESETS_META)) {
+    PRESETS_META[k] = { id: k, preset_id: a[6] || k, label: a[0], base_url: a[1], api_type: a[2], version: a[3] || '', updated_at: a[4] || '', anthropic_base_url: a[5] || '' };
+  }
 
   // Robust cURL Command Parser (M3)
   function parseCurl(text) {
@@ -1055,7 +1021,16 @@
   function mergeExtraPresets(extraPresets = []) {
     if (!Array.isArray(extraPresets)) return;
     for (const p of extraPresets) {
-      if (!p || !p.id || PRESETS_META[p.id]) continue;
+      if (!p || !p.id) continue;
+      const meta = PRESETS_META[p.id];
+      if (meta) {
+        // Known id: keep the table's label/urls but let the server refresh the
+        // adapter-file version metadata (PresetDef) — otherwise the pill would
+        // keep rendering a stale literal after the adapter file moves on.
+        meta.version = p.version || '';
+        meta.updated_at = p.updated_at || '';
+        continue;
+      }
       PRESETS_META[p.id] = {
         id: p.id,
         preset_id: p.id,
@@ -1063,9 +1038,57 @@
         base_url: p.base_url || '',
         anthropic_base_url: p.anthropic_base_url || '',
         api_type: normalizeApiType(p.protocol),
+        // Adapter-file version metadata sent along with presets-extra (PresetDef);
+        // keeps the provider card version pill working for server-side presets.
+        version: p.version || '',
+        updated_at: p.updated_at || '',
       };
     }
   }
+
+  // Resolve the adapter (preset) meta bound to a provider: direct id hit first,
+  // then preset_id match (e.g. a minimax-cn provider binds the shared 'minimax'
+  // preset). Falls back to the provider id, mirroring the brand-icon lookup.
+  function presetMetaForProvider(p, pId) {
+    const pid = String(p?.preset_id || pId || '').trim();
+    if (!pid) return null;
+    if (PRESETS_META[pid]) return PRESETS_META[pid];
+    for (const meta of Object.values(PRESETS_META)) {
+      if (meta.preset_id && meta.preset_id === pid) return meta;
+    }
+    return null;
+  }
+
+  // Version pill for provider cards: 适配 {id} · v{version} · {updated_at}.
+  function presetVersionText(meta) {
+    if (!meta || !meta.version) return '';
+    return `适配 ${meta.id} · v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}`;
+  }
+
+  // 已适配 = the provider actually runs an adapter script (plan D): a preset with
+  // an adapter file (meta carries its version), hub-pulled rules (rule_hash), or
+  // inline adapter_rules. A preset_id that only names a protocol (e.g. anthropic,
+  // which has no adapter file) or an empty binding does NOT count — those are
+  // 自定义（无适配文件）.
+  function providerHasAdapter(p) {
+    if (p.adapter_rules && Object.keys(p.adapter_rules).length > 0) return true;
+    if (p.rule_hash) return true;
+    const pid = String(p?.preset_id || '').trim();
+    if (!pid) return false;
+    return Boolean(presetVersionText(presetMetaForProvider(p, pid)));
+  }
+
+  // Adapter badge on provider cards (full + hub alike): a bound preset with an
+  // adapter file shows its version, anything else is visibly「自定义（无适配文件）」
+  // so operators can tell adapted providers apart at a glance (pairs with the
+  // 已适配 filter, which uses the same providerHasAdapter judgement).
+  function presetVersionPillHtml(p) {
+    const pid = String(p?.preset_id || '').trim();
+    const text = pid ? presetVersionText(presetMetaForProvider(p, pid)) : '';
+    if (!text) return '<span class="pill" title="无适配文件">自定义（无适配文件）</span>';
+    return `<span class="pill tabular" title="适配文件版本">${eh(text)}</span>`;
+  }
+
 
   function setupToolbars() {
     const provSearch = $('providerSearchInput');
@@ -1095,20 +1118,6 @@
       modelSearch.addEventListener('input', (e) => {
         state.modelQuery = (e.target.value || '').trim().toLowerCase();
         renderModelsList();
-      });
-    }
-
-    const modelSubSeg = $('modelPipelineSeg');
-    if (modelSubSeg) {
-      modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-        clk(btn, () => {
-          const m = btn.getAttribute('data-submode') || 'all';
-          state.modelSubMode = m;
-          modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
-            b.classList.toggle('active', b.getAttribute('data-submode') === m);
-          });
-          renderModelsList();
-        });
       });
     }
 
@@ -1382,6 +1391,11 @@
     if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
   }
 
+  // Closes the provider combobox panel of the add-model modal. Assigned by
+  // setupProvCombo once the static panel markup exists; the noop
+  // default keeps the modal-cancel closures safe before that.
+  let closeProvPanel = () => {};
+
   function setupCreationForms() {
     const pForm = $('addProviderForm');
     const mForm = $('addModelForm');
@@ -1542,18 +1556,111 @@
       await persistConfig('供应商创建成功');
     });
 
+    // Both creation forms are centered overlays now (same dimmed-backdrop pattern
+    // as the login screen): a click on the backdrop itself cancels, and each has an
+    // explicit 关闭 button in its header next to the Esc key.
+    if (pForm) {
+      pForm.addEventListener('click', (ev) => {
+        if (ev.target === pForm) toggle(pForm, false);
+      });
+    }
+    clk($('btnXProv'), () => toggle(pForm, false));
+
+    const cancelAddModel = () => {
+      toggle(mForm, false);
+      closeProvPanel();
+      resetProbe();
+    };
+    if (mForm) {
+      mForm.addEventListener('click', (ev) => {
+        if (ev.target === mForm) cancelAddModel();
+      });
+    }
+    clk($('btnXModel'), cancelAddModel);
+
+    setupProvCombo();
+
     clk($('btnAddModel'), () => {
       toggle(mForm);
-      if (mForm && !mForm.hidden) populateModelProvidersDropdown();
+      if (mForm && !mForm.hidden) {
+        // Fresh form on every open: a model name left over from the previous
+        // session would otherwise be confirmed into the new route untouched.
+        resetProbe();
+        closeProvPanel();
+        const provInput = $('newModelProvider');
+        if (provInput) provInput.value = '';
+        const nameInput = $('newModelName');
+        if (nameInput) nameInput.value = '';
+        renderKeyPills();
+      }
     });
-    clk($('btnCancelAddModel'), () => toggle(mForm, false));
+    clk($('btnCancelAddModel'), cancelAddModel);
+
+    // Switching the provider invalidates the previous probe results, the picked
+    // keys (they belong to the old provider's key pool) and the picked upstream
+    // target (it belongs to the old provider's model list) — resetProbe covers all.
+    $('newModelProvider')?.addEventListener('change', () => {
+      resetProbe();
+      renderKeyPills();
+    });
+
+    // Probe the upstream model list through the gateway (works for both full and
+    // hub hosts: the backend resolves an unmasked key from the stored provider).
+    const probeBtn = $('btnProbeModel');
+    // Failure/empty probes keep a persistent inline note inside the probe result
+    // box (#npbPills): the toast alone auto-dismisses, and resetProbe() then
+    // leaves the form looking untouched — the operator would never see why
+    // nothing appeared. Cleared by the next probe, provider switch or close.
+    const showProbeFail = (msg) => {
+      const list = $('npbPills');
+      if (list) list.innerHTML = `<span class="text-xs text-muted">${eh(msg)}</span>`;
+      toggle('npbBox', true);
+    };
+    clk(probeBtn, async () => {
+      const prov = ($('newModelProvider')?.value || '').trim();
+      if (!prov) return toast('请先选择供应商', 'warn');
+      const p = state.config?.providers?.[prov] || {};
+      toast(`探测 ${prov}...`, 'info');
+      probeBtn.disabled = true;
+      try {
+        const res = await window.HOST.probeModels({
+          provider: prov,
+          base_url: p.base_url || '',
+          api_type: normalizeApiType(p.api_type),
+        });
+        const models = Array.isArray(res?.models) ? res.models : [];
+        if (models.length > 0) {
+          resetProbe();
+          state.addModelProbed = models;
+          renderProbePills();
+          toast(`探测成功: ${models.length} 个模型`, 'ok');
+        } else {
+          // A failed/empty probe invalidates the previous result too: leave no
+          // unmarked stale pills from an earlier probe behind.
+          resetProbe();
+          const msg = res?.error ? `未探测到模型: ${scrubUiText(res.error)}` : '未探测到可用模型，可手填上游目标模型 ID';
+          showProbeFail(msg);
+          toast(msg, 'warn');
+        }
+      } catch (e) {
+        resetProbe();
+        const msg = `探测异常: ${scrubUiText(e.message)}`;
+        showProbeFail(msg);
+        toast(msg, 'err');
+      } finally {
+        probeBtn.disabled = false;
+      }
+    });
 
     clk($('btnConfirmAddModel'), async () => {
       const mName = ($('newModelName')?.value || '').trim();
       const prov = ($('newModelProvider')?.value || '').trim();
       const target = ($('newModelTarget')?.value || '').trim() || mName;
+      const pickedLabels = [...document.querySelectorAll('#nmKeys .probe-pill--managed')]
+        .map((b) => b.dataset.key)
+        .filter(Boolean);
 
-      if (!mName) return toast('请输入逻辑模型名称', 'warn');
+      if (!mName) return toast('请输入模型名', 'warn');
 
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
@@ -1562,36 +1669,214 @@
         state.activeEditorKey = `m_${mName}`;
         toggle(mForm, false);
         renderModelsList();
-        return toast('模型已存在，已为您展开编辑', 'info');
+        return toast('模型已存在', 'info');
       }
 
+      if (!prov) return toast('请选择供应商', 'warn');
+      // 手动输入 may hold any free-text id: fail on a missing provider before the
+      // key check, otherwise the misleading「请至少勾选一把 Key」hides the real cause.
+      if (!state.config?.providers?.[prov]) return toast(`供应商 ${prov} 不存在，请先在供应商页创建`, 'warn');
+      // Key picking is mandatory: every checked key becomes one candidate, and none
+      // is pre-checked (the pool must be an explicit operator choice).
+      if (pickedLabels.length === 0) return toast('请至少勾选一把 Key', 'warn');
+
       const provKeys = state.config?.providers?.[prov]?.api_keys || [];
-      const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-      const keyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-      const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
+      const candidates = pickedLabels
+        // Disabled keys are not pillable and not bindable: the scheduler drops
+        // them when expanding candidates, so a binding would never route.
+        .filter((lbl) => provKeys.some((k) => k && k.enabled !== false && (k.label || k.id) === lbl))
+        .map((lbl) => ({ provider: prov, key_label: lbl, target_model: target, enabled: true, weight: 1 }));
+      if (candidates.length === 0) return toast('勾选的 Key 已不存在或已禁用', 'warn');
 
       state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
       state.activeEditorKey = `m_${mName}`;
       toggle(mForm, false);
+      resetProbe();
       await persistConfig('模型添加成功');
     });
   }
 
-  function populateModelProvidersDropdown() {
-    const sel = $('newModelProvider');
-    if (!sel) return;
-    sel.innerHTML = '';
-    const provs = Object.keys(state.config?.providers || {}).sort();
-    if (provs.length === 0) {
-      sel.innerHTML = '<option value="">(暂无供应商)</option>';
-    } else {
-      provs.forEach((pId) => {
-        const pName = state.config.providers[pId]?.name || pId;
-        const opt = ce('option');
-        opt.value = pId;
-        opt.textContent = `${pName} (${pId})`;
-        sel.appendChild(opt);
+  // --- Provider combobox (searchable dropdown for「首选供应商」) ---
+  // Replaces the bare <select>: an input + an in-flow panel card whose rows show
+  // the provider name plus a small Base URL line, a top search filter and a
+  // bottom「手动输入…」free entry. No new CSS: rows reuse .row/.who/.name from the
+  // provider list, the panel is a plain .card. Keyboard semantics mirror a native
+  // select: ArrowDown/ArrowUp walk the options, Esc closes the panel first and
+  // only then lets the global handler close the modal.
+  function setupProvCombo() {
+    const input = $('newModelProvider');
+    const panel = $('npPanel');
+    if (!input || !panel) return;
+
+    const showPanel = () => {
+      const search = $('npSearch');
+      search.value = '';
+      syncProvOptions();
+      toggle(panel, true);
+      search.focus();
+    };
+    closeProvPanel = () => toggle(panel, false);
+
+    input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) {
+        e.stopPropagation();
+        closeProvPanel();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (panel.hidden) showPanel();
+        panel.querySelector('button.row')?.focus();
+      }
+    });
+
+    $('npSearch')?.addEventListener('input', () => syncProvOptions());
+
+    // Esc / arrows anywhere inside the panel (search box included, events bubble):
+    // close it, or walk the option rows.
+    panel.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) {
+        e.stopPropagation();
+        closeProvPanel();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const rows = [...panel.querySelectorAll('button.row')];
+      if (rows.length === 0) return;
+      e.preventDefault();
+      const idx = rows.indexOf(document.activeElement);
+      (e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
+    });
+
+    // Free entry: keep whatever is in the combobox input as the provider ID.
+    clk($('npManual'), () => {
+      const v = (input.value || '').trim();
+      if (!v) return toast('请先输入供应商 ID', 'warn');
+      pickProv(v);
+    });
+  }
+
+  function syncProvOptions() {
+    const box = $('npOptions');
+    if (!box) return;
+    const f = String($('npSearch')?.value || '').trim().toLowerCase();
+    const provs = state.config?.providers || {};
+    const ids = Object.keys(provs).sort().filter((pId) => {
+      if (!f) return true;
+      const p = provs[pId] || {};
+      return `${pId} ${p.name || ''} ${p.base_url || ''}`.toLowerCase().includes(f);
+    });
+    box.innerHTML = '';
+    if (ids.length === 0) {
+      box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商，可手动输入</div>';
+      return;
+    }
+    ids.forEach((pId) => {
+      const p = provs[pId] || {};
+      const rowBtn = ce('button');
+      rowBtn.className = 'row';
+      rowBtn.setAttribute('role', 'option');
+      rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
+      clk(rowBtn, () => pickProv(pId));
+      box.appendChild(rowBtn);
+    });
+  }
+
+  // Commit the picked provider: fill the combobox input, close the panel and
+  // refresh everything that depends on the provider (probe results + key pills).
+  function pickProv(pId) {
+    const input = $('newModelProvider');
+    if (input) input.value = pId;
+    closeProvPanel();
+    resetProbe();
+    renderKeyPills();
+  }
+
+  // --- Add-model form: key picking + upstream model probe ---
+  // Clears everything the previous probe session produced, including「上游目标模型
+  // ID」: a target picked (or typed) against one provider must never survive a
+  // provider switch — confirm would otherwise persist the old provider's model id
+  // into the new provider's candidates as a silent broken route.
+  function resetProbe() {
+    state.addModelProbed = null;
+    const filterEl = $('npbFilter');
+    if (filterEl) filterEl.value = '';
+    toggle('npbBox', false);
+    const pills = $('npbPills');
+    if (pills) pills.innerHTML = '';
+    const targetEl = $('newModelTarget');
+    if (targetEl) targetEl.value = '';
+  }
+
+  // Key capsules for the selected provider. None is pre-checked on purpose: the
+  // candidate pool of the new route must be an explicit operator choice. Disabled
+  // keys are not listed — the scheduler drops disabled keys when expanding
+  // candidates, so binding one would create a route that silently never routes.
+  // Selection state lives in the DOM (.probe-pill--managed), re-read at confirm time.
+  function renderKeyPills() {
+    const box = $('nmKeys');
+    if (!box) return;
+    box.innerHTML = '';
+    const provId = ($('newModelProvider')?.value || '').trim();
+    const allKeys = state.config?.providers?.[provId]?.api_keys || [];
+    const keys = allKeys.filter((k) => k && k.enabled !== false);
+    if (!provId || keys.length === 0) {
+      box.innerHTML = `<span class="text-xs text-muted">${!provId ? '请先选择供应商' : '该供应商没有已启用的 Key'}</span>`;
+      return;
+    }
+    // Badge convention mirrors the provider key table: only the full-node console
+    // distinguishes vault (hub-issued, read-only) from local keys.
+    keys.forEach((k, idx) => {
+      const label = k?.label || k?.id || `key-${idx}`;
+      const pill = ce('button');
+      pill.type = 'button';
+      pill.dataset.key = label;
+      pill.className = 'probe-pill';
+      pill.innerHTML = isHubMode() ? eh(label)
+        : `${eh(label)}${k?.origin === 'vault' ? ' <span class="pill">中枢只读</span>' : ' <span class="pill pill--amber">本地</span>'}`;
+      clk(pill, () => pill.classList.toggle('probe-pill--managed'));
+      box.appendChild(pill);
+    });
+  }
+
+  // Probe result capsules: click fills「上游目标模型 ID」and highlights the pill
+  // (single selection — clicking another pill just moves the highlight).
+  // #npbFilter is static DOM and its input listener is bound once, so draw must
+  // re-read state.addModelProbed on every call: closing over one probe's array
+  // made the filter re-render the previous provider's list after a re-probe.
+  function renderProbePills() {
+    const list = $('npbPills');
+    if (!list) return;
+    const models = Array.isArray(state.addModelProbed) ? state.addModelProbed : [];
+    if (models.length === 0) {
+      toggle('npbBox', false);
+      list.innerHTML = '';
+      return;
+    }
+    toggle('npbBox', true);
+    const targetInput = $('newModelTarget');
+    const draw = (rawFilter) => {
+      const live = state.addModelProbed || [];
+      list.innerHTML = '';
+      const f = String(rawFilter || '').trim().toLowerCase();
+      const visible = (f ? live.filter((m) => String(m).toLowerCase().includes(f)) : live).slice(0, 200);
+      const curTarget = (targetInput?.value || '').trim();
+      visible.forEach((modelName) => {
+        const pill = ce('button');
+        pill.type = 'button';
+        pill.className = `probe-pill${curTarget === modelName ? ' probe-pill--managed' : ''}`;
+        pill.textContent = modelName;
+        clk(pill, () => {
+          if (targetInput) targetInput.value = modelName;
+          list.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
+        });
+        list.appendChild(pill);
       });
+    };
+    draw('');
+    const filterEl = $('npbFilter');
+    if (filterEl && !filterEl.dataset.bound) {
+      filterEl.dataset.bound = '1';
+      filterEl.addEventListener('input', (e) => draw(e.target.value));
     }
   }
 
@@ -1643,7 +1928,6 @@
     try {
       const cfgResp = await window.HOST.getConfig();
       if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
-        ensureUnifiedFixedRoutes(cfgResp);
         state.config = cfgResp;
         const verEl = $('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
@@ -1664,6 +1948,9 @@
         window.HOST.getPresetsExtra().then((res) => {
           if (res && res.ok && Array.isArray(res.presets)) {
             mergeExtraPresets(res.presets);
+            // The first paint already used the table literals: re-render so the
+            // version pills reflect the server-refreshed adapter metadata.
+            renderProvidersList();
           }
         }).catch(() => {});
       }
@@ -1859,40 +2146,6 @@
     }
   }
 
-  async function verifyProviderKeys(pId) {
-    const p = state.config?.providers?.[pId];
-    if (!p) return;
-    const keys = p.api_keys || [];
-    if (keys.length === 0) return toast(`${p.name || pId} 暂无密钥可探活`, 'warn');
-    toast(`正在探活 ${p.name || pId} (${keys.length} 把密钥)...`, 'info');
-    let okCount = 0;
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      const lbl = k.label || k.id || `key-${i}`;
-      try {
-        const r = await window.HOST.verifyKey({
-          provider: pId,
-          api_key: k.key,
-          key: k.key,
-          key_label: lbl,
-          base_url: p.base_url || '',
-          api_type: normalizeApiType(p.api_type),
-        });
-        syncVersionFromRes(r);
-        k.last_ok = !!(r && (r.ok || r.valid));
-        k.last_status = r?.status || (k.last_ok ? 200 : 0);
-        k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
-        k.last_checked_at = new Date().toISOString();
-        if (k.last_ok) okCount++;
-      } catch (_) {
-        k.last_ok = false;
-      }
-    }
-    toast(`${p.name || pId} 探活完成: ${okCount}/${keys.length} 正常`, okCount === keys.length ? 'ok' : 'warn');
-    if (window.HOST.kind === 'hub') renderHubOverview();
-    renderProvidersList();
-  }
-
   async function verifyAllHubKeys() {
     if (state.batchVerifying) return;
     const providers = state.config?.providers || {};
@@ -2025,6 +2278,10 @@
       if (f === 'enabled') return p.enabled !== false && keys.length > 0;
       if (f === 'healthy') return keys.some((k) => k.last_ok === true);
       if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
+      // 已适配: the provider runs a real adapter script — adapter-file preset,
+      // hub rules (rule_hash) or inline adapter_rules (plan D). A preset_id that
+      // only names a protocol (anthropic, no adapter file) is NOT adapted.
+      if (f === 'adapted') return providerHasAdapter(p);
       return true;
     });
 
@@ -2071,11 +2328,19 @@
 
       const who = ce('div');
       who.className = 'who';
+      // Vault-pulled providers carry no version field in the hub manifest; show the
+      // rule_hash fingerprint (same source as the drift check) instead of a version.
+      // Without a hash they fall back to the standard adapted/custom badge.
+      const isVaultCard = !isHubMode() && p.origin === 'vault';
+      const versionPill = isVaultCard && p.rule_hash
+        ? `<span class="pill tabular" title="中枢规则指纹 (rule_hash 前 8 位)">指纹 ${eh(String(p.rule_hash).slice(0, 8))}</span>`
+        : presetVersionPillHtml(p);
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${eh(p.name || pId)}</span>
           ${(p.name && p.name !== pId) ? `<span class="pill">${eh(pId)}</span>` : ''}
+          ${versionPill}
           ${isHubMode() ? '' : (isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>')}
           ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
           ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
@@ -2217,6 +2482,14 @@
     const adapterText = p.adapter_rules && Object.keys(p.adapter_rules).length > 0
       ? JSON.stringify(p.adapter_rules, null, 2)
       : '';
+    // Adapter-file version/date note under the preset binding input; rendered for
+    // vault providers too (the input itself is locked, the note stays read-only).
+    // Mirrors the card badge: adapter file → version, hub rules → 指纹, none →
+    // 自定义（无适配文件）. A preset_id without an adapter file is NOT「适配 …」.
+    const versionText = isVaultProv && p.rule_hash
+      ? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}`
+      : (presetVersionText(presetMetaForProvider(p, String(p?.preset_id || '').trim())) || '自定义（无适配文件）');
+    const presetVersionHint = `<span class="text-xs text-muted mt-1">${eh(versionText)}</span>`;
 
     const lockAttr = isVaultProv ? ' disabled' : '';
     const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAttr}>`
@@ -2256,15 +2529,17 @@
       fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
       fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"${lockAttr}><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`),
       fg('上游协议类型', apiTypeSelectHtml),
+      // Plan C: rpm_per_key is the provider's OVERALL RPM ceiling — it lives at
+      // the top of the provider editor, not folded away and not per-key.
+      fg('该供应商整体 RPM 上限 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`),
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
-      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>`),
+      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>${presetVersionHint}`),
       `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额重置、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
-      fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
       fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
+    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     if (tbody && !tbody.dataset.revealWired) {
@@ -2307,7 +2582,7 @@
         <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
         <td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td>
         <td>${renderKeyCell(k, vaultKey, idx)}</td>
-        <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM" ${vaultKey ? 'disabled' : ''}></div></td>
+        <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}></div></td>
         ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
         <td>${statusHtml}</td>
         <td>
@@ -2321,11 +2596,9 @@
       tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
         k.weight = Math.max(1, Number(e.target.value) || 1);
       });
-      tr.querySelector('.k_rpm_in')?.addEventListener('change', (e) => {
-        const v = Number(e.target.value) || 0;
-        if (v > 0) k.max_rpm = v;
-        else delete k.max_rpm;
-      });
+      // Key-row RPM input removed (plan C): rpm_per_key is provider-wide and is
+      // edited at the top of this editor; an existing api_keys[].max_rpm from an
+      // older config keeps its key-level meaning but is no longer editable here.
       tr.querySelector('.btn_clear_k_cd')?.addEventListener('click', () => {
         clearSingleCooldown(cdTarget);
       });
@@ -2640,8 +2913,17 @@
         try {
           const res = await window.HOST.fetchVaultCredentials(pId);
           if (res && res.ok) {
-            toast(`供应商 ${pId} 已按中枢最新内容重新拉取`, 'ok');
             await loadData();
+            // The refetch replaces the vault key list wholesale (keys the hub no
+            // longer holds disappear): the route-card dot only counts candidates,
+            // so flag routes whose candidates now bind to missing key labels.
+            const provs = state.config?.providers || {};
+            const dangling = Object.entries(state.config?.agent_models || {})
+              .filter(([n2, m2]) => templateRouteMissingKeyLabels(n2, m2, provs).length > 0)
+              .map(([n2]) => n2);
+            toast(dangling.length
+              ? `警告: 路由 ${dangling.join('、')} 有候选绑定的 Key 已缺失，请编辑候选池`
+              : `供应商 ${pId} 已按中枢最新内容重新拉取`, dangling.length ? 'warn' : 'ok');
           } else {
             toast(`重新拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
           }
@@ -3309,7 +3591,7 @@
     }
   }
 
-  // --- View: Unified Model Routing & Fixed 4 High-Concurrency Channels (U1, U5, M16) ---
+  // --- View: Unified Model Routing (U1, U5, M16) ---
   function renderModelsList() {
     const container = $('modelsList');
     if (!container) return;
@@ -3321,32 +3603,20 @@
       btnAddModel.classList.remove('hidden');
     }
 
-    ensureUnifiedFixedRoutes(state.config);
-    const isHub = isHubMode();
     const models = state.config?.agent_models || {};
     const q = state.modelQuery || '';
-    let sub = state.modelSubMode || 'all';
-    if (isHub && sub === 'fixed') sub = 'all';
 
-    // Always list built-in fixed channels first, followed by custom models sorted alphabetically
-    const customKeys = Object.keys(models).filter((k) => !FIXED_SLOT_META[k]).sort();
-    let orderedKeys = [];
-    if (sub === 'fixed') {
-      orderedKeys = [...FIXED_SLOT_IDS];
-    } else if (sub === 'custom') {
-      orderedKeys = customKeys;
-    } else {
-      orderedKeys = [...FIXED_SLOT_IDS, ...customKeys];
-    }
-    // Hub model page has no KB 4-channel block: only the custom template routes.
-    if (isHub) orderedKeys = orderedKeys.filter((mName) => !FIXED_SLOT_META[mName]);
+    // Every route renders as an ordinary entry, sorted alphabetically — on full and
+    // hub hosts alike. Legacy KB fixed channels (chat/embedding/reranker/ocr) show
+    // up only when actually configured: never rebuilt from kb_models, never hidden,
+    // deletable like any other route.
+    let orderedKeys = Object.keys(models).sort();
 
     orderedKeys = orderedKeys.filter((mName) => {
       if (!q) return true;
       const m = models[mName] || {};
-      const meta = FIXED_SLOT_META[mName];
       const cands = (m.candidates || []).map((c) => `${c.provider} ${c.target_model}`).join(' ');
-      return `${mName} ${meta?.path || ''} ${cands}`.toLowerCase().includes(q);
+      return `${mName} ${cands}`.toLowerCase().includes(q);
     });
 
     if (orderedKeys.length === 0) {
@@ -3360,39 +3630,33 @@
     const stratLabels = STRATEGY_LABELS;
 
     for (const mName of orderedKeys) {
-      const meta = FIXED_SLOT_META[mName];
-      const isFixed = Boolean(meta);
-      const m = models[mName] || {
-        enabled: true,
-        routing_strategy: isFixed ? 'round_robin' : 'sticky_failover',
-        no_reasoning: mName === 'chat',
-        force_non_stream: mName === 'chat',
-        candidates: [],
-      };
+      const m = models[mName];
       const cCount = (m.candidates || []).length;
       const isExpanded = state.activeEditorKey === `m_${mName}`;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
-      const defaultStrat = isFixed ? 'round_robin' : 'sticky_failover';
-      const strat = m.routing_strategy || defaultStrat;
+      const strat = m.routing_strategy || 'sticky_failover';
 
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
       const dot = ce('span');
-      dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : (isFixed ? 'dot--warn' : 'dot--err')}`;
+      dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}`;
 
       const who = ce('div');
       who.className = 'who';
-      const subDesc = isFixed
-        ? `${meta.path} · ${meta.desc}`
-        : `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
+      const subDesc = `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
+      // Latest 测试路由 result: verdict + latency + which provider/key answered;
+      // title carries the upstream snippet (testCandidate) or the upstream error.
+      const t = m._lastTest;
+      const testPill = !t ? '' : t.ok
+        ? `<span class="pill pill--green tabular" title="${eh(t.text || '测试通过')}">测试 ${t.latency_ms || 0}ms · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`
+        : `<span class="pill pill--red" title="${eh(t.error || '测试失败')}">测试失败 · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`;
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${eh(mName)}</span>
-          ${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
           <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
-          ${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
+          ${testPill}
         </div>
         <div class="sub">${eh(subDesc)}</div>
       `;
@@ -3410,28 +3674,32 @@
       if (testBtn) {
         clk(testBtn, async (e) => {
           e.stopPropagation();
-          toast(`正在测试 ${mName} 路由...`, 'info');
+          toast(`正在测试 ${mName} 路由（最小真实推理）...`, 'info');
           try {
-            let res;
             if (mName === 'embedding' || mName === 'reranker' || mName === 'ocr') {
               const first = (m.candidates || []).find((c) => c && c.enabled !== false) || m.candidates[0];
-              res = await window.HOST.testCandidate({
-                provider: first.provider,
-                key_label: first.key_label,
-                model: first.target_model || mName,
-                type: mName,
-              });
+              if (!first) return toast('该路由没有候选', 'warn');
+              const res = await window.HOST.testCandidate({ provider: first.provider, key_label: first.key_label, model: first.target_model || mName, type: mName });
+              const ok = Boolean(res && res.ok);
+              const text = String(res?.text || '').trim().slice(0, 40);
+              m._lastTest = ok
+                ? { ok: true, latency_ms: res?.latency_ms || res?.ms || 0, provider: first.provider, key_label: first.key_label, text }
+                : { ok: false, provider: first.provider, key_label: first.key_label, error: scrubUiText(res?.error || '路由无响应') };
+              toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
             } else {
-              res = await window.HOST.testAgentModel({ model: mName });
+              // Backend fires one minimal real inference per candidate; report the
+              // fastest passing one (provider + key + latency).
+              const res = await window.HOST.testAgentModel({ model: mName });
+              const results = (res && Array.isArray(res.results) ? res.results : []).filter(Boolean);
+              const best = results.filter((r) => r.ok).sort((a, b) => (a.latency_ms || 0) - (b.latency_ms || 0))[0] || null;
+              const failed = results.find((r) => !r.ok) || results[0] || {};
+              m._lastTest = best
+                ? { ok: true, latency_ms: best.latency_ms || 0, provider: best.provider, key_label: best.key, text: '' }
+                : { ok: false, provider: failed.provider || '', key_label: failed.key || '', error: scrubUiText(failed.error || res?.error || '路由无响应') };
+              const ok = m._lastTest.ok;
+              toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
             }
-            if (res && res.ok) {
-              const lat = res.latency_ms || res.ms || 0;
-              m._lastTestLatency = lat;
-              toast(`测试通过！耗时: ${lat}ms${res.winner_provider ? ` (优胜: ${res.winner_provider})` : ''}`, 'ok');
-              renderModelsList();
-            } else {
-              toast(`测试失败: ${res?.error || '路由无响应'}`, 'err');
-            }
+            renderModelsList();
           } catch (err) {
             toast(`测试异常: ${err.message}`, 'err');
           }
@@ -3453,212 +3721,253 @@
       if (isExpanded) {
         const editor = ce('div');
         editor.className = 'editor';
-        editor.appendChild(buildModelEditor(mName, m, isFixed));
+        editor.appendChild(buildModelEditor(mName, m));
         container.appendChild(editor);
       }
     }
   }
 
-  function buildModelEditor(mName, m, isFixed = false) {
+  function buildModelEditor(mName, m) {
     const wrap = ce('div');
     const q = makeScopedQuery(wrap);
     m.candidates = m.candidates || [];
     const candidates = m.candidates;
-    const strat = m.routing_strategy || (isFixed ? 'round_robin' : 'sticky_failover');
+    let stratVal = m.routing_strategy || 'sticky_failover';
+
+    // Only one route editor is open at a time (state.activeEditorKey), so every
+    // element id below is static. Strategy pills are magpie-style flat tiles; the
+    // live value rides in stratVal — save reads it, no hidden input needed.
+    const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
 
     wrap.innerHTML = `
-      <div class="form-grid form-grid--2">
-        <div class="form-group">
-          <label class="form-label">路由策略</label>
-          <select class="select" id="ed_m_strat_${mName}">
-            <option value="sticky_failover" ${strat === 'sticky_failover' ? 'selected' : ''}>会话粘性优先（推荐）</option>
-            <option value="round_robin" ${strat === 'round_robin' ? 'selected' : ''}>空闲优先轮询</option>
-            ${ADVANCED_STRATEGIES.includes(strat) ? `<option value="${strat}" selected>${STRATEGY_LABELS[strat]}（高级）</option>` : ''}
-            <optgroup label="高级策略">
-              ${ADVANCED_STRATEGIES.map((k) => `<option value="${k}" ${strat === k ? 'selected' : ''}>${STRATEGY_LABELS[k]}</option>`).join('')}
-            </optgroup>
-          </select>
-          <div class="text-xs text-muted mt-1">会话粘性：同一会话固定走同一 Key，命中缓存最省。轮询：优先分给空闲 Key。高级策略仅在明确需要时使用。</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">首选/指定 Key (sticky/manual 可选)</label>
-          <input class="input" id="ed_m_act_${mName}" value="${eh(m.active_key || '')}" placeholder="格式: provider:key_label">
-        </div>
-        <div class="form-group">
-          <label class="form-label form-label--check">
-            <input type="checkbox" id="ed_m_noreas_${mName}" ${m.no_reasoning ? 'checked' : ''}>
-            <span>剥离思考/推理参数 (RAG/KB 推荐)</span>
-          </label>
-        </div>
-        <div class="form-group">
-          <label class="form-label form-label--check">
-            <input type="checkbox" id="ed_m_nonstream_${mName}" ${m.force_non_stream ? 'checked' : ''}>
-            <span>强制非流式响应 (stream=false)</span>
-          </label>
-        </div>
-        <div class="form-group">
-          <label class="form-label form-label--check">
-            <input type="checkbox" id="ed_m_keyfb_${mName}" ${m.allow_key_fallback ? 'checked' : ''}>
-            <span>候选 Key 不可用时回退同供应商其它 Key</span>
-          </label>
-        </div>
+      <div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="ed_m_name" value="${eh(mName)}"><span class="text-xs text-muted">Agent 客户端看到的模型名</span></div>
+      <div class="section-bar mt-3"><span class="form-label">模型列表</span></div>
+      <div class="card" id="m_cl"></div>
+      <div class="form-actions"><button class="btn btn--sm" id="btn_add_cand" type="button">+ 添加模型</button></div>
+      <div class="card mt-2 card-pad hidden" id="m_ac" hidden>
+        <div class="fields"><input class="input input--code flex-1" id="m_ac_prov" list="datalistProviders" placeholder="选择供应商"></div>
+        <div class="probe-pills-wrap" id="m_ac_models"></div>
+        <div class="fields mt-2"><input class="input input--code flex-1" id="m_ac_target" placeholder="上游模型 ID（可手填）"><button class="btn btn--sm btn--primary" id="m_ac_ok" type="button">追加所选</button></div>
       </div>
-
-      <div class="section-bar mt-4">
-        <span class="form-label">候选 Key 列表 (${candidates.length})</span>
+      <div class="section-bar mt-3"><span class="form-label">Key 选择</span><span class="text-xs text-muted">默认任一=全部启用 Key</span></div>
+      <div class="card card-pad" id="m_kw"></div>
+      <details class="headers-details mt-3"><summary class="form-label">候选权重 / 并发上限</summary><div id="m_ca" class="mt-2"></div></details>
+      <div class="form-group mt-4">
+        <label class="form-label">路由策略</label>
+        <div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div>
+        <div class="text-xs text-muted mt-1"><span id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</span> · 默认值：${eh(STRATEGY_LABELS[state.config?.settings?.agent_routing_strategy || 'sticky_failover'])}</div>
       </div>
-
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>启用</th>
-                <th>供应商</th>
-                <th>Key 标签</th>
-                <th>目标模型</th>
-                <th>权重</th>
-                <th>并发上限</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="m_cands_tbody_${mName}"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="form-grid mt-3">
-        <div class="form-group">
-          <input class="input" id="new_c_prov_${mName}" list="datalistProviders" placeholder="供应商 ID (如 minimax)">
-        </div>
-        <div class="form-group">
-          <input class="input" id="new_c_lbl_${mName}" placeholder="Key 标签 (留空=全部启用Key)">
-        </div>
-        <div class="form-group">
-          <input class="input" id="new_c_target_${mName}" placeholder="上游真实模型 (留空同名)">
-        </div>
-        <div class="form-group">
-          <input class="input tabular" id="new_c_weight_${mName}" type="number" min="1" value="1" placeholder="权重 (1)">
-        </div>
-        <div class="form-group">
-          <input class="input tabular" id="new_c_conc_${mName}" type="number" min="0" value="0" placeholder="并发上限 (0=不限)">
-        </div>
-      </div>
-      <div class="section-bar mt-2 flex-end">
-        <button class="btn" id="btn_add_cand_${mName}" type="button">添加候选</button>
-      </div>
-
-      <div class="form-actions form-actions--split">
-        <div class="form-actions-group">
-          ${isFixed ? '' : `<button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>`}
-        </div>
-        <div class="form-actions-group">
-          <button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button>
-        </div>
+      <details class="headers-details mt-3"><summary class="form-label">高级（剥离思考 / 流式 / 指定 Key）</summary>
+        <input class="input mt-2" id="ed_m_act" value="${eh(m.active_key || '')}" placeholder="首选/指定 Key (provider:key_label)">
+        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_noreas" ${m.no_reasoning ? 'checked' : ''}><span>剥离思考/推理参数 (RAG/KB 推荐)</span></label>
+        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_nonstream" ${m.force_non_stream ? 'checked' : ''}><span>强制非流式响应 (stream=false)</span></label>
+        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_keyfb" ${m.allow_key_fallback ? 'checked' : ''}><span>候选 Key 不可用时回退同供应商其它 Key</span></label>
+      </details>
+      <div class="form-actions form-actions--split mt-3">
+        <div class="form-actions-group"><button class="btn btn--danger" id="btn_del_model" type="button">删除此模型</button></div>
+        <div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model" type="button">保存模型配置</button></div>
       </div>
     `;
 
-    const tbody = q(`#m_cands_tbody_${mName}`);
-    candidates.forEach((c, idx) => {
-      const tr = ce('tr');
-      const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
-      tr.innerHTML = `
-        <td><input type="checkbox" class="m_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td>
-        <td>${brandIco}<strong>${eh(c.provider)}</strong></td>
-        <td><input class="input input--compact input--code m_c_lbl" data-idx="${idx}" value="${eh(c.key_label || '')}" placeholder="* (全部)"></td>
-        <td><input class="input input--compact input--code m_c_target" data-idx="${idx}" value="${eh(c.target_model || '')}" placeholder="同对外名"></td>
-        <td><input class="input input--compact tabular m_c_weight" data-idx="${idx}" type="number" min="1" value="${c.weight || 1}"></td>
-        <td><input class="input input--compact tabular m_c_conc" data-idx="${idx}" type="number" min="0" value="${c.max_concurrency || 0}"></td>
-        <td>
-          <div class="fields">
-            <button class="btn btn--sm btn_move_up" data-idx="${idx}" type="button" ${idx === 0 ? 'disabled' : ''} title="上移优先级">↑</button>
-            <button class="btn btn--sm btn_move_dn" data-idx="${idx}" type="button" ${idx === candidates.length - 1 ? 'disabled' : ''} title="下移优先级">↓</button>
-            <button class="btn btn--sm btn--danger btn_del_cand" data-idx="${idx}" type="button">移除</button>
-          </div>
-        </td>
-      `;
-      tr.querySelector('.m_c_en').addEventListener('change', (e) => {
-        c.enabled = e.target.checked;
+    const stratDesc = q('#ed_m_strat_desc');
+    const stratPills = wrap.querySelectorAll('button[data-strat]');
+    stratPills.forEach((btn) => {
+      clk(btn, () => {
+        stratVal = btn.dataset.strat || '';
+        stratPills.forEach((b) => b.classList.toggle('probe-pill--managed', b === btn));
+        stratDesc.textContent = STRATEGY_HINTS[stratVal] || '';
       });
-      tr.querySelector('.m_c_lbl').addEventListener('change', (e) => {
-        c.key_label = e.target.value.trim();
-      });
-      tr.querySelector('.m_c_target').addEventListener('change', (e) => {
-        c.target_model = e.target.value.trim();
-      });
-      tr.querySelector('.m_c_weight').addEventListener('change', (e) => {
-        c.weight = Math.max(1, Number(e.target.value) || 1);
-      });
-      tr.querySelector('.m_c_conc').addEventListener('change', (e) => {
-        c.max_concurrency = Math.max(0, Number(e.target.value) || 0);
-      });
-      clk(tr.querySelector('.btn_move_up'), () => {
-        if (idx <= 0) return;
-        const tmp = candidates[idx - 1];
-        candidates[idx - 1] = candidates[idx];
-        candidates[idx] = tmp;
-        renderModelsList();
-      });
-      clk(tr.querySelector('.btn_move_dn'), () => {
-        if (idx >= candidates.length - 1) return;
-        const tmp = candidates[idx + 1];
-        candidates[idx + 1] = candidates[idx];
-        candidates[idx] = tmp;
-        renderModelsList();
-      });
-      clk(tr.querySelector('.btn_del_cand'), () => {
-        candidates.splice(idx, 1);
-        renderModelsList();
-      });
-      tbody.appendChild(tr);
     });
 
-    clk(q(`#btn_add_cand_${mName}`), () => {
-      const prov = q(`#new_c_prov_${mName}`).value.trim();
-      const lbl = q(`#new_c_lbl_${mName}`).value.trim();
-      const target = q(`#new_c_target_${mName}`).value.trim();
-      const weight = Math.max(1, Number(q(`#new_c_weight_${mName}`)?.value) || 1);
-      const conc = Math.max(0, Number(q(`#new_c_conc_${mName}`)?.value) || 0);
-      if (!prov) return toast('请填写供应商 ID', 'warn');
-      candidates.push({
-        provider: prov,
-        key_label: lbl,
-        target_model: target || '',
-        enabled: true,
-        weight,
-        max_concurrency: conc,
-      });
-      state.config = state.config || { providers: {}, agent_models: {} };
-      state.config.agent_models = state.config.agent_models || {};
-      state.config.agent_models[mName] = m;
-      renderModelsList();
+    // ② 模型列表 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 上移/下移/移除.
+    // All draws are local so pool edits never collapse the editor via
+    // renderModelsList; one delegated handler serves every row. The per-row Key
+    // pill is what makes unchecked-but-listed keys visible: without it a checked
+    // key beyond the candidate count silently never routes.
+    const drawCands = () => {
+      q('#m_cl').innerHTML = candidates.map((c, i) => `<div class="row row--static" data-i="${i}"><div class="who"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><span class="pill">${eh(c.provider)}</span><span class="pill">${c.key_label ? `Key ${eh(c.key_label)}` : '任一 Key'}</span></div><div class="fields"><button class="btn btn--sm" data-a="u"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm" data-a="d"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button><button class="btn btn--sm btn--danger" data-a="r">移除</button></div></div>`).join('') || '<div class="row row--static text-muted">暂无候选</div>';
+    };
+    const swapCand = (i, j) => {
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      drawCands();
+      drawAdv();
+    };
+    clk(q('#m_cl'), (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest('button[data-a]') : null;
+      if (!btn) return;
+      const i = Number(btn.closest('[data-i]').dataset.i);
+      const a = btn.dataset.a;
+      if (a === 'u' && i > 0) swapCand(i, i - 1);
+      else if (a === 'd' && i < candidates.length - 1) swapCand(i, i + 1);
+      else if (a === 'r') {
+        candidates.splice(i, 1);
+        drawCands();
+        drawAdv();
+        drawKeys();
+      }
     });
 
-    clk(q(`#btn_save_model_${mName}`), async () => {
+    // ③ Key 选择: one row per provider in the pool.「任一」(empty selection) leaves
+    // key_label '' = any enabled key; checking concrete labels re-binds that
+    // provider's candidates cyclically (key[i % n]). When more keys are checked
+    // than there are candidates, the surplus stays selected but binds nothing —
+    // drawKeys badges those as 未绑定候选 so the state is visible, and binding
+    // more candidates (「+ 添加模型」) puts them to work. Selection rides on
+    // m._keySel: it survives the local redraws and dies with the config
+    // round-trip on save (persistConfig strips it — on hub too, where the raw
+    // KV save would otherwise persist and later replay stale selections).
+    // The selection is seeded from the candidates as they exist: candidates
+    // created by the add-model modal carry concrete key_label bindings, so their
+    // pills show checked instead of the lying「任一」highlight.
+    const keySel = m._keySel = m._keySel || {};
+    for (const c of candidates) {
+      if (c && c.provider && c.key_label) {
+        const set = keySel[c.provider] || (keySel[c.provider] = []);
+        if (!set.includes(c.key_label)) set.push(c.key_label);
+      }
+    }
+    const applyKeySel = (pId) => {
+      const sel = keySel[pId] || [];
+      let ci = 0;
+      for (const c of candidates) {
+        if (c && c.provider === pId) c.key_label = sel.length ? sel[ci++ % sel.length] : '';
+      }
+    };
+    const drawKeys = () => {
+      const provs = state.config?.providers || {};
+      const ids = [...new Set(candidates.map((c) => c && c.provider).filter(Boolean))];
+      q('#m_kw').innerHTML = ids.map((pId) => {
+        const sel = keySel[pId] || [];
+        const labels = ((provs[pId] || {}).api_keys || []).filter((k) => k && k.enabled !== false)
+          .map((k, i) => k.label || k.id || `key-${i}`);
+        const used = new Set(candidates.filter((c) => c && c.provider === pId && c.key_label).map((c) => c.key_label));
+        return `<div class="mb-2"><span class="form-label">${eh(provs[pId]?.name || pId)}</span><div class="probe-pills-wrap"><button class="probe-pill${sel.length ? '' : ' probe-pill--managed'}" data-p="${eh(pId)}" data-k="">任一</button>${labels.map((l) => {
+          const checked = sel.includes(l);
+          const badge = checked && !used.has(l) ? ' <span class="pill pill--amber">未绑定候选</span>' : '';
+          return `<button class="probe-pill${checked ? ' probe-pill--managed' : ''}" data-p="${eh(pId)}" data-k="${eh(l)}">${eh(l)}${badge}</button>`;
+        }).join('')}</div></div>`;
+      }).join('') || '<div class="text-xs text-muted">暂无</div>';
+    };
+    clk(q('#m_kw'), (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest('button[data-k]') : null;
+      if (!btn) return;
+      const pId = btn.dataset.p || '';
+      const k = btn.dataset.k || '';
+      if (!k) keySel[pId] = [];
+      else {
+        const cur = new Set(keySel[pId] || []);
+        if (cur.has(k)) cur.delete(k); else cur.add(k);
+        keySel[pId] = [...cur];
+      }
+      applyKeySel(pId);
+      drawKeys();
+      drawCands();
+    });
+
+    // 权重 / 并发上限 fold: per-candidate inputs keyed by 序号 (mirrors the rows);
+    // one delegated change listener on the persistent container.
+    const drawAdv = () => {
+      q('#m_ca').innerHTML = candidates.map((c, i) => `<div class="fields mt-1"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><input class="input input--compact tabular" data-w="${i}" type="number" min="1" value="${c.weight || 1}" title="权重"><input class="input input--compact tabular" data-x="${i}" type="number" min="0" value="${c.max_concurrency || 0}"></div>`).join('');
+    };
+    q('#m_ca')?.addEventListener('change', (e) => {
+      const el = e.target;
+      const c = candidates[Number(el.dataset.w || el.dataset.x)];
+      if (!c) return;
+      if (el.dataset.w) c.weight = Math.max(1, Number(el.value) || 1);
+      else c.max_concurrency = Math.max(0, Number(el.value) || 0);
+    });
+
+    //「+ 添加模型」popup: provider (datalist) → check probed model pills → append
+    // (manual input as fallback). Probe data shares the provider-editor cache
+    // state.probedModelsByProvider — probe a provider there once and the pills
+    // light up here too.
+    const drawAddPills = () => {
+      const models = state.probedModelsByProvider[(q('#m_ac_prov')?.value || '').trim()] || [];
+      q('#m_ac_models').innerHTML = models.map((mo) => `<button class="probe-pill" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('') || '<span class="text-xs text-muted">暂无探测数据</span>';
+    };
+    clk(q('#m_ac_models'), (ev) => {
+      const pill = ev.target instanceof Element ? ev.target.closest('button[data-mo]') : null;
+      if (pill) pill.classList.toggle('probe-pill--managed');
+    });
+    clk(q('#btn_add_cand'), () => {
+      const box = q('#m_ac');
+      box.hidden = !box.hidden;
+      box.classList.toggle('hidden', box.hidden);
+      drawAddPills();
+    });
+    // The provider input drives the pill pool: redraw on click, datalist pick
+    // and every keystroke. Click alone misses keyboard/datalist switches, which
+    // used to leave the previous provider's pills checked — appending them then
+    // built candidates pairing the NEW provider with the OLD provider's models.
+    // A committed switch (change) also clears the manual target, mirroring the
+    // add-model modal's rule: switching providers invalidates the probe result.
+    const addProvEl = q('#m_ac_prov');
+    if (addProvEl) {
+      clk(addProvEl, drawAddPills);
+      addProvEl.addEventListener('input', drawAddPills);
+      addProvEl.addEventListener('change', () => {
+        drawAddPills();
+        const t = q('#m_ac_target');
+        if (t) t.value = '';
+      });
+    }
+    clk(q('#m_ac_ok'), () => {
+      const prov = (q('#m_ac_prov')?.value || '').trim();
+      if (!state.config?.providers?.[prov]) return toast('供应商不存在', 'warn');
+      const picked = [...q('#m_ac_models').querySelectorAll('.probe-pill--managed')].map((b) => b.dataset.mo);
+      const manual = (q('#m_ac_target')?.value || '').trim();
+      if (manual && !picked.includes(manual)) picked.push(manual);
+      if (picked.length === 0) return toast('请勾选或手填上游模型', 'warn');
+      const sel = keySel[prov] || [];
+      let base = candidates.filter((c) => c && c.provider === prov).length;
+      for (const t of picked) {
+        const kl = sel.length ? sel[base++ % sel.length] : '';
+        candidates.push({ provider: prov, key_label: kl, target_model: t, enabled: true, weight: 1, max_concurrency: 0 });
+      }
+      drawCands();
+      drawAdv();
+      drawKeys();
+    });
+
+    drawCands();
+    drawKeys();
+    drawAdv();
+
+    clk(q('#btn_save_model'), async () => {
+      // ① 名称 editable: renaming re-keys the route (agents request by this name),
+      // and the editor stays open on the renamed route.
+      const newName = (q('#ed_m_name')?.value || '').trim() || mName;
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
+      if (newName !== mName && state.config.agent_models[newName]) return toast(`模型 ${newName} 已存在`, 'warn');
       m.enabled = true;
-      m.routing_strategy = q(`#ed_m_strat_${mName}`).value;
-      m.active_key = q(`#ed_m_act_${mName}`).value.trim();
-      m.no_reasoning = Boolean(q(`#ed_m_noreas_${mName}`)?.checked);
-      m.force_non_stream = Boolean(q(`#ed_m_nonstream_${mName}`)?.checked);
-      m.allow_key_fallback = Boolean(q(`#ed_m_keyfb_${mName}`)?.checked);
-      state.config.agent_models[mName] = m;
-      if (state.config.kb_models && state.config.kb_models[mName]) {
+      m.routing_strategy = stratVal;
+      m.active_key = (q('#ed_m_act')?.value || '').trim();
+      m.no_reasoning = Boolean(q('#ed_m_noreas')?.checked);
+      m.force_non_stream = Boolean(q('#ed_m_nonstream')?.checked);
+      m.allow_key_fallback = Boolean(q('#ed_m_keyfb')?.checked);
+      if (newName !== mName) {
+        delete state.config.agent_models[mName];
+        if (state.activeEditorKey === `m_${mName}`) state.activeEditorKey = `m_${newName}`;
+      }
+      state.config.agent_models[newName] = m;
+      // Same-name legacy KB channels go (delete is a no-op if absent).
+      if (state.config.kb_models) {
         delete state.config.kb_models[mName];
+        delete state.config.kb_models[newName];
       }
       await persistConfig('模型配置保存成功');
     });
 
-    const delBtn = q(`#btn_del_model_${mName}`);
-    if (delBtn) {
-      clk(delBtn, async () => {
-        if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
-        delete state.config.agent_models[mName];
-        state.activeEditorKey = null;
-        await persistConfig('模型已删除');
-      });
-    }
+    clk(q('#btn_del_model'), async () => {
+      if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
+      delete state.config.agent_models[mName];
+      // Same-name legacy KB channel must go with it: leaving it behind would let
+      // the KB fallback resurrect a ghost route on the next config round-trip.
+      if (state.config.kb_models) delete state.config.kb_models[mName];
+      state.activeEditorKey = null;
+      await persistConfig('模型已删除');
+    });
 
     return wrap;
   }
@@ -3710,11 +4019,12 @@
     const manifestModels = vaultManifestModels();
     const localModels = state.config?.agent_models || {};
     const localProviders = state.config?.providers || {};
-    // Hub templates no longer carry the KB fixed-4-channel routes (chat/ocr/embedding/
-    // reranker). If an old hub config still holds them, they are invisible on the hub
-    // model page — do not surface them here either.
+    // Fixed-4-channel names are ordinary routes now: if an old hub manifest still
+    // carries chat/embedding/reranker/ocr templates, they must stay importable —
+    // building the same-name KB route is exactly the supported path since the
+    // channels stopped being auto-generated.
     const entries = Object.entries(manifestModels).filter(
-      ([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName] && !FIXED_SLOT_META[mName]
+      ([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName]
     );
     if (entries.length === 0) {
       const empty = ce('div');
@@ -4110,6 +4420,13 @@
   // --- Common Helper: Persist Config ---
   async function persistConfig(successMsg) {
     try {
+      // m._keySel is editor-session state (checked-key pills), not config. The
+      // full backend drops unknown route fields on the typed round-trip, but the
+      // hub stores the payload verbatim in KV — strip it here so both hosts
+      // honor the documented "dies with the config round-trip on save".
+      for (const m of Object.values(state.config?.agent_models || {})) {
+        if (m) delete m._keySel;
+      }
       const res = await window.HOST.saveConfig(state.config);
       const data = res?.data || res || {};
 

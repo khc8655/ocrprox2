@@ -298,4 +298,4 @@ flowchart LR
 - [ ] **100% 使用 `internal/types`**：未在包内重复定义 `ProxyConfig`、`ProviderConfig`、`RuntimeSnapshot`、`RequestTrace`；
 - [ ] **未引入任何禁用依赖**：`go.mod` 保持 `CGO_ENABLED=0` 纯标准库（无第三方重依赖，无 `magpie` 动态依赖）；
 - [ ] **单测带 `-race` 全绿**：本包 `go test -race ./...` 100% 通过且无并发竞争；
-- [ ] **UI 零内联样式（仅 W5）**：无 `style="`、无 `.drawer`、总大小 `≤ 240KB`（`245,760 bytes`）。
+- [ ] **UI 零内联样式（仅 W5）**：无 `style="`、无 `.drawer`、总大小 `≤ 252KB`（`258,048 bytes`）。

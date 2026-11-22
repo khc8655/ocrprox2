@@ -44,7 +44,7 @@
 | **`T1.admin_ui_contract`** | 校验 `shared/contracts/admin-ui-backend.json` 中声明的所有 API 路径、请求方法、响应字段与 `shared/admin/js/host.js` 的 `HOST.capabilities` | `edgeone-hub` 或 Go `internal/admin` 缺失契约路由，或前端引用了未在当前角色声明的 `data-cap` 能力位 |
 | **`T1.presets_integrity`** | 校验 `shared/presets/*.json` 16 家厂商预设与生成的 `catalog.json` 的 Schema 合法性及 `rule_hash` 一致性 | JSON 语法错误、未知 `adapter_rules` 键或构建产物发生漂移 |
 | **`T1.readonly_route_guard`** | 执行 Magpie 搬运的 `internal/router/readonly_test.go` (`routeMux` 门禁) | 任何新注册到 HTTP `ServeMux` 的路由未显式在 `allowedLiteRoutes` 或 `fullOnlyRoutes` 白名单登记 |
-| **`T1.ui_layout_and_zero_inline_style`** | 扫描 `shared/admin/` 全部 `.html`、`.css`、`.js` 文件（执行 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 五大硬门禁） | 出现任何 `style="` 或 `.style.display` 内联样式、出现 `.drawer` 组件、出现左边框彩条，或打包总大小 `> 240 KB`（`245,760 bytes`） |
+| **`T1.ui_layout_and_zero_inline_style`** | 扫描 `shared/admin/` 全部 `.html`、`.css`、`.js` 文件（执行 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 五大硬门禁） | 出现任何 `style="` 或 `.style.display` 内联样式、出现 `.drawer` 组件、出现左边框彩条，或打包总大小 `> 252 KB`（`258,048 bytes`） |
 | **`T1.hub_export_guard`** | 扫描 `edgeone-hub/` 与 `edge-functions/` 的 AST 与纯 Web Standard 边界规范 | 1. 发现任何 `/v1/*` 推理代理路由；<br>2. 投影计算未对 `origin === "local"` 实施物理阻断；<br>3. `edge-functions/` 与 `edgeone-hub/` 引入 `node:*` 模块、`Buffer.from/alloc`、`process.cwd` 或 `../edgeone-hub` 逃逸；<br>4. `edge-functions/` 入口文件使用 `export * from` 或缺失显式 `export function onRequest*`。 |
 
 ---

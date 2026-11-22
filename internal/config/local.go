@@ -437,9 +437,10 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 				existingP.RuleHash = vp.RuleHash
 			}
 			existingP.HideClientName = vp.HideClientName
-			if vp.RPMPerKey > 0 {
-				existingP.RPMPerKey = vp.RPMPerKey
-			}
+			// rpm_per_key is hub-managed wholesale like the fields above: 0 (the hub
+			// cleared the limit) must reach the node on re-fetch, never a one-way
+			// ratchet that keeps a stale positive value forever.
+			existingP.RPMPerKey = vp.RPMPerKey
 			if vp.QuotaResetAt != "" {
 				existingP.QuotaResetAt = vp.QuotaResetAt
 			}
@@ -472,9 +473,10 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 				existingP.RuleHash = vp.RuleHash
 			}
 			existingP.HideClientName = vp.HideClientName
-			if vp.RPMPerKey > 0 {
-				existingP.RPMPerKey = vp.RPMPerKey
-			}
+			// rpm_per_key is hub-managed wholesale like the fields above: 0 (the hub
+			// cleared the limit) must reach the node on re-fetch, never a one-way
+			// ratchet that keeps a stale positive value forever.
+			existingP.RPMPerKey = vp.RPMPerKey
 			if vp.QuotaResetAt != "" {
 				existingP.QuotaResetAt = vp.QuotaResetAt
 			}

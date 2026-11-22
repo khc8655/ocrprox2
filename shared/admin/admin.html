@@ -243,68 +243,82 @@
         </div>
       </div>
 
-      <div class="card card-pad" id="addProviderForm" hidden>
-        <div class="section-bar">
-          <h2 class="card-title">新增供应商</h2>
-          <button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button>
-        </div>
+      <!-- Add Provider Modal (centered overlay, same pattern as login-screen) -->
+      <div class="login-overlay hidden" id="addProviderForm" hidden>
+        <div class="login-card login-card--wide">
+          <div class="login-head">
+            <div>
+              <h2 class="card-title">新增供应商</h2>
+              
+            </div>
+            <button class="btn" id="btnXProv">关闭</button>
+          </div>
 
-        <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
-          <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea>
-        </div>
+          <div class="fields mb-3">
+            <button class="btn btn--sm" id="btnToggleCurlPaste">从 cURL 自动解析</button>
+          </div>
 
-        <div class="form-grid">
-          <div class="form-group form-group--span2">
-            <label class="form-label">供应商来源</label>
+          <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
+            <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 自动解析"></textarea>
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label" for="newProvSource">供应商来源</label>
             <select class="select" id="newProvSource">
               <option value="custom">自定义（手动填写）</option>
               <option value="vault">中枢托管（按需拉取）</option>
             </select>
-            <span class="text-xs text-muted mt-1" id="newProvSourceHint"></span>
+            <span class="text-xs text-muted" id="newProvSourceHint"></span>
           </div>
-          <div class="form-group form-group--span2 hidden" id="newProvVaultGroup" hidden>
+          <div class="form-group mb-3 hidden" id="newProvVaultGroup" hidden>
             <label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label>
             <div class="probe-pills-wrap" id="newProvVaultPick"></div>
-            <span class="text-xs text-muted mt-1" id="newProvVaultHint"></span>
+            <span class="text-xs text-muted" id="newProvVaultHint"></span>
           </div>
-          <div class="form-group">
-            <label class="form-label">供应商 ID</label>
-            <input class="input input--code" id="newProvId" placeholder="例如 deepseek">
+          <div class="form-group mb-3">
+            <label class="form-label" for="newProvId">供应商 ID</label>
+            <input class="input input--code" id="newProvId" placeholder="deepseek">
+            <span class="text-xs text-muted">唯一标识，保存后不可改</span>
           </div>
-          <div class="form-group">
-            <label class="form-label">显示名称</label>
-            <input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">
+          <div class="form-group mb-3">
+            <label class="form-label" for="newProvName">显示名称</label>
+            <input class="input" id="newProvName" placeholder="DeepSeek 官方">
+            <span class="text-xs text-muted">控制台显示名；厂商名自动匹配预设</span>
             <span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span>
           </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">Base URL</label>
+          <div class="form-group mb-3">
+            <label class="form-label" for="newProvBaseUrl">Base URL</label>
             <div class="input-row">
               <input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">
-              <button class="btn" id="btnDetectProvider" type="button">探测协议</button>
+              <button class="btn" id="btnDetectProvider">探测协议</button>
             </div>
+            <span class="text-xs text-muted">上游根地址，含版本段</span>
           </div>
-          <div class="form-group">
-            <label class="form-label">上游协议类型</label>
+          <div class="form-group mb-3">
+            <label class="form-label" for="newProvApiType">上游协议类型</label>
             <select class="select" id="newProvApiType">
               <option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option>
               <option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option>
               <option value="gemini">Gemini 兼容</option>
               <option value="ocr">原生 OCR 接口 (/v1/ocr)</option>
             </select>
+            <span class="text-xs text-muted">访问上游的协议；不确定可探测</span>
           </div>
-          <div class="form-group" id="newProvKeyAliasGroup">
-            <label class="form-label">初始 Key 标签</label>
-            <input class="input" id="newProvKeyAlias" placeholder="例如 pool-01">
+          <div class="form-group mb-3" id="newProvKeyAliasGroup">
+            <label class="form-label" for="newProvKeyAlias">初始 Key 标签</label>
+            <input class="input" id="newProvKeyAlias" placeholder="pool-01">
+            <span class="text-xs text-muted">首把 Key 标签；多把时自动递增</span>
           </div>
-          <div class="form-group form-group--span2" id="newProvApiKeyGroup">
-            <label class="form-label">初始 API Key</label>
-            <input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)">
+          <div class="form-group mb-3" id="newProvApiKeyGroup">
+            <label class="form-label" for="newProvApiKey">初始 API Key</label>
+            <input class="input input--code privacy-mask" id="newProvApiKey" placeholder="API Key (可选)">
+            <span class="text-xs text-muted">上游密钥；可换行/逗号分隔多把</span>
           </div>
-        </div>
 
-        <div class="form-actions">
-          <button class="btn" id="btnCancelAddProvider" type="button">取消</button>
-          <button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button>
+          <div class="form-actions form-actions--split">
+            <button class="btn" id="btnCancelAddProvider">取消</button>
+            <button class="btn btn--primary" id="btnConfirmAddProvider">保存供应商</button>
+          </div>
         </div>
       </div>
 
@@ -314,10 +328,11 @@
           <input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
         </div>
         <div class="seg" id="providerFilterSeg">
-          <button class="seg-btn active" data-filter="all" type="button">全部</button>
-          <button class="seg-btn" data-filter="enabled" type="button">已启用</button>
-          <button class="seg-btn" data-filter="healthy" type="button">探活通过</button>
-          <button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button>
+          <button class="seg-btn active" data-filter="all">全部</button>
+          <button class="seg-btn" data-filter="enabled">已启用</button>
+          <button class="seg-btn" data-filter="healthy">探活通过</button>
+          <button class="seg-btn" data-filter="issue">异常 / 未测</button>
+          <button class="seg-btn" data-filter="adapted">已适配</button>
         </div>
       </div>
 
@@ -329,38 +344,75 @@
       <div class="view-header">
         <div>
           <h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1>
-          <p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由、多密钥故障转移及固定 4 通道并发编排</p>
+          <p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由与多密钥故障转移</p>
         </div>
         <div class="view-actions">
-          <div class="seg" id="modelPipelineSeg">
-            <button class="seg-btn active" data-submode="all" type="button">全部</button>
-            <button class="seg-btn" data-submode="fixed" type="button">固定 4 通道</button>
-            <button class="seg-btn" data-submode="custom" type="button">自定义模型</button>
-          </div>
-          <button class="btn" id="btnImportFromTemplate" type="button" hidden>从模板导入</button>
-          <button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button>
+          <button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button>
+          <button class="btn btn--primary" id="btnAddModel">添加模型</button>
         </div>
       </div>
 
-      <div class="card card-pad" id="addModelForm" hidden>
-        <h2 class="card-title mb-3">新增逻辑模型路由</h2>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">对外模型名</label>
-            <input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5">
+      <!-- Add Model Modal (centered overlay, same pattern as login-screen) -->
+      <div class="login-overlay hidden" id="addModelForm" hidden>
+        <div class="login-card login-card--wide">
+          <div class="login-head">
+            <div>
+              <h2 class="card-title">新增模型路由</h2>
+              
+            </div>
+            <button class="btn" id="btnXModel">关闭</button>
           </div>
-          <div class="form-group">
-            <label class="form-label">首选供应商</label>
-            <select class="select" id="newModelProvider"></select>
+
+          <div class="form-group mb-3">
+            <label class="form-label" for="newModelName">对外模型名</label>
+            <input class="input input--code" id="newModelName" placeholder="claude-sonnet-4-5">
+            <span class="text-xs text-muted">Agent 客户端看到的模型名</span>
           </div>
-          <div class="form-group">
-            <label class="form-label">上游目标模型 ID</label>
-            <input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致">
+
+          <div class="form-group mb-3">
+            <label class="form-label" for="newModelProvider">首选供应商</label>
+            <input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商">
+            <span class="text-xs text-muted">候选 Key 池来源</span>
           </div>
-        </div>
-        <div class="form-actions">
-          <button class="btn" id="btnCancelAddModel" type="button">取消</button>
-          <button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button>
+
+          <div class="card hidden" id="npPanel" hidden>
+            <div class="fields">
+              <input class="input flex-1" id="npSearch" placeholder="搜索">
+            </div>
+            <div id="npOptions" role="listbox"></div>
+            <div class="fields mb-2">
+              <button class="btn" id="npManual">手动输入</button>
+            </div>
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label" for="newModelTarget">上游目标模型 ID</label>
+            <input class="input input--code" id="newModelTarget" placeholder="留空同对外名">
+            <span class="text-xs text-muted">上游真实模型 ID，留空同对外名</span>
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label">探测上游模型</label>
+            <div class="fields">
+              <button class="btn btn--sm" id="btnProbeModel">探测模型</button>
+              <span class="text-xs text-muted">用已存 Key 拉上游列表；也可手填</span>
+            </div>
+          </div>
+          <div class="mb-3 hidden" id="npbBox" hidden>
+            <input class="input input--code" id="npbFilter" placeholder="过滤模型...">
+            <div class="probe-pills-wrap" id="npbPills"></div>
+          </div>
+
+          <div class="form-group mb-3">
+            <label class="form-label">Key 勾选</label>
+            <div class="probe-pills-wrap" id="nmKeys"></div>
+            <span class="text-xs text-muted">勾选 Key 生成候选；默认全不勾</span>
+          </div>
+
+          <div class="form-actions form-actions--split">
+            <button class="btn" id="btnCancelAddModel">取消</button>
+            <button class="btn btn--primary" id="btnConfirmAddModel">确认添加</button>
+          </div>
         </div>
       </div>
 
@@ -381,11 +433,11 @@
               <h2 class="card-title">从模板导入模型路由</h2>
               <p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p>
             </div>
-            <button class="btn btn--sm" id="btnCloseTemplateImport" type="button" aria-label="关闭导入窗口">关闭</button>
+            <button class="btn btn--sm" id="btnCloseTemplateImport" aria-label="关闭导入窗口">关闭</button>
           </div>
           <div id="templateImportList"></div>
           <div class="form-actions">
-            <button class="btn btn--primary" id="btnConfirmImportRoutes" type="button">导入选中路由</button>
+            <button class="btn btn--primary" id="btnConfirmImportRoutes">导入选中路由</button>
           </div>
         </div>
       </div>
@@ -399,7 +451,7 @@
           <p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p>
         </div>
         <div class="view-actions">
-          <button class="btn btn--primary" id="btnIssueNode" type="button">添加节点</button>
+          <button class="btn btn--primary" id="btnIssueNode">添加节点</button>
         </div>
       </div>
 
@@ -446,7 +498,7 @@
           </div>
         </details>
         <div class="form-actions">
-          <button class="btn btn--primary" id="btnDoIssue" type="button">添加节点</button>
+          <button class="btn btn--primary" id="btnDoIssue">添加节点</button>
         </div>
       </div>
 
@@ -460,7 +512,7 @@
               <h2 class="card-title" id="nodeInstallTitle">一键安装</h2>
               <p class="card-sub" id="nodeInstallSub"></p>
             </div>
-            <button class="btn btn--sm" id="btnCloseNodeInstall" type="button" aria-label="关闭安装指引">关闭</button>
+            <button class="btn btn--sm" id="btnCloseNodeInstall" aria-label="关闭安装指引">关闭</button>
           </div>
           <div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden>
             <span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span>
@@ -481,7 +533,7 @@
           <p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p>
         </div>
         <div class="view-actions">
-          <button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button>
+          <button class="btn btn--primary" id="btnSaveSettings">保存全部设置</button>
         </div>
       </div>
 
@@ -503,8 +555,8 @@
             <label class="form-label">主客户端鉴权密钥 (client_key)</label>
             <div class="input-row">
               <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
-              <button class="btn" id="btnGenClientKey" type="button">随机生成</button>
-              <button class="btn" id="btnSaveClientKey" type="button">保存密钥</button>
+              <button class="btn" id="btnGenClientKey">随机生成</button>
+              <button class="btn" id="btnSaveClientKey">保存密钥</button>
             </div>
           </div>
           <div class="form-group form-group--span2">
@@ -516,14 +568,14 @@
           <div class="snippet-box">
             <div class="snippet-header">
               <span class="form-label">Claude Code 环境变量</span>
-              <button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button>
+              <button class="btn btn--sm" id="btnCopyClaudeSnippet">复制</button>
             </div>
             <code class="snippet-code" id="snippetClaude"></code>
           </div>
           <div class="snippet-box">
             <div class="snippet-header">
               <span class="form-label">OpenAI / Cursor 配置</span>
-              <button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button>
+              <button class="btn btn--sm" id="btnCopyCursorSnippet">复制</button>
             </div>
             <code class="snippet-code" id="snippetCursor"></code>
           </div>
@@ -537,7 +589,7 @@
             <h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2>
             <div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div>
           </div>
-          <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button>
+          <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button>
         </div>
         <div class="form-grid">
           <div class="form-group">
@@ -598,7 +650,7 @@
       <div class="card card-pad" id="cfgVaultLinkBox" hidden>
         <div class="section-bar">
           <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
-          <button class="btn btn--sm" id="btnTestVaultLink" type="button">测试连接</button>
+          <button class="btn btn--sm" id="btnTestVaultLink">测试连接</button>
         </div>
         <div class="form-grid form-grid--2">
           <div class="form-group" id="cfgVaultUrlGroup">
@@ -621,7 +673,7 @@
           <div class="form-group">
             <label class="form-label">导出当前完整配置 (JSON)</label>
             <div>
-              <button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button>
+              <button class="btn" id="btnExportConfig">导出 JSON 配置文件</button>
             </div>
           </div>
           <div class="form-group">
@@ -632,7 +684,7 @@
                 <option value="overwrite">全量覆盖</option>
               </select>
               <input type="file" id="importConfigFile" accept=".json,application/json" hidden>
-              <button class="btn" id="btnTriggerImport" type="button">选择文件导入</button>
+              <button class="btn" id="btnTriggerImport">选择文件导入</button>
             </div>
           </div>
         </div>
@@ -641,9 +693,9 @@
           <div class="mt-2">
             <textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea>
             <div class="form-actions">
-              <button class="btn" id="btnRefreshRawJson" type="button">重新载入当前配置</button>
-              <button class="btn" id="btnFormatRawJson" type="button">格式化 JSON</button>
-              <button class="btn btn--primary" id="btnSaveRawJson" type="button">应用此 JSON 配置</button>
+              <button class="btn" id="btnRefreshRawJson">重新载入当前配置</button>
+              <button class="btn" id="btnFormatRawJson">格式化 JSON</button>
+              <button class="btn btn--primary" id="btnSaveRawJson">应用此 JSON 配置</button>
             </div>
           </div>
         </details>
@@ -657,14 +709,13 @@
             <div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div>
           </div>
           <div class="fields">
-            <button class="btn" id="btnCheckSystemUpdate" type="button">检查程序更新</button>
-            <button class="btn btn--danger" id="btnRestartService" type="button">平滑重启服务</button>
+            <button class="btn" id="btnCheckSystemUpdate">检查程序更新</button>
+            <button class="btn btn--danger" id="btnRestartService">平滑重启服务</button>
           </div>
         </div>
         <div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div>
       </div>
       <datalist id="datalistProviders"></datalist>
-      <datalist id="datalistModels"></datalist>
     </section>
   </main>
 

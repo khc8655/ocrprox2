@@ -537,8 +537,10 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 		// claimed on arrival and passed over when full, so the walk moves to a sibling
 		// key with room.
 		var releaseBusy func()
+		usedClaim := false
 		if claimTag == cand.KeyTag && claimRel != nil {
 			releaseBusy = claimRel
+			usedClaim = true
 		} else {
 			rel, ok := s.lanes.TryAcquireOne(cand.KeyTag, cand.MaxConc)
 			if !ok {
@@ -547,15 +549,47 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			}
 			releaseBusy = rel
 		}
-
-		rpmLimit := cand.KeyEntry.MaxRPM
-		if rpmLimit <= 0 && cand.Provider != nil {
-			rpmLimit = cand.Provider.RPMPerKey
-		}
-		if rpmLimit > 0 && !s.rpmLimiter.TryAcquire(cand.KeyTag, rpmLimit) {
+		// releaseSlot hands the lane slot back. When the slot was the ordering
+		// claim, the claim is spent: a later candidate with the same KeyTag must
+		// claim its own slot instead of reusing the stale claim closure (its
+		// once-guard would make the second release a no-op and the attempt would
+		// run without holding a lane slot).
+		releaseSlot := func() {
 			releaseBusy()
-			skips = append(skips, fmt.Sprintf("%s (RPM limit)", keyID))
-			continue
+			if usedClaim {
+				claimRel = nil
+				usedClaim = false
+			}
+		}
+
+		// Provider-wide RPM first (cheap, and one exhausted window stops every key
+		// of the provider at once), then the per-key limit. Provider.RPMPerKey is
+		// the provider's OVERALL RPM ceiling (0 = unlimited), not a per-key limit —
+		// it must never fall back into the key-level check, or N keys would each
+		// get the whole-provider ceiling. Both takes return undo tokens: anything
+		// skipped or failed before the request reaches the wire hands them back,
+		// so attempts that never dial never consume the windows.
+		var releaseProviderRPM, releaseKeyRPM func()
+		if cand.Provider != nil && cand.Provider.RPMPerKey > 0 {
+			rel, ok := s.providerRPMLimiter.TryAcquireToken(providerRPMKey(cand.Provider.ID), cand.Provider.RPMPerKey)
+			if !ok {
+				releaseSlot()
+				skips = appendSkipOnce(skips, fmt.Sprintf("%s (provider RPM limit)", cand.Provider.ID))
+				continue
+			}
+			releaseProviderRPM = rel
+		}
+		if rpmLimit := cand.KeyEntry.MaxRPM; rpmLimit > 0 {
+			rel, ok := s.rpmLimiter.TryAcquireToken(cand.KeyTag, rpmLimit)
+			if !ok {
+				if releaseProviderRPM != nil {
+					releaseProviderRPM()
+				}
+				releaseSlot()
+				skips = appendSkipOnce(skips, fmt.Sprintf("%s (RPM limit)", keyID))
+				continue
+			}
+			releaseKeyRPM = rel
 		}
 
 		var (
@@ -563,7 +597,23 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			abortLoop bool
 		)
 		func() {
-			defer releaseBusy()
+			defer releaseSlot()
+			// Any failure before the request is on the wire gives the RPM tokens
+			// back: the sliding windows must count requests that were actually
+			// sent, not attempts that never dialed. onWire flips just before the
+			// HTTP call; from there the tokens stay (the attempt is real traffic).
+			onWire := false
+			defer func() {
+				if onWire {
+					return
+				}
+				if releaseKeyRPM != nil {
+					releaseKeyRPM()
+				}
+				if releaseProviderRPM != nil {
+					releaseProviderRPM()
+				}
+			}()
 			queuedStart := time.Now()
 			cancelWait := s.lanes.StartWaiting(cand.KeyTag)
 			defer cancelWait()
@@ -621,6 +671,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			cancelWait()
 
 			sendStart := time.Now()
+			onWire = true
 			resp, callErr := client.Do(upReq)
 			sentMillis := time.Since(sendStart).Milliseconds()
 			tryElapsed := time.Since(tryStart).Milliseconds()
@@ -653,7 +704,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			if resp.StatusCode != http.StatusOK {
 				errBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 				_ = resp.Body.Close()
-				releaseBusy()
+				releaseSlot()
 				lastErrSnippet = string(errBytes)
 
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
@@ -700,7 +751,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 
 			respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 			_ = resp.Body.Close()
-			releaseBusy()
+			releaseSlot()
 			if readErr != nil {
 				lastStatus = http.StatusBadGateway
 				lastErrSnippet = readErr.Error()

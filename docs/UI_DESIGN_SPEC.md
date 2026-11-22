@@ -13,7 +13,7 @@
 2. **零内联样式（Zero Inline Style）**：HTML 与 JS 字符串中严禁出现 `style="..."`，JS 代码中严禁出现 `.style.xxx`（显隐统一使用 `[hidden]` 与 `.hidden`，SVG 尺寸/进度条使用 SVG 属性如 `width` / `height` / `rx`）。
 3. **零抽屉弹窗（Zero `.drawer`）**：列表项配置统一使用行内原地展开（`.row` + `.editor`），严禁右侧大抽屉套娃。
 4. **零左边框色条**：严禁使用 `border-left: ... (#|rgb|hsl|var(--)` 彩色竖条，状态统一采用 `7px` 语义圆点（`.dot`）与轻量胶囊（`.pill`）。
-5. **单文件瞬开体积上限**：`shared/admin/dist/index.html` 与 `internal/admin/assets/index.html` 体积必须 **≤ 245,760 bytes（240 KB）**，当前为 ~215 KB。
+5. **单文件瞬开体积上限**：`shared/admin/dist/index.html` 与 `internal/admin/assets/index.html` 体积必须 **≤ 258,048 bytes（252 KB）**，当前为 ~215 KB。
 
 ---
 

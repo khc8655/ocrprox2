@@ -107,16 +107,18 @@
 | 路由 | `lite` 角色 | `full` 角色 (`agent` 模式) | `full` 角色 (`kb` 模式) | 鉴权要求 |
 |---|:---:|:---:|:---:|---|
 | `GET /healthz` (及 `/health`) | ✓ (脱敏状态) | ✓ | ✓ | 免鉴权（绝不含任何敏感信息或模型/Key 列表） |
-| `GET /v1/models` | ✓ | ✓ (真实模型列表) | ✓ (`chat`, `embedding`, `reranker`, `ocr`) | `CLIENT_KEY` 强制 |
-| `POST /v1/chat/completions` | ✓ | ✓ | ✓ (仅 `model="chat"`, `stream=false`) | `CLIENT_KEY` 强制 |
+| `GET /v1/models` | ✓ | ✓ (真实模型列表) | ✓ (仅列已配置类别：agent_models 路由 + 存留的 `chat`/`embedding`/`reranker`/`ocr`) | `CLIENT_KEY` 强制 |
+| `POST /v1/chat/completions` | ✓ | ✓ | ✓ (仅 `model="chat"`, `stream=false`；`chat` 未配置时 `404`) | `CLIENT_KEY` 强制 |
 | `POST /v1/messages` | ✓ | ✓ | `404` (模式门禁) | `CLIENT_KEY` 强制 |
 | `POST /v1/responses` | ✓ | ✓ | `404` (模式门禁) | `CLIENT_KEY` 强制 |
-| `POST /v1/embeddings` | `404` | `404` | ✓ | `CLIENT_KEY` 强制 |
-| `POST /v1/rerank` | `404` | `404` | ✓ | `CLIENT_KEY` 强制 |
-| `POST /v1/ocr` | `404` | `404` | ✓ (预读信号量 + 零拷贝流式) | `CLIENT_KEY` 强制 |
+| `POST /v1/embeddings` | `404` | `404` | ✓ (需已配置 `embedding` 同名路由，否则 `404`) | `CLIENT_KEY` 强制 |
+| `POST /v1/rerank` | `404` | `404` | ✓ (需已配置 `reranker` 同名路由，否则 `404`) | `CLIENT_KEY` 强制 |
+| `POST /v1/ocr` | `404` | `404` | ✓ (预读信号量 + 零拷贝流式；需已配置 `ocr` 同名路由，否则 `404`) | `CLIENT_KEY` 强制 |
 | `GET/POST /admin*`, `/api/admin/*` | **不注册 (`404`/`403`)** | ✓ | ✓ | `ADMIN_PASSWORD` 强制 |
 
 > 注：所有 `/v1/*` 路由同时兼容挂载在 `/api/v1/*` 下，以无缝兼容各类第三方客户端的 Base URL 习惯。
+>
+> 注：kb 模式的四通道端点**不再无条件可用**——前端已停止默认生成 chat/embedding/reranker/ocr 路由（可手动删除），端点仅在配置了同名路由（agent_models）或残留 legacy `kb_models` 时可达，否则统一回 `404 model "…" not configured or disabled`（`internal/scheduler/scheduler.go`）。要用 KB 就自行建同名路由。
 
 ---
 
@@ -321,10 +323,11 @@
 {
   "ok": true,
   "presets": [
-    { "id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "protocols": ["chat", "responses"] }
+    { "id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "protocols": ["chat", "responses"], "version": "1.2.1", "updated_at": "2026-10-19" }
   ]
 }
 ```
+> preset 对象为后端 `PresetDef` 的完整 JSON 序列化（`internal/provider/presets.go`）。其中 `version` / `updated_at` 镜像该供应商适配文件（`shared/presets/<id>.json`，与 `shared/presets/catalog.json` 汇总目录同源）的版本与日期，控制台用于在供应商卡片渲染「适配 `<id>` · v`<version>` · `<updated_at>`」标签；无对应适配文件的预设（如 `anthropic`、`minimax-cn` 等）两字段带 `omitempty`，响应中直接省略。
 
 ### 6.6 节点访问信息与 API 凭据管理
 - **获取节点接入信息 `GET /api/admin/access-info`**:
@@ -347,6 +350,37 @@
 }
 ```
 返回 `{ "ok": true, "client_key": "sk-llmproxy-...", "masked": "sk-...abcd" }`，并实时热更新 `authMgr`。
+
+### 6.7 添加模型：上游模型探测 `POST /api/admin/probe-models`（hub + full）
+- **Request**:
+```json
+{
+  "provider": "minimax",
+  "base_url": "https://api.minimax.chat/v1",
+  "api_key": "可选：空或脱敏占位符时自动取该供应商第一把启用的已存 Key（中枢侧另接受 key_label 指定某把已存 Key）",
+  "api_type": "可选：anthropic-messages 时改用 x-api-key + anthropic-version 头探测"
+}
+```
+- **Response (`200 OK`)**:
+```json
+{ "ok": true, "models": ["MiniMax-M2.5", "MiniMax-Text-01"] }
+```
+- **语义**：添加模型流程（选供应商 → 探测上游模型 → 点选/手填「上游目标模型 ID」）的后端支柱，只读不落库。探测上游 `GET {base_url}/models`：OpenAI 形态 `{data:[{id}]}` 与 Google 形态 `{models:[{name}]}`（自动剥 `models/` 前缀）均可解析。**full 节点**：`api_key` 为空/脱敏时自动解析供应商第一把启用 Key；vault 托管 Key 禁止用 `base_url` 覆盖探测目标（`403 cannot override base_url when using a vault-managed key`）；上游非 2xx 状态码原样透传并附 `ok:false`。**中枢**：同一端点由 `edgeone-hub/api/admin/probe-models.js` 实现（`400 api_key_required` / `base_url_required` / `unsafe_upstream_url`、`502` 上游不可达）。
+
+### 6.8 路由行「测试路由」：`POST /api/admin/test-agent-model` 与 `POST /api/admin/test-candidate`（仅 full）
+- **`POST /api/admin/test-agent-model`** —— chat 类路由的行级测试：对该路由每条启用候选（全被禁用时回退全部候选）各发**一次最小真实推理**——OpenAI 兼容供应商 `POST {base_url}/chat/completions`，请求体 `{model: target_model||model, messages:[{role:"user",content:"你好"}], max_tokens:16, stream:false}`；`anthropic-messages` 供应商改发 `{base_url}/messages`（不带 stream）。最多 5 路并发、15s 超时；某候选探测成功即清除该 Key 的冷却封禁。
+```json
+{
+  "ok": true, "success": true, "model": "claude-sonnet-4-20250514",
+  "total": 2, "passed": 2, "checked_at": "2026-11-22 12:00:00",
+  "results": [
+    { "provider": "minimax", "key": "hk-pool-01", "model": "MiniMax-M2.5", "ok": true, "status": 200, "latency_ms": 380 },
+    { "provider": "minimax", "key": "hk-pool-02", "model": "MiniMax-M2.5", "ok": true, "status": 200, "latency_ms": 412 }
+  ]
+}
+```
+- **`POST /api/admin/test-candidate`** —— 单候选探测，embedding/reranker/ocr 路由的「测试路由」走它（取第一条候选）：`type` 取 `chat|embedding|reranker|ocr`（缺省 `chat`，别名 `category`）。各类型载荷：embedding → `POST {base}/embeddings` `{model, input:"test"}`；reranker → `POST {base}/rerank` `{model, query:"test", documents:["a"]}`；ocr → `chat/completions` 携带 1×1 PNG + "Extract text"、`max_tokens:64`；chat → 与 test-agent-model 相同的最小推理。`model` 缺省时依序从 `kb_models[type]`（本供应商条目）→ 供应商模型别名 → 类型名解析；`key_label` 缺省时取第一把启用 Key。响应 `{ok, success, status, ms, latency_ms, model, text(答案片段：chat 取 message.content，形态不识别时取响应体前 100 字节), error?}`，探测成功同样清冷却。
+- 控制台路由行展示判定胶囊：成功显示「测试 `<latency>ms · <provider> · <key_label>`」（chat 路由取最快通过的候选），失败显示错误摘录。
 
 ---
 
@@ -459,6 +493,12 @@
 - `agent_models.<model>.allow_key_fallback`（默认 `false`）：当候选引用的 `key_label` 被禁用或删除时，允许回退到**同供应商**其它启用 Key。
 - 默认关闭以保持「候选按 provider+key_label 精确绑定」的语义；控制台模型编辑器可勾选开启。
 
+### 7.3.4 供应商 `rpm_per_key` 整体限流语义（v3.3 起）
+- `providers.<id>.rpm_per_key` 是**该供应商整体 RPM 上限（调度器按供应商维度限流），0=不限**——不再是 Key 级限流的回退值。`>0` 时调度器在派发前先对整个供应商做一次滑动窗口检查（独立 `RPMLimiter` 实例 `providerRPMLimiter` 的桶 `provider:<provider_id>`，与 Key 级桶 `provider:key_label` 分属两个实例，命名空间不相交由构造保证，见 `internal/scheduler/rpm.go` 的 `providerRPMKey()`）：窗口满则该供应商**全部 Key** 一律不再派发——排序期 `isCandidateHealthy` 判不健康（不占通道槽）、`Dispatch` 与 `ExecuteEndpoint` 的候选遍历两处 `TryAcquire` 显式跳过，跳过原因记 `<provider_id> (provider RPM limit)`（同一供应商多个候选去重，不重复追加）。
+- 拨号前失败回滚：供应商令牌先取、随后 Key 级拒绝（`max_rpm` 打满）、OAuth 刷新失败或请求构建失败时，已取的供应商令牌（及 Key 令牌）经 `TryAcquireToken` 返回的 release 退回——滑动窗口只统计真实发出的请求，幽灵尝试不虚耗供应商额度。
+- Key 级限流 `api_keys[].max_rpm` 语义不变、独立生效：仅约束该 Key 自身的滑动窗口，0=不限；调度顺序为先查供应商窗口、再查 Key 窗口。旧「`RPMPerKey` 作为 Key 级回退」行为已移除——N 把 Key 不会各拿一份整供应商额度（守卫测试 `internal/scheduler/rpm_provider_test.go`）。
+- 中枢托管同步：`rpm_per_key` 属中枢托管字段，vault 供应商重拉（`MergeVaultConfig`）时**全量跟随**中枢值——中枢清 0（放开限制）后节点重拉即恢复不限，不单向只增不减。
+
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
 - `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。
@@ -468,6 +508,7 @@
 ## 八、 前端单文件构建预算与门禁规范
 
 - 前端控制台源码统一位于 `shared/admin/`，通过 `node shared/admin/build.mjs` 构建为内嵌单一单页 HTML（输出至 `shared/admin/dist/index.html` 与 `internal/admin/assets/index.html`）。
-- 打包体积硬门禁：**`≤ 240 KB`（`245,760 bytes`）**（执行 G4 门禁校验与 T1 合同测试）。
+- 打包体积硬门禁：**`≤ 252 KB`（`258,048 bytes`）**（执行 G4 门禁校验与 T1 合同测试；2026-11-22 由 240 KB 重标——magpie 骨架重排与探测/策略胶囊等已确认 UI 的真实字节成本，见 v20261122-06 CHANGELOG）。
 - 零内联样式（严禁 `style="` 与 `.style.xxx`）、零 Drawer 抽屉（全部行内展开 `.editor`）、零彩色左边框条、原生 `[hidden]` 显隐控制。
+- **流程纪律**：任何对 `shared/admin/` 源码（`admin.html` / `js/*` / `css/*`）的改动，必须当场跑 `npm run test:admin`（含全部体积/样式门禁并再生成 dist、`internal/admin/assets`、`admin/index.html` 与 `edge-functions/_hub` 同步产物）；只跑 `verify:release` 之类的下游产物校验不算数——下游校验看到的是上一次构建的陈旧产物，门禁失败会被静默漏掉。
 

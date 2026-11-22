@@ -526,6 +526,35 @@ func TestLocalSource_MergeVaultConfig_PreservesMagpieFields(t *testing.T) {
 	if p.QuotaResetAt != "00:00+08:00" {
 		t.Errorf("expected QuotaResetAt '00:00+08:00', got %q", p.QuotaResetAt)
 	}
+
+	// rpm_per_key is hub-managed wholesale: clearing it on the hub (0 = 不限)
+	// must reach the node on the next fetch instead of ratcheting forever.
+	vaultProviders["deepseek"].RPMPerKey = 0
+	snap, err = src.MergeVaultConfig(vaultProviders, false)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig (clear rpm) err: %v", err)
+	}
+	if p = snap.Config.Providers["deepseek"]; p.RPMPerKey != 0 {
+		t.Errorf("hub-cleared rpm_per_key must follow to 0, got %d", p.RPMPerKey)
+	}
+
+	// Same direction on the replace branch (on-demand re-fetch).
+	vaultProviders["deepseek"].RPMPerKey = 90
+	snap, err = src.MergeVaultConfig(vaultProviders, true)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig (replace, set 90) err: %v", err)
+	}
+	if p = snap.Config.Providers["deepseek"]; p.RPMPerKey != 90 {
+		t.Errorf("expected RPMPerKey 90 after replace merge, got %d", p.RPMPerKey)
+	}
+	vaultProviders["deepseek"].RPMPerKey = 0
+	snap, err = src.MergeVaultConfig(vaultProviders, true)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig (replace, clear) err: %v", err)
+	}
+	if p = snap.Config.Providers["deepseek"]; p.RPMPerKey != 0 {
+		t.Errorf("replace merge must follow hub-cleared rpm_per_key to 0, got %d", p.RPMPerKey)
+	}
 }
 
 func TestLocalSource_KernelGuard_VaultOriginLock_And_RefreshToken(t *testing.T) {

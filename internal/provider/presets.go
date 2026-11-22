@@ -44,6 +44,10 @@ type PresetDef struct {
 	RegionLabel      string              `json:"region_label,omitempty"`
 	KeyPlans         bool                `json:"key_plans,omitempty"`
 	AdapterRules     *types.AdapterRules `json:"adapter_rules,omitempty"`
+	// Version and UpdatedAt mirror the provider's adapter file (shared/presets/<id>.json);
+	// presets without a matching adapter file leave both empty.
+	Version   string `json:"version,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 // Fallback model lists for vendors that do not provide a live /models endpoint (NoList=true).
@@ -87,6 +91,8 @@ var catalogPresets = []PresetDef{
 		Name:         "OpenAI",
 		Icon:         "openai",
 		Kind:         "vendor",
+		Version:      "1.2.1",
+		UpdatedAt:    "2026-10-19",
 		BaseURL:      "https://api.openai.com/v1",
 		ChatURL:      "https://api.openai.com/v1",
 		ResponsesURL: "https://api.openai.com/v1",
@@ -121,6 +127,8 @@ var catalogPresets = []PresetDef{
 		Name:         "Google Gemini",
 		Icon:         "gemini-color",
 		Kind:         "vendor",
+		Version:      "1.2.0",
+		UpdatedAt:    "2026-10-18",
 		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
 		ChatURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
 		Website:      "https://aistudio.google.com",
@@ -135,6 +143,8 @@ var catalogPresets = []PresetDef{
 		Name:            "Google Vertex AI",
 		Icon:            "vertexai-color",
 		Kind:            "vendor",
+		Version:         "1.1.0",
+		UpdatedAt:       "2026-10-18",
 		BaseURL:         "https://aiplatform.googleapis.com/v1beta1/openai",
 		ChatURL:         "https://aiplatform.googleapis.com/v1beta1/openai",
 		Website:         "https://cloud.google.com/vertex-ai",
@@ -150,6 +160,8 @@ var catalogPresets = []PresetDef{
 		Name:         "DeepSeek",
 		Icon:         "deepseek-color",
 		Kind:         "vendor",
+		Version:      "1.2.0",
+		UpdatedAt:    "2026-10-18",
 		BaseURL:      "https://api.deepseek.com/v1",
 		ChatURL:      "https://api.deepseek.com/v1",
 		ResponsesURL: "https://api.deepseek.com/v1",
@@ -166,6 +178,8 @@ var catalogPresets = []PresetDef{
 		Name:         "MiniMax",
 		Icon:         "minimax-color",
 		Kind:         "vendor",
+		Version:      "1.4.0",
+		UpdatedAt:    "2026-10-18",
 		BaseURL:      "https://api.minimax.io/v1",
 		ChatURL:      "https://api.minimax.io/v1",
 		AnthropicURL: "https://api.minimax.io/anthropic",
@@ -349,6 +363,8 @@ var catalogPresets = []PresetDef{
 		Name:         "OpenRouter",
 		Icon:         "openrouter",
 		Kind:         "relay",
+		Version:      "1.0.0",
+		UpdatedAt:    "2026-10-18",
 		BaseURL:      "https://openrouter.ai/api/v1",
 		ChatURL:      "https://openrouter.ai/api/v1",
 		AnthropicURL: "https://openrouter.ai/api",
@@ -362,6 +378,8 @@ var catalogPresets = []PresetDef{
 		Name:       "SiliconFlow",
 		Icon:       "siliconcloud-color",
 		Kind:       "relay",
+		Version:    "1.2.0",
+		UpdatedAt:  "2026-10-18",
 		BaseURL:    "https://api.siliconflow.cn/v1",
 		ChatURL:    "https://api.siliconflow.cn/v1",
 		Website:    "https://cloud.siliconflow.cn",
@@ -379,6 +397,8 @@ var catalogPresets = []PresetDef{
 		Name:         "StepFun",
 		Icon:         "stepfun-color",
 		Kind:         "vendor",
+		Version:      "1.2.0",
+		UpdatedAt:    "2026-10-18",
 		BaseURL:      "https://api.stepfun.ai/step_plan/v1",
 		ChatURL:      "https://api.stepfun.ai/step_plan/v1",
 		AnthropicURL: "https://api.stepfun.ai/step_plan",
@@ -410,14 +430,16 @@ var catalogPresets = []PresetDef{
 
 	// 21. NVIDIA NIM
 	{
-		ID:      "nvidia",
-		Name:    "NVIDIA NIM",
-		Icon:    "nvidia-color",
-		Kind:    "relay",
-		BaseURL: "https://integrate.api.nvidia.com/v1",
-		ChatURL: "https://integrate.api.nvidia.com/v1",
-		Website: "https://build.nvidia.com",
-		KeysURL: "https://build.nvidia.com/settings/api-keys",
+		ID:        "nvidia",
+		Name:      "NVIDIA NIM",
+		Icon:      "nvidia-color",
+		Kind:      "relay",
+		Version:   "2.0.0",
+		UpdatedAt: "2026-10-18",
+		BaseURL:   "https://integrate.api.nvidia.com/v1",
+		ChatURL:   "https://integrate.api.nvidia.com/v1",
+		Website:   "https://build.nvidia.com",
+		KeysURL:   "https://build.nvidia.com/settings/api-keys",
 	},
 
 	// 22. Baidu Qianfan
@@ -486,13 +508,15 @@ var catalogPresets = []PresetDef{
 
 	// 25. AMD Developer Cloud
 	{
-		ID:      "amd",
-		Name:    "AMD Developer Cloud",
-		Icon:    "amd",
-		Kind:    "vendor",
-		BaseURL: "https://llm-api.amd.com/v1",
-		ChatURL: "https://llm-api.amd.com/v1",
-		Website: "https://developer.amd.com",
+		ID:        "amd",
+		Name:      "AMD Developer Cloud",
+		Icon:      "amd",
+		Kind:      "vendor",
+		Version:   "2026.10.19",
+		UpdatedAt: "2026-10-19",
+		BaseURL:   "https://llm-api.amd.com/v1",
+		ChatURL:   "https://llm-api.amd.com/v1",
+		Website:   "https://developer.amd.com",
 	},
 
 	// 26. Ollama Local

@@ -1081,7 +1081,7 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 			reqBodyBytes, _ = json.Marshal(map[string]any{
 				"model": model,
 				"messages": []map[string]any{
-					{"role": "user", "content": "Hi"},
+					{"role": "user", "content": "你好"},
 				},
 				"max_tokens": 16,
 			})
@@ -1090,7 +1090,7 @@ func (s *Server) handleTestCandidate(w http.ResponseWriter, r *http.Request) {
 			reqBodyBytes, _ = json.Marshal(map[string]any{
 				"model": model,
 				"messages": []map[string]any{
-					{"role": "user", "content": "Hi"},
+					{"role": "user", "content": "你好"},
 				},
 				"max_tokens": 16,
 				"stream":     false,
@@ -1344,7 +1344,7 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 				testBody, _ = json.Marshal(map[string]any{
 					"model": targetModel,
 					"messages": []map[string]any{
-						{"role": "user", "content": "Hi"},
+						{"role": "user", "content": "你好"},
 					},
 					"max_tokens": 16,
 				})
@@ -1353,7 +1353,7 @@ func (s *Server) handleTestAgentModel(w http.ResponseWriter, r *http.Request) {
 				testBody, _ = json.Marshal(map[string]any{
 					"model": targetModel,
 					"messages": []map[string]any{
-						{"role": "user", "content": "Hi"},
+						{"role": "user", "content": "你好"},
 					},
 					"max_tokens": 16,
 					"stream":     false,

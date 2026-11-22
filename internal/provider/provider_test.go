@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -246,5 +248,55 @@ func TestCatalog_AndPresetAdapterRules(t *testing.T) {
 		!rules.RescueFromText || !rules.NormalizeChoiceToString || rules.UnwrapRoot != "data" ||
 		rules.MaxTokensCeiling != 65536 || rules.ExtraHeaders["HTTP-Referer"] != "https://example.com" {
 		t.Fatalf("nested AdapterRules fields missing after unmarshal: %+v", rules)
+	}
+}
+
+func TestCatalog_PresetAdapterVersions(t *testing.T) {
+	// Version/UpdatedAt must mirror the adapter files on disk
+	// (shared/presets/<id>.json). The files are read directly so the adapter file,
+	// presets.go and this test cannot drift apart silently.
+	adapterVersions := map[string]string{}
+	for _, p := range Catalog() {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "shared", "presets", p.ID+".json"))
+		if err != nil {
+			if p.Version != "" || p.UpdatedAt != "" {
+				t.Errorf("preset %q carries Version=%q UpdatedAt=%q but has no adapter file: %v", p.ID, p.Version, p.UpdatedAt, err)
+			}
+			continue
+		}
+		var file struct {
+			Version   string `json:"version"`
+			UpdatedAt string `json:"updated_at"`
+		}
+		if err := json.Unmarshal(raw, &file); err != nil {
+			t.Fatalf("adapter file for %q unmarshal failed: %v", p.ID, err)
+		}
+		if p.Version != file.Version || p.UpdatedAt != file.UpdatedAt {
+			t.Errorf("preset %q Version/UpdatedAt = %q/%q, adapter file says %q/%q", p.ID, p.Version, p.UpdatedAt, file.Version, file.UpdatedAt)
+		}
+		adapterVersions[p.ID] = file.Version
+	}
+
+	// Catalog() clones the catalog; the fields must survive the clone and JSON encoding.
+	blob, err := json.Marshal(Catalog())
+	if err != nil {
+		t.Fatalf("Catalog marshal failed: %v", err)
+	}
+	var wire []struct {
+		ID        string `json:"id"`
+		Version   string `json:"version"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(blob, &wire); err != nil {
+		t.Fatalf("Catalog unmarshal failed: %v", err)
+	}
+	wireVersion := map[string]string{}
+	for _, w := range wire {
+		wireVersion[w.ID] = w.Version
+	}
+	for id, want := range adapterVersions {
+		if got := wireVersion[id]; got != want {
+			t.Errorf("wire preset %q version = %q, want %q", id, got, want)
+		}
 	}
 }

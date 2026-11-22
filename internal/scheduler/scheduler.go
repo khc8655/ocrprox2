@@ -37,23 +37,24 @@ type OAuthRefresher interface {
 
 // Scheduler coordinates upstream dispatching across candidate keys.
 type Scheduler struct {
-	mu                sync.Mutex
-	configSource      types.ConfigSource
-	engine            types.AdapterEngine
-	cooldowns         *CooldownManager
-	obsSink           types.ObservabilitySink
-	httpClient        *http.Client
-	allowPrivate      bool
-	clientsMu         sync.RWMutex
-	clients           map[int]*http.Client // cached by firstByteTimeoutSec -> client
-	lanes             *LaneTracker
-	rpmLimiter        *RPMLimiter
-	rrIndex           map[string]int
-	swrrCurrent       map[string]map[string]int
-	latency           *LatencyTracker
-	sessionSticky     *SessionStickyCache
-	oauthRefresher    OAuthRefresher
-	keepaliveInterval time.Duration
+	mu                 sync.Mutex
+	configSource       types.ConfigSource
+	engine             types.AdapterEngine
+	cooldowns          *CooldownManager
+	obsSink            types.ObservabilitySink
+	httpClient         *http.Client
+	allowPrivate       bool
+	clientsMu          sync.RWMutex
+	clients            map[int]*http.Client // cached by firstByteTimeoutSec -> client
+	lanes              *LaneTracker
+	rpmLimiter         *RPMLimiter
+	providerRPMLimiter *RPMLimiter
+	rrIndex            map[string]int
+	swrrCurrent        map[string]map[string]int
+	latency            *LatencyTracker
+	sessionSticky      *SessionStickyCache
+	oauthRefresher     OAuthRefresher
+	keepaliveInterval  time.Duration
 }
 
 // NewScheduler creates a Scheduler.
@@ -63,20 +64,21 @@ func NewScheduler(
 	allowPrivate bool,
 ) *Scheduler {
 	return &Scheduler{
-		configSource:      cfgSrc,
-		engine:            adapters.NewDefaultEngine(),
-		cooldowns:         NewCooldownManager(),
-		obsSink:           obsSink,
-		httpClient:        upstream.UpstreamClient(120*time.Second, allowPrivate),
-		allowPrivate:      allowPrivate,
-		clients:           make(map[int]*http.Client),
-		lanes:             NewLaneTracker(),
-		rpmLimiter:        NewRPMLimiter(60 * time.Second),
-		rrIndex:           make(map[string]int),
-		swrrCurrent:       make(map[string]map[string]int),
-		latency:           NewLatencyTracker(),
-		sessionSticky:     NewSessionStickyCache(defaultSessionStickyTTL, defaultSessionStickyMaxSize),
-		keepaliveInterval: KeepaliveInterval,
+		configSource:       cfgSrc,
+		engine:             adapters.NewDefaultEngine(),
+		cooldowns:          NewCooldownManager(),
+		obsSink:            obsSink,
+		httpClient:         upstream.UpstreamClient(120*time.Second, allowPrivate),
+		allowPrivate:       allowPrivate,
+		clients:            make(map[int]*http.Client),
+		lanes:              NewLaneTracker(),
+		rpmLimiter:         NewRPMLimiter(60 * time.Second),
+		providerRPMLimiter: NewRPMLimiter(60 * time.Second),
+		rrIndex:            make(map[string]int),
+		swrrCurrent:        make(map[string]map[string]int),
+		latency:            NewLatencyTracker(),
+		sessionSticky:      NewSessionStickyCache(defaultSessionStickyTTL, defaultSessionStickyMaxSize),
+		keepaliveInterval:  KeepaliveInterval,
 	}
 }
 
@@ -141,6 +143,14 @@ func (s *Scheduler) SnapshotLanes() map[string]Lane {
 // RPM returns the per-key sliding window RPM limiter.
 func (s *Scheduler) RPM() *RPMLimiter {
 	return s.rpmLimiter
+}
+
+// ProviderRPM returns the provider-wide sliding window RPM limiter. It is a
+// separate RPMLimiter instance from the per-key one (RPM), so the provider:<id>
+// buckets and the KeyTag ("provider:key_label") buckets can never share a
+// window — the disjointness holds by construction, not by naming convention.
+func (s *Scheduler) ProviderRPM() *RPMLimiter {
+	return s.providerRPMLimiter
 }
 
 // SetBanFile configures the persistent ban file path.
@@ -538,6 +548,10 @@ func moveCandidateFirst(candidates []*CandidateKey, keyTag string) ([]*Candidate
 // isCandidateHealthy reports whether c can take a request now: not cooling
 // down and within its RPM quota. It deliberately ignores in-flight load, so a
 // caller that has just claimed c's lane slot is not refused by its own claim.
+// Both RPM probes are non-consuming Allow checks — the consuming TryAcquire
+// happens in the attempt walks. Provider.RPMPerKey is the provider's OVERALL
+// RPM ceiling (0 = unlimited) shared by all its keys, not a per-key limit, so
+// a provider whose window is exhausted marks every one of its keys unhealthy.
 func (s *Scheduler) isCandidateHealthy(c *CandidateKey) bool {
 	if c == nil || c.Provider == nil || c.KeyEntry == nil {
 		return false
@@ -549,14 +563,28 @@ func (s *Scheduler) isCandidateHealthy(c *CandidateKey) bool {
 	if s.cooldowns != nil && s.cooldowns.IsCooledDown(c.Provider.ID, c.TargetModel, keyID) {
 		return false
 	}
-	rpmLimit := c.KeyEntry.MaxRPM
-	if rpmLimit <= 0 {
-		rpmLimit = c.Provider.RPMPerKey
-	}
-	if rpmLimit > 0 && s.rpmLimiter != nil && !s.rpmLimiter.Allow(c.KeyTag, rpmLimit) {
+	if s.providerRPMLimiter != nil && c.Provider.RPMPerKey > 0 && !s.providerRPMLimiter.Allow(providerRPMKey(c.Provider.ID), c.Provider.RPMPerKey) {
 		return false
 	}
+	if s.rpmLimiter != nil {
+		if rpmLimit := c.KeyEntry.MaxRPM; rpmLimit > 0 && !s.rpmLimiter.Allow(c.KeyTag, rpmLimit) {
+			return false
+		}
+	}
 	return true
+}
+
+// appendSkipOnce appends msg to skips unless the exact message is already
+// recorded. A provider-wide limit is re-hit by every remaining candidate of the
+// same provider, and the joined "skipped: ..." message would otherwise repeat
+// the entry once per candidate.
+func appendSkipOnce(skips []string, msg string) []string {
+	for _, s := range skips {
+		if s == msg {
+			return skips
+		}
+	}
+	return append(skips, msg)
 }
 
 // candidateHasRoom reports whether c can take another request without passing
@@ -794,15 +822,36 @@ func (s *Scheduler) Dispatch(
 			continue
 		}
 
-		// 2. Pre-flight per-key sliding-window RPM rate limiter check
-		rpmLimit := cand.KeyEntry.MaxRPM
-		if rpmLimit <= 0 && cand.Provider != nil {
-			rpmLimit = cand.Provider.RPMPerKey
+		// 2. Pre-flight RPM checks: the provider-wide sliding window first (cheap,
+		// and one exhausted window stops every key of the provider at once), then
+		// the per-key limit. Provider.RPMPerKey is the provider's OVERALL RPM
+		// ceiling (0 = unlimited), not a per-key limit — it must never fall back
+		// into the key-level check, or N keys would each get the whole-provider
+		// ceiling. Both takes return undo tokens: a candidate refused after the
+		// provider take (key-level quota, OAuth refresh, request build) hands the
+		// provider token back, so attempts that never dial never consume the
+		// provider window.
+		var releaseProviderRPM, releaseKeyRPM func()
+		if cand.Provider != nil && cand.Provider.RPMPerKey > 0 {
+			rel, ok := s.providerRPMLimiter.TryAcquireToken(providerRPMKey(cand.Provider.ID), cand.Provider.RPMPerKey)
+			if !ok {
+				skips = appendSkipOnce(skips, fmt.Sprintf("%s (provider RPM limit)", cand.Provider.ID))
+				continue
+			}
+			releaseProviderRPM = rel
 		}
-		if rpmLimit > 0 && !s.rpmLimiter.TryAcquire(cand.KeyTag, rpmLimit) {
-			// Over quota! Skip key cleanly before dialing upstream
-			skips = append(skips, fmt.Sprintf("%s (RPM limit)", keyID))
-			continue
+		if rpmLimit := cand.KeyEntry.MaxRPM; rpmLimit > 0 {
+			rel, ok := s.rpmLimiter.TryAcquireToken(cand.KeyTag, rpmLimit)
+			if !ok {
+				// Over quota! Skip key cleanly before dialing upstream and hand the
+				// provider token back — this candidate will not make a request.
+				if releaseProviderRPM != nil {
+					releaseProviderRPM()
+				}
+				skips = appendSkipOnce(skips, fmt.Sprintf("%s (RPM limit)", keyID))
+				continue
+			}
+			releaseKeyRPM = rel
 		}
 
 		var (
@@ -810,6 +859,23 @@ func (s *Scheduler) Dispatch(
 			retErr error
 		)
 		func() {
+			// Any failure before the request is on the wire gives the RPM tokens
+			// back: the sliding windows must count requests that were actually
+			// sent, not attempts that never dialed. onWire flips just before the
+			// HTTP call; from there the tokens stay (the attempt is real traffic).
+			onWire := false
+			defer func() {
+				if onWire {
+					return
+				}
+				if releaseKeyRPM != nil {
+					releaseKeyRPM()
+				}
+				if releaseProviderRPM != nil {
+					releaseProviderRPM()
+				}
+			}()
+
 			// 3. Concurrency tracking: start waiting (guaranteed cleanup via defer)
 			queuedStart := time.Now()
 			cancelWait := s.lanes.StartWaiting(cand.KeyTag)
@@ -887,6 +953,7 @@ func (s *Scheduler) Dispatch(
 
 			// Execute HTTP call
 			sendStart := time.Now()
+			onWire = true
 			resp, callErr := client.Do(upReq)
 			sentMillis := time.Since(sendStart).Milliseconds()
 			tryElapsed := time.Since(tryStart).Milliseconds()

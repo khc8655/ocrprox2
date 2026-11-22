@@ -15,6 +15,22 @@ type RPMLimiter struct {
 	requests map[string][]time.Time
 }
 
+// providerRPMKey returns the bucket id for a provider-wide RPM window.
+//
+// Semantics of Provider.RPMPerKey: 该供应商整体 RPM 上限（0=不限）— a ceiling shared
+// by ALL keys of the provider, NOT a per-key limit. A key with MaxRPM <= 0 is
+// unlimited on its own; it is only constrained by this provider-wide window.
+//
+// Provider-wide buckets live in their own RPMLimiter instance (Scheduler
+// providerRPMLimiter), never in the same map as the per-key buckets: per-key
+// buckets are keyed by the KeyTag ("provider:key_label"), and key strings alone
+// cannot keep two such namespaces apart (a provider literally named "provider"
+// with a key labelled like another provider's id would collide). Separate
+// instances make the disjointness hold by construction.
+func providerRPMKey(providerID string) string {
+	return "provider:" + providerID
+}
+
 // NewRPMLimiter creates a sliding-window RPM limiter.
 // Default window is 1 minute (60 seconds) if omitted or non-positive.
 func NewRPMLimiter(window ...time.Duration) *RPMLimiter {
@@ -85,6 +101,47 @@ func (l *RPMLimiter) Record(who string) {
 	now := time.Now()
 	ts := l.pruneLocked(who, now)
 	l.requests[who] = append(ts, now)
+}
+
+// TryAcquireToken is TryAcquire with an undo. When ok is true the caller holds
+// one window slot and release removes exactly the timestamp this call recorded;
+// call it when the pre-authorized request is skipped or fails before reaching
+// the upstream, so the window is not consumed by traffic that never happened.
+// A limit <= 0 is unlimited and returns a no-op release.
+func (l *RPMLimiter) TryAcquireToken(who string, limit int) (release func(), ok bool) {
+	if limit <= 0 {
+		return func() {}, true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	ts := l.pruneLocked(who, now)
+	if len(ts) >= limit {
+		return nil, false
+	}
+	l.requests[who] = append(ts, now)
+	return func() { l.remove(who, now) }, true
+}
+
+// remove drops the first timestamp equal to at from who's window. Timestamps
+// are unique in practice; if two acquires landed on the same clock tick,
+// removing either one keeps the window count correct.
+func (l *RPMLimiter) remove(who string, at time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ts := l.requests[who]
+	for i, t := range ts {
+		if t.Equal(at) {
+			ts = append(ts[:i], ts[i+1:]...)
+			if len(ts) == 0 {
+				delete(l.requests, who)
+			} else {
+				l.requests[who] = ts
+			}
+			return
+		}
+	}
 }
 
 // Count returns active requests in the sliding window for who.

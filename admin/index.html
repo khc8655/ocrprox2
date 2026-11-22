@@ -1,11 +1,8 @@
 <!DOCTYPE html><html lang="zh-CN"><head>
   <script>window.__HOST_KIND__="hub";</script><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><title>LLMProxy2 控制台</title><style>
 :root{--khc-primary-500:#1664FF;--khc-primary-600:#0F54E0;--khc-primary-50:#E6EEFF;--khc-primary-100:#D1E0FF;--khc-surface-page:#F8FAFC;--khc-surface-card:#FFFFFF;--khc-surface-hover:#F1F5F9;--khc-surface-muted:#F1F5F9;--khc-border-1:#E2E8F0;--khc-border-2:#CBD5E1;--khc-text-1:#0F172A;--khc-text-2:#475569;--khc-text-3:#94A3B8;--khc-success-500:#10B981;--khc-success-bg:#ECFDF5;--khc-success-text:#047857;--khc-warning-500:#F59E0B;--khc-warning-bg:#FFFBEB;--khc-warning-text:#B45309;--khc-danger-500:#EF4444;--khc-danger-bg:#FEF2F2;--khc-danger-text:#B91C1C;--khc-radius-sm:4px;--khc-radius-md:6px;--khc-radius-lg:8px;--khc-radius-xl:12px;--khc-shadow-sm:0 1px 2px rgba(15,23,42,0.04);--khc-shadow-md:0 4px 12px rgba(15,23,42,0.08);--khc-shadow-lg:0 12px 32px rgba(15,23,42,0.14);--khc-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--khc-font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--khc-weight-body:400;--khc-weight-medium:500;--khc-weight-strong:600;--khc-text-xs:12px;--khc-text-sm:13px;--khc-text-md:14px;--khc-header-h:48px;--khc-ctrl-h:32px}:root[data-theme="dark"]{--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;background-color:var(--khc-surface-page);color:var(--khc-text-1);font-family:var(--khc-font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}[hidden],.hidden{display:none !important}.tabular{font-variant-numeric:tabular-nums;font-family:var(--khc-font-mono)}.mono{font-family:var(--khc-font-mono)}.app-header{position:sticky;top:0;z-index:40;background-color:var(--khc-surface-card);border-bottom:1px solid var(--khc-border-1)}.header-inner{max-width:1120px;margin:0 auto;height:var(--khc-header-h);padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}.brand-mark{width:24px;height:24px;border-radius:var(--khc-radius-md);background:var(--khc-primary-500);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}.brand-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--khc-text-1)}.badge-role{font-size:11px;font-weight:500;padding:2px 6px;border-radius:var(--khc-radius-sm);background-color:var(--khc-primary-50);color:var(--khc-primary-500)}.nav-wrap{display:flex;align-items:center;min-width:0;flex:1;justify-content:center}.seg{display:inline-flex;align-items:center;gap:2px;background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:2px}.seg-btn{appearance:none;border:none;background:transparent;color:var(--khc-text-2);font-family:inherit;font-size:12px;font-weight:500;height:26px;padding:0 12px;border-radius:var(--khc-radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;transition:color 0.15s ease,background-color 0.15s ease}.seg-btn:hover{color:var(--khc-text-1)}.seg-btn.active{background-color:var(--khc-surface-card);color:var(--khc-text-1);font-weight:500;box-shadow:var(--khc-shadow-sm)}.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.version-pill{font-size:11px;font-weight:500;padding:0 8px;height:26px;display:inline-flex;align-items:center;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);color:var(--khc-text-2)}.main-wrap{max-width:1120px;margin:0 auto;padding:20px}.view-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}.view-title{margin:0;font-size:18px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.01em}.view-sub{margin:2px 0 0 0;font-size:12px;color:var(--khc-text-2)}.view-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}.search-box{position:relative;flex:1;min-width:200px;max-width:320px}.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--khc-text-3);pointer-events:none;display:inline-flex}.search-input{padding-left:30px !important}.btn{appearance:none;border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;font-weight:500;height:var(--khc-ctrl-h);padding:0 12px;border-radius:var(--khc-radius-md);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;transition:background-color 0.15s ease,border-color 0.15s ease}.btn:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:var(--khc-border-2)}.btn:disabled{opacity:0.5;cursor:not-allowed}.btn--primary{background-color:var(--khc-primary-500);border-color:var(--khc-primary-500);color:#FFFFFF}.btn--primary:hover:not(:disabled){background-color:var(--khc-primary-600);border-color:var(--khc-primary-600)}.btn--danger{color:var(--khc-danger-text);border-color:var(--khc-border-1)}.btn--danger:hover:not(:disabled){background-color:var(--khc-danger-bg);border-color:var(--khc-danger-500)}.btn--sm{height:26px;padding:0 10px;font-size:11px}.btn--icon{width:var(--khc-ctrl-h);padding:0}.btn--ghost{background-color:transparent;border-color:transparent;color:var(--khc-text-2)}.btn--ghost:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:transparent;color:var(--khc-text-1)}.btn.active{background-color:var(--khc-primary-50);border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.input,.select,.textarea{width:100%;height:var(--khc-ctrl-h);padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;outline:none;transition:border-color 0.15s ease}.input:focus,.select:focus,.textarea:focus{border-color:var(--khc-primary-500)}.input--code{font-family:var(--khc-font-mono);font-size:12px}.textarea{height:auto;min-height:76px;padding:8px 10px;resize:vertical;line-height:1.45}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}.form-group{display:flex;flex-direction:column;gap:5px;min-width:0}.form-group--span2{grid-column:span 2}.form-group--full{grid-column:1 / -1}.form-label{font-size:12px;font-weight:500;color:var(--khc-text-2);display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px;line-height:18px}.input-row{display:flex;align-items:center;gap:8px;min-width:0}.input-row > .input,.input-row > .select{flex:1 1 auto;min-width:0;width:auto}.input-row > .btn{flex-shrink:0}input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:var(--khc-primary-500);cursor:pointer;flex-shrink:0}.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--khc-border-1)}.form-actions--split{justify-content:space-between;flex-wrap:wrap}.form-actions-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);box-shadow:var(--khc-shadow-sm);overflow:hidden;margin-bottom:16px}.card-pad{padding:16px 20px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);flex-wrap:wrap}.card-title{margin:0;font-size:14px;font-weight:500;color:var(--khc-text-1);display:flex;align-items:center;gap:8px}.card-sub{font-size:12px;color:var(--khc-text-2)}.row{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);cursor:pointer;transition:background-color 0.12s ease}.row:last-child{border-bottom:none}.row:hover{background-color:var(--khc-surface-hover)}.row.expanded{background-color:var(--khc-surface-hover)}.row--static{cursor:default}.row--static:hover{background-color:transparent}.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:var(--khc-text-3)}.dot--ok{background-color:var(--khc-success-500)}.dot--warn{background-color:var(--khc-warning-500)}.dot--err{background-color:var(--khc-danger-500)}.ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--khc-text-2)}.ico svg{width:16px;height:16px}.who{flex:1;min-width:0}.name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:500;color:var(--khc-text-1)}.sub{font-size:11px;color:var(--khc-text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fields{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}.caret{font-size:11px;color:var(--khc-text-3);transition:transform 0.15s ease}.row.expanded .caret{transform:rotate(180deg)}.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--khc-radius-sm);font-size:11px;font-weight:500;background-color:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);white-space:nowrap}.pill--accent{background-color:var(--khc-primary-50);border-color:var(--khc-primary-100);color:var(--khc-primary-500)}.pill--green{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.pill--amber{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.pill--red{background-color:var(--khc-danger-bg);border-color:transparent;color:var(--khc-danger-text)}.editor{padding:16px 20px;background-color:var(--khc-surface-muted);border-bottom:1px solid var(--khc-border-1)}.editor-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--khc-border-1)}.section-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th{text-align:left;font-size:12px;font-weight:500;color:var(--khc-text-2);padding:9px 12px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);white-space:nowrap}.data-table td{padding:9px 12px;border-bottom:1px solid var(--khc-border-1);color:var(--khc-text-1);vertical-align:middle}.data-table th:first-child,.data-table td:first-child{padding-left:20px}.data-table th:last-child,.data-table td:last-child{padding-right:20px;white-space:nowrap}.data-table tr:last-child td{border-bottom:none}.data-table tr:hover td{background-color:var(--khc-surface-hover)}.health-bar{display:flex;align-items:center;gap:8px}.health-track{width:72px;height:6px;border-radius:3px;background-color:var(--khc-border-1);overflow:hidden;flex-shrink:0}.health-fill{height:100%;fill:var(--khc-primary-500);background-color:var(--khc-primary-500);border-radius:3px}.health-fill--ok{fill:var(--khc-success-500);background-color:var(--khc-success-500)}.health-fill--warn{fill:var(--khc-warning-500);background-color:var(--khc-warning-500)}.health-fill--err{fill:var(--khc-danger-500);background-color:var(--khc-danger-500)}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);padding:14px 16px;box-shadow:var(--khc-shadow-sm);display:flex;flex-direction:column;gap:4px}.kpi-label{font-size:12px;font-weight:500;color:var(--khc-text-2)}.kpi-value{font-size:20px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.kpi-sub{font-size:11px;color:var(--khc-text-3)}.chart-svg{width:100%;height:auto;display:block}.chart-axis{stroke:var(--khc-border-1);stroke-width:1}.chart-rect--in{fill:var(--khc-primary-500)}.chart-rect--cache{fill:var(--khc-success-500)}.chart-rect--write{fill:var(--khc-warning-500)}.chart-rect--out{fill:var(--khc-primary-100)}.chart-rect--req{fill:var(--khc-primary-500)}.chart-rect--fail{fill:var(--khc-danger-500)}.chart-rect--ttft{fill:var(--khc-warning-500)}.chart-gridline{stroke:var(--khc-border-1);stroke-width:1;stroke-dasharray:3 3}.chart-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;color:var(--khc-text-2)}.legend-item{display:inline-flex;align-items:center;gap:5px}.legend-swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}.legend-swatch--in{background-color:var(--khc-primary-500)}.legend-swatch--cache{background-color:var(--khc-success-500)}.legend-swatch--write{background-color:var(--khc-warning-500)}.legend-swatch--out{background-color:var(--khc-primary-100)}.legend-swatch--fail{background-color:var(--khc-danger-500)}.legend-swatch--own{background-color:#64748B}.legend-swatch--queued{background-color:#8B5CF6}.legend-swatch--sent{background-color:#06B6D4}.legend-swatch--ttft{background-color:var(--khc-warning-500)}.legend-swatch--flow{background-color:var(--khc-primary-500)}.legend-swatch--retried{background-color:var(--khc-danger-500)}.chart-empty{padding:20px 12px;text-align:center;color:var(--khc-text-3);font-size:12px}.chart-label{font-size:10px;fill:var(--khc-text-3);font-family:var(--khc-font-mono)}.heatmap-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.heatmap-svg{width:100%;min-width:580px;height:auto;display:block}.heatmap-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;font-size:11px;color:var(--khc-text-2);flex-wrap:wrap}.heatmap-legend{display:inline-flex;align-items:center;gap:4px}.heat-swatch{width:10px;height:10px;border-radius:2px;display:inline-block}.heat-swatch--l0{background-color:var(--khc-surface-muted)}.heat-swatch--l1{background-color:#DBEAFE}.heat-swatch--l2{background-color:#93C5FD}.heat-swatch--l3{background-color:#3B82F6}.heat-swatch--l4{background-color:#1664FF}:root[data-theme="dark"] .heat-swatch--l1{background-color:#1E3A8A}:root[data-theme="dark"] .heat-swatch--l2{background-color:#1D4ED8}:root[data-theme="dark"] .heat-swatch--l3{background-color:#3B82F6}:root[data-theme="dark"] .heat-swatch--l4{background-color:#60A5FA}.heat-cell{fill:var(--khc-surface-muted)}.heat-l1{fill:#DBEAFE}.heat-l2{fill:#93C5FD}.heat-l3{fill:#3B82F6}.heat-l4{fill:#1664FF}:root[data-theme="dark"] .heat-l1{fill:#1E3A8A}:root[data-theme="dark"] .heat-l2{fill:#1D4ED8}:root[data-theme="dark"] .heat-l3{fill:#3B82F6}:root[data-theme="dark"] .heat-l4{fill:#60A5FA}.probe-pills-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.probe-pill{font-family:var(--khc-font-mono);font-size:11px;padding:4px 8px;border-radius:var(--khc-radius-sm);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);cursor:pointer}.probe-pill:hover{border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.probe-pill--managed{background-color:var(--khc-success-bg);color:var(--khc-success-text);border-color:transparent}.headers-details{border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);padding:8px 12px}.headers-details summary{cursor:pointer;user-select:none;font-weight:500}.headers-pre{margin:8px 0 0 0;padding:10px;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);overflow-x:auto;font-size:11px}.snippet-box{background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:10px 12px}.snippet-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.snippet-code{display:block;font-family:var(--khc-font-mono);font-size:11px;color:var(--khc-text-1);overflow-x:auto;white-space:nowrap}.waterfall-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px 12px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md)}.wf-item{font-size:12px;display:flex;align-items:center;gap:4px}.wf-label{color:var(--khc-text-2)}.try-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);margin-top:6px}.wf-bar-svg{width:100%;height:14px;display:block;border-radius:4px;overflow:hidden;background-color:var(--khc-surface-muted)}.wf-seg--own{fill:#64748B}.wf-seg--queued{fill:#8B5CF6}.wf-seg--sent{fill:#06B6D4}.wf-seg--ttft{fill:var(--khc-warning-500)}.wf-seg--flow{fill:var(--khc-primary-500)}.wf-seg--retried{fill:var(--khc-danger-500)}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric-box{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:8px 10px}.metric-box-label{font-size:11px;color:var(--khc-text-2)}.metric-box-val{font-size:14px;font-weight:600;color:var(--khc-text-1);margin-top:2px}.live-strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.live-strip-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.trace-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.trace-toolbar .search-box{flex:1 1 200px}.trace-toolbar .select{width:auto;min-width:120px}.input--compact{height:26px;padding:0 8px;font-size:11px;min-width:68px}.update-box{padding:12px 14px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.update-notes{margin:8px 0 0 18px;padding:0;font-size:12px;color:var(--khc-text-2);line-height:1.55}.step-num{width:20px;height:20px;border-radius:50%;background-color:var(--khc-primary-50);color:var(--khc-primary-500);font-size:11px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.privacy-masked .privacy-mask{filter:blur(5px);user-select:none}.login-overlay{position:fixed;inset:0;z-index:100;background-color:rgba(15,23,42,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}.login-overlay > .login-card{margin:auto;flex-shrink:0}.login-card{width:100%;max-width:380px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-xl);box-shadow:var(--khc-shadow-lg);padding:24px}.login-card--wide{max-width:680px}.login-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.login-error{margin-top:10px;padding:8px 10px;border-radius:var(--khc-radius-md);background-color:var(--khc-danger-bg);color:var(--khc-danger-text);font-size:12px}.toast-box{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:340px}.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);box-shadow:var(--khc-shadow-md);font-size:12px;color:var(--khc-text-1)}.check-group{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-height:32px}.check-chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);font-size:12px;color:var(--khc-text-1);cursor:pointer;user-select:none;transition:border-color var(--khc-duration-fast) var(--khc-ease-out),background-color var(--khc-duration-fast) var(--khc-ease-out)}.check-chip:hover{border-color:var(--khc-border-2)}.check-chip input{margin:0;cursor:pointer}.textarea--json{min-height:84px;font-family:var(--khc-font-mono);font-size:11px;line-height:1.45;resize:vertical}.notice-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-2);font-size:12px;line-height:1.45}.notice-strip--ok{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.notice-strip--warn{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.code-snippet-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.code-pre{margin:0;padding:12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-1);font-family:var(--khc-font-mono);font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre}.flex-1{flex:1;min-width:0}.flex-end{display:flex;justify-content:flex-end;align-items:flex-end}.gap-2{gap:8px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mr-2{margin-right:8px}.text-sm{font-size:12px}.text-xs{font-size:11px}.text-muted{color:var(--khc-text-2)}.text-danger{color:var(--khc-danger-text)}.text-ok{color:var(--khc-success-text)}@media (max-width:768px){.header-inner{height:auto;min-height:var(--khc-header-h);padding:8px 12px;flex-wrap:wrap;row-gap:8px}.brand{order:1}.header-actions{order:2}.nav-wrap{order:3;flex-basis:100%;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-wrap::-webkit-scrollbar{display:none}.main-wrap{padding:14px 12px}.kpi-grid,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:12px}.kpi-value{font-size:17px}.form-grid,.form-grid--2{grid-template-columns:minmax(0,1fr);gap:10px}.form-group--span2{grid-column:span 1}.search-box{max-width:none;flex-basis:100%}.row{padding:10px 12px;flex-wrap:wrap}.fields{width:100%;justify-content:flex-end;margin-top:4px}.editor{padding:12px}.card-pad{padding:12px 14px}.toast-box{left:12px;right:12px;bottom:12px;max-width:none}}.avatar-initial{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin-right:6px;border-radius:50%;background:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);font-size:11px;font-weight:600;line-height:1;user-select:none}.form-label--check{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer}.key-cell{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="card card-pad" id="addProviderForm" hidden><div class="section-bar"><h2 class="card-title">新增供应商</h2><button class="btn btn--sm" id="btnToggleCurlPaste" type="button">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴完整 curl 命令，自动提取 Base URL、协议与 API Key"></textarea></div><div class="form-grid"><div class="form-group form-group--span2"><label class="form-label">供应商来源</label><select class="select" id="newProvSource"><option value="custom">自定义（手动填写）</option><option value="vault">中枢托管（按需拉取）</option></select><span class="text-xs text-muted mt-1" id="newProvSourceHint"></span></div><div class="form-group form-group--span2 hidden" id="newProvVaultGroup" hidden><label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label><div class="probe-pills-wrap" id="newProvVaultPick"></div><span class="text-xs text-muted mt-1" id="newProvVaultHint"></span></div><div class="form-group"><label class="form-label">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="例如 deepseek"></div><div class="form-group"><label class="form-label">显示名称</label><input class="input" id="newProvName" placeholder="例如 DeepSeek 官方"><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group form-group--span2"><label class="form-label">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider" type="button">探测协议</button></div></div><div class="form-group"><label class="form-label">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select></div><div class="form-group" id="newProvKeyAliasGroup"><label class="form-label">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="例如 pool-01"></div><div class="form-group form-group--span2" id="newProvApiKeyGroup"><label class="form-label">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="粘贴 API Key (可选)"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddProvider" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all" type="button">全部</button><button class="seg-btn" data-filter="enabled" type="button">已启用</button><button class="seg-btn" data-filter="healthy" type="button">探活通过</button><button class="seg-btn" data-filter="issue" type="button">异常 / 未测</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由、多密钥故障转移及固定 4 通道并发编排</p></div><div class="view-actions"><div class="seg" id="modelPipelineSeg"><button class="seg-btn active" data-submode="all" type="button">全部</button><button class="seg-btn" data-submode="fixed" type="button">固定 4 通道</button><button class="seg-btn" data-submode="custom" type="button">自定义模型</button></div><button class="btn" id="btnImportFromTemplate" type="button" hidden>从模板导入</button><button class="btn btn--primary" id="btnAddModel" type="button">添加模型</button></div></div><div class="card card-pad" id="addModelForm" hidden><h2 class="card-title mb-3">新增逻辑模型路由</h2><div class="form-grid"><div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="newModelName" placeholder="例如 claude-sonnet-4-5"></div><div class="form-group"><label class="form-label">首选供应商</label><select class="select" id="newModelProvider"></select></div><div class="form-group"><label class="form-label">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空默认与对外模型名一致"></div></div><div class="form-actions"><button class="btn" id="btnCancelAddModel" type="button">取消</button><button class="btn btn--primary" id="btnConfirmAddModel" type="button">确认添加</button></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div><div class="login-overlay hidden" id="templateImportOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">从模板导入模型路由</h2><p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p></div><button class="btn btn--sm" id="btnCloseTemplateImport" type="button" aria-label="关闭导入窗口">关闭</button></div><div id="templateImportList"></div><div class="form-actions"><button class="btn btn--primary" id="btnConfirmImportRoutes" type="button">导入选中路由</button></div></div></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode" type="button">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeProvAll" checked><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="issueNodeProvs" hidden></div></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeModelAll" checked><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="issueNodeModels" hidden></div></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue" type="button">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" type="button" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings" type="button">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span></div><div class="form-grid form-grid--2"><div class="form-group" id="gwBaseUrlGroup"><label class="form-label">网关入口地址 (Base URL)</label><input class="input input--code" id="gwBaseUrl" readonly></div><div class="form-group"><label class="form-label">主客户端鉴权密钥 (client_key)</label><div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey" type="button">随机生成</button><button class="btn" id="btnSaveClientKey" type="button">保存密钥</button></div></div><div class="form-group form-group--span2"><label class="form-label">附加客户端密钥列表 (proxy_keys，逗号或换行分隔，支持多端分密钥轮换)</label><textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea></div></div><div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox"><div class="snippet-box"><div class="snippet-header"><span class="form-label">Claude Code 环境变量</span><button class="btn btn--sm" id="btnCopyClaudeSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetClaude"></code></div><div class="snippet-box"><div class="snippet-header"><span class="form-label">OpenAI / Cursor 配置</span><button class="btn btn--sm" id="btnCopyCursorSnippet" type="button">复制</button></div><code class="snippet-code" id="snippetCursor"></code></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" type="button" hidden>解除全部冷却</button></div><div class="form-grid"><div class="form-group"><label class="form-label">默认路由策略</label><select class="select" id="cfgRoutingStrategy"><option value="sticky_failover">多路会话粘性优先</option><option value="round_robin">空闲优先轮询</option><option value="weighted">按权重比例分摊</option><option value="least_busy">最少并发优先</option><option value="fast">动态低延迟优先</option><option value="manual">手动直通</option></select></div><div class="form-group"><label class="form-label">首字超时 (秒，5~600)</label><input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120"></div><div class="form-group"><label class="form-label">429 限流冷却 (秒)</label><input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">5xx 服务端异常冷却 (秒)</label><input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30"></div><div class="form-group"><label class="form-label">网络超时冷却 (秒)</label><input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label><input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400"></div></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label><input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4"></div><div class="form-group"><label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label><input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16"></div></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnTestVaultLink" type="button">测试连接</button></div><div class="form-grid form-grid--2"><div class="form-group" id="cfgVaultUrlGroup"><label class="form-label">Vault 中枢地址</label><input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com"></div><div class="form-group" id="cfgVaultTokenGroup"><label class="form-label">节点同步 Token</label><input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN"></div></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">导出当前完整配置 (JSON)</label><div><button class="btn" id="btnExportConfig" type="button">导出 JSON 配置文件</button></div></div><div class="form-group"><label class="form-label">导入 v1 / v2 配置文件</label><div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport" type="button">选择文件导入</button></div></div></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">原始 JSON 配置查看与直接保存 (脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson" type="button">重新载入当前配置</button><button class="btn" id="btnFormatRawJson" type="button">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson" type="button">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate" type="button">检查程序更新</button><button class="btn btn--danger" id="btnRestartService" type="button">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist><datalist id="datalistModels"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
+</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="login-overlay hidden" id="addProviderForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增供应商</h2></div><button class="btn" id="btnXProv">关闭</button></div><div class="fields mb-3"><button class="btn btn--sm" id="btnToggleCurlPaste">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 自动解析"></textarea></div><div class="form-group mb-3"><label class="form-label" for="newProvSource">供应商来源</label><select class="select" id="newProvSource"><option value="custom">自定义（手动填写）</option><option value="vault">中枢托管（按需拉取）</option></select><span class="text-xs text-muted" id="newProvSourceHint"></span></div><div class="form-group mb-3 hidden" id="newProvVaultGroup" hidden><label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label><div class="probe-pills-wrap" id="newProvVaultPick"></div><span class="text-xs text-muted" id="newProvVaultHint"></span></div><div class="form-group mb-3"><label class="form-label" for="newProvId">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="deepseek"><span class="text-xs text-muted">唯一标识，保存后不可改</span></div><div class="form-group mb-3"><label class="form-label" for="newProvName">显示名称</label><input class="input" id="newProvName" placeholder="DeepSeek 官方"><span class="text-xs text-muted">控制台显示名；厂商名自动匹配预设</span><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group mb-3"><label class="form-label" for="newProvBaseUrl">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider">探测协议</button></div><span class="text-xs text-muted">上游根地址，含版本段</span></div><div class="form-group mb-3"><label class="form-label" for="newProvApiType">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select><span class="text-xs text-muted">访问上游的协议；不确定可探测</span></div><div class="form-group mb-3" id="newProvKeyAliasGroup"><label class="form-label" for="newProvKeyAlias">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="pool-01"><span class="text-xs text-muted">首把 Key 标签；多把时自动递增</span></div><div class="form-group mb-3" id="newProvApiKeyGroup"><label class="form-label" for="newProvApiKey">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="API Key (可选)"><span class="text-xs text-muted">上游密钥；可换行/逗号分隔多把</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddProvider">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider">保存供应商</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all">全部</button><button class="seg-btn" data-filter="enabled">已启用</button><button class="seg-btn" data-filter="healthy">探活通过</button><button class="seg-btn" data-filter="issue">异常 / 未测</button><button class="seg-btn" data-filter="adapted">已适配</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由与多密钥故障转移</p></div><div class="view-actions"><button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button><button class="btn btn--primary" id="btnAddModel">添加模型</button></div></div><div class="login-overlay hidden" id="addModelForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增模型路由</h2></div><button class="btn" id="btnXModel">关闭</button></div><div class="form-group mb-3"><label class="form-label" for="newModelName">对外模型名</label><input class="input input--code" id="newModelName" placeholder="claude-sonnet-4-5"><span class="text-xs text-muted">Agent 客户端看到的模型名</span></div><div class="form-group mb-3"><label class="form-label" for="newModelProvider">首选供应商</label><input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商"><span class="text-xs text-muted">候选 Key 池来源</span></div><div class="card hidden" id="npPanel" hidden><div class="fields"><input class="input flex-1" id="npSearch" placeholder="搜索"></div><div id="npOptions" role="listbox"></div><div class="fields mb-2"><button class="btn" id="npManual">手动输入</button></div></div><div class="form-group mb-3"><label class="form-label" for="newModelTarget">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空同对外名"><span class="text-xs text-muted">上游真实模型 ID，留空同对外名</span></div><div class="form-group mb-3"><label class="form-label">探测上游模型</label><div class="fields"><button class="btn btn--sm" id="btnProbeModel">探测模型</button><span class="text-xs text-muted">用已存 Key 拉上游列表；也可手填</span></div></div><div class="mb-3 hidden" id="npbBox" hidden><input class="input input--code" id="npbFilter" placeholder="过滤模型..."><div class="probe-pills-wrap" id="npbPills"></div></div><div class="form-group mb-3"><label class="form-label">Key 勾选</label><div class="probe-pills-wrap" id="nmKeys"></div><span class="text-xs text-muted">勾选 Key 生成候选；默认全不勾</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddModel">取消</button><button class="btn btn--primary" id="btnConfirmAddModel">确认添加</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div><div class="login-overlay hidden" id="templateImportOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">从模板导入模型路由</h2><p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p></div><button class="btn btn--sm" id="btnCloseTemplateImport" aria-label="关闭导入窗口">关闭</button></div><div id="templateImportList"></div><div class="form-actions"><button class="btn btn--primary" id="btnConfirmImportRoutes">导入选中路由</button></div></div></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeProvAll" checked><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="issueNodeProvs" hidden></div></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeModelAll" checked><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="issueNodeModels" hidden></div></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span></div><div class="form-grid form-grid--2"><div class="form-group" id="gwBaseUrlGroup"><label class="form-label">网关入口地址 (Base URL)</label><input class="input input--code" id="gwBaseUrl" readonly></div><div class="form-group"><label class="form-label">主客户端鉴权密钥 (client_key)</label><div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey">随机生成</button><button class="btn" id="btnSaveClientKey">保存密钥</button></div></div><div class="form-group form-group--span2"><label class="form-label">附加客户端密钥列表 (proxy_keys，逗号或换行分隔，支持多端分密钥轮换)</label><textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea></div></div><div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox"><div class="snippet-box"><div class="snippet-header"><span class="form-label">Claude Code 环境变量</span><button class="btn btn--sm" id="btnCopyClaudeSnippet">复制</button></div><code class="snippet-code" id="snippetClaude"></code></div><div class="snippet-box"><div class="snippet-header"><span class="form-label">OpenAI / Cursor 配置</span><button class="btn btn--sm" id="btnCopyCursorSnippet">复制</button></div><code class="snippet-code" id="snippetCursor"></code></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button></div><div class="form-grid"><div class="form-group"><label class="form-label">默认路由策略</label><select class="select" id="cfgRoutingStrategy"><option value="sticky_failover">多路会话粘性优先</option><option value="round_robin">空闲优先轮询</option><option value="weighted">按权重比例分摊</option><option value="least_busy">最少并发优先</option><option value="fast">动态低延迟优先</option><option value="manual">手动直通</option></select></div><div class="form-group"><label class="form-label">首字超时 (秒，5~600)</label><input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120"></div><div class="form-group"><label class="form-label">429 限流冷却 (秒)</label><input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">5xx 服务端异常冷却 (秒)</label><input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30"></div><div class="form-group"><label class="form-label">网络超时冷却 (秒)</label><input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15"></div><div class="form-group"><label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label><input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400"></div></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label><input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4"></div><div class="form-group"><label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label><input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16"></div></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnTestVaultLink">测试连接</button></div><div class="form-grid form-grid--2"><div class="form-group" id="cfgVaultUrlGroup"><label class="form-label">Vault 中枢地址</label><input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com"></div><div class="form-group" id="cfgVaultTokenGroup"><label class="form-label">节点同步 Token</label><input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN"></div></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">导出当前完整配置 (JSON)</label><div><button class="btn" id="btnExportConfig">导出 JSON 配置文件</button></div></div><div class="form-group"><label class="form-label">导入 v1 / v2 配置文件</label><div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport">选择文件导入</button></div></div></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">原始 JSON 配置查看与直接保存 (脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson">重新载入当前配置</button><button class="btn" id="btnFormatRawJson">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate">检查程序更新</button><button class="btn btn--danger" id="btnRestartService">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
 (function () {
-const ICONS = {
-generic: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6v6H9z"/></svg>',
-};
 function initialOf(idOrName) {
 const raw = String(idOrName || '').trim();
 if (!raw) return '?';
@@ -17,12 +14,6 @@ const letter = initialOf(idOrName);
 const safe = letter.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 return `<span class="avatar-initial" aria-hidden="true">${safe}</span>`;
 }
-function getBrandKey() {
-return 'generic';
-}
-function getBrandIcon(idOrName) {
-return renderBrandIcon(idOrName);
-}
 const UI_ICONS = {
 eye: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
 eyeOff: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>',
@@ -31,23 +22,12 @@ moon: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="curre
 monitor: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
 logout: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
 search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
-plus: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
-refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
-activity: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
-sliders: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="2" y1="14" x2="6" y2="14"/><line x1="10" y1="8" x2="14" y2="8"/><line x1="18" y1="16" x2="22" y2="16"/></svg>',
-shield: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
 server: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
-download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
-upload: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
 };
 function uiIcon(name) {
 return UI_ICONS[name] || '';
 }
-window.BRAND_ICONS = ICONS;
-window.UI_ICONS = UI_ICONS;
 window.uiIcon = uiIcon;
-window.getBrandKey = getBrandKey;
-window.getBrandIcon = getBrandIcon;
 window.renderBrandIcon = renderBrandIcon;
 })();
 </script><script>
@@ -620,7 +600,6 @@ systemVersion: null,
 extraPresetsLoaded: false,
 activeTab: 'activity',
 activeEditorKey: null,
-modelSubMode: 'all',
 providerQuery: '',
 providerFilter: 'all',
 searchQuery: '',
@@ -639,6 +618,7 @@ probedModelsByProvider: {},
 probeFilterByProvider: {},
 vaultManifest: null,
 addProvVaultPick: '',
+addModelProbed: null,
 };
 function byIdIn(root, id) {
 if (!root || !id) return null;
@@ -729,11 +709,6 @@ const provDl = $('datalistProviders');
 if (provDl) {
 const pIds = Object.keys(state.config?.providers || {}).sort();
 provDl.innerHTML = pIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
-}
-const modDl = $('datalistModels');
-if (modDl) {
-const mIds = Object.keys(state.config?.agent_models || {}).sort();
-modDl.innerHTML = mIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
 }
 }
 function renumberSettingsSections() {
@@ -879,13 +854,6 @@ if (n < 3600) return `${Math.round(n / 60)}m`;
 if (n < 86400) return `${Math.round(n / 3600)}h`;
 return `${Math.round(n / 86400)}d`;
 }
-const FIXED_SLOT_META = {
-chat: { path: '/v1/chat/completions', desc: '固定 RAG 对话高并发通道' },
-embedding: { path: '/v1/embeddings', desc: '固定文档向量化高并发通道' },
-reranker: { path: '/v1/rerank', desc: '固定语义重排高并发通道' },
-ocr: { path: '/v1/ocr', desc: '固定多模态 OCR 高并发通道' },
-};
-const FIXED_SLOT_IDS = ['chat', 'embedding', 'reranker', 'ocr'];
 const ADVANCED_STRATEGIES = ['weighted', 'least_busy', 'fast', 'manual'];
 const STRATEGY_LABELS = {
 sticky_failover: '多路会话粘性',
@@ -895,31 +863,14 @@ least_busy: '最少并发优先',
 fast: '动态低延迟优先',
 manual: '手动严格直通',
 };
-function ensureUnifiedFixedRoutes(cfg) {
-if (!cfg || typeof cfg !== 'object') return;
-if (window.HOST && window.HOST.kind === 'hub') return;
-cfg.agent_models = cfg.agent_models || {};
-const kb = cfg.kb_models || {};
-for (const cat of FIXED_SLOT_IDS) {
-const kbList = Array.isArray(kb[cat]) ? kb[cat] : [];
-if (!cfg.agent_models[cat] && kbList.length > 0) {
-cfg.agent_models[cat] = {
-enabled: true,
-routing_strategy: 'round_robin',
-no_reasoning: cat === 'chat',
-force_non_stream: cat === 'chat',
-candidates: kbList.filter(Boolean).map((kc) => ({
-provider: kc.provider || '',
-key_label: kc.key_label || kc.key || '',
-target_model: kc.model || '',
-enabled: kc.enabled !== false,
-weight: 1,
-max_concurrency: Number(kc.max_concurrency || kc.max_conc || 0) || 0,
-})),
+const STRATEGY_HINTS = {
+sticky_failover: '会话固定同一 Key，失败才切换；保上下文缓存（推荐）',
+round_robin: '优先分给空闲 Key；高并发均摊',
+weighted: '按权重比例分摊；配额差异大时用',
+least_busy: '优先分给并发最小 Key；求瞬时均衡',
+fast: '按实测延迟动态选最快 Key；首字敏感时用',
+manual: '按候选顺序直通；调试排障用',
 };
-}
-}
-}
 function routesUsingKey(providerId, keyLabel) {
 const refs = [];
 const agentModels = (state.config && state.config.agent_models) || {};
@@ -939,10 +890,6 @@ refs.push(`固定通道 ${kind}`);
 return refs;
 }
 const eh = escapeHtml;
-function cssId(value) {
-const s = String(value == null ? '' : value);
-return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
-}
 function toggle(target, show) {
 const el = typeof target === 'string' ? document.getElementById(target) : target;
 if (!el) return;
@@ -1042,7 +989,6 @@ const hubOverviewBox = $('hubOverviewBox');
 const fullOverviewBox = $('fullOverviewBox');
 const btnClearAllCooldowns = $('btnClearAllCooldowns');
 const btnImportFromTemplate = $('btnImportFromTemplate');
-const modelPipelineSeg = $('modelPipelineSeg');
 if (navModels) navModels.hidden = false;
 if (navNodes) navNodes.hidden = !caps.nodeManager;
 if (navActivity) navActivity.hidden = false;
@@ -1052,7 +998,6 @@ if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
 if (fullOverviewBox) fullOverviewBox.hidden = isHub;
 if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
 if (btnImportFromTemplate) btnImportFromTemplate.hidden = !caps.vaultClient;
-if (modelPipelineSeg) modelPipelineSeg.hidden = isHub;
 const guardBox = $('concurrencyGuardBox');
 if (guardBox) guardBox.hidden = false;
 const sysBox = $('systemUpdateBox');
@@ -1070,8 +1015,8 @@ modelsTitle.textContent = isHub ? '模型路由模板（下发编排）' : '模�
 }
 if (modelsSub) {
 modelsSub.textContent = isHub
-? '中枢只做编排与下发模板，不参与流量中转；节点侧按需拉取供应商与模板路由。'
-: '管理当前网关对外暴露的模型路由、多密钥粘性/轮询策略及固定 4 通道并发编排。';
+? '仅下发给 lite 节点；full 节点可选导入'
+: '管理当前网关对外暴露的模型路由与多密钥粘性/轮询策略。';
 }
 const rpTitle = $('routingPolicyTitle');
 const rpSub = $('routingPolicySub');
@@ -1418,32 +1363,28 @@ toast(`解除冷却失败: ${e.message}`, 'err');
 }
 }
 const PRESETS_META = {
-openai: { id: 'openai', preset_id: 'openai', label: 'OpenAI 官方', base_url: 'https://api.openai.com/v1', api_type: 'openai-completions' },
-anthropic: { id: 'anthropic', preset_id: 'anthropic', label: 'Anthropic 官方', base_url: 'https://api.anthropic.com/v1', api_type: 'anthropic-messages' },
-deepseek: { id: 'deepseek', preset_id: 'deepseek', label: 'DeepSeek 官方开放平台', base_url: 'https://api.deepseek.com/v1', api_type: 'openai-completions' },
-google: { id: 'google', preset_id: 'google', label: 'Google AI Studio (Gemini)', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', api_type: 'gemini' },
-vertex: {
-id: 'vertex',
-preset_id: 'vertex',
-label: 'Google Vertex AI',
-base_url: 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi',
-api_type: 'openai-completions',
-hint: '请将 URL 中的 {project} 与 {region}（或 global 端点）替换为实际 GCP 项目与区域',
-},
-openrouter: { id: 'openrouter', preset_id: 'openrouter', label: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', anthropic_base_url: 'https://openrouter.ai/api/v1', api_type: 'openai-completions' },
-minimax: { id: 'minimax', preset_id: 'minimax', label: 'MiniMax (国际 api.minimax.io)', base_url: 'https://api.minimax.io/v1', anthropic_base_url: 'https://api.minimax.io/anthropic', api_type: 'openai-completions' },
-'minimax-cn': { id: 'minimax-cn', preset_id: 'minimax', label: 'MiniMax (国内 api.minimaxi.com)', base_url: 'https://api.minimaxi.com/v1', anthropic_base_url: 'https://api.minimaxi.com/anthropic', api_type: 'openai-completions' },
-siliconflow: { id: 'siliconflow', preset_id: 'siliconflow', label: '硅基流动 (SiliconFlow)', base_url: 'https://api.siliconflow.cn/v1', api_type: 'openai-completions' },
-stepfun: { id: 'stepfun', preset_id: 'stepfun', label: '阶跃星辰 (StepFun)', base_url: 'https://api.stepfun.com/step_plan', api_type: 'openai-completions' },
-sensenova: { id: 'sensenova', preset_id: 'sensenova', label: '商汤日日新 (SenseNova)', base_url: 'https://token.sensenova.cn/v1', anthropic_base_url: 'https://token.sensenova.cn/v1', api_type: 'openai-completions' },
-nvidia: { id: 'nvidia', preset_id: 'nvidia', label: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', api_type: 'openai-completions' },
-opencode: { id: 'opencode', preset_id: 'opencode', label: 'OpenCode Zen', base_url: 'https://opencode.ai/zen/v1', api_type: 'openai-completions' },
-cline: { id: 'cline', preset_id: 'cline', label: 'Cline 官方 API', base_url: 'https://api.cline.bot/api/v1', api_type: 'openai-completions' },
-amd: { id: 'amd', preset_id: 'amd', label: 'AMD Radeon Cloud', base_url: 'https://developer.amd.com.cn/radeon/api/v1', anthropic_base_url: 'https://developer.amd.com.cn/radeon/api/v1', api_type: 'openai-completions' },
-agnes: { id: 'agnes', preset_id: 'agnes', label: 'Agnes AI', base_url: 'https://apihub.agnes-ai.com/v1', anthropic_base_url: 'https://apihub.agnes-ai.com/v1', api_type: 'openai-completions' },
-bai: { id: 'bai', preset_id: 'bai', label: 'B.AI', base_url: 'https://api.b.ai/v1', anthropic_base_url: 'https://api.b.ai/v1', api_type: 'openai-completions' },
-tokenrhythm: { id: 'tokenrhythm', preset_id: 'tokenrhythm', label: 'TokenRhythm', base_url: 'https://tokenrhythm.studio/v1', api_type: 'openai-completions' },
+openai: ['OpenAI 官方', 'https://api.openai.com/v1', 'openai-completions', '1.2.1', '2026-10-19'],
+anthropic: ['Anthropic 官方', 'https://api.anthropic.com/v1', 'anthropic-messages'],
+deepseek: ['DeepSeek 官方开放平台', 'https://api.deepseek.com/v1', 'openai-completions', '1.2.0', '2026-10-18'],
+google: ['Google AI Studio (Gemini)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini', '1.2.0', '2026-10-18'],
+vertex: ['Google Vertex AI', 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi', 'openai-completions', '1.1.0', '2026-10-18'],
+openrouter: ['OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions', '1.0.0', '2026-10-18', 'https://openrouter.ai/api/v1'],
+minimax: ['MiniMax (国际 api.minimax.io)', 'https://api.minimax.io/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.minimax.io/anthropic'],
+'minimax-cn': ['MiniMax (国内 api.minimaxi.com)', 'https://api.minimaxi.com/v1', 'openai-completions', '', '', 'https://api.minimaxi.com/anthropic', 'minimax'],
+siliconflow: ['硅基流动 (SiliconFlow)', 'https://api.siliconflow.cn/v1', 'openai-completions', '1.2.0', '2026-10-18'],
+stepfun: ['阶跃星辰 (StepFun)', 'https://api.stepfun.com/step_plan', 'openai-completions', '1.2.0', '2026-10-18'],
+sensenova: ['商汤日日新 (SenseNova)', 'https://token.sensenova.cn/v1', 'openai-completions', '1.3.0', '2026-10-18', 'https://token.sensenova.cn/v1'],
+nvidia: ['NVIDIA NIM', 'https://integrate.api.nvidia.com/v1', 'openai-completions', '2.0.0', '2026-10-18'],
+opencode: ['OpenCode Zen', 'https://opencode.ai/zen/v1', 'openai-completions', '2.0.0', '2026-10-18'],
+cline: ['Cline 官方 API', 'https://api.cline.bot/api/v1', 'openai-completions', '1.1.1', '2026-10-30'],
+amd: ['AMD Radeon Cloud', 'https://developer.amd.com.cn/radeon/api/v1', 'openai-completions', '2026.10.19', '2026-10-19', 'https://developer.amd.com.cn/radeon/api/v1'],
+agnes: ['Agnes AI', 'https://apihub.agnes-ai.com/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://apihub.agnes-ai.com/v1'],
+bai: ['B.AI', 'https://api.b.ai/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.b.ai/v1'],
+tokenrhythm: ['TokenRhythm', 'https://tokenrhythm.studio/v1', 'openai-completions', '1.2.0', '2026-10-18'],
 };
+for (const [k, a] of Object.entries(PRESETS_META)) {
+PRESETS_META[k] = { id: k, preset_id: a[6] || k, label: a[0], base_url: a[1], api_type: a[2], version: a[3] || '', updated_at: a[4] || '', anthropic_base_url: a[5] || '' };
+}
 function parseCurl(text) {
 let s = String(text || '').trim();
 const head = /^curl(?:\.exe)?(?=\s)/i.exec(s);
@@ -1519,7 +1460,13 @@ return { url, base, protocol, key, model };
 function mergeExtraPresets(extraPresets = []) {
 if (!Array.isArray(extraPresets)) return;
 for (const p of extraPresets) {
-if (!p || !p.id || PRESETS_META[p.id]) continue;
+if (!p || !p.id) continue;
+const meta = PRESETS_META[p.id];
+if (meta) {
+meta.version = p.version || '';
+meta.updated_at = p.updated_at || '';
+continue;
+}
 PRESETS_META[p.id] = {
 id: p.id,
 preset_id: p.id,
@@ -1527,8 +1474,36 @@ label: p.name || p.id,
 base_url: p.base_url || '',
 anthropic_base_url: p.anthropic_base_url || '',
 api_type: normalizeApiType(p.protocol),
+version: p.version || '',
+updated_at: p.updated_at || '',
 };
 }
+}
+function presetMetaForProvider(p, pId) {
+const pid = String(p?.preset_id || pId || '').trim();
+if (!pid) return null;
+if (PRESETS_META[pid]) return PRESETS_META[pid];
+for (const meta of Object.values(PRESETS_META)) {
+if (meta.preset_id && meta.preset_id === pid) return meta;
+}
+return null;
+}
+function presetVersionText(meta) {
+if (!meta || !meta.version) return '';
+return `适配 ${meta.id} · v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}`;
+}
+function providerHasAdapter(p) {
+if (p.adapter_rules && Object.keys(p.adapter_rules).length > 0) return true;
+if (p.rule_hash) return true;
+const pid = String(p?.preset_id || '').trim();
+if (!pid) return false;
+return Boolean(presetVersionText(presetMetaForProvider(p, pid)));
+}
+function presetVersionPillHtml(p) {
+const pid = String(p?.preset_id || '').trim();
+const text = pid ? presetVersionText(presetMetaForProvider(p, pid)) : '';
+if (!text) return '<span class="pill" title="无适配文件">自定义（无适配文件）</span>';
+return `<span class="pill tabular" title="适配文件版本">${eh(text)}</span>`;
 }
 function setupToolbars() {
 const provSearch = $('providerSearchInput');
@@ -1556,19 +1531,6 @@ if (modelSearch) {
 modelSearch.addEventListener('input', (e) => {
 state.modelQuery = (e.target.value || '').trim().toLowerCase();
 renderModelsList();
-});
-}
-const modelSubSeg = $('modelPipelineSeg');
-if (modelSubSeg) {
-modelSubSeg.querySelectorAll('.seg-btn').forEach((btn) => {
-clk(btn, () => {
-const m = btn.getAttribute('data-submode') || 'all';
-state.modelSubMode = m;
-modelSubSeg.querySelectorAll('.seg-btn').forEach((b) => {
-b.classList.toggle('active', b.getAttribute('data-submode') === m);
-});
-renderModelsList();
-});
 });
 }
 clk($('btnHubRefreshOverview'), loadData);
@@ -1815,6 +1777,7 @@ if (apiSel && [...apiSel.options].some((o) => o.value === apiType)) apiSel.value
 const baseEl = $('newProvBaseUrl');
 if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
 }
+let closeProvPanel = () => {};
 function setupCreationForms() {
 const pForm = $('addProviderForm');
 const mForm = $('addModelForm');
@@ -1954,49 +1917,253 @@ state.activeEditorKey = `p_${id}`;
 toggle(pForm, false);
 await persistConfig('供应商创建成功');
 });
+if (pForm) {
+pForm.addEventListener('click', (ev) => {
+if (ev.target === pForm) toggle(pForm, false);
+});
+}
+clk($('btnXProv'), () => toggle(pForm, false));
+const cancelAddModel = () => {
+toggle(mForm, false);
+closeProvPanel();
+resetProbe();
+};
+if (mForm) {
+mForm.addEventListener('click', (ev) => {
+if (ev.target === mForm) cancelAddModel();
+});
+}
+clk($('btnXModel'), cancelAddModel);
+setupProvCombo();
 clk($('btnAddModel'), () => {
 toggle(mForm);
-if (mForm && !mForm.hidden) populateModelProvidersDropdown();
+if (mForm && !mForm.hidden) {
+resetProbe();
+closeProvPanel();
+const provInput = $('newModelProvider');
+if (provInput) provInput.value = '';
+const nameInput = $('newModelName');
+if (nameInput) nameInput.value = '';
+renderKeyPills();
+}
 });
-clk($('btnCancelAddModel'), () => toggle(mForm, false));
+clk($('btnCancelAddModel'), cancelAddModel);
+$('newModelProvider')?.addEventListener('change', () => {
+resetProbe();
+renderKeyPills();
+});
+const probeBtn = $('btnProbeModel');
+const showProbeFail = (msg) => {
+const list = $('npbPills');
+if (list) list.innerHTML = `<span class="text-xs text-muted">${eh(msg)}</span>`;
+toggle('npbBox', true);
+};
+clk(probeBtn, async () => {
+const prov = ($('newModelProvider')?.value || '').trim();
+if (!prov) return toast('请先选择供应商', 'warn');
+const p = state.config?.providers?.[prov] || {};
+toast(`探测 ${prov}...`, 'info');
+probeBtn.disabled = true;
+try {
+const res = await window.HOST.probeModels({
+provider: prov,
+base_url: p.base_url || '',
+api_type: normalizeApiType(p.api_type),
+});
+const models = Array.isArray(res?.models) ? res.models : [];
+if (models.length > 0) {
+resetProbe();
+state.addModelProbed = models;
+renderProbePills();
+toast(`探测成功: ${models.length} 个模型`, 'ok');
+} else {
+resetProbe();
+const msg = res?.error ? `未探测到模型: ${scrubUiText(res.error)}` : '未探测到可用模型，可手填上游目标模型 ID';
+showProbeFail(msg);
+toast(msg, 'warn');
+}
+} catch (e) {
+resetProbe();
+const msg = `探测异常: ${scrubUiText(e.message)}`;
+showProbeFail(msg);
+toast(msg, 'err');
+} finally {
+probeBtn.disabled = false;
+}
+});
 clk($('btnConfirmAddModel'), async () => {
 const mName = ($('newModelName')?.value || '').trim();
 const prov = ($('newModelProvider')?.value || '').trim();
 const target = ($('newModelTarget')?.value || '').trim() || mName;
-if (!mName) return toast('请输入逻辑模型名称', 'warn');
+const pickedLabels = [...document.querySelectorAll('#nmKeys .probe-pill--managed')]
+.map((b) => b.dataset.key)
+.filter(Boolean);
+if (!mName) return toast('请输入模型名', 'warn');
 state.config = state.config || { providers: {}, agent_models: {} };
 state.config.agent_models = state.config.agent_models || {};
 if (state.config.agent_models[mName]) {
 state.activeEditorKey = `m_${mName}`;
 toggle(mForm, false);
 renderModelsList();
-return toast('模型已存在，已为您展开编辑', 'info');
+return toast('模型已存在', 'info');
 }
+if (!prov) return toast('请选择供应商', 'warn');
+if (!state.config?.providers?.[prov]) return toast(`供应商 ${prov} 不存在，请先在供应商页创建`, 'warn');
+if (pickedLabels.length === 0) return toast('请至少勾选一把 Key', 'warn');
 const provKeys = state.config?.providers?.[prov]?.api_keys || [];
-const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-const keyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-const candidates = prov ? [{ provider: prov, key_label: keyLabel, target_model: target, enabled: true, weight: 1 }] : [];
+const candidates = pickedLabels
+.filter((lbl) => provKeys.some((k) => k && k.enabled !== false && (k.label || k.id) === lbl))
+.map((lbl) => ({ provider: prov, key_label: lbl, target_model: target, enabled: true, weight: 1 }));
+if (candidates.length === 0) return toast('勾选的 Key 已不存在或已禁用', 'warn');
 state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
 state.activeEditorKey = `m_${mName}`;
 toggle(mForm, false);
+resetProbe();
 await persistConfig('模型添加成功');
 });
 }
-function populateModelProvidersDropdown() {
-const sel = $('newModelProvider');
-if (!sel) return;
-sel.innerHTML = '';
-const provs = Object.keys(state.config?.providers || {}).sort();
-if (provs.length === 0) {
-sel.innerHTML = '<option value="">(暂无供应商)</option>';
-} else {
-provs.forEach((pId) => {
-const pName = state.config.providers[pId]?.name || pId;
-const opt = ce('option');
-opt.value = pId;
-opt.textContent = `${pName} (${pId})`;
-sel.appendChild(opt);
+function setupProvCombo() {
+const input = $('newModelProvider');
+const panel = $('npPanel');
+if (!input || !panel) return;
+const showPanel = () => {
+const search = $('npSearch');
+search.value = '';
+syncProvOptions();
+toggle(panel, true);
+search.focus();
+};
+closeProvPanel = () => toggle(panel, false);
+input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Escape' && !panel.hidden) {
+e.stopPropagation();
+closeProvPanel();
+} else if (e.key === 'ArrowDown') {
+e.preventDefault();
+if (panel.hidden) showPanel();
+panel.querySelector('button.row')?.focus();
+}
 });
+$('npSearch')?.addEventListener('input', () => syncProvOptions());
+panel.addEventListener('keydown', (e) => {
+if (e.key === 'Escape' && !panel.hidden) {
+e.stopPropagation();
+closeProvPanel();
+return;
+}
+if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+const rows = [...panel.querySelectorAll('button.row')];
+if (rows.length === 0) return;
+e.preventDefault();
+const idx = rows.indexOf(document.activeElement);
+(e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
+});
+clk($('npManual'), () => {
+const v = (input.value || '').trim();
+if (!v) return toast('请先输入供应商 ID', 'warn');
+pickProv(v);
+});
+}
+function syncProvOptions() {
+const box = $('npOptions');
+if (!box) return;
+const f = String($('npSearch')?.value || '').trim().toLowerCase();
+const provs = state.config?.providers || {};
+const ids = Object.keys(provs).sort().filter((pId) => {
+if (!f) return true;
+const p = provs[pId] || {};
+return `${pId} ${p.name || ''} ${p.base_url || ''}`.toLowerCase().includes(f);
+});
+box.innerHTML = '';
+if (ids.length === 0) {
+box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商，可手动输入</div>';
+return;
+}
+ids.forEach((pId) => {
+const p = provs[pId] || {};
+const rowBtn = ce('button');
+rowBtn.className = 'row';
+rowBtn.setAttribute('role', 'option');
+rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
+clk(rowBtn, () => pickProv(pId));
+box.appendChild(rowBtn);
+});
+}
+function pickProv(pId) {
+const input = $('newModelProvider');
+if (input) input.value = pId;
+closeProvPanel();
+resetProbe();
+renderKeyPills();
+}
+function resetProbe() {
+state.addModelProbed = null;
+const filterEl = $('npbFilter');
+if (filterEl) filterEl.value = '';
+toggle('npbBox', false);
+const pills = $('npbPills');
+if (pills) pills.innerHTML = '';
+const targetEl = $('newModelTarget');
+if (targetEl) targetEl.value = '';
+}
+function renderKeyPills() {
+const box = $('nmKeys');
+if (!box) return;
+box.innerHTML = '';
+const provId = ($('newModelProvider')?.value || '').trim();
+const allKeys = state.config?.providers?.[provId]?.api_keys || [];
+const keys = allKeys.filter((k) => k && k.enabled !== false);
+if (!provId || keys.length === 0) {
+box.innerHTML = `<span class="text-xs text-muted">${!provId ? '请先选择供应商' : '该供应商没有已启用的 Key'}</span>`;
+return;
+}
+keys.forEach((k, idx) => {
+const label = k?.label || k?.id || `key-${idx}`;
+const pill = ce('button');
+pill.type = 'button';
+pill.dataset.key = label;
+pill.className = 'probe-pill';
+pill.innerHTML = isHubMode() ? eh(label)
+: `${eh(label)}${k?.origin === 'vault' ? ' <span class="pill">中枢只读</span>' : ' <span class="pill pill--amber">本地</span>'}`;
+clk(pill, () => pill.classList.toggle('probe-pill--managed'));
+box.appendChild(pill);
+});
+}
+function renderProbePills() {
+const list = $('npbPills');
+if (!list) return;
+const models = Array.isArray(state.addModelProbed) ? state.addModelProbed : [];
+if (models.length === 0) {
+toggle('npbBox', false);
+list.innerHTML = '';
+return;
+}
+toggle('npbBox', true);
+const targetInput = $('newModelTarget');
+const draw = (rawFilter) => {
+const live = state.addModelProbed || [];
+list.innerHTML = '';
+const f = String(rawFilter || '').trim().toLowerCase();
+const visible = (f ? live.filter((m) => String(m).toLowerCase().includes(f)) : live).slice(0, 200);
+const curTarget = (targetInput?.value || '').trim();
+visible.forEach((modelName) => {
+const pill = ce('button');
+pill.type = 'button';
+pill.className = `probe-pill${curTarget === modelName ? ' probe-pill--managed' : ''}`;
+pill.textContent = modelName;
+clk(pill, () => {
+if (targetInput) targetInput.value = modelName;
+list.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
+});
+list.appendChild(pill);
+});
+};
+draw('');
+const filterEl = $('npbFilter');
+if (filterEl && !filterEl.dataset.bound) {
+filterEl.dataset.bound = '1';
+filterEl.addEventListener('input', (e) => draw(e.target.value));
 }
 }
 function switchTab(tab) {
@@ -2041,7 +2208,6 @@ async function loadData() {
 try {
 const cfgResp = await window.HOST.getConfig();
 if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
-ensureUnifiedFixedRoutes(cfgResp);
 state.config = cfgResp;
 const verEl = $('configVersionDisplay');
 if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
@@ -2059,6 +2225,7 @@ state.extraPresetsLoaded = true;
 window.HOST.getPresetsExtra().then((res) => {
 if (res && res.ok && Array.isArray(res.presets)) {
 mergeExtraPresets(res.presets);
+renderProvidersList();
 }
 }).catch(() => {});
 }
@@ -2217,39 +2384,6 @@ tr.innerHTML = `
 usageBody.appendChild(tr);
 }
 }
-async function verifyProviderKeys(pId) {
-const p = state.config?.providers?.[pId];
-if (!p) return;
-const keys = p.api_keys || [];
-if (keys.length === 0) return toast(`${p.name || pId} 暂无密钥可探活`, 'warn');
-toast(`正在探活 ${p.name || pId} (${keys.length} 把密钥)...`, 'info');
-let okCount = 0;
-for (let i = 0; i < keys.length; i++) {
-const k = keys[i];
-const lbl = k.label || k.id || `key-${i}`;
-try {
-const r = await window.HOST.verifyKey({
-provider: pId,
-api_key: k.key,
-key: k.key,
-key_label: lbl,
-base_url: p.base_url || '',
-api_type: normalizeApiType(p.api_type),
-});
-syncVersionFromRes(r);
-k.last_ok = !!(r && (r.ok || r.valid));
-k.last_status = r?.status || (k.last_ok ? 200 : 0);
-k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
-k.last_checked_at = new Date().toISOString();
-if (k.last_ok) okCount++;
-} catch (_) {
-k.last_ok = false;
-}
-}
-toast(`${p.name || pId} 探活完成: ${okCount}/${keys.length} 正常`, okCount === keys.length ? 'ok' : 'warn');
-if (window.HOST.kind === 'hub') renderHubOverview();
-renderProvidersList();
-}
 async function verifyAllHubKeys() {
 if (state.batchVerifying) return;
 const providers = state.config?.providers || {};
@@ -2370,6 +2504,7 @@ if (!hay.includes(q)) return false;
 if (f === 'enabled') return p.enabled !== false && keys.length > 0;
 if (f === 'healthy') return keys.some((k) => k.last_ok === true);
 if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
+if (f === 'adapted') return providerHasAdapter(p);
 return true;
 });
 if (pKeys.length === 0) {
@@ -2409,11 +2544,16 @@ const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCoun
 dot.className = `dot ${dotCls}`;
 const who = ce('div');
 who.className = 'who';
+const isVaultCard = !isHubMode() && p.origin === 'vault';
+const versionPill = isVaultCard && p.rule_hash
+? `<span class="pill tabular" title="中枢规则指纹 (rule_hash 前 8 位)">指纹 ${eh(String(p.rule_hash).slice(0, 8))}</span>`
+: presetVersionPillHtml(p);
 who.innerHTML = `
 <div class="name">
 ${brandIcon}
 <span>${eh(p.name || pId)}</span>
 ${(p.name && p.name !== pId) ? `<span class="pill">${eh(pId)}</span>` : ''}
+${versionPill}
 ${isHubMode() ? '' : (isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>')}
 ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
 ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
@@ -2541,6 +2681,10 @@ const aliasText = Object.entries(p.model_aliases || {})
 const adapterText = p.adapter_rules && Object.keys(p.adapter_rules).length > 0
 ? JSON.stringify(p.adapter_rules, null, 2)
 : '';
+const versionText = isVaultProv && p.rule_hash
+? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}`
+: (presetVersionText(presetMetaForProvider(p, String(p?.preset_id || '').trim())) || '自定义（无适配文件）');
+const presetVersionHint = `<span class="text-xs text-muted mt-1">${eh(versionText)}</span>`;
 const lockAttr = isVaultProv ? ' disabled' : '';
 const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAttr}>`
 + `<option value="openai-completions" ${curApiType === 'openai-completions' ? 'selected' : ''}>OpenAI 兼容 (/v1/chat/completions)</option>`
@@ -2576,15 +2720,15 @@ wrap.innerHTML = `<div class="form-grid">${[
 fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
 fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"${lockAttr}><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`),
 fg('上游协议类型', apiTypeSelectHtml),
+fg('该供应商整体 RPM 上限 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`),
 fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
-fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>`),
+fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>${presetVersionHint}`),
 `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额限流、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
+].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额重置、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
 fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
-fg('单 Key RPM 限制 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="不限">`),
 fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
 fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重 / RPM</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
+].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
 const tbody = q(`#p_keys_tbody_${pId}`);
 if (tbody && !tbody.dataset.revealWired) {
 tbody.dataset.revealWired = '1';
@@ -2622,17 +2766,12 @@ statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_s
 }
 const vaultKey = !isHubMode() && (isVaultProv || k.origin === 'vault');
 tr.innerHTML = `
-<td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td><td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td><td>${renderKeyCell(k, vaultKey, idx)}</td><td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}><input class="input input--compact tabular k_rpm_in" type="number" min="0" value="${k.max_rpm || ''}" placeholder="RPM" title="Max RPM" ${vaultKey ? 'disabled' : ''}></div></td>
+<td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td><td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td><td>${renderKeyCell(k, vaultKey, idx)}</td><td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}></div></td>
 ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
 <td>${statusHtml}</td><td><div class="fields"><button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button><button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button></div></td>
 `;
 tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
 k.weight = Math.max(1, Number(e.target.value) || 1);
-});
-tr.querySelector('.k_rpm_in')?.addEventListener('change', (e) => {
-const v = Number(e.target.value) || 0;
-if (v > 0) k.max_rpm = v;
-else delete k.max_rpm;
 });
 tr.querySelector('.btn_clear_k_cd')?.addEventListener('click', () => {
 clearSingleCooldown(cdTarget);
@@ -2927,8 +3066,14 @@ toast(`正在重新拉取供应商 ${pId}（规则与全部 Key）...`, 'info');
 try {
 const res = await window.HOST.fetchVaultCredentials(pId);
 if (res && res.ok) {
-toast(`供应商 ${pId} 已按中枢最新内容重新拉取`, 'ok');
 await loadData();
+const provs = state.config?.providers || {};
+const dangling = Object.entries(state.config?.agent_models || {})
+.filter(([n2, m2]) => templateRouteMissingKeyLabels(n2, m2, provs).length > 0)
+.map(([n2]) => n2);
+toast(dangling.length
+? `警告: 路由 ${dangling.join('、')} 有候选绑定的 Key 已缺失，请编辑候选池`
+: `供应商 ${pId} 已按中枢最新内容重新拉取`, dangling.length ? 'warn' : 'ok');
 } else {
 toast(`重新拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
 }
@@ -3449,28 +3594,14 @@ if (btnAddModel) {
 btnAddModel.hidden = false;
 btnAddModel.classList.remove('hidden');
 }
-ensureUnifiedFixedRoutes(state.config);
-const isHub = isHubMode();
 const models = state.config?.agent_models || {};
 const q = state.modelQuery || '';
-let sub = state.modelSubMode || 'all';
-if (isHub && sub === 'fixed') sub = 'all';
-const customKeys = Object.keys(models).filter((k) => !FIXED_SLOT_META[k]).sort();
-let orderedKeys = [];
-if (sub === 'fixed') {
-orderedKeys = [...FIXED_SLOT_IDS];
-} else if (sub === 'custom') {
-orderedKeys = customKeys;
-} else {
-orderedKeys = [...FIXED_SLOT_IDS, ...customKeys];
-}
-if (isHub) orderedKeys = orderedKeys.filter((mName) => !FIXED_SLOT_META[mName]);
+let orderedKeys = Object.keys(models).sort();
 orderedKeys = orderedKeys.filter((mName) => {
 if (!q) return true;
 const m = models[mName] || {};
-const meta = FIXED_SLOT_META[mName];
 const cands = (m.candidates || []).map((c) => `${c.provider} ${c.target_model}`).join(' ');
-return `${mName} ${meta?.path || ''} ${cands}`.toLowerCase().includes(q);
+return `${mName} ${cands}`.toLowerCase().includes(q);
 });
 if (orderedKeys.length === 0) {
 const emptyRow = ce('div');
@@ -3481,36 +3612,27 @@ return;
 }
 const stratLabels = STRATEGY_LABELS;
 for (const mName of orderedKeys) {
-const meta = FIXED_SLOT_META[mName];
-const isFixed = Boolean(meta);
-const m = models[mName] || {
-enabled: true,
-routing_strategy: isFixed ? 'round_robin' : 'sticky_failover',
-no_reasoning: mName === 'chat',
-force_non_stream: mName === 'chat',
-candidates: [],
-};
+const m = models[mName];
 const cCount = (m.candidates || []).length;
 const isExpanded = state.activeEditorKey === `m_${mName}`;
 const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
-const defaultStrat = isFixed ? 'round_robin' : 'sticky_failover';
-const strat = m.routing_strategy || defaultStrat;
+const strat = m.routing_strategy || 'sticky_failover';
 const row = ce('div');
 row.className = `row ${isExpanded ? 'expanded' : ''}`;
 const dot = ce('span');
-dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : (isFixed ? 'dot--warn' : 'dot--err')}`;
+dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}`;
 const who = ce('div');
 who.className = 'who';
-const subDesc = isFixed
-? `${meta.path} · ${meta.desc}`
-: `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
+const subDesc = `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
+const t = m._lastTest;
+const testPill = !t ? '' : t.ok
+? `<span class="pill pill--green tabular" title="${eh(t.text || '测试通过')}">测试 ${t.latency_ms || 0}ms · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`
+: `<span class="pill pill--red" title="${eh(t.error || '测试失败')}">测试失败 · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`;
 who.innerHTML = `
 <div class="name">
 ${brandIcon}
-<span>${eh(mName)}</span>
-${isFixed ? '<span class="pill pill--green">内置固定通道</span>' : ''}
-<span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
-${m._lastTestLatency ? `<span class="pill pill--green">${m._lastTestLatency}ms</span>` : ''}
+<span>${eh(mName)}</span><span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
+${testPill}
 </div><div class="sub">${eh(subDesc)}</div>
 `;
 const fields = ce('div');
@@ -3524,28 +3646,30 @@ const testBtn = fields.querySelector('.btn_test_agent_m');
 if (testBtn) {
 clk(testBtn, async (e) => {
 e.stopPropagation();
-toast(`正在测试 ${mName} 路由...`, 'info');
+toast(`正在测试 ${mName} 路由（最小真实推理）...`, 'info');
 try {
-let res;
 if (mName === 'embedding' || mName === 'reranker' || mName === 'ocr') {
 const first = (m.candidates || []).find((c) => c && c.enabled !== false) || m.candidates[0];
-res = await window.HOST.testCandidate({
-provider: first.provider,
-key_label: first.key_label,
-model: first.target_model || mName,
-type: mName,
-});
+if (!first) return toast('该路由没有候选', 'warn');
+const res = await window.HOST.testCandidate({ provider: first.provider, key_label: first.key_label, model: first.target_model || mName, type: mName });
+const ok = Boolean(res && res.ok);
+const text = String(res?.text || '').trim().slice(0, 40);
+m._lastTest = ok
+? { ok: true, latency_ms: res?.latency_ms || res?.ms || 0, provider: first.provider, key_label: first.key_label, text }
+: { ok: false, provider: first.provider, key_label: first.key_label, error: scrubUiText(res?.error || '路由无响应') };
+toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
 } else {
-res = await window.HOST.testAgentModel({ model: mName });
+const res = await window.HOST.testAgentModel({ model: mName });
+const results = (res && Array.isArray(res.results) ? res.results : []).filter(Boolean);
+const best = results.filter((r) => r.ok).sort((a, b) => (a.latency_ms || 0) - (b.latency_ms || 0))[0] || null;
+const failed = results.find((r) => !r.ok) || results[0] || {};
+m._lastTest = best
+? { ok: true, latency_ms: best.latency_ms || 0, provider: best.provider, key_label: best.key, text: '' }
+: { ok: false, provider: failed.provider || '', key_label: failed.key || '', error: scrubUiText(failed.error || res?.error || '路由无响应') };
+const ok = m._lastTest.ok;
+toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
 }
-if (res && res.ok) {
-const lat = res.latency_ms || res.ms || 0;
-m._lastTestLatency = lat;
-toast(`测试通过！耗时: ${lat}ms${res.winner_provider ? ` (优胜: ${res.winner_provider})` : ''}`, 'ok');
 renderModelsList();
-} else {
-toast(`测试失败: ${res?.error || '路由无响应'}`, 'err');
-}
 } catch (err) {
 toast(`测试异常: ${err.message}`, 'err');
 }
@@ -3563,112 +3687,179 @@ container.appendChild(row);
 if (isExpanded) {
 const editor = ce('div');
 editor.className = 'editor';
-editor.appendChild(buildModelEditor(mName, m, isFixed));
+editor.appendChild(buildModelEditor(mName, m));
 container.appendChild(editor);
 }
 }
 }
-function buildModelEditor(mName, m, isFixed = false) {
+function buildModelEditor(mName, m) {
 const wrap = ce('div');
 const q = makeScopedQuery(wrap);
 m.candidates = m.candidates || [];
 const candidates = m.candidates;
-const strat = m.routing_strategy || (isFixed ? 'round_robin' : 'sticky_failover');
+let stratVal = m.routing_strategy || 'sticky_failover';
+const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
 wrap.innerHTML = `
-<div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">路由策略</label><select class="select" id="ed_m_strat_${mName}"><option value="sticky_failover" ${strat === 'sticky_failover' ? 'selected' : ''}>会话粘性优先（推荐）</option><option value="round_robin" ${strat === 'round_robin' ? 'selected' : ''}>空闲优先轮询</option>
-${ADVANCED_STRATEGIES.includes(strat) ? `<option value="${strat}" selected>${STRATEGY_LABELS[strat]}（高级）</option>` : ''}
-<optgroup label="高级策略">
-${ADVANCED_STRATEGIES.map((k) => `<option value="${k}" ${strat === k ? 'selected' : ''}>${STRATEGY_LABELS[k]}</option>`).join('')}
-</optgroup></select><div class="text-xs text-muted mt-1">会话粘性：同一会话固定走同一 Key，命中缓存最省。轮询：优先分给空闲 Key。高级策略仅在明确需要时使用。</div></div><div class="form-group"><label class="form-label">首选/指定 Key (sticky/manual 可选)</label><input class="input" id="ed_m_act_${mName}" value="${eh(m.active_key || '')}" placeholder="格式: provider:key_label"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_m_noreas_${mName}" ${m.no_reasoning ? 'checked' : ''}><span>剥离思考/推理参数 (RAG/KB 推荐)</span></label></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_m_nonstream_${mName}" ${m.force_non_stream ? 'checked' : ''}><span>强制非流式响应 (stream=false)</span></label></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_m_keyfb_${mName}" ${m.allow_key_fallback ? 'checked' : ''}><span>候选 Key 不可用时回退同供应商其它 Key</span></label></div></div><div class="section-bar mt-4"><span class="form-label">候选 Key 列表 (${candidates.length})</span></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>供应商</th><th>Key 标签</th><th>目标模型</th><th>权重</th><th>并发上限</th><th>操作</th></tr></thead><tbody id="m_cands_tbody_${mName}"></tbody></table></div></div><div class="form-grid mt-3"><div class="form-group"><input class="input" id="new_c_prov_${mName}" list="datalistProviders" placeholder="供应商 ID (如 minimax)"></div><div class="form-group"><input class="input" id="new_c_lbl_${mName}" placeholder="Key 标签 (留空=全部启用Key)"></div><div class="form-group"><input class="input" id="new_c_target_${mName}" placeholder="上游真实模型 (留空同名)"></div><div class="form-group"><input class="input tabular" id="new_c_weight_${mName}" type="number" min="1" value="1" placeholder="权重 (1)"></div><div class="form-group"><input class="input tabular" id="new_c_conc_${mName}" type="number" min="0" value="0" placeholder="并发上限 (0=不限)"></div></div><div class="section-bar mt-2 flex-end"><button class="btn" id="btn_add_cand_${mName}" type="button">添加候选</button></div><div class="form-actions form-actions--split"><div class="form-actions-group">
-${isFixed ? '' : `<button class="btn btn--danger" id="btn_del_model_${mName}" type="button">删除此模型</button>`}
-</div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model_${mName}" type="button">保存模型配置</button></div></div>
+<div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="ed_m_name" value="${eh(mName)}"><span class="text-xs text-muted">Agent 客户端看到的模型名</span></div><div class="section-bar mt-3"><span class="form-label">模型列表</span></div><div class="card" id="m_cl"></div><div class="form-actions"><button class="btn btn--sm" id="btn_add_cand" type="button">+ 添加模型</button></div><div class="card mt-2 card-pad hidden" id="m_ac" hidden><div class="fields"><input class="input input--code flex-1" id="m_ac_prov" list="datalistProviders" placeholder="选择供应商"></div><div class="probe-pills-wrap" id="m_ac_models"></div><div class="fields mt-2"><input class="input input--code flex-1" id="m_ac_target" placeholder="上游模型 ID（可手填）"><button class="btn btn--sm btn--primary" id="m_ac_ok" type="button">追加所选</button></div></div><div class="section-bar mt-3"><span class="form-label">Key 选择</span><span class="text-xs text-muted">默认任一=全部启用 Key</span></div><div class="card card-pad" id="m_kw"></div><details class="headers-details mt-3"><summary class="form-label">候选权重 / 并发上限</summary><div id="m_ca" class="mt-2"></div></details><div class="form-group mt-4"><label class="form-label">路由策略</label><div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div><div class="text-xs text-muted mt-1"><span id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</span> · 默认值：${eh(STRATEGY_LABELS[state.config?.settings?.agent_routing_strategy || 'sticky_failover'])}</div></div><details class="headers-details mt-3"><summary class="form-label">高级（剥离思考 / 流式 / 指定 Key）</summary><input class="input mt-2" id="ed_m_act" value="${eh(m.active_key || '')}" placeholder="首选/指定 Key (provider:key_label)"><label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_noreas" ${m.no_reasoning ? 'checked' : ''}><span>剥离思考/推理参数 (RAG/KB 推荐)</span></label><label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_nonstream" ${m.force_non_stream ? 'checked' : ''}><span>强制非流式响应 (stream=false)</span></label><label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_keyfb" ${m.allow_key_fallback ? 'checked' : ''}><span>候选 Key 不可用时回退同供应商其它 Key</span></label></details><div class="form-actions form-actions--split mt-3"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_model" type="button">删除此模型</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model" type="button">保存模型配置</button></div></div>
 `;
-const tbody = q(`#m_cands_tbody_${mName}`);
-candidates.forEach((c, idx) => {
-const tr = ce('tr');
-const brandIco = window.renderBrandIcon ? window.renderBrandIcon(c.provider) : '';
-tr.innerHTML = `
-<td><input type="checkbox" class="m_c_en" data-idx="${idx}" ${c.enabled !== false ? 'checked' : ''}></td><td>${brandIco}<strong>${eh(c.provider)}</strong></td><td><input class="input input--compact input--code m_c_lbl" data-idx="${idx}" value="${eh(c.key_label || '')}" placeholder="* (全部)"></td><td><input class="input input--compact input--code m_c_target" data-idx="${idx}" value="${eh(c.target_model || '')}" placeholder="同对外名"></td><td><input class="input input--compact tabular m_c_weight" data-idx="${idx}" type="number" min="1" value="${c.weight || 1}"></td><td><input class="input input--compact tabular m_c_conc" data-idx="${idx}" type="number" min="0" value="${c.max_concurrency || 0}"></td><td><div class="fields"><button class="btn btn--sm btn_move_up" data-idx="${idx}" type="button" ${idx === 0 ? 'disabled' : ''} title="上移优先级">↑</button><button class="btn btn--sm btn_move_dn" data-idx="${idx}" type="button" ${idx === candidates.length - 1 ? 'disabled' : ''} title="下移优先级">↓</button><button class="btn btn--sm btn--danger btn_del_cand" data-idx="${idx}" type="button">移除</button></div></td>
-`;
-tr.querySelector('.m_c_en').addEventListener('change', (e) => {
-c.enabled = e.target.checked;
+const stratDesc = q('#ed_m_strat_desc');
+const stratPills = wrap.querySelectorAll('button[data-strat]');
+stratPills.forEach((btn) => {
+clk(btn, () => {
+stratVal = btn.dataset.strat || '';
+stratPills.forEach((b) => b.classList.toggle('probe-pill--managed', b === btn));
+stratDesc.textContent = STRATEGY_HINTS[stratVal] || '';
 });
-tr.querySelector('.m_c_lbl').addEventListener('change', (e) => {
-c.key_label = e.target.value.trim();
 });
-tr.querySelector('.m_c_target').addEventListener('change', (e) => {
-c.target_model = e.target.value.trim();
+const drawCands = () => {
+q('#m_cl').innerHTML = candidates.map((c, i) => `<div class="row row--static" data-i="${i}"><div class="who"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><span class="pill">${eh(c.provider)}</span><span class="pill">${c.key_label ? `Key ${eh(c.key_label)}` : '任一 Key'}</span></div><div class="fields"><button class="btn btn--sm" data-a="u"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm" data-a="d"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button><button class="btn btn--sm btn--danger" data-a="r">移除</button></div></div>`).join('') || '<div class="row row--static text-muted">暂无候选</div>';
+};
+const swapCand = (i, j) => {
+[candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+drawCands();
+drawAdv();
+};
+clk(q('#m_cl'), (ev) => {
+const btn = ev.target instanceof Element ? ev.target.closest('button[data-a]') : null;
+if (!btn) return;
+const i = Number(btn.closest('[data-i]').dataset.i);
+const a = btn.dataset.a;
+if (a === 'u' && i > 0) swapCand(i, i - 1);
+else if (a === 'd' && i < candidates.length - 1) swapCand(i, i + 1);
+else if (a === 'r') {
+candidates.splice(i, 1);
+drawCands();
+drawAdv();
+drawKeys();
+}
 });
-tr.querySelector('.m_c_weight').addEventListener('change', (e) => {
-c.weight = Math.max(1, Number(e.target.value) || 1);
+const keySel = m._keySel = m._keySel || {};
+for (const c of candidates) {
+if (c && c.provider && c.key_label) {
+const set = keySel[c.provider] || (keySel[c.provider] = []);
+if (!set.includes(c.key_label)) set.push(c.key_label);
+}
+}
+const applyKeySel = (pId) => {
+const sel = keySel[pId] || [];
+let ci = 0;
+for (const c of candidates) {
+if (c && c.provider === pId) c.key_label = sel.length ? sel[ci++ % sel.length] : '';
+}
+};
+const drawKeys = () => {
+const provs = state.config?.providers || {};
+const ids = [...new Set(candidates.map((c) => c && c.provider).filter(Boolean))];
+q('#m_kw').innerHTML = ids.map((pId) => {
+const sel = keySel[pId] || [];
+const labels = ((provs[pId] || {}).api_keys || []).filter((k) => k && k.enabled !== false)
+.map((k, i) => k.label || k.id || `key-${i}`);
+const used = new Set(candidates.filter((c) => c && c.provider === pId && c.key_label).map((c) => c.key_label));
+return `<div class="mb-2"><span class="form-label">${eh(provs[pId]?.name || pId)}</span><div class="probe-pills-wrap"><button class="probe-pill${sel.length ? '' : ' probe-pill--managed'}" data-p="${eh(pId)}" data-k="">任一</button>${labels.map((l) => {
+const checked = sel.includes(l);
+const badge = checked && !used.has(l) ? ' <span class="pill pill--amber">未绑定候选</span>' : '';
+return `<button class="probe-pill${checked ? ' probe-pill--managed' : ''}" data-p="${eh(pId)}" data-k="${eh(l)}">${eh(l)}${badge}</button>`;
+}).join('')}</div></div>`;
+}).join('') || '<div class="text-xs text-muted">暂无</div>';
+};
+clk(q('#m_kw'), (ev) => {
+const btn = ev.target instanceof Element ? ev.target.closest('button[data-k]') : null;
+if (!btn) return;
+const pId = btn.dataset.p || '';
+const k = btn.dataset.k || '';
+if (!k) keySel[pId] = [];
+else {
+const cur = new Set(keySel[pId] || []);
+if (cur.has(k)) cur.delete(k); else cur.add(k);
+keySel[pId] = [...cur];
+}
+applyKeySel(pId);
+drawKeys();
+drawCands();
 });
-tr.querySelector('.m_c_conc').addEventListener('change', (e) => {
-c.max_concurrency = Math.max(0, Number(e.target.value) || 0);
+const drawAdv = () => {
+q('#m_ca').innerHTML = candidates.map((c, i) => `<div class="fields mt-1"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><input class="input input--compact tabular" data-w="${i}" type="number" min="1" value="${c.weight || 1}" title="权重"><input class="input input--compact tabular" data-x="${i}" type="number" min="0" value="${c.max_concurrency || 0}"></div>`).join('');
+};
+q('#m_ca')?.addEventListener('change', (e) => {
+const el = e.target;
+const c = candidates[Number(el.dataset.w || el.dataset.x)];
+if (!c) return;
+if (el.dataset.w) c.weight = Math.max(1, Number(el.value) || 1);
+else c.max_concurrency = Math.max(0, Number(el.value) || 0);
 });
-clk(tr.querySelector('.btn_move_up'), () => {
-if (idx <= 0) return;
-const tmp = candidates[idx - 1];
-candidates[idx - 1] = candidates[idx];
-candidates[idx] = tmp;
-renderModelsList();
+const drawAddPills = () => {
+const models = state.probedModelsByProvider[(q('#m_ac_prov')?.value || '').trim()] || [];
+q('#m_ac_models').innerHTML = models.map((mo) => `<button class="probe-pill" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('') || '<span class="text-xs text-muted">暂无探测数据</span>';
+};
+clk(q('#m_ac_models'), (ev) => {
+const pill = ev.target instanceof Element ? ev.target.closest('button[data-mo]') : null;
+if (pill) pill.classList.toggle('probe-pill--managed');
 });
-clk(tr.querySelector('.btn_move_dn'), () => {
-if (idx >= candidates.length - 1) return;
-const tmp = candidates[idx + 1];
-candidates[idx + 1] = candidates[idx];
-candidates[idx] = tmp;
-renderModelsList();
+clk(q('#btn_add_cand'), () => {
+const box = q('#m_ac');
+box.hidden = !box.hidden;
+box.classList.toggle('hidden', box.hidden);
+drawAddPills();
 });
-clk(tr.querySelector('.btn_del_cand'), () => {
-candidates.splice(idx, 1);
-renderModelsList();
+const addProvEl = q('#m_ac_prov');
+if (addProvEl) {
+clk(addProvEl, drawAddPills);
+addProvEl.addEventListener('input', drawAddPills);
+addProvEl.addEventListener('change', () => {
+drawAddPills();
+const t = q('#m_ac_target');
+if (t) t.value = '';
 });
-tbody.appendChild(tr);
+}
+clk(q('#m_ac_ok'), () => {
+const prov = (q('#m_ac_prov')?.value || '').trim();
+if (!state.config?.providers?.[prov]) return toast('供应商不存在', 'warn');
+const picked = [...q('#m_ac_models').querySelectorAll('.probe-pill--managed')].map((b) => b.dataset.mo);
+const manual = (q('#m_ac_target')?.value || '').trim();
+if (manual && !picked.includes(manual)) picked.push(manual);
+if (picked.length === 0) return toast('请勾选或手填上游模型', 'warn');
+const sel = keySel[prov] || [];
+let base = candidates.filter((c) => c && c.provider === prov).length;
+for (const t of picked) {
+const kl = sel.length ? sel[base++ % sel.length] : '';
+candidates.push({ provider: prov, key_label: kl, target_model: t, enabled: true, weight: 1, max_concurrency: 0 });
+}
+drawCands();
+drawAdv();
+drawKeys();
 });
-clk(q(`#btn_add_cand_${mName}`), () => {
-const prov = q(`#new_c_prov_${mName}`).value.trim();
-const lbl = q(`#new_c_lbl_${mName}`).value.trim();
-const target = q(`#new_c_target_${mName}`).value.trim();
-const weight = Math.max(1, Number(q(`#new_c_weight_${mName}`)?.value) || 1);
-const conc = Math.max(0, Number(q(`#new_c_conc_${mName}`)?.value) || 0);
-if (!prov) return toast('请填写供应商 ID', 'warn');
-candidates.push({
-provider: prov,
-key_label: lbl,
-target_model: target || '',
-enabled: true,
-weight,
-max_concurrency: conc,
-});
+drawCands();
+drawKeys();
+drawAdv();
+clk(q('#btn_save_model'), async () => {
+const newName = (q('#ed_m_name')?.value || '').trim() || mName;
 state.config = state.config || { providers: {}, agent_models: {} };
 state.config.agent_models = state.config.agent_models || {};
-state.config.agent_models[mName] = m;
-renderModelsList();
-});
-clk(q(`#btn_save_model_${mName}`), async () => {
-state.config = state.config || { providers: {}, agent_models: {} };
-state.config.agent_models = state.config.agent_models || {};
+if (newName !== mName && state.config.agent_models[newName]) return toast(`模型 ${newName} 已存在`, 'warn');
 m.enabled = true;
-m.routing_strategy = q(`#ed_m_strat_${mName}`).value;
-m.active_key = q(`#ed_m_act_${mName}`).value.trim();
-m.no_reasoning = Boolean(q(`#ed_m_noreas_${mName}`)?.checked);
-m.force_non_stream = Boolean(q(`#ed_m_nonstream_${mName}`)?.checked);
-m.allow_key_fallback = Boolean(q(`#ed_m_keyfb_${mName}`)?.checked);
-state.config.agent_models[mName] = m;
-if (state.config.kb_models && state.config.kb_models[mName]) {
+m.routing_strategy = stratVal;
+m.active_key = (q('#ed_m_act')?.value || '').trim();
+m.no_reasoning = Boolean(q('#ed_m_noreas')?.checked);
+m.force_non_stream = Boolean(q('#ed_m_nonstream')?.checked);
+m.allow_key_fallback = Boolean(q('#ed_m_keyfb')?.checked);
+if (newName !== mName) {
+delete state.config.agent_models[mName];
+if (state.activeEditorKey === `m_${mName}`) state.activeEditorKey = `m_${newName}`;
+}
+state.config.agent_models[newName] = m;
+if (state.config.kb_models) {
 delete state.config.kb_models[mName];
+delete state.config.kb_models[newName];
 }
 await persistConfig('模型配置保存成功');
 });
-const delBtn = q(`#btn_del_model_${mName}`);
-if (delBtn) {
-clk(delBtn, async () => {
+clk(q('#btn_del_model'), async () => {
 if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
 delete state.config.agent_models[mName];
+if (state.config.kb_models) delete state.config.kb_models[mName];
 state.activeEditorKey = null;
 await persistConfig('模型已删除');
 });
-}
 return wrap;
 }
 function openTemplateImportOverlay() {
@@ -3708,7 +3899,7 @@ const manifestModels = vaultManifestModels();
 const localModels = state.config?.agent_models || {};
 const localProviders = state.config?.providers || {};
 const entries = Object.entries(manifestModels).filter(
-([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName] && !FIXED_SLOT_META[mName]
+([mName, tpl]) => tpl && typeof tpl === 'object' && !localModels[mName]
 );
 if (entries.length === 0) {
 const empty = ce('div');
@@ -4045,6 +4236,9 @@ await loadVaultManifest({ force: true });
 }
 async function persistConfig(successMsg) {
 try {
+for (const m of Object.values(state.config?.agent_models || {})) {
+if (m) delete m._keySel;
+}
 const res = await window.HOST.saveConfig(state.config);
 const data = res?.data || res || {};
 const isConflict = res?.status === 409 ||

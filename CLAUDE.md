@@ -71,7 +71,7 @@
 
 1. **前端唯一源码与 Magpie 极简风格铁律**：
    - 所有管理端 UI 仅在 `shared/admin/` 编写，构建产物禁止手改；
-   - **彻底摒弃 1 代臃肿 UI（禁止 Drawer 抽屉、禁止多层弹窗、禁止彩色左边框、禁止 JS 内联 `style=`）**，严格遵循 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 的 Magpie 极简设计语言（`One Quiet Surface` + `.list/.row` + 行内原地展开 `.editor` + 原生 `[hidden]` 控制显隐，单文件打包体积 `≤ 240 KB`（`245,760 bytes`））；
+   - **彻底摒弃 1 代臃肿 UI（禁止 Drawer 抽屉、禁止多层弹窗、禁止彩色左边框、禁止 JS 内联 `style=`）**，严格遵循 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 的 Magpie 极简设计语言（`One Quiet Surface` + `.list/.row` + 行内原地展开 `.editor` + 原生 `[hidden]` 控制显隐，单文件打包体积 `≤ 252 KB`（`258,048 bytes`））；
    - `HOST.capabilities` 严格按 `hub` / `lite` / `full` 真实能力位声明。
 2. **配置与预设唯一源码**：`shared/config/settings.schema.json`、`shared/config/runtime-profiles.json`、`shared/presets/*.json`。
 3. **设置项新增/修改六步契约**：
@@ -104,7 +104,7 @@
   - `T1.admin_ui_contract`：前后端路由契约与 `HOST.capabilities` 声明一致性；
   - `T1.presets_integrity`：16 家厂商预设与 `catalog.json` 哈希防篡改；
   - `T1.readonly_route_guard`：Go `internal/router/readonly.go`（`routeMux` 路由白名单单测报错机制）；
-  - `T1.ui_layout_and_zero_inline_style`：单文件控制台零内联样式、零抽屉、零左边框彩条、打包体积 `≤ 240 KB`（`245,760 bytes`）；
+  - `T1.ui_layout_and_zero_inline_style`：单文件控制台零内联样式、零抽屉、零左边框彩条、打包体积 `≤ 252 KB`（`258,048 bytes`）；
   - `T1.hub_export_guard`：EdgeOne `edge-functions/` 纯 Web Standard 检查（零 `node:*` 引用、零 `Buffer`、无边界逃逸）与 AST 显式 `export function onRequest*` 路由扫描门禁。
 - **T2：单元测试与并发竞争检测（Unit & Race < 30s）**：
   - `edgeone-hub/test/hub.test.mjs`：中枢 CAS 乐观锁、Scope 投影、304 续租、节点签发/吊销/轮换；

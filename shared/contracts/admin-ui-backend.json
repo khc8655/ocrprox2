@@ -2,6 +2,8 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.3: providers.rpm_per_key is the provider's OVERALL RPM ceiling enforced scheduler-side as one provider-wide sliding window (0 = unlimited) and no longer falls back into the per-key check — api_keys[].max_rpm keeps its key-level meaning; probe_models documents api_type and stored-key resolution (empty/masked api_key resolves the provider's first enabled stored key, vault-managed keys refuse base_url overrides with 403); added test_agent_model and test_candidate (the route-line 测试路由 endpoints, full role only).",
+    "v3.2: GET /api/admin/presets-extra preset objects carry version/updated_at mirroring the provider's adapter file (shared/presets/<id>.json); both fields are omitted when the preset has no matching adapter file.",
     "v3: removed POST /api/vault/sync (full sync replaced by on-demand fetch); POST /api/vault/fetch gains 409 provider_exists_local, wholesale replace of hub-managed fields on re-fetch, and imported_keys; GET /api/vault/manifest gains the agent_models route-template section; both endpoints now serve hub and full roles.",
     "v3.1: vault fetch no longer accepts caller-supplied hub_url/node_token (target is always the stored vault config; anti-exfiltration); provider_config gains api_type/rule_hash and no longer touches enabled; manifest candidates rename max_conc to max_concurrency and rule_hash is hub-computed from adapter_rules; /api/vault/manifest accepts POST (credentials in body instead of the query string); provider IDs with unsafe characters are refused at adoption.",
     "v2: initial published revision."
@@ -210,13 +212,21 @@
       ],
       "request": {
         "provider": "string",
-        "base_url": "string (optional)",
-        "api_key": "string"
+        "base_url": "string (optional; required when neither the provider nor its preset carries a base_url)",
+        "api_key": "string (optional: empty or masked resolves the provider's first enabled stored key; the hub additionally accepts key_label to pick a specific stored key)",
+        "api_type": "string (optional: anthropic-messages switches the probe to x-api-key + anthropic-version headers)"
       },
       "response": {
         "ok": true,
-        "models": "array of strings"
-      }
+        "models": "array of strings (upstream GET /models ids; OpenAI {data:[{id}]} and Google {models:[{name}]} shapes both parse, the models/ prefix is stripped)"
+      },
+      "errors": {
+        "400": "invalid json / base_url required / (hub) api_key_required, cannot_probe_with_masked_key, unsafe_upstream_url",
+        "401": "api key is empty or unresolvable (full)",
+        "403": "cannot override base_url when using a vault-managed key (full)",
+        "4xx-5xx": "upstream non-2xx status is passed through with ok:false (full)"
+      },
+      "semantics": "backbone of the add-model flow (选供应商 → 探测上游模型 → 点选/手填 target_model)：the probe never mutates config, it only lists the upstream model ids the admin can pick from"
     },
     "verify_key": {
       "method": "POST",
@@ -372,6 +382,52 @@
         "results": "array of objects"
       }
     },
+    "test_candidate": {
+      "method": "POST",
+      "path": "/api/admin/test-candidate",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "request": {
+        "provider": "string",
+        "key_label": "string (optional, alias key: empty resolves the provider's first enabled stored key)",
+        "type": "string (optional: chat | embedding | reranker | ocr, default chat; alias category)",
+        "model": "string (optional, alias model_name/agent_model: empty resolves from kb_models[type] for this provider, then the provider's model aliases, then falls back to the type name)"
+      },
+      "response": {
+        "ok": "boolean",
+        "success": "boolean (same as ok)",
+        "status": "integer (upstream HTTP status, 502 on transport error)",
+        "ms": "integer",
+        "latency_ms": "integer (same as ms)",
+        "model": "string (the resolved upstream model)",
+        "text": "string (chat answer content, or the first ≤100 bytes of the body when the shape is unrecognized)",
+        "error": "string (optional, upstream body capped at 200 chars)"
+      },
+      "semantics": "single-candidate probe used by the route-line 测试路由 button for embedding/reranker/ocr: embedding → POST {base}/embeddings {model, input:test}; reranker → POST {base}/rerank {model, query:test, documents:[a]}; ocr → chat/completions with a 1×1 png + Extract text, max_tokens 64; chat → the same minimal inference as test_agent_model (messages [{role:user, content:Hi}], max_tokens 16). A passing probe clears the key's cooldown."
+    },
+    "test_agent_model": {
+      "method": "POST",
+      "path": "/api/admin/test-agent-model",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "request": {
+        "model": "string (agent_models route name; alias name)"
+      },
+      "response": {
+        "ok": "boolean (true when at least one candidate passed)",
+        "success": "boolean (same as ok)",
+        "model": "string",
+        "total": "integer",
+        "passed": "integer",
+        "results": "array of {provider, key, model, ok, status, latency_ms, error?}",
+        "checked_at": "string (local time of the check)"
+      },
+      "semantics": "route-line 测试路由 for chat-style routes: fires one minimal real inference per enabled candidate (all candidates when none enabled) — POST {base}/chat/completions {model: target_model||model, messages:[{role:user, content:Hi}], max_tokens:16, stream:false} (anthropic-messages providers target {base}/messages without stream), up to 5 probes in parallel with a 15s timeout; a passing probe clears that key's cooldown. The UI reports the fastest passing candidate (provider + key + latency)."
+    },
     "presets_extra": {
       "method": "GET",
       "path": "/api/admin/presets-extra",
@@ -381,7 +437,7 @@
       ],
       "response": {
         "ok": true,
-        "presets": "array of objects"
+        "presets": "array of preset objects (PresetDef); each may carry version/updated_at mirroring the provider's adapter file shared/presets/<id>.json — omitted (omitempty) when the preset has no matching adapter file"
       }
     },
     "access_info": {
@@ -475,6 +531,10 @@
         "full"
       ]
     }
+  },
+  "provider_config_semantics": {
+    "rpm_per_key": "该供应商整体 RPM 上限（调度器按供应商维度限流），0=不限：>0 时调度器在派发前先对整个供应商（独立 RPMLimiter 实例 providerRPMLimiter 的桶 provider:<provider_id>，与 Key 级桶 provider:key_label 分属两个实例，命名空间不相交由构造保证）做一次滑动窗口 TryAcquire，窗口满则该供应商全部 Key 一律不再派发（isCandidateHealthy 排序期判不健康与 Dispatch / ExecuteEndpoint 候选遍历两处一致，跳过原因记 <provider_id> (provider RPM limit)，相同供应商去重）。Key 级拒绝、OAuth 刷新或请求构建等拨号前失败会退回已取的供应商令牌（TryAcquireToken/Release 语义），窗口只统计真实发出的请求。不再回退进 Key 级检查——N 把 Key 不会各拿一份整供应商额度。internal/scheduler/rpm.go providerRPMKey()/TryAcquireToken()、internal/scheduler/scheduler.go、internal/scheduler/high_conc.go。",
+    "max_rpm": "Key 级 RPM 上限（api_keys[].max_rpm），语义不变、独立生效：仅约束该 Key 自身的滑动窗口（桶 provider:key_label），0=不限；调度顺序为先查供应商窗口、再查 Key 窗口。"
   },
   "auth_semantics": {
     "login": {

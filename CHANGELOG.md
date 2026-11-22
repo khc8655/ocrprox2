@@ -4,6 +4,66 @@
 
 ---
 
+## [v20261122-06] - 2026-11-22
+
+### Added
+
+- **供应商整体 RPM 限流（调度器按供应商维度）**：`Provider.RPMPerKey`（`rpm_per_key`）语义改为「该供应商整体 RPM 上限，0=不限」——不再是 Key 级限流的回退值。`>0` 时调度器在派发前先对整个供应商做一次滑动窗口检查（**独立 `RPMLimiter` 实例** `providerRPMLimiter` 的桶 `provider:<provider_id>`，与 Key 级桶 `provider:key_label` 分属两个实例，命名空间不相交由构造保证；`internal/scheduler/rpm.go` 新增 `providerRPMKey()`/`TryAcquireToken()`）：窗口满则该供应商**全部 Key** 一律不再派发——排序期 `isCandidateHealthy` 判不健康（不占通道槽）、`Dispatch`（`internal/scheduler/scheduler.go`）与 `ExecuteEndpoint`（`internal/scheduler/high_conc.go`）的候选遍历两处显式跳过，跳过原因记 `<provider_id> (provider RPM limit)`（同供应商多候选去重）；随后才做 Key 级检查，`api_keys[].max_rpm` 语义不变、独立生效。旧「`RPMPerKey` 作为 Key 级回退」行为移除——N 把 Key 不会各拿一份整供应商额度。
+- **路由编辑器按 magpie 骨架重排**：`buildModelEditor` 重排为「对外模型名（Agent 客户端看到的模型名）→ 模型列表（每行=序号+上游模型+供应商+上移/下移/移除，底部「+ 添加模型」内联面板：选供应商 → 探测胶囊点选 → 可手填上游 ID 追加）→ Key 选择（按供应商分行、胶囊多选，默认「任一」=空 `key_label` 用全部启用 Key，勾选具体标签按 `key[i%n]` 循环回绑该供应商候选，不乘出行数）→ 候选权重/并发上限折叠 → 路由策略平铺胶囊（每策略下方中文说明 + 当前生效默认值）→ 高级折叠（指定 Key/剥离思考/强制非流式/Key 回退）」。编辑器内全部重绘走局部 draw（`drawCands`/`drawKeys`/`drawAdv`），不再折叠行内编辑器；策略选择由隐藏 input 改为闭包内 `stratVal`。不搬 magpie 的上下文徽章、额度优先、模式匹配、压缩阈值、供应商 logo 与「也列出成员模型」开关；候选仍是一条 `provider+key_label+target_model`。
+
+### Fixed
+
+- **供应商级 RPM 两段式取令牌无回滚（虚耗供应商窗口）**：`Dispatch`/`ExecuteEndpoint` 先取供应商级令牌、随后 Key 级 `TryAcquire` 失败 `continue`（或 OAuth 刷新、`PrepareRequest` 等拨号前失败）时没有任何路径移除该时间戳，供应商窗口被从未发出的请求虚耗——实测 rpm_per_key=3、k1 MaxRPM=1、k2 不限、round_robin 两候选连发 3 请求得 `[200,200,502]`（真实上游命中 2）。`internal/scheduler/rpm.go` 新增 `TryAcquireToken()`（返回撤销句柄，精确移除本次记录的时间戳），两处调度循环在 Key 级拒绝与全部拨号前失败路径上回退供应商令牌（及 Key 令牌）；已拨上线的尝试令牌保留。守卫测试 `TestScheduler_Dispatch_ProviderTokenReleasedWhenKeyLimited`：同场景 3 请求全 200、k1 恰 1 次、k2 恰 2 次。
+- **供应商级桶与 KeyTag 桶命名空间碰撞**：KeyTag 为 `providerID:key_label`，单靠注释断言「`provider:<id>` 命名空间不相交」不成立（供应商 ID 恰为 `provider` 且 Key 标签撞另一供应商 ID 即共享窗口）。改为供应商级限流使用独立 `RPMLimiter` 实例（`Scheduler.providerRPMLimiter` + `ProviderRPM()` 访问器），不相交由构造保证；守卫测试 `TestRPMLimiter_ProviderWindowIsOwnLimiter`。
+- **跳过原因不可定位且重复**：`provider RPM limit` 裸写不带供应商标识、同供应商多候选按候选数重复 N 遍。改记 `<provider_id> (provider RPM limit)`，并新增 `appendSkipOnce()` 对完全相同的跳过消息去重（Key 级消息既有 `<keyID> (RPM limit)` 格式不变）。注：全部候选被限流跳过时仍回 502 `upstream_error`「all candidate keys failed」——与 Key 级 RPM 既有行为及 E2E S4a 断言一致，未改状态码。
+- **high_conc 通道槽 claim 复用 stale 闭包（MaxConc 瞬时旁路）**：RPM 跳过先释放 claim 后，同 KeyTag 后续候选仍走 `claimTag == cand.KeyTag && claimRel != nil` 分支拿已释放的槽位（once-guard 二次释放无效，该次尝试不持通道槽）。改为 `releaseSlot()` 闭包：凡释放的是 claim 槽即置 `claimRel = nil`，后续候选必须自取槽位。
+- **vault 重拉对 rpm_per_key 只增不减**：`internal/config/local.go` 两个合并分支原为 `if vp.RPMPerKey > 0 { ... }`，中枢清 0（放开限制）后节点重拉仍保留旧正值。改为中枢托管字段全量跟随（与同函数 `AdapterRules` 缺失即清空的口径一致）；`TestLocalSource_MergeVaultConfig_PreservesMagpieFields` 补「中枢清 0 → 节点跟随 0」与 replace 分支两向断言。
+- **供应商编辑器 RPM UI 与新语义相反（方案 C 未落地）**：`rpm_per_key` 字段由高级折叠内的「单 Key RPM 限制 (rpm_per_key)」改为编辑器顶部的「该供应商整体 RPM 上限 (rpm_per_key)」（placeholder `0 = 不限`，vault 托管供应商锁定）；Key 行 RPM 输入（`k_rpm_in`）及其写 `max_rpm` 的监听整体撤除，表头「权重 / RPM」改「权重」。存量配置里已有 `api_keys[].max_rpm` 语义不变，仅不再在节点控制台编辑。
+- **模型编辑器 Key 勾选与候选绑定状态不一致**：①打开编辑器时 Key 选择区按候选现状播种 `m._keySel`——添加模型弹层建出的「全绑具体 Key」候选不再显示为骗人的「任一」高亮；②勾选数多于候选数时，多余 Key 的胶囊追加「未绑定候选」徽章、模型列表每行新增绑定 Key 胶囊（`Key <label>` / `任一 Key`），勾了没用的状态可见。
+- **编辑器「+ 添加模型」面板换供应商不重绘探测**：`#m_ac_prov` 原仅 click 重绘，键盘/datalist 换供应商后旧供应商的胶囊仍可勾选、确认即生成「新供应商 × 旧供应商模型」的坏候选。补 `input`/`change` 监听（change 提交时同步清空手填目标，与添加模型弹层「换供应商即作废探测结果」防线对等）。
+- **添加模型弹层不过滤禁用 Key**：Key 胶囊现按 `enabled !== false` 过滤（与编辑器 Key 选择区一致），确认路径同样拒绝已禁用 Key——调度器展开候选时直接跳过禁用 Key，绑了也不路由。
+- **探测失败无持久内联提示**：失败/空结果/异常除 toast 外，在探测结果框（`#npbPills`）内留下持久失败原因（如 401/502 文案），下次探测、切换供应商或关闭弹层时清除——错过 toast 也能看到失败原因；手填路径不受影响。
+- **「已适配」判定按 preset_id 而非适配文件**：卡片徽章/编辑器版本说明/「已适配」筛选统一改为「真有适配脚本」判定——适配文件预设（meta 带版本）、中枢规则（`rule_hash`）或内联 `adapter_rules` 三者其一；绑定 anthropic（无适配文件）等仅命名协议的 preset 显示「自定义（无适配文件）」且不再计入已适配；vault 卡片保留 `rule_hash` 指纹展示。
+- **hub 端 `_keySel` 编辑态随配置入库**：full 端 Go 结构体丢弃未知字段，hub 端 `saveConfigWithCAS` 原样 `JSON.stringify` 入库导致过期勾选跨会话回显。`persistConfig` 统一在保存前剥离 `agent_models[*]._keySel`，两端口径一致（选中状态仅在编辑会话内存活）。
+- **路由行「测试路由」最小推理载荷与方案字面一致**：`POST /api/admin/test-agent-model` 两分支载荷 `content` 由 `"Hi"` 改为 `"你好"`（`max_tokens:16` 不变），与已确认方案 G 对齐（`internal/admin/admin.go`）。
+- **路由行「测试路由」统一为最小真实推理**：chat 类路由经 `POST /api/admin/test-agent-model` 对每条启用候选各发一次 `{messages:[{role:"user",content:"你好"}], max_tokens:16}` 的真实推理（`anthropic-messages` 供应商发 `/v1/messages`，最多 5 路并发、15s 超时），路由行展示**最快通过候选**的「测试 `<延迟>ms · <供应商> · <Key>`」胶囊；embedding/reranker/ocr 路由走 `POST /api/admin/test-candidate` 单候选探测（embeddings/rerank/1×1 PNG OCR 载荷）；两种探测成功均清除该 Key 的冷却封禁。两条端点此前未入契约文档，本次补入（`shared/contracts/admin-ui-backend.json` 升 v3.3，`docs/ADMIN_UI_BACKEND_CONTRACT.md` 新增 §6.7/§6.8）。
+- **中枢「模型路由模板」页角色降级**：Hub 模板页副标题改为「仅下发给 lite 节点；full 节点可选导入」——Hub 的模型路由退为「lite 模板 + full 可选导入源」，full 节点路由一律本地创建（既有按需拉取 + 模板导入不变）。
+- **新增供应商弹层改居中 overlay 模态**：`addProviderForm` 由内嵌卡片改为与登录屏同款的居中 overlay（`login-card` 布局、右上角关闭按钮），cURL 自动解析入口保留；`icons.js` 清理未接线的 generic 图标脚手架（`ICONS`/`getBrandIcon`/未使用的 UI 图标字面量）。
+
+### Verified
+
+- `npm run test:t1` 全绿（T1 契约守卫：capabilities 对齐、full/hub 端点注册与实现文件存在性、readonly 路由边界、presets 完整性、UI 零内联样式与体积门禁）；`npm run test:hub` 41/41 全绿；`go test -count=1 ./internal/...` 全部 22 包通过，`go build ./...` 与 `go vet ./internal/...` 干净。
+- `npm run test:admin` 全量构建五门禁通过（零内联样式/零抽屉/零左边框/体积/edge gzip 29,739B ≤ 45,000B），并再生成 `shared/admin/dist/index.html`、`internal/admin/assets/index.html`、`admin/index.html` 与 `edge-functions/_hub` 同步产物（源码与三产物 `probe-pill--managed` 计数一致=15）。**打包体积门禁由 240 KB（245,760B）重标为 252 KB（258,048B）**——magpie 骨架重排与探测/策略胶囊等已确认 UI 的真实字节成本，同步更新 `shared/admin/build.mjs` Gate 4、`scripts/verify-release.mjs`（G2 漂移校验自带同款上限）、`tests/t1_contracts/verify_contracts.test.mjs`、`docs/UI_DESIGN_SPEC.md`、`docs/TESTING_SPEC.md`、`docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md`、`docs/MULTI_AGENT_BLUEPRINT.md`、`CLAUDE.md` 与 `docs/ADMIN_UI_BACKEND_CONTRACT.md` §八；§八新增流程纪律：改 `shared/admin/` 源码必须当场跑 `npm run test:admin`（含体积门禁），只跑下游产物校验不算数。
+- `go test -race ./internal/scheduler/` 全绿，含 `internal/scheduler/rpm_provider_test.go` 九例：供应商窗口由双 Key 共享额度（第三请求被拒且不达上游）、Key 级 `MaxRPM` 在供应商窗口有余量时独立拦截、`RPMPerKey=0` 不装供应商窗口（chat 与 embeddings 两路径）、供应商窗口满时排序期即拦截不占通道槽、**供应商令牌在 Key 级拒绝时回滚（3 请求全 200、k1 恰 1 次 k2 恰 2 次）**、**供应商桶与 KeyTag 桶分属独立实例不碰撞**、`TryAcquireToken` 取/还精确配额；`internal/config/local_test.go` 补 vault 重拉 rpm_per_key 双向（设值/清 0）与 replace 分支断言。
+- 版本号四处同步：`version.json`（v20261122-06 / 2.9.3）、`cmd/llmproxy/main.go` `version`/`AppVersion` 回退字面量、`edgeone-hub/lib/generated-version.js` 与 `edge-functions/_hub/lib/generated-version.js`（`npm run build:presets` + `npm run build:admin` 再生成，不手改）。
+
+---
+
+## [v20261122-05] - 2026-11-22
+
+### Added
+
+- **添加模型支持探测上游与按需选 Key**：添加模型弹层重构——「首选供应商」由裸下拉改为可搜索下拉面板（行内显示供应商名称与 Base URL，支持 `↑`/`↓`/`Esc` 键盘导航与「手动输入」任意 ID）；新增「探测模型」按钮，经网关 `HOST.probeModels` 用已存 Key 拉取上游 `/models`，探测结果以胶囊展示（支持过滤、点击回填「上游目标模型 ID」）；Key 改为胶囊按需勾选——**默认一个都不勾**（不默认全选），确认时每个勾选的 Key 生成一条候选，切换供应商即作废上次探测结果与勾选。
+- **供应商适配文件版本展示**：`presets-extra` 响应的 `PresetDef` 新增 `version` / `updated_at` 字段（`internal/provider/presets.go`，镜像 `shared/presets/<id>.json` 适配文件的版本与日期，Go 目录内 10 个有适配文件的预设置入字面量，如 openai `1.2.1 · 2026-10-19`）。full 与 Hub 两处控制台的供应商卡片均显示「适配 `<id>` · v`<版本>` · `<日期>`」胶囊；vault 中枢拉取供应商因托管字段随中枢、本地不持适配文件，改显示 `rule_hash` 指纹（前 8 位）；编辑面板「预设规则绑定」下方同步显示版本说明。无适配文件的预设（anthropic、minimax-cn 等）两字段 `omitempty`，不显示标签。
+- **契约同步**：`shared/contracts/admin-ui-backend.json` 升 v3.2（`presets_extra` preset 对象补 `version`/`updated_at` 字段说明），`docs/ADMIN_UI_BACKEND_CONTRACT.md` §6.5 示例与字段说明同步。
+
+### Fixed
+
+- **模型路由页的「内置固定通道」不再自动生成，且全部可删除**：移除前端 `ensureUnifiedFixedRoutes()`——此前每次读配置都会从 `kb_models` 内存重建 chat/embedding/reranker/ocr 四条路由并置顶展示、带「内置固定通道」标签且无删除按钮。现在四通道不再默认生成，「固定 4 通道」筛选子模式一并移除；所有路由一律按字母序平等渲染，`buildModelEditor` 不再区分 `isFixed`，删除按钮无条件渲染。已有部署存留的四通道升级后原样保留、可手动删除；后端 `kb_models` legacy 回退（`internal/scheduler/high_conc.go ResolveRoute`）与 KB 端点固定名消费（`internal/kb/kb.go`）不动——删除四通道后，KB 端点对未配置类别回 404 属预期行为（要用 KB 就自行建同名路由）。
+- **删除路由防幽灵复活**：删除与 legacy KB 通道同名的路由时，同步 `delete kb_models[同名类别]`（复用既有清除模式）——否则下一轮配置回读会被 legacy 回退复活出删不掉的通道。
+- **固定通道残留语义清理**：删除前端 `FIXED_SLOT_META`——hub 模型路由页不再隐藏自建的 chat/embedding/reranker/ocr 路由（自建即可见、可管理、可删除，与 full 节点及投影下发语义一致）；模板导入不再把四通道名无条件拉黑（旧中枢清单存留的同名模板路由恢复可导入，与「要用 KB 就自行建同名路由」路径对齐）；随固定通道移除已失效的「全部/自定义模型」子模式切换（过滤逻辑早已为死代码）一并清理。
+- **添加模型表单缺陷修复**：探测结果过滤框 stale closure 修复——过滤监听只绑一次但闭包捕获首次探测的数组，重探/换供应商后过滤框按旧供应商列表重绘、可把上一家供应商的模型名回填进「上游目标模型 ID」，现改为 draw 每次实时读 `state.addModelProbed`；切换供应商、重开弹层（另清「对外模型名」）与探测失败/异常均清空「上游目标模型 ID」及探测胶囊，杜绝旧供应商模型名残留成静默坏路由；探测期间禁用按钮防并发重复点击、失败路径不再残留无标记旧胶囊；「手动输入」先校验供应商存在性再校验 Key 勾选，不再以「请至少勾选一把 Key」掩盖「供应商不存在」。
+- **供应商版本胶囊接入服务端数据**：`mergeExtraPresets` 对表中已有 id 不再整体跳过——`presets-extra` 下发的 version/updated_at 现在会刷新表项并在加载后重渲染，full 控制台版本胶囊跟随服务端适配文件元数据而非纯前端字面量；`minimax-cn` 表项不再借用 minimax 适配文件的版本号（其自身无适配文件、服务端 omitempty，此前会显示不存在的适配版本）。
+- **Vault 重新拉取后悬空候选告警**：重拉成功后扫描 `agent_models` 中候选绑定的 Key 标签是否仍存在于对应供应商 Key 池（复用模板导入的缺失校验），缺失时以警告 toast 列出受影响路由——此前 `replaceVaultKeyList` 整表替换后路由卡片圆点仍按候选数量显示绿色、请求时才 503。
+
+### Verified
+
+- `npm run test:t1` 全绿（T1 契约守卫：路由注册、capabilities 对齐、UI 限额、settings schema 双向校验）。
+- `go test -race ./internal/provider/` 全绿，含 `TestCatalog_PresetAdapterVersions`：测试改为直接读取 `shared/presets/<id>.json` 适配文件比对 `presets.go` 的 `version`/`updated_at`（有版本必须有同名适配文件且数值一致、有适配文件不得缺版本，双向守卫杜绝字面量副本漂移）、`Catalog()` 克隆与 JSON 编码后字段存活；`go build` 编译通过。
+- 前端源码改动后 `npm run build:admin` 重新构建，`shared/admin/dist/index.html`、`admin/index.html`、`internal/admin/assets/index.html` 三处产物同步零漂移。
+
+---
+
 ## [v20261122-04] - 2026-11-22
 
 ### Fixed
