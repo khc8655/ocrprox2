@@ -1,13 +1,14 @@
 {
-  "version": "v20261122-03",
-  "semver": "2.9.0",
+  "version": "v20261122-04",
+  "semver": "2.9.1",
   "release_date": "2026-11-22",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.9.0 — 中枢托管内容改按需拉取与供应商级锁定",
+  "title": "LLMProxy2 (OCRProxy v2) 2.9.1 — 修复 Web 端在线升级权限失败（二进制布局迁移）",
   "changelog": [
-    "full 模式移除「一键全量同步」（POST /api/vault/sync 与 MergeHubSync 下线），改为按需拉取：清单 /api/vault/manifest（仅元数据 + Key 标签，新增 agent_models 路由模板段）→ 单供应商整体拉取 /api/vault/fetch（适配规则 + 全部 Key，整体替换中枢托管字段与 vault Key 列表）→ 按 Key 标签补拉（增量合并，不动其它 vault Key）；模板路由不再随同步整批落地，本地路由完全自由，控制台提供「从模板导入」按需入口",
-    "安全收紧：POST /api/vault/fetch 不再接受调用方传入的 hub_url/node_token（拉取目标恒为节点已配置的 Vault，防管理密码泄露后把自动导入 base_url 的拉取指向恶意中枢外送明文 Key）；外部保存时后端强制还原 vault 供应商的 base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name（Key 级锁定扩展为供应商级）；本地同名非 vault 供应商拉取返回 409 provider_exists_local；中枢下发供应商 ID 按字符白名单校验；fetch 响应回显管理端前掩码明文 Key；清单凭据改走 POST 请求体（Token 不进 URL 日志）",
-    "添加供应商不以预设为主：预设退为适配文件模板，按输入名称/ID 自动匹配填充；新增中枢规则漂移检测（manifest 与 fetch 以同一 rule_hash 标注解析后的 adapter_rules，不一致时控制台提示「中枢规则已更新」）",
-    "验证：npm run verify:release G1–G6 全绿（版本一致性、确定性构建零漂移、T1 契约、Hub 单测、go test -race、T3 黑盒 E2E）；新增 Go/Hub 单测覆盖整体拉取替换语义、vault 锁定、拉取目标不可重指向、模板路由 scope 过滤与明文 Key 零泄露"
+    "修复 Web 端在线升级「cannot write executable staging file: permission denied」：full 服务以非特权 llmproxy 用户运行，而二进制在 root 属主的 /usr/local/bin，升级的暂存写入与 rename 均被拒。根因有两层——写 staging 需要文件属主、rename 需要目录可写，仅修正暂存文件属主不够（实测 rename 仍 permission denied）",
+    "二进制布局迁移：full 的真实二进制改放 /opt/llmproxy/bin/llmproxy（运行用户可写目录，chown llmproxy），/usr/local/bin/llmproxy 降级为符号链接保持 PATH 与文档兼容；systemd ExecStart 改指真实路径。os.Executable()+EvalSymlinks 解析到真实路径，Web 升级的 tmp 写入与 rename 全程在可写目录内完成，零提权、零 sudoers 变化",
+    "升级路径：历史部署（二进制直接在 /usr/local/bin）重跑 install.sh 即自动迁移——二进制原子搬迁至 /opt/llmproxy/bin、原路径换符号链接、ExecStart 就地改写、清理残留 staging 文件；lite 无 Web 升级，布局不变",
+    "Go 侧：staging 打开遇 permission denied 时报错附带修复指引（重跑 install.sh 或改用 llmproxy-ctl upgrade）；os.Executable 抽为包级变量以支持回归测试",
+    "验证：HK NAT 实测两条链路均通过——①旧布局 v20261122-03 → 重跑 install.sh 迁移 → Web 升级 ok:true → 服务重启 active；②全新安装直接新布局 → Web 升级 → active；llmproxy-ctl 经符号链接正常工作；TestSystemUpgrade_StagingPermissionHint 回归单测"
   ]
 }

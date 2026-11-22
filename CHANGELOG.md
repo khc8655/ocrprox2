@@ -4,6 +4,22 @@
 
 ---
 
+## [v20261122-04] - 2026-11-22
+
+### Fixed
+
+- **Web 端在线升级 `permission denied`（两层根因，均实测复现后修复）**：full 服务以非特权 `llmproxy` 用户运行，而二进制在 root 属主的 `/usr/local/bin`。第一层：升级暂存文件 `llmproxy.upgrade.tmp` 打开即被拒；第二层（更隐蔽）：即使暂存文件已归运行用户，**rename 替换需要目录写权限**，文件属主并不够——实测仍 `permission denied`。仅靠预创建暂存文件的方案被推翻。
+- **二进制布局迁移（最终方案，零提权）**：full 的真实二进制改放 `/opt/llmproxy/bin/llmproxy`（运行用户可写目录），`/usr/local/bin/llmproxy` 降级为符号链接保持 PATH 与文档兼容；systemd `ExecStart` 改指真实路径。`os.Executable()+EvalSymlinks` 解析到真实路径，Web 升级的暂存写入与 rename 全程在可写目录内完成，无 sudoers 变化、无目录放宽权限。
+- **历史部署升级路径**：旧布局（二进制直接在 `/usr/local/bin`）重跑一次 `install.sh` 即自动迁移——二进制原子搬迁、原路径换符号链接、`ExecStart` 就地改写、残留 staging 文件清理。lite 无 Web 升级，布局不变。
+- **报错可操作化**：staging 打开遇 `permission denied` 时，错误信息附带修复指引（重跑 `install.sh` 或改用 `llmproxy-ctl upgrade`），不再裸抛 errno。
+
+### Verified
+
+- HK NAT 实测两条链路均通过：① 旧布局 v20261122-03 → 重跑 `install.sh` 迁移 → Web 升级 `ok:true` → SIGTERM → systemd 拉起 → 服务 `active`、版本正确；② 全新安装直接新布局 → Web 升级 → `active`。`llmproxy-ctl` 经符号链接正常工作；卸载零残留（含 `/opt/llmproxy`）。
+- 回归单测 `TestSystemUpgrade_StagingPermissionHint`：staging 打开失败时报错必须含修复指引；既有 SEC-05 fail-closed 三例保持绿；`go test -race ./internal/admin/` 全绿。
+
+---
+
 ## [v20261122-03] - 2026-11-22
 
 ### Added

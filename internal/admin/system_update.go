@@ -20,6 +20,10 @@ import (
 const UpdateRepo = "khc8655/ocrprox2"
 const defaultGitHubRepo = UpdateRepo
 
+// osExecutable is os.Executable as a package var so tests can point the upgrade
+// staging path at a fixture (see TestSystemUpgrade_StagingPermissionHint).
+var osExecutable = os.Executable
+
 func (s *Server) systemRepo() string {
 	if r := strings.TrimSpace(os.Getenv("LLMPROXY_GITHUB_REPO")); r != "" {
 		return r
@@ -250,7 +254,7 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exePath, err := os.Executable()
+	exePath, err := osExecutable()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "resolve executable path: " + err.Error()})
@@ -283,7 +287,15 @@ func (s *Server) handleSystemUpgrade(w http.ResponseWriter, r *http.Request) {
 	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "cannot write executable staging file: " + err.Error()})
+		// The service runs unprivileged (llmproxy user) while /usr/local/bin is root-owned.
+		// Fresh installs pre-create the staging file owned by the run user and grant
+		// ReadWritePaths on the unit; older installs got neither. Point the operator at
+		// the CLI path, which runs as an admin and needs no such setup.
+		hint := "cannot write executable staging file: " + err.Error()
+		if strings.Contains(strings.ToLower(err.Error()), "permission denied") {
+			hint += "（服务用户对二进制目录无写权限：重跑一次 install.sh 可自动修复暂存文件属主；或改用 llmproxy-ctl upgrade）"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": hint})
 		return
 	}
 

@@ -2,10 +2,13 @@ package admin
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -188,5 +191,83 @@ func TestSystemUpgrade_MandatorySHA256FailsClosed(t *testing.T) {
 				t.Fatalf("SEC-05 violation: binary download URL was requested %d times before SHA256SUMS verification!", binDownloads.Load())
 			}
 		})
+	}
+}
+
+// TestSystemUpgrade_StagingPermissionHint: when the staging file cannot be opened
+// with permission denied (root-owned /usr/local/bin on an install that predates the
+// pre-created staging file), the error body must tell the operator how to recover
+// (re-run install.sh or use llmproxy-ctl upgrade) instead of a bare errno string.
+func TestSystemUpgrade_StagingPermissionHint(t *testing.T) {
+	binName := fmt.Sprintf("llmproxy-%s-%s", runtime.GOOS, runtime.GOARCH)
+	var baseURL string
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tag_name": "v20261199-01",
+				"assets": []map[string]any{
+					{"name": binName, "browser_download_url": baseURL + "/download/" + binName},
+					{"name": "SHA256SUMS", "browser_download_url": baseURL + "/download/SHA256SUMS"},
+				},
+			})
+		case r.URL.Path == "/download/SHA256SUMS":
+			// correct sha for the two-block body below
+			h := sha256.Sum256(bytes.Repeat([]byte("X"), 2048))
+			_, _ = fmt.Fprintf(w, "%x  %s\n", h, binName)
+		case strings.HasPrefix(r.URL.Path, "/download/"):
+			_, _ = w.Write(bytes.Repeat([]byte("X"), 2048))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockGH.Close()
+	baseURL = mockGH.URL
+
+	// The running executable is a read-only directory: staging open must fail with
+	// permission denied.
+	tmpDir := t.TempDir()
+	exeDir := filepath.Join(tmpDir, "bin")
+	if err := os.Mkdir(exeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeExe := filepath.Join(exeDir, "llmproxy")
+	if err := os.WriteFile(fakeExe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(exeDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(exeDir, 0o755) })
+	// os.Executable() resolves to the test binary; point the handler at our read-only
+	// directory via a symlink swap is overkill — instead override via chdir is also
+	// invasive. Use the direct approach: temporarily replace osExecutable.
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return fakeExe, nil }
+	defer func() { osExecutable = origExe }()
+
+	localSrc, _ := config.NewLocalSource(tmpDir, "pass")
+	authMgr := auth.NewAuthenticator("sk-init", "adminpass")
+	srv := NewServer(authMgr, localSrc, nil, nil)
+	srv.SetAllowPrivate(true)
+	srv.updateAPIBase = mockGH.URL
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/system/upgrade", nil)
+	req.Header.Set("Authorization", "Bearer adminpass")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on staging permission failure, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "cannot write executable staging file") {
+		t.Fatalf("missing staging error prefix: %s", body)
+	}
+	if !strings.Contains(body, "llmproxy-ctl upgrade") {
+		t.Fatalf("error must point the operator at llmproxy-ctl upgrade: %s", body)
 	}
 }

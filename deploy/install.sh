@@ -1212,6 +1212,25 @@ if [[ "$CLI_ACTION" == "upgrade" ]] || is_installed; then
         install_binary_atomic "${TARGET_DIR}/${BIN_NAME}" /opt/llmproxy/bin/llmproxy
     fi
 
+    # Web 端在线升级布局迁移（历史部署：二进制直接在 /usr/local/bin，运行用户无目录写
+    # 权限，rename 无法完成）。把真实二进制迁到 /opt/llmproxy/bin（运行用户可写），原路径
+    # 降级为符号链接，ExecStart 改指真实路径。Web 升级的 tmp 写入与 rename 从此都在可写
+    # 目录内完成，零提权、零 sudoers 变化。lite 无 Web 升级，不需要迁移。
+    unit_file="/etc/systemd/system/llmproxy-${FINAL_ROLE}.service"
+    run_user=$(sed -n -E 's/^User=//p' "$unit_file" 2>/dev/null | head -n 1)
+    if [[ "$FINAL_ROLE" == "full" && -n "$run_user" ]]; then
+        real_bin="/opt/llmproxy/bin/llmproxy"
+        run_sudo mkdir -p /opt/llmproxy/bin
+        run_sudo chown "${run_user}:${run_user}" /opt/llmproxy/bin 2>/dev/null || true
+        # 把刚升级到 /usr/local/bin 的二进制挪为真实文件（原子替换目标）
+        install_binary_atomic "${TARGET_DIR}/${BIN_NAME}" "$real_bin"
+        run_sudo ln -sfn "$real_bin" "${TARGET_DIR}/${BIN_NAME}"
+        run_sudo rm -f "${TARGET_DIR}/${BIN_NAME}.upgrade.tmp" 2>/dev/null || true
+        if ! grep -q '^ExecStart=/opt/llmproxy/bin/llmproxy' "$unit_file" 2>/dev/null; then
+            run_sudo sed -i "s|^ExecStart=.*|ExecStart=/opt/llmproxy/bin/llmproxy --role=full --config-dir=${CONFIG_DIR}|" "$unit_file"
+        fi
+    fi
+
     # 注册或更新全局 CLI 与免密规则，写入非机密端口提示文件
     write_port_hint "$FINAL_PORT"
     setup_cli_and_sudoers
@@ -1466,6 +1485,12 @@ if [[ "$FINAL_ROLE" == "full" ]]; then
 
     SERVICE_FILE="/etc/systemd/system/llmproxy-full.service"
     info "正在写入 systemd 服务单元 (${SERVICE_FILE})..."
+    # Web 端在线升级布局：真实二进制放 /opt/llmproxy/bin（运行用户可写目录，
+    # upgrade 的 tmp 写入与 rename 换 inode 都无权限障碍），/usr/local/bin/llmproxy
+    # 仅作为 PATH 兼容的符号链接。服务直接从真实路径启动，os.Executable()+EvalSymlinks
+    # 解析到它，Web 升级自然落在可写目录——零提权、零 sudoers 变化。
+    run_sudo mkdir -p /opt/llmproxy/bin
+    run_sudo chown "${RUN_AS_USER}:${RUN_AS_USER}" /opt/llmproxy/bin 2>/dev/null || true
     cat << EOF | run_sudo tee "$SERVICE_FILE" >/dev/null
 [Unit]
 Description=LLMProxy2 Full Gateway (Agent + KB + Web Admin)
@@ -1478,7 +1503,7 @@ User=${RUN_AS_USER}
 Group=${RUN_AS_USER}
 WorkingDirectory=${WORK_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${TARGET_DIR}/${BIN_NAME} --role=full --config-dir=${CONFIG_DIR}
+ExecStart=/opt/llmproxy/bin/llmproxy --role=full --config-dir=${CONFIG_DIR}
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
@@ -1526,8 +1551,17 @@ EOF
     rm -f "$TMP_SVC_FILE"
 fi
 
-# 安装二进制
-resolve_binary "${TARGET_DIR}/${BIN_NAME}"
+# 安装二进制：full 的真实二进制放 /opt/llmproxy/bin（运行用户可写，Web 在线升级
+# 的 tmp 写入 + rename 在该目录内完成），/usr/local/bin/llmproxy 保持为符号链接以
+# 兼容 PATH 与既有文档。lite 无 Web 升级，仍直接装 /usr/local/bin。
+if [[ "$FINAL_ROLE" == "full" ]]; then
+    run_sudo mkdir -p /opt/llmproxy/bin
+    run_sudo chown "${RUN_AS_USER}:${RUN_AS_USER}" /opt/llmproxy/bin 2>/dev/null || true
+    resolve_binary "/opt/llmproxy/bin/${BIN_NAME}"
+    run_sudo ln -sfn "/opt/llmproxy/bin/${BIN_NAME}" "${TARGET_DIR}/${BIN_NAME}"
+else
+    resolve_binary "${TARGET_DIR}/${BIN_NAME}"
+fi
 
 # 注册管理工具与免密规则，写入非机密端口提示文件
 write_port_hint "$FINAL_PORT"
