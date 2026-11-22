@@ -19,7 +19,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-SCRIPT_VERSION="v20261118-02"
+# Displayed in the post-install banner. Keep in sync with version.json so the
+# script never advertises a release older than the binary it just installed.
+SCRIPT_VERSION="v20261122-01"
 TARGET_DIR="/usr/local/bin"
 BIN_NAME="llmproxy"
 CTL_NAME="llmproxy-ctl"
@@ -944,12 +946,22 @@ print_summary_banner() {
         masked_key="sk-llmproxy-****"
     fi
 
+    # Prefer the version the installed binary reports; the constant is only a
+    # fallback for the unlikely case where the binary cannot be executed. This
+    # keeps the banner from advertising a release older than what it installed.
+    local shown_version="$SCRIPT_VERSION"
+    local probed_version
+    probed_version="$("${TARGET_DIR}/${BIN_NAME}" --version 2>/dev/null | head -n 1 || true)"
+    if [[ "$probed_version" =~ (v20[0-9]{6}-[0-9]{2}) ]]; then
+        shown_version="${BASH_REMATCH[1]}"
+    fi
+
     echo ""
     echo "=============================================================================="
     if [[ "$healthy" == "true" ]]; then
-        echo -e "${GREEN}${BOLD}  🎉 LLMProxy2 (${role}) 部署成功并已正常启动！(${SCRIPT_VERSION})${NC}"
+        echo -e "${GREEN}${BOLD}  🎉 LLMProxy2 (${role}) 部署成功并已正常启动！(${shown_version})${NC}"
     else
-        echo -e "${YELLOW}${BOLD}  ⚠️ LLMProxy2 (${role}) 服务已就绪，正在初始化启动中... (${SCRIPT_VERSION})${NC}"
+        echo -e "${YELLOW}${BOLD}  ⚠️ LLMProxy2 (${role}) 服务已就绪，正在初始化启动中... (${shown_version})${NC}"
     fi
     echo "=============================================================================="
     echo ""

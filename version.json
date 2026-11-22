@@ -1,16 +1,11 @@
 {
-  "version": "v20261122-01",
-  "semver": "2.8.0",
+  "version": "v20261122-02",
+  "semver": "2.8.1",
   "release_date": "2026-11-22",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.8.0 — 监听范围可选（默认仅 127.0.0.1）、安装脚本健壮性与原子升级",
+  "title": "LLMProxy2 (OCRProxy v2) 2.8.1 — 安装完成横幅显示真实版本号",
   "changelog": [
-    "新增 --bind=<local|public> 监听范围选项：local（默认）写入 LLMPROXY_ADDR=127.0.0.1:PORT 仅本机可访问，public 写入 [::]:PORT 双栈对外；安装脚本不再探测也不再打印外部 IP，端口如何对外发布（nginx/caddy 反代、端口映射、防火墙）不属于程序职责，与 1 代行为一致。已安装环境重复执行脚本即平滑升级并改写监听地址，可在两种模式间随时切换；--bind 非法值立即报错退出",
-    "修复全新 full 安装必然失败（rc=1）：.env 生成子 shell 末尾为 [[ -n \"$LLMPROXY_NODE_TOKEN\" ]] && printf ...，未提供节点令牌时该 [[ ]] 返回 1 成为子 shell 退出码，在 set -e 下终止整个安装；改为 if 形式。同一缺陷在升级路径的 .env 生成块中一并修复",
-    "修复原地升级必然失败（cp: Text file busy / ETXTBSY）：改为「同目录临时文件 + rename」原子替换二进制（install.sh 的二进制落位、/opt/llmproxy/bin、以及 llmproxy-ctl upgrade 三处），rename 换 inode 使运行中进程保留旧映射、重启后加载新文件；llmproxy-ctl 自身脚本亦改为原子替换，避免覆盖正在被 bash 逐行读取的脚本",
-    "修复 get_env_val 读取不存在的 .env 时返回 1 经赋值语句传播、在 set -e 下中止安装（升级路径 8 处探测均加保护）",
-    "修复「只剩二进制、无 systemd 单元」状态被误判为已安装，进而进入升级分支却又找不到单元可重启：is_installed 收紧为只认 systemd 单元文件，此类残留状态改走全新安装并重建单元",
-    "UI 与 Hub 侧：full 角色签发时由 Hub 生成 20 位强随机后台密码，随 admin_password 字段返回并写入 install_command；安装脚本对自动生成的密码仍脱敏，但显式传入时明文回显并给出查看命令；新增 docs/AGENT_DEPLOY_GUIDE.md（可直接交给 agent 的自包含部署说明）",
-    "验证：HK NAT 真实 VM 上覆盖 full/lite × local/public 四种组合的全新安装、public↔local 双向升级切换、llmproxy-ctl upgrade 自覆盖升级、非法 --bind 拒绝、卸载零残留；README/AGENT_DEPLOY_GUIDE 同步 --bind 语义与 ss 判定方法"
+    "安装完成横幅此前硬编码 SCRIPT_VERSION=v20261118-02，与实际安装的二进制版本脱节（2.8.0 装好后仍打印 v20261118-02）。现在优先执行已安装二进制的 --version 并从输出中提取 vYYYYMMDD-NN 作为展示版本，仅在无法执行时回退到脚本常量；脚本常量同步更新到 v20261122-01",
+    "验证：HK NAT 真实 VM 全新安装后横幅显示 v20261122-01，与 llmproxy --version 输出一致；llmproxy-ctl uninstall -y 后零残留"
   ]
 }
