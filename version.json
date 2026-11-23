@@ -1,17 +1,13 @@
 {
-  "version": "v20261123-03",
-  "semver": "2.10.1",
+  "version": "v20261123-04",
+  "semver": "2.10.2",
   "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.10.1 — 控制台可用性回归修复（供应商下拉浮层 / 路由术语统一 / 模板导入缺依赖动作化 / 升级自动刷新 / 折叠箭头 / 设置行规范）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.10.2 — 设置页规范补齐（网关接入 / Vault 链接 / 配置备份）",
   "changelog": [
-    "修复「新增模型路由」首选供应商搜索下拉挤爆表单的回归（#6）：#npPanel 由表单流内的普通 div.card 改为 .np-combo（position:relative）内的绝对定位浮层 .np-panel——贴齐输入框整行宽度、z-index:30 浮于后续字段之上、max-height 280px，搜索框与「手动输入」页脚固定、仅候选列表滚动，面板不再撑开表单布局",
-    "模型路由术语统一（#3）：路由列表入口「添加模型」→「新增模型路由」，空态提示同步；路由编辑器「模型列表」改「候选池（该路由可用的 供应商×Key 组合）」并补「按策略从这里挑一个来发请求；排第一的是首选」说明，「+ 添加模型」改「+ 添加候选」并移入候选池标题行，「保存模型配置/删除此模型」→「保存路由配置/删除此路由」，保存/删除 toast 与确认文案同步改为「路由」口径",
-    "模板导入「缺依赖」由纯红字报错改为可点击动作（#4）：整体缺失的供应商显示「拉取 <供应商>」按钮、本地已有但缺绑定 Key 标签的显示「点此补拉 <供应商>」按钮（整缺失供应商不再叠加无效补拉钮），琥珀色「缺依赖」胶囊替代红色错误条；点击经 fetchVaultCredentials 拉取（补拉只取缺失标签），成功后自动刷新配置并重渲染列表、对应候选恢复可勾选",
-    "在线升级自动确认与品牌版本号（#5）：升级过程在 #systemUpdateResult 内显示「正在升级...」进度与失败原因（不再只靠 toast），成功后每 2s 轮询 /api/admin/system/version（最长 60s）——版本号翻转或服务重启后回活即自动 location.reload()，超时兜底显示手动「刷新页面」按钮；顶栏品牌区新增 #brandVersion（Full 端经 getSystemVersion 显示网关当前版本号，Hub 无该端点则留空）",
-    "修复高级折叠展开不可见（#2）：.headers-details 的 summary 因 .form-label 的 flex 布局丢失原生展开三角，补 ::after「⌄」chevron（展开时旋转 180°），折叠措辞统一为「高级 (…)」",
-    "系统设置页统一 setting-row 行规范（#1）：新增 .setting-row「一行一项：标题 + 说明小字 + 右侧控件」组件（说明文本镜像到 title 属性作悬停提示，≤768px 控件折行占满）；全局路由策略 6 项与高并发护栏 2 项由 form-grid 改为 setting-row 挂载（#routingPolicyRows/#concurrencyGuardRows 运行时渲染，输入框 id 不变、渲染取值逻辑零改动），字段说明补齐",
-    "新增节点心跳 POST /api/node/heartbeat（低成本在线与版本上报）：Bearer stk_node_* 鉴权（复用 findNodeByToken），只更新 last_seen/last_ip/last_binary_version，恒定 204 无 body——不拉配置、不做投影、不返回 payload；中枢用 last_seen 自身做 60 秒服务端去抖，窗口内直接 204 且零 KV 写入（EdgeOne Makers 免费额度同时限制调用次数与 KV 写入数）；lite 与 full 令牌均可用",
-    "新增 LLMPROXY_HEARTBEAT_INTERVAL 环境变量 / --heartbeat-interval 标志（秒）：默认 600（每节点每天 144 次）、最小 60（小于按 60 处理）、0/off 关闭；full 默认启用、lite 默认关闭（显式配置非 off 值才发，为后续 lite UI 配置预留）；启动后延迟 5 秒发首次心跳——升级重启即自动上报新版本，无需用户操作；失败只记 debug 日志，不重试风暴、不阻塞数据面与启动"
+    "补齐设置页剩余三块的 setting-row 规范：网关接入（Base URL / 主 client_key / 附加 proxy_keys）、Vault 中枢连接（地址 / 节点 Token）、配置备份（导出 / 导入）——此前仅第 2（全局路由 6 项）与第 3（并发护栏 2 项）两块迁移，用户报告点名的这三块仍是旧 form-grid 形态、无说明小字、无悬停提示",
+    "settingRow helper 新增可选 id 参数：Base URL 行需要被角色门控（仅 full 显示），旧实现依赖 #gwBaseUrlGroup 容器，改为把 id 挂到 row 自身；新增 .setting-row[hidden] { display: none } 规则（display:flex 会覆盖 UA 的 [hidden]）",
+    "所有输入框 id 保持原样（gwBaseUrl/gwClientKey/gwProxyKeys/cfgVaultUrl/cfgVaultToken/btnExportConfig/importConfigMode/btnTriggerImport），renderSettingsView 按 id 填值逻辑零改动",
+    "验证：浏览器实测 15 行 setting-row（原 8 + 新增 7）、全部 id 存在、gwBaseUrlGroup 角色门控正常、0 行空说明；值填充实测 gwBaseUrl=http://127.0.0.1:18080/v1、client_key 已填、路由策略 sticky_failover、OCR 并发 4；包体 256,550 / 258,048；G1-G6 全绿"
   ]
 }

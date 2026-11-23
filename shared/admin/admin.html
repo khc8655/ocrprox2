@@ -562,24 +562,7 @@
         <div class="notice-strip mb-3" id="gwHubNotice" hidden>
           <span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span>
         </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group" id="gwBaseUrlGroup">
-            <label class="form-label">网关入口地址 (Base URL)</label>
-            <input class="input input--code" id="gwBaseUrl" readonly>
-          </div>
-          <div class="form-group">
-            <label class="form-label">主客户端鉴权密钥 (client_key)</label>
-            <div class="input-row">
-              <input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key">
-              <button class="btn" id="btnGenClientKey">随机生成</button>
-              <button class="btn" id="btnSaveClientKey">保存密钥</button>
-            </div>
-          </div>
-          <div class="form-group form-group--span2">
-            <label class="form-label">附加客户端密钥列表 (proxy_keys，逗号或换行分隔，支持多端分密钥轮换)</label>
-            <textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea>
-          </div>
-        </div>
+        <div class="setting-rows" id="gatewayAccessRows"></div>
         <div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox">
           <div class="snippet-box">
             <div class="snippet-header">
@@ -627,16 +610,7 @@
           <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
           <button class="btn btn--sm" id="btnTestVaultLink">测试连接</button>
         </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group" id="cfgVaultUrlGroup">
-            <label class="form-label">Vault 中枢地址</label>
-            <input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">
-          </div>
-          <div class="form-group" id="cfgVaultTokenGroup">
-            <label class="form-label">节点同步 Token</label>
-            <input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">
-          </div>
-        </div>
+        <div id="vaultLinkRows"></div>
       </div>
 
       <!-- 5. Config Backup & Restore (Hub + Full) -->
@@ -644,25 +618,7 @@
         <div class="section-bar">
           <h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2>
         </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group">
-            <label class="form-label">导出当前完整配置 (JSON)</label>
-            <div>
-              <button class="btn" id="btnExportConfig">导出 JSON 配置文件</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">导入 v1 / v2 配置文件</label>
-            <div class="input-row">
-              <select class="select" id="importConfigMode">
-                <option value="merge">增量合并 (保留现有)</option>
-                <option value="overwrite">全量覆盖</option>
-              </select>
-              <input type="file" id="importConfigFile" accept=".json,application/json" hidden>
-              <button class="btn" id="btnTriggerImport">选择文件导入</button>
-            </div>
-          </div>
-        </div>
+        <div id="configBackupRows"></div>
         <details class="headers-details mt-3" id="rawJsonDetails">
           <summary class="form-label">高级 (原始 JSON 查看与直接保存，脱敏快照下保留未改密钥)</summary>
           <div class="mt-2">

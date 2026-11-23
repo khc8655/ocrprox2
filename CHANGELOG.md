@@ -4,6 +4,24 @@
 
 ---
 
+## [v20261123-04] - 2026-11-23
+
+### Added
+
+- **设置页规范补齐：网关接入 / Vault 链接 / 配置备份三块迁移到 `setting-row`**：v20261123-03 只完成了「全局路由策略」6 项与「并发护栏」2 项，用户报告点名的这三块仍是旧 `form-grid` 形态（无字段说明小字、无悬停提示）。本次补齐后设置页共 **15 行 setting-row**，每行都是「标题 + 说明 + 右侧控件 + `title` 悬停提示」的统一形态：
+  - 网关接入：Base URL（只读，由访问地址推导）、主客户端密钥（含随机生成/保存按钮）、附加密钥列表（多端分发用）
+  - Vault 链接：中枢地址、节点同步 Token
+  - 配置备份：导出完整 JSON、导入 v1/v2（合并/覆盖模式 + 文件选择）
+- `settingRow` helper 新增可选 `id` 参数——Base URL 行需要按角色门控（仅 full 显示），旧实现靠 `#gwBaseUrlGroup` 容器，改为把 id 挂到行自身；配套新增 `.setting-row[hidden] { display: none }`（`display:flex` 会盖过 UA 的 `[hidden]` 规则）。
+
+### Verified
+
+- 浏览器实测：15 行 setting-row、全部原有输入框 id 存在（`gwBaseUrl`/`gwClientKey`/`gwProxyKeys`/`cfgVaultUrl`/`cfgVaultToken`/`btnExportConfig`/`importConfigMode`/`btnTriggerImport`）、`gwBaseUrlGroup` 角色门控正常、**0 行空说明**。
+- 值填充未受影响（`renderSettingsView` 按 id 填值逻辑零改动）：`gwBaseUrl=http://127.0.0.1:18080/v1`、client_key 已填入、路由策略 `sticky_failover`、OCR 并发 `4`。
+- 包体 256,550 / 258,048 字节；`test:admin` 5 门与 `verify:release` G1–G6 全绿。
+
+---
+
 ## [v20261123-03] - 2026-11-23
 
 ### Added

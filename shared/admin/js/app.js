@@ -4483,8 +4483,10 @@
 
   // --- Unified settings row (#1): one item per line — title + desc on the left,
   // control on the right; desc doubles as the hover tooltip via the title attr.
-  function settingRow(title, desc, controlHtml) {
-    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div></div><div class="setting-control">${controlHtml}</div></div>`;
+  // `id` is optional: some rows are toggled by capability (e.g. the Base URL row is
+  // Full-only), and those selectors look the container up by id.
+  function settingRow(title, desc, controlHtml, id = '') {
+    return `<div class="setting-row"${id ? ` id="${id}"` : ''} title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div></div><div class="setting-control">${controlHtml}</div></div>`;
   }
 
   // Mounts the routing-policy and concurrency-guard rows once at init; the inputs
@@ -4513,6 +4515,46 @@
       guardRows.innerHTML = [
         settingRow('OCR 预读并发上限', '1~64；大图预读并发上限，防止内存溢出', `<input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4">`),
         settingRow('固定通道全局并发上限', '1~256；固定通道整体最大并发请求数', `<input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16">`),
+      ].join('');
+    }
+    // Gateway access: the three fields were a plain form-grid; they now follow the
+    // same row规范. Input ids are unchanged so renderSettingsView keeps filling them.
+    const gwRows = $('gatewayAccessRows');
+    if (gwRows && !gwRows.childElementCount) {
+      gwRows.innerHTML = [
+        settingRow('网关入口地址 (Base URL)',
+          '客户端实际调用用的完整地址，供复制到 Cursor / Claude Code 等客户端；只读，由当前访问地址推导',
+          `<input class="input input--code" id="gwBaseUrl" readonly>`, 'gwBaseUrlGroup'),
+        settingRow('主客户端鉴权密钥 (client_key)',
+          '调用 /v1/* 的主密钥；所有客户端至少需要这一把。修改后旧密钥立即失效',
+          `<div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey">随机生成</button><button class="btn" id="btnSaveClientKey">保存密钥</button></div>`),
+        settingRow('附加客户端密钥列表 (proxy_keys)',
+          '逗号或换行分隔的额外密钥，用于给不同终端分配独立密钥、便于单独吊销；可留空',
+          `<textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea>`),
+      ].join('');
+    }
+    // Vault link (Full only): URL + node token.
+    const vaultRows = $('vaultLinkRows');
+    if (vaultRows && !vaultRows.childElementCount) {
+      vaultRows.innerHTML = [
+        settingRow('Vault 中枢地址',
+          '中枢（Hub）的根地址；改地址必须重新输入 Token',
+          `<input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">`),
+        settingRow('节点同步 Token',
+          '该节点专属的 stk_node_* 令牌，仅用于向中枢拉取配置与供应商；丢失请在中枢轮换',
+          `<input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">`),
+      ].join('');
+    }
+    // Config backup: export / import.
+    const backupRows = $('configBackupRows');
+    if (backupRows && !backupRows.childElementCount) {
+      backupRows.innerHTML = [
+        settingRow('导出当前完整配置 (JSON)',
+          '下载一份包含提供商、路由与设置的完整配置，可用于备份或迁移到另一台节点',
+          `<button class="btn" id="btnExportConfig">导出 JSON 配置文件</button>`),
+        settingRow('导入 v1 / v2 配置文件',
+          '从备份恢复：增量合并保留现有内容，全量覆盖会替换全部配置；密钥类字段按脱敏规则处理',
+          `<div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport">选择文件导入</button></div>`),
       ].join('');
     }
   }

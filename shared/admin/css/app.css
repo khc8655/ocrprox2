@@ -482,6 +482,12 @@ html, body {
   border-bottom: 0;
 }
 
+/* A row gated by role uses the hidden attribute; display:flex above would
+   otherwise win over the UA [hidden] rule. */
+.setting-row[hidden] {
+  display: none;
+}
+
 .setting-main {
   flex: 1;
   min-width: 0;
