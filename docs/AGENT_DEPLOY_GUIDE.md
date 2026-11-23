@@ -138,6 +138,7 @@ If-None-Match: "<etag>"        # 可选，命中返回 304 零载荷
 | 能力 | `lite` 令牌 | `full` 令牌 |
 |---|---|---|
 | 拉配置投影 `/api/node/config` | ✅ | ✅ |
+| 心跳上报 `/api/node/heartbeat`（`204` 无 body、不返回配置；60s 服务端去抖） | ✅ | ✅ |
 | 取明文 Key `/api/vault/manifest`、`/api/vault/fetch` | ❌ `403` | ✅（限 scope 内） |
 | 任何 `/api/admin/*` | ❌ `401` | ❌ `401` |
 

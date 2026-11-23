@@ -13,6 +13,7 @@
         <span class="brand-mark" id="brandMark"></span>
         <span class="brand-name">LLMProxy2</span>
         <span class="badge-role" id="brandRole"></span>
+        <span class="text-xs text-muted" id="brandVersion"></span>
       </div>
 
       <nav class="nav-wrap" aria-label="主导航">
@@ -348,7 +349,7 @@
         </div>
         <div class="view-actions">
           <button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button>
-          <button class="btn btn--primary" id="btnAddModel">添加模型</button>
+          <button class="btn btn--primary" id="btnAddModel">新增模型路由</button>
         </div>
       </div>
 
@@ -366,23 +367,24 @@
           <div class="form-group mb-3">
             <label class="form-label" for="newModelName">对外模型名</label>
             <input class="input input--code" id="newModelName" placeholder="claude-sonnet-4-5">
-            <span class="text-xs text-muted">Agent 客户端看到的模型名</span>
+            <span class="text-xs text-muted">这就是一个路由：Agent 客户端用这个名字调用</span>
           </div>
 
           <div class="form-group mb-3">
             <label class="form-label" for="newModelProvider">首选供应商</label>
-            <input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商">
+            <div class="np-combo">
+              <input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商">
+              <div class="card np-panel hidden" id="npPanel" hidden>
+                <div class="np-panel-search">
+                  <input class="input" id="npSearch" placeholder="搜索">
+                </div>
+                <div class="np-panel-options" id="npOptions" role="listbox"></div>
+                <div class="np-panel-foot">
+                  <button class="btn" id="npManual">手动输入</button>
+                </div>
+              </div>
+            </div>
             <span class="text-xs text-muted">候选 Key 池来源</span>
-          </div>
-
-          <div class="card hidden" id="npPanel" hidden>
-            <div class="fields">
-              <input class="input flex-1" id="npSearch" placeholder="搜索">
-            </div>
-            <div id="npOptions" role="listbox"></div>
-            <div class="fields mb-2">
-              <button class="btn" id="npManual">手动输入</button>
-            </div>
           </div>
 
           <div class="form-group mb-3">
@@ -464,7 +466,7 @@
           </div>
         </div>
         <details class="headers-details">
-          <summary class="form-label">高级选项 (角色 / 租约 / 权限范围，一般无需修改)</summary>
+          <summary class="form-label">高级 (角色 / 租约 / 权限范围，一般无需修改)</summary>
           <div class="form-grid mt-2">
             <div class="form-group">
               <label class="form-label">节点角色</label>
@@ -605,39 +607,7 @@
           </div>
           <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button>
         </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">默认路由策略</label>
-            <select class="select" id="cfgRoutingStrategy">
-              <option value="sticky_failover">多路会话粘性优先</option>
-              <option value="round_robin">空闲优先轮询</option>
-              <option value="weighted">按权重比例分摊</option>
-              <option value="least_busy">最少并发优先</option>
-              <option value="fast">动态低延迟优先</option>
-              <option value="manual">手动直通</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">首字超时 (秒，5~600)</label>
-            <input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120">
-          </div>
-          <div class="form-group">
-            <label class="form-label">429 限流冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15">
-          </div>
-          <div class="form-group">
-            <label class="form-label">5xx 服务端异常冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30">
-          </div>
-          <div class="form-group">
-            <label class="form-label">网络超时冷却 (秒)</label>
-            <input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15">
-          </div>
-          <div class="form-group">
-            <label class="form-label">401/403 鉴权失败冷却 (秒，0=不封禁)</label>
-            <input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400">
-          </div>
-        </div>
+        <div id="routingPolicyRows"></div>
       </div>
 
       <!-- 3. High-Concurrency & Multimodal Guards -->
@@ -648,16 +618,7 @@
             <div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div>
           </div>
         </div>
-        <div class="form-grid form-grid--2">
-          <div class="form-group">
-            <label class="form-label" for="cfgOcrInflight">OCR 预读并发上限 (1~64，防大图 OOM)</label>
-            <input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="cfgKbConcurrency">固定通道全局并发上限 (1~256)</label>
-            <input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16">
-          </div>
-        </div>
+        <div id="concurrencyGuardRows"></div>
       </div>
 
       <!-- 4. Vault Client Link (Full) -->
@@ -703,7 +664,7 @@
           </div>
         </div>
         <details class="headers-details mt-3" id="rawJsonDetails">
-          <summary class="form-label">原始 JSON 配置查看与直接保存 (脱敏快照下保留未改密钥)</summary>
+          <summary class="form-label">高级 (原始 JSON 查看与直接保存，脱敏快照下保留未改密钥)</summary>
           <div class="mt-2">
             <textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea>
             <div class="form-actions">

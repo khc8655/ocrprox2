@@ -1,15 +1,17 @@
 {
-  "version": "v20261123-02",
-  "semver": "2.10.0",
+  "version": "v20261123-03",
+  "semver": "2.10.1",
   "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.10.0 — 节点后台密码可回看（Hub KV 明文存）+ Full 控制台 ?key= 直登",
+  "title": "LLMProxy2 (OCRProxy v2) 2.10.1 — 控制台可用性回归修复（供应商下拉浮层 / 路由术语统一 / 模板导入缺依赖动作化 / 升级自动刷新 / 折叠箭头 / 设置行规范）",
   "changelog": [
-    "节点后台密码可回看：Full 节点签发时生成的 admin_password 不再是只随 install_command 出现一次的一次性密文，改以明文存入中枢 KV（运营者明确选择的方案 A，私有部署风险已知悉），节点对象随列表返回、UI 可再次查看/复制；Lite 节点从不含该字段，full→lite 改角色时主动清除残留值",
-    "新增只读端点 GET /api/admin/nodes/:id/credentials（响应 Cache-Control: no-store，绝不轮换 Token）：Full 节点回 KV 明文密码与可恢复的全局 client_key；Lite 节点与「未存过密码的历史版本节点」回说明性 note；节点列表每行新增「密码」按钮 + 掩码弹层（显示/复制密码、复制 API Key）",
-    "Token 轮换语义细化：admin_password 与 node_token 分离——重新获取安装命令/轮换仍轮换 Token，但 KV 已存的密码原样复用，仅历史未存密码的节点在轮换时补生成一次并持久化，保证后续查看稳定",
-    "Full 控制台 URL 直登：节点 full 控制台的 /admin 支持 ?key=<admin_password> / ?token= / ?password= 查询串一键登录——Go 管理面 VerifyAdminAuth 在请求头之外接受查询串凭据（优先级 头 > key > token > password，与 magpie 一致的便利性，运营者明确接受 URL 可能进浏览器历史/Referrer/访问日志的取舍）；/v1/* 数据面仍只认请求头",
-    "前端直登为一次性自动填充：读取 URL 参数经正常登录路径提交，成功后 history.replaceState 抹除参数，凭据不长期驻留地址栏；Hub 中枢 HTTP API 鉴权未放宽（仍只认请求头），错误查询串凭据与错误请求头同等消耗防暴力额度（守卫测试 TestVerifyAdminAuth_AcceptsQueryStringTokens / TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout）",
-    "契约同步：admin-ui-backend.json 升 v3.4（节点对象 admin_password 字段、nodes_credentials 端点、auth_semantics.query_string_credentials 取舍记录），docs/ADMIN_UI_BACKEND_CONTRACT.md 新增 §2.4 与 §7.3.5"
+    "修复「新增模型路由」首选供应商搜索下拉挤爆表单的回归（#6）：#npPanel 由表单流内的普通 div.card 改为 .np-combo（position:relative）内的绝对定位浮层 .np-panel——贴齐输入框整行宽度、z-index:30 浮于后续字段之上、max-height 280px，搜索框与「手动输入」页脚固定、仅候选列表滚动，面板不再撑开表单布局",
+    "模型路由术语统一（#3）：路由列表入口「添加模型」→「新增模型路由」，空态提示同步；路由编辑器「模型列表」改「候选池（该路由可用的 供应商×Key 组合）」并补「按策略从这里挑一个来发请求；排第一的是首选」说明，「+ 添加模型」改「+ 添加候选」并移入候选池标题行，「保存模型配置/删除此模型」→「保存路由配置/删除此路由」，保存/删除 toast 与确认文案同步改为「路由」口径",
+    "模板导入「缺依赖」由纯红字报错改为可点击动作（#4）：整体缺失的供应商显示「拉取 <供应商>」按钮、本地已有但缺绑定 Key 标签的显示「点此补拉 <供应商>」按钮（整缺失供应商不再叠加无效补拉钮），琥珀色「缺依赖」胶囊替代红色错误条；点击经 fetchVaultCredentials 拉取（补拉只取缺失标签），成功后自动刷新配置并重渲染列表、对应候选恢复可勾选",
+    "在线升级自动确认与品牌版本号（#5）：升级过程在 #systemUpdateResult 内显示「正在升级...」进度与失败原因（不再只靠 toast），成功后每 2s 轮询 /api/admin/system/version（最长 60s）——版本号翻转或服务重启后回活即自动 location.reload()，超时兜底显示手动「刷新页面」按钮；顶栏品牌区新增 #brandVersion（Full 端经 getSystemVersion 显示网关当前版本号，Hub 无该端点则留空）",
+    "修复高级折叠展开不可见（#2）：.headers-details 的 summary 因 .form-label 的 flex 布局丢失原生展开三角，补 ::after「⌄」chevron（展开时旋转 180°），折叠措辞统一为「高级 (…)」",
+    "系统设置页统一 setting-row 行规范（#1）：新增 .setting-row「一行一项：标题 + 说明小字 + 右侧控件」组件（说明文本镜像到 title 属性作悬停提示，≤768px 控件折行占满）；全局路由策略 6 项与高并发护栏 2 项由 form-grid 改为 setting-row 挂载（#routingPolicyRows/#concurrencyGuardRows 运行时渲染，输入框 id 不变、渲染取值逻辑零改动），字段说明补齐",
+    "新增节点心跳 POST /api/node/heartbeat（低成本在线与版本上报）：Bearer stk_node_* 鉴权（复用 findNodeByToken），只更新 last_seen/last_ip/last_binary_version，恒定 204 无 body——不拉配置、不做投影、不返回 payload；中枢用 last_seen 自身做 60 秒服务端去抖，窗口内直接 204 且零 KV 写入（EdgeOne Makers 免费额度同时限制调用次数与 KV 写入数）；lite 与 full 令牌均可用",
+    "新增 LLMPROXY_HEARTBEAT_INTERVAL 环境变量 / --heartbeat-interval 标志（秒）：默认 600（每节点每天 144 次）、最小 60（小于按 60 处理）、0/off 关闭；full 默认启用、lite 默认关闭（显式配置非 off 值才发，为后续 lite UI 配置预留）；启动后延迟 5 秒发首次心跳——升级重启即自动上报新版本，无需用户操作；失败只记 debug 日志，不重试风暴、不阻塞数据面与启动"
   ]
 }

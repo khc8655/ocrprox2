@@ -468,6 +468,52 @@ html, body {
   grid-column: 1 / -1;
 }
 
+/* Unified settings rows: one item per line — title + desc on the left, control on
+   the right; the row's title attribute mirrors desc for hover hints. */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--khc-border-1);
+}
+
+.setting-row:last-child {
+  border-bottom: 0;
+}
+
+.setting-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--khc-text-1);
+}
+
+.setting-desc {
+  font-size: 12px;
+  color: var(--khc-text-2);
+  margin-top: 2px;
+}
+
+.setting-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-control .input {
+  width: 110px;
+}
+
+.setting-control .select {
+  width: auto;
+}
+
 .form-label {
   font-size: 12px;
   font-weight: 500;
@@ -577,6 +623,20 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--khc-border-1);
   cursor: pointer;
   transition: background-color 0.12s ease;
+}
+
+/* <button class="row"> (provider combobox options): strip UA button chrome and
+   stretch to the panel width — otherwise buttons shrink to fit-content and
+   keep a grey outset border that ignores the --khc-* palette. */
+button.row {
+  width: 100%;
+  appearance: none;
+  border: 0;
+  border-bottom: 1px solid var(--khc-border-1);
+  background: transparent;
+  color: var(--khc-text-1);
+  text-align: left;
+  font: inherit;
 }
 
 .row:last-child {
@@ -789,42 +849,11 @@ input[type="checkbox"] {
 }
 
 /* Health Bar */
-.health-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
-.health-track {
-  width: 72px;
-  height: 6px;
-  border-radius: 3px;
-  background-color: var(--khc-border-1);
-  overflow: hidden;
-  flex-shrink: 0;
-}
 
-.health-fill {
-  height: 100%;
-  fill: var(--khc-primary-500);
-  background-color: var(--khc-primary-500);
-  border-radius: 3px;
-}
 
-.health-fill--ok {
-  fill: var(--khc-success-500);
-  background-color: var(--khc-success-500);
-}
 
-.health-fill--warn {
-  fill: var(--khc-warning-500);
-  background-color: var(--khc-warning-500);
-}
 
-.health-fill--err {
-  fill: var(--khc-danger-500);
-  background-color: var(--khc-danger-500);
-}
 
 /* KPI Grid — 4 columns desktop, 2 columns mobile */
 .kpi-grid {
@@ -865,50 +894,15 @@ input[type="checkbox"] {
 }
 
 /* Charts & Heatmap */
-.chart-svg {
-  width: 100%;
-  height: auto;
-  display: block;
-}
 
-.chart-axis {
-  stroke: var(--khc-border-1);
-  stroke-width: 1;
-}
 
-.chart-rect--in {
-  fill: var(--khc-primary-500);
-}
 
-.chart-rect--cache {
-  fill: var(--khc-success-500);
-}
 
-.chart-rect--write {
-  fill: var(--khc-warning-500);
-}
 
-.chart-rect--out {
-  fill: var(--khc-primary-100);
-}
 
-.chart-rect--req {
-  fill: var(--khc-primary-500);
-}
 
-.chart-rect--fail {
-  fill: var(--khc-danger-500);
-}
 
-.chart-rect--ttft {
-  fill: var(--khc-warning-500);
-}
 
-.chart-gridline {
-  stroke: var(--khc-border-1);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-}
 
 .chart-legend {
   display: flex;
@@ -952,62 +946,14 @@ input[type="checkbox"] {
   font-size: 12px;
 }
 
-.chart-label {
-  font-size: 10px;
-  fill: var(--khc-text-3);
-  font-family: var(--khc-font-mono);
-}
 
-.heatmap-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
 
-.heatmap-svg {
-  width: 100%;
-  min-width: 580px;
-  height: auto;
-  display: block;
-}
 
-.heatmap-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--khc-text-2);
-  flex-wrap: wrap;
-}
 
-.heatmap-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 
-.heat-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  display: inline-block;
-}
 
-.heat-swatch--l0 { background-color: var(--khc-surface-muted); }
-.heat-swatch--l1 { background-color: #DBEAFE; }
-.heat-swatch--l2 { background-color: #93C5FD; }
-.heat-swatch--l3 { background-color: #3B82F6; }
-.heat-swatch--l4 { background-color: #1664FF; }
 
-:root[data-theme="dark"] .heat-swatch--l1 { background-color: #1E3A8A; }
-:root[data-theme="dark"] .heat-swatch--l2 { background-color: #1D4ED8; }
-:root[data-theme="dark"] .heat-swatch--l3 { background-color: #3B82F6; }
-:root[data-theme="dark"] .heat-swatch--l4 { background-color: #60A5FA; }
 
-.heat-cell {
-  fill: var(--khc-surface-muted);
-}
 
 .heat-l1 {
   fill: #DBEAFE;
@@ -1071,6 +1017,45 @@ input[type="checkbox"] {
   border-color: transparent;
 }
 
+/* Provider combobox floating panel (add-model form, #npPanel): absolutely
+ * positioned under #newModelProvider inside .np-combo — spans the full input
+ * width, floats above the following fields and never pushes the form layout.
+ * Search box and「手动输入」footer stay pinned; only the option list scrolls. */
+.np-combo {
+  position: relative;
+}
+
+.np-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 4px 0 0;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--khc-shadow-md);
+}
+
+.np-panel-search {
+  flex-shrink: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--khc-border-1);
+}
+
+.np-panel-options {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.np-panel-foot {
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--khc-border-1);
+}
+
 /* Details & Code Snippets */
 .headers-details {
   border: 1px solid var(--khc-border-1);
@@ -1080,9 +1065,27 @@ input[type="checkbox"] {
 }
 
 .headers-details summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   user-select: none;
   font-weight: 500;
+}
+
+/* Explicit chevron: .form-label turns the summary into display:flex, which drops
+ * the native disclosure triangle — without this the fold is invisible. Rotates
+ * 180° (points up) while the details element is open. */
+.headers-details summary::after {
+  content: "⌄";
+  margin-left: auto;
+  color: var(--khc-text-3);
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+
+.headers-details[open] summary::after {
+  transform: rotate(180deg);
 }
 
 .headers-pre {
@@ -1351,39 +1354,9 @@ input[type="checkbox"] {
 }
 
 /* Check / Radio Chip Group (Search Capabilities & Selection) */
-.check-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  min-height: 32px;
-}
 
-.check-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--khc-border-1);
-  border-radius: var(--khc-radius-md);
-  background-color: var(--khc-surface-card);
-  font-size: 12px;
-  color: var(--khc-text-1);
-  cursor: pointer;
-  user-select: none;
-  transition: border-color var(--khc-duration-fast) var(--khc-ease-out),
-              background-color var(--khc-duration-fast) var(--khc-ease-out);
-}
 
-.check-chip:hover {
-  border-color: var(--khc-border-2);
-}
 
-.check-chip input {
-  margin: 0;
-  cursor: pointer;
-}
 
 .textarea--json {
   min-height: 84px;
@@ -1420,26 +1393,7 @@ input[type="checkbox"] {
   color: var(--khc-warning-text);
 }
 
-.code-snippet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
 
-.code-pre {
-  margin: 0;
-  padding: 12px;
-  border-radius: var(--khc-radius-md);
-  border: 1px solid var(--khc-border-1);
-  background-color: var(--khc-surface-muted);
-  color: var(--khc-text-1);
-  font-family: var(--khc-font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  overflow-x: auto;
-  white-space: pre;
-}
 
 /* Utilities */
 .flex-1 { flex: 1; min-width: 0; }
@@ -1514,6 +1468,15 @@ input[type="checkbox"] {
 
   .form-group--span2 {
     grid-column: span 1;
+  }
+
+  .setting-row {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .setting-control {
+    flex-basis: 100%;
   }
 
   .search-box {

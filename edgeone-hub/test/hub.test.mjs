@@ -7,13 +7,15 @@ import { dirname, join } from 'node:path';
 import { handleConfigRequest } from '../api/config.js';
 import { handleNodesRequest } from '../api/admin/nodes.js';
 import { handleNodeConfigRequest } from '../api/node/config.js';
+import { handleHeartbeatRequest } from '../api/node/heartbeat.js';
+import * as edgeNodeHeartbeat from '../api/node/heartbeat.js';
 import { handleVaultManifestRequest } from '../api/vault/manifest.js';
 import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
-import { generateClientKey, NODES_KV_KEY } from '../lib/nodes.js';
+import { generateClientKey, NODES_KV_KEY, loadNodes, saveNodes } from '../lib/nodes.js';
 import { projectConfigForNode } from '../lib/projection.js';
 import { PRESET_MAP } from '../lib/generated-presets.js';
 import * as edgeIndex from '../../edge-functions/index.js';
@@ -2317,3 +2319,213 @@ describe('12. Vault manifest agent_models (on-demand route templates)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Node heartbeat — quota-saving liveness endpoint (invocations + KV writes).
+// Task: /api/node/heartbeat must be 204-only, auth-guarded, debounced < 60s on
+// last_seen (no KV write on the debounced path), preserve last_binary_version
+// when X-Node-Version is absent, and never load or return config payloads.
+// ---------------------------------------------------------------------------
+describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
+  let kv;
+  beforeEach(() => {
+    kv = new MockKV();
+  });
+
+  function heartbeatReq(token, extraHeaders = null) {
+    const headers = { authorization: `Bearer ${token}` };
+    if (extraHeaders) Object.assign(headers, extraHeaders);
+    return new Request('https://hub.example.com/api/node/heartbeat', {
+      method: 'POST',
+      headers,
+    });
+  }
+
+  async function issueHeartbeatNode(kv, name = 'zz_hb', role = 'full') {
+    const res = await handleNodesRequest(
+      makeAdminReq('POST', '/api/admin/nodes', { name, role }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(res.status, 200);
+    return res.json();
+  }
+
+  async function findRawNode(kv, nodeId) {
+    return (await loadNodes(kv)).find((n) => n.id === nodeId);
+  }
+
+  test('valid token first heartbeat → 204 with no body, updates last_seen and last_binary_version', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_first');
+    const before = await findRawNode(kv, issue.node.id);
+    assert.equal(before.last_seen, null, 'fresh node has no last_seen');
+    const initialVersion = before.last_binary_version;
+
+    const resp = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, {
+        'x-node-version': 'v20261123-heartbeat',
+        'x-forwarded-for': '198.51.100.42',
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(resp.status, 204, 'heartbeat success is a bodyless 204');
+    assert.equal(await resp.text(), '', '204 carries no body — no config payload, no telemetry echo');
+
+    const after = await findRawNode(kv, issue.node.id);
+    assert.ok(after.last_seen, 'last_seen is now set');
+    assert.ok(new Date(after.last_seen).getTime() > 0);
+    assert.equal(after.last_binary_version, 'v20261123-heartbeat', 'reported binary version is stored');
+    assert.equal(after.last_ip, '198.51.100.42', 'client IP from x-forwarded-for is stored');
+    assert.equal(after.sync_count, before.sync_count, 'heartbeat does not inflate sync_count');
+    assert.equal(after.last_config_version, before.last_config_version, 'heartbeat does not touch config version');
+    assert.notEqual(after.last_binary_version, initialVersion, 'version actually advanced from the issued default');
+  });
+
+  test('second heartbeat within 60s → 204 and last_seen unchanged (debounce, no KV write)', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_debounce');
+
+    const first = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, { 'x-node-version': 'v-debounce-1' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(first.status, 204);
+    const afterFirst = await findRawNode(kv, issue.node.id);
+    const firstSeen = afterFirst.last_seen;
+    const firstVersion = afterFirst.last_binary_version;
+
+    // Spy on KV.put to prove the debounced path performs ZERO writes.
+    const kvWrites = [];
+    const spyingKv = {
+      get: (...args) => kv.get(...args),
+      put: async (...args) => {
+        kvWrites.push(args[0]);
+        return kv.put(...args);
+      },
+    };
+
+    // Immediately again (well inside 60s), reporting a different version.
+    const second = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, { 'x-node-version': 'v-debounce-2' }),
+      TEST_ENV,
+      spyingKv
+    );
+    assert.equal(second.status, 204, 'debounced heartbeat still returns 204');
+    assert.equal(kvWrites.length, 0, 'debounced heartbeat issues ZERO KV.put calls');
+
+    const afterSecond = await findRawNode(kv, issue.node.id);
+    assert.equal(afterSecond.last_seen, firstSeen, 'last_seen is unchanged while inside the 60s window');
+    assert.equal(afterSecond.last_binary_version, firstVersion, 'debounced heartbeat does not write a new version either');
+  });
+
+  test('invalid token → 401 node_revoked_or_invalid', async () => {
+    await issueHeartbeatNode(kv, 'zz_hb_invalid');
+    const resp = await handleHeartbeatRequest(
+      heartbeatReq('stk_node_000000000000000000000000000000000000000000000000'),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(resp.status, 401);
+    const body = await resp.json();
+    assert.deepEqual(body, { ok: false, error: 'node_revoked_or_invalid' });
+  });
+
+  test('revoked (disabled) node → 401', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_revoked');
+    const patchResp = await handleNodesRequest(
+      makeAdminReq('PATCH', `/api/admin/nodes/${issue.node.id}`, { enabled: false }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(patchResp.status, 200);
+
+    const before = await findRawNode(kv, issue.node.id);
+    const seenBefore = before.last_seen;
+    const resp = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, { 'x-node-version': 'v-should-not-stick' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(resp.status, 401, 'disabled node token is rejected');
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_seen, seenBefore, 'revoked node telemetry is untouched');
+  });
+
+  test('heartbeat without X-Node-Version keeps the previous last_binary_version', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_nover');
+    // Seed a known version via a first heartbeat with a header.
+    const seeded = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, { 'x-node-version': 'v-keep-me' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(seeded.status, 204);
+    const withVersion = await findRawNode(kv, issue.node.id);
+    assert.equal(withVersion.last_binary_version, 'v-keep-me');
+
+    // Force last_seen back beyond the debounce window so the next beat writes.
+    withVersion.last_seen = new Date(Date.now() - 120_000).toISOString();
+    const nodes = await loadNodes(kv);
+    const idx = nodes.findIndex((n) => n.id === issue.node.id);
+    nodes[idx] = withVersion;
+    await saveNodes(nodes, kv);
+
+    const noHeader = await handleHeartbeatRequest(heartbeatReq(issue.node_token), TEST_ENV, kv);
+    assert.equal(noHeader.status, 204);
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_binary_version, 'v-keep-me', 'absent X-Node-Version never clears the stored version');
+    assert.ok(new Date(after.last_seen).getTime() > new Date(withVersion.last_seen).getTime(), 'liveness still advanced');
+  });
+
+  test('never loads config: no llmproxy_config read, no payload; non-POST rejected', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_noconfig');
+    const configReads = [];
+    const auditKv = {
+      get: async (key) => {
+        configReads.push(key);
+        return kv.get(key);
+      },
+      put: (...args) => kv.put(...args),
+    };
+
+    const resp = await handleHeartbeatRequest(
+      heartbeatReq(issue.node_token, { 'x-node-version': 'v-no-config' }),
+      TEST_ENV,
+      auditKv
+    );
+    assert.equal(resp.status, 204);
+    const text = await resp.text();
+    assert.equal(text, '', 'no body at all');
+    assert.equal(configReads.includes('llmproxy_config'), false, 'heartbeat must never read llmproxy_config');
+    assert.ok(
+      configReads.every((key) => key === NODES_KV_KEY),
+      'heartbeat only ever reads the node store (auth + touch), never a config key'
+    );
+
+    const getResp = await handleHeartbeatRequest(
+      new Request('https://hub.example.com/api/node/heartbeat', {
+        method: 'GET',
+        headers: { authorization: `Bearer ${issue.node_token}` },
+      }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(getResp.status, 405, 'non-POST method is rejected');
+  });
+
+  test('EdgeOne onRequest/onRequestPost/default.fetch entry points all return 204', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_entries');
+    const context = {
+      request: heartbeatReq(issue.node_token, { 'x-node-version': 'v-entry' }),
+      env: { ...TEST_ENV, KV: kv },
+    };
+    assert.equal((await edgeNodeHeartbeat.onRequest(context)).status, 204);
+    assert.equal((await edgeNodeHeartbeat.onRequestPost(context)).status, 204);
+    assert.equal(
+      (await edgeNodeHeartbeat.default.fetch(heartbeatReq(issue.node_token), { ...TEST_ENV, KV: kv })).status,
+      204
+    );
+  });
+});
+

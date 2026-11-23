@@ -119,6 +119,18 @@
 
 ---
 
+## 三·补 节点心跳契约（`POST /api/node/heartbeat`，v3.5）
+
+> **动机**：full 节点原本只在手动 `/api/vault/fetch`、`/api/vault/manifest` 时上报 `X-Node-Version`，不拉配置就一直显示「离线」（15 分钟口径），升级后中枢仍显示旧版本。心跳以极低成本补上在线与版本信号——EdgeOne Makers 免费额度**同时限制调用次数与 KV 写入数**，故端点与客户端都按「压到最低」设计。
+
+- **鉴权**：`Authorization: Bearer stk_node_<48hex>`（`NODE_TOKEN`，复用 `findNodeByToken`）；**`lite` 与 `full` 令牌均可调用**。未知/吊销/禁用令牌返回 `401 { ok:false, error:"node_revoked_or_invalid" }`；非 POST 返回 `405 method_not_allowed`。
+- **请求头**：`X-Node-Version` 可选（如 `v20261123-03`）；缺省时保留节点既有的 `last_binary_version`，不清空。客户端 IP 解析沿用 `/api/node/config` 的头优先级（`eo-connecting-ip` > `cf-connecting-ip` > `x-forwarded-for`）。
+- **响应**：**恒定 `204 No Content`、零 body**——不拉配置、不做投影、不返回 payload、不回显遥测。
+- **服务端去抖**：用节点既有 `last_seen` 自身做依据（不新增 KV 字段）；距上次心跳 **< 60 秒** 直接返回 204 且**不写 KV**（不读整个节点数组、不 `saveNodes`）——KV 写入是免费额度里更贵的一项。只有去抖窗口外才更新 `last_seen` / `last_ip` / `last_binary_version`。touch 失败静默吞掉，绝不影响调用方。
+- **客户端间隔**：`LLMPROXY_HEARTBEAT_INTERVAL` 环境变量 / `--heartbeat-interval` CLI 标志（秒）：**默认 600 秒**（每节点每天 144 次），**最小 60 秒**（小于 60 按 60 处理），`0` / `off` 关闭。**full 角色默认启用**，**lite 角色默认关闭**（保持零轮询）；lite 显式配置非 off 值时按该间隔发送（lite 节点令牌同样有效）。启动后延迟 5 秒发首次心跳、不阻塞启动——升级重启即自动上报新二进制版本，无需用户操作；失败只记 debug 日志，绝不重试风暴、绝不阻塞数据面、绝不影响启动。
+
+---
+
 ## 四、 数据面与健康检查契约（Go Lite & Full 节点）
 
 | 路由 | `lite` 角色 | `full` 角色 (`agent` 模式) | `full` 角色 (`kb` 模式) | 鉴权要求 |

@@ -102,3 +102,23 @@
 1. **单区域单主按钮原则（Single Primary CTA）**：每个独立视图或折叠编辑区**最多 1 个 `.btn--primary`**（实心主蓝，仅用于主保存/主创建动作）；局部辅助动作（如“添加 Key”“添加候选”“随机生成”“探测协议”“选择文件导入”）统一使用标准 `.btn`（白底灰框）。
 2. **破坏性操作统一标识**：所有删除、移除、清空、停用、解除冷却操作统一使用 `.btn--danger`（包括表格行内的 `移除` 按钮 `.btn--sm.btn--danger`）。
 3. **左右分栏操作栏（`.form-actions--split`）**：当表单底部同时存在危险操作与主保存操作时，必须使用 `.form-actions--split`：**危险/次级维护操作放左侧 `.form-actions-group`，主确认操作（`.btn--primary`）放右侧 `.form-actions-group`**，禁止紧邻混排防止误触。
+
+### 6.4 设置行组件规范（`.setting-row`，v20261123-03 新增）
+
+系统设置页一类「一行一项」配置清单统一使用 `.setting-row`（定义于 [`shared/admin/css/app.css`](file:///Users/xk/Documents/llmproxy2/shared/admin/css/app.css)，生成器 `settingRow(title, desc, controlHtml)` 于 [`shared/admin/js/app.js`](file:///Users/xk/Documents/llmproxy2/shared/admin/js/app.js)），替代裸 `.form-grid` 网格，与 magpie 设置页形态对齐：
+
+1. **结构**：`.setting-row`（`display:flex; align-items:center`）内为 `.setting-main`（`flex:1; min-width:0`，含标题与说明）+ `.setting-control`（`flex-shrink:0; gap:8px`，右侧控件容器）。
+2. **尺寸**：行内边距 `10px 0`（上下），列间距 `16px`（4px 栅格）；标题 `.setting-title` `14px / font-weight:500`，说明 `.setting-desc` `12px / margin-top:2px`；控件高度沿用全局 `32px`（`--khc-ctrl-h`）。
+3. **颜色只用 KHC token**：标题 `--khc-text-1`、说明 `--khc-text-2`、行间分隔线 `1px solid var(--khc-border-1)`（`.setting-row:last-child` 无分隔线）；严禁硬编码色值。
+4. **悬停提示**：行容器 `title` 属性由 `settingRow()` 自动镜像说明文本，鼠标悬停即显示完整说明——新增行必须走 `settingRow()` 生成器，不得手写缺失 `title` 的行。
+5. **控件宽度约定**：`.setting-control .input` 固定 `110px`（秒数/并发数等小数值输入），`.setting-control .select` 宽度自适应（`width:auto`）；超长控件（搜索框等）不适用本组件。
+6. **移动端 ≤768px**：`.setting-row` 折行（`flex-wrap:wrap; gap:8px 16px`），`.setting-control` 占满整行（`flex-basis:100%`）。
+7. **挂载纪律**：静态 HTML 只留空容器（如 `#routingPolicyRows`），由 `mountSettingRows()` 运行时一次性挂载；行内输入框 id 必须保留原 id（`renderSettingsView` 按 id 填值），禁止在 HTML 中硬编码业务默认值。
+
+### 6.5 输入框下拉浮层规范（`.np-combo` / `.np-panel`，v20261123-03 新增）
+
+「输入框 + 可搜索候选面板」组合（如新增模型路由的「首选供应商」）必须浮层化，严禁表单流内联展开挤开布局：
+
+1. **结构**：`.np-combo`（`position:relative`）包裹输入框与 `.np-panel`（`position:absolute; top:100%; left:0; right:0`）——面板贴齐输入框整行宽度，`z-index:30` 浮于后续表单字段之上，`max-height:280px`，阴影 `var(--khc-shadow-md)`。
+2. **面板三段**：`.np-panel-search`（固定顶部，`border-bottom: var(--khc-border-1)`）、`.np-panel-options`（唯一滚动区，`overflow-y:auto; min-height:0`）、`.np-panel-foot`（固定底部，操作按钮放此处）；`display:flex; flex-direction:column` 保证搜索框与页脚不随列表滚动。
+3. **复用纪律**：候选行复用供应商列表的 `.row/.who/.name`，面板本体仅是 `.card`——不为本组件新增行样式。

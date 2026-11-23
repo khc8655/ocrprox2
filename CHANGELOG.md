@@ -4,6 +4,33 @@
 
 ---
 
+## [v20261123-03] - 2026-11-23
+
+### Added
+
+- **设置页统一 setting-row 行规范（用户报告 #1）**：新增 `.setting-row` 组件——一行一项「标题（`.setting-title`）+ 说明小字（`.setting-desc`）+ 右侧控件（`.setting-control`）」，说明文本镜像写入行容器 `title` 属性作悬停提示，行间以 `--khc-border-1` 分隔线、末行无线。`mountSettingRows()` 初始化时把「全局路由策略」6 项与「高并发护栏」2 项由 `.form-grid` 裸网格改为 setting-row 挂载（`admin.html` 仅留 `#routingPolicyRows`/`#concurrencyGuardRows` 空容器、运行时渲染），全部输入框保留原 id，`renderSettingsView` 按 id 填值的逻辑零改动；每项补齐字段说明（如「429 限流冷却」= 命中上游限流后该 Key 暂停调度的时长）。≤768px 时说明与控件折行、控件占满整行。
+- **顶栏品牌区版本号（用户报告 #5）**：品牌行新增 `#brandVersion`（`.text-xs.text-muted`），Full 端经 `GET /api/admin/system/version` 显示网关当前版本号（`setBrandVersion`，与设置页共用一次请求结果）；Hub 中枢无该端点，span 保持留空、不报错。
+- **模板导入「缺依赖」可点击动作（用户报告 #4）**：模板候选行原来把「需先拉取供应商 xxx」「候选绑定的 Key 标签本地缺失」渲染成一串红色错误条、无任何动作指引。现改为琥珀色「缺依赖」胶囊 + 行内按钮：整体缺失的供应商给「拉取 <供应商>」（整供应商规则与全部 Key）；本地已有但缺绑定 Key 标签的给「点此补拉 <供应商>」（只补拉缺失的标签列表）——供应商整体缺失时其名下所有标签缺口由「拉取」覆盖，不再叠加必然失败的补拉钮。`#templateImportList` 上单个事件委托监听（`data-tpl-fetch` / `data-tpl-fetch-keys` / `data-labels`）跨每次 innerHTML 重渲染存活，点击经 `fetchVaultCredentials` 拉取（`key_label` 保持 undefined 以对齐供应商编辑器补拉口径），成功即重拉配置并重绘列表、对应候选恢复可勾选，失败 toast 并复位按钮可重试。
+- **节点心跳与版本上报（低成本，`edgeone-hub/api/node/heartbeat.js` + `internal/hubheartbeat/`）**：新增 `POST /api/node/heartbeat`——`Bearer stk_node_*` 鉴权（复用 `findNodeByToken`），只更新 `last_seen` / `last_ip` / `last_binary_version`，成功恒定 **204 无 body**，不拉配置、不做投影、不返回 payload；中枢用既有 `last_seen` 做 **60 秒服务端去抖**，窗口内直接 204 且**零 KV 写入**（EdgeOne Makers 免费额度同时限制调用次数与 KV 写入数）。`lite` 与 `full` 令牌均可用（为后续 lite UI 配置预留）。客户端新增 `LLMPROXY_HEARTBEAT_INTERVAL` 环境变量 / `--heartbeat-interval` 标志（秒）：默认 600（每节点每天约 144 次）、最小 60（小于按 60 处理）、`0`/`off` 关闭；**full 默认启用、lite 默认关闭**（lite 显式配置非 off 值才发，保持零轮询）。启动延迟 5 秒发首次心跳、不阻塞启动——升级重启即自动上报新二进制版本；失败只记 debug 日志，不重试风暴、不阻塞数据面与启动。
+- **契约与文档同步**：`shared/contracts/admin-ui-backend.json` v3.5 新增 `node_heartbeat` 端点（鉴权、可选 `X-Node-Version`、60s 去抖、204 无 body、不下发配置）与 `LLMPROXY_HEARTBEAT_INTERVAL` 语义；`docs/ADMIN_UI_BACKEND_CONTRACT.md` 新增心跳契约节；`docs/AGENT_DEPLOY_GUIDE.md` §2.5 令牌能力矩阵补心跳行；`docs/OPERATIONS_GUIDE.md` 新增「节点在线状态与版本上报」小节（频率 / 免费额度影响 / 关闭方法）。版本号与已完成的 UI 修复同批交付，仍为 v20261123-03 / 2.10.1。
+
+### Fixed
+
+- **「新增模型路由」首选供应商搜索下拉挤爆表单（用户报告 #6，回归）**：`#npPanel` 原是表单流里的普通 `div.card`，无任何浮层定位——展开即撑开表单布局、宽度随内容收缩到约 1/3、搜索框与「手动输入」按钮挤在面板内部无法使用。现包进 `.np-combo`（`position:relative`）浮层化：`.np-panel` 绝对定位于输入框正下方（`top:100%`、左右贴齐输入框整行宽度）、`z-index:30` 浮于后续字段之上、`max-height:280px` 弹性列布局，搜索框与「手动输入」页脚固定、仅候选列表滚动（`.np-panel-options` `overflow-y:auto`）；HTML 同步重排为 `np-panel-search` / `np-panel-options` / `np-panel-foot` 三段。
+- **模型路由术语混乱（用户报告 #3）**：路由列表入口「添加模型」→「新增模型路由」（空态提示同步）；编辑器「模型列表」改「候选池（该路由可用的 供应商×Key 组合）」+ 说明「按策略从这里挑一个来发请求；排第一的是首选」，「+ 添加模型」→「+ 添加候选」并移入候选池标题行；「对外模型名」说明补「这就是一个路由：Agent 客户端用这个名字调用」；「保存模型配置 / 删除此模型」→「保存路由配置 / 删除此路由」，保存/删除 toast 与确认弹窗同步改为「路由」口径。
+- **在线升级无反馈、不自动刷新（用户报告 #5）**：升级过程现于 `#systemUpdateResult` 内显示「正在升级...」进度胶囊与失败原因（此前只有一闪而过的 toast）；成功后每 2s 轮询 `/api/admin/system/version`（最长 60s）——检测到版本号翻转（或轮询期间服务曾不可达、重启后恢复）即自动 `location.reload()`，60s 超时兜底显示手动「刷新页面」按钮；升级请求本身补 try/catch，异常不再无提示。
+- **高级折叠展开不可见（用户报告 #2）**：`.headers-details` 的 `summary` 挂 `.form-label`（`display:flex`）后原生展开三角被丢弃，用户看不出可展开。补 `summary::after` 显式「⌄」chevron（`--khc-text-3`，展开态旋转 180°、0.15s 过渡）；节点编辑「高级选项」、供应商编辑「高级配置」、原始 JSON「原始 JSON 配置查看与直接保存」三处折叠措辞统一为「高级 (…)」。
+
+### Verified
+
+- `npm run test:admin`（build:admin）五门禁全过：零内联样式 / 零抽屉 / 零左边框 / 体积 257,925B ≤ 258,048B（余量仅 123B，如实记录）/ edge-functions gzip 30,408B ≤ 45,000B；同步再生成 `shared/admin/dist/index.html`、`internal/admin/assets/index.html`、`admin/index.html` 与 `edge-functions/_hub/`。
+- `npm run test:t1` 8/8 绿（契约与 host.js capabilities 对齐、readonly 路由守卫、presets 完整性、UI 零内联样式与体积门禁、hub 纯 Web Standard 门禁）。
+- `go build -trimpath -o /dev/null ./cmd/llmproxy` 通过。
+- 版本号四处同步：`version.json`（v20261123-03 / 2.10.1）、`cmd/llmproxy/main.go` `version`/`AppVersion` 回退字面量、`edgeone-hub/lib/generated-version.js` 与 `edge-functions/_hub/lib/generated-version.js`（`npm run build:presets` + `npm run build:admin` 再生成，未手改）。
+- 本版为纯前端（`shared/admin/` 源码 + 三构建产物）可用性修复，无后端/契约/协议改动：`shared/contracts/admin-ui-backend.json` 保持 v3.4，Go 侧仅 `main.go` 版本字面量同步。
+
+---
+
 ## [v20261123-02] - 2026-11-23
 
 ### Added

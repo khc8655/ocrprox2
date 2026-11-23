@@ -415,6 +415,7 @@
     setupCreationForms();
     setupToolbars();
     setupConfigBackup();
+    mountSettingRows();
     // Only fetch data when a credential is already present. An unauthenticated
     // page load must not issue /api/* requests: every one of those is a 401 and
     // would otherwise burn the anti-bruteforce budget (5 hits = 10 min lockout).
@@ -522,6 +523,14 @@
         }
       }
     }
+  }
+
+  // Brand pill version: shows the gateway's build version (e.g. v20261123-02)
+  // next to the role badge. Full reads GET /api/admin/system/version; the hub has
+  // no such endpoint, so the span simply stays empty there (no error surfaced).
+  function setBrandVersion(v) {
+    const el = $('brandVersion');
+    if (el && v && v.ok && v.current_version) el.textContent = String(v.current_version);
   }
 
   function setupCapabilities() {
@@ -841,6 +850,47 @@
     if (templateImportOverlay) {
       templateImportOverlay.addEventListener('click', (ev) => {
         if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
+      });
+    }
+    // Template import「缺依赖」actions: pull a missing provider wholesale, or
+    // re-pull just the missing key labels of a provider that already exists
+    // locally. One delegated listener on the static list element survives the
+    // per-render innerHTML swaps; a successful pull reloads config and redraws
+    // the list, so the resolved rows re-enable their import checkboxes.
+    const templateImportList = $('templateImportList');
+    if (templateImportList) {
+      templateImportList.addEventListener('click', async (ev) => {
+        const btn = ev.target instanceof Element ? ev.target.closest('button[data-tpl-fetch], button[data-tpl-fetch-keys]') : null;
+        if (!btn || btn.disabled) return;
+        const keysOnly = btn.hasAttribute('data-tpl-fetch-keys');
+        const prov = (keysOnly ? btn.getAttribute('data-tpl-fetch-keys') : btn.getAttribute('data-tpl-fetch')) || '';
+        if (!prov) return;
+        const labels = keysOnly
+          ? JSON.parse(btn.getAttribute('data-labels') || '[]')
+          : undefined;
+        if (keysOnly && (!labels || labels.length === 0)) return;
+        btn.disabled = true;
+        toast(keysOnly ? `正在补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签...` : `正在从中枢拉取供应商 ${prov}（规则与全部 Key）...`, 'info');
+        try {
+          // key_label must stay undefined (matching the 补拉 flow in the provider
+          // editor): HOST only omits it from the payload when it is undefined.
+          const res = await window.HOST.fetchVaultCredentials(prov, undefined, undefined, undefined, labels);
+          if (res && res.ok) {
+            toast(keysOnly ? `已补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签` : `已拉取供应商 ${prov}`, 'ok');
+            await loadData();
+            renderTemplateImportList();
+          } else {
+            const err = String(res?.error || '');
+            const msg = err === 'provider_exists_local'
+              ? `${prov} 是本地自建供应商，不能从中枢补拉；请在供应商页补齐 Key 标签`
+              : `拉取失败: ${scrubUiText(err || '请求未成功')}`;
+            toast(msg, 'err');
+            btn.disabled = false;
+          }
+        } catch (e) {
+          toast(`拉取异常: ${e.message}`, 'err');
+          btn.disabled = false;
+        }
       });
     }
     clk($('btnTestVaultLink'), handleTestVaultLink);
@@ -1308,15 +1358,52 @@
             clk($('btnDoSystemUpgrade'), async () => {
               if (!confirm(`确定下载并升级到 ${data.latest_version} 并自动重启服务吗？`)) return;
               const uBtn = $('btnDoSystemUpgrade');
+              const uBox = $('systemUpdateResult');
               if (uBtn) uBtn.disabled = true;
+              const uMsg = (html) => { if (uBox) uBox.innerHTML = html; };
+              uMsg('<div class="text-sm"><span class="pill pill--amber">正在升级...</span></div>');
               toast('正在下载校验最新二进制并平滑替换...', 'info');
-              const uRes = await window.HOST.upgradeSystem();
-              if (uRes && uRes.ok) {
-                toast(uRes.message || '升级替换成功，服务正在重启...', 'ok');
-              } else {
-                toast(`在线升级失败: ${uRes?.error || '未知错误'}`, 'err');
-                if (uBtn) uBtn.disabled = false;
+              const beforeVer = data.current_version || '';
+              let uRes = null;
+              try {
+                uRes = await window.HOST.upgradeSystem();
+              } catch (uErr) {
+                uRes = { ok: false, error: uErr.message };
               }
+              if (!uRes || !uRes.ok) {
+                toast(`在线升级失败: ${uRes?.error || '未知错误'}`, 'err');
+                uMsg(`<div class="text-sm text-muted">在线升级失败: ${eh(uRes?.error || '未知错误')}，请重试</div>`);
+                if (uBtn) uBtn.disabled = false;
+                return;
+              }
+              toast(uRes.message || '升级替换成功，服务正在重启...', 'ok');
+              // Poll /api/admin/system/version every 2s (max 60s): reload only
+              // once current_version actually flips, which is the definitive
+              // proof the new build is serving. A single failed poll is a
+              // network blip, not evidence of a restart — treating it as such
+              // used to reload (and claim success) while the old process still
+              // served. The 60s fallback below covers a hung restart.
+              const pollDeadline = Date.now() + 60000;
+              const pollTimer = setInterval(async () => {
+                if (Date.now() > pollDeadline) {
+                  clearInterval(pollTimer);
+                  uMsg('<div class="section-bar"><span class="text-sm text-muted">升级可能未完成，请手动刷新页面确认版本</span><button class="btn btn--sm" id="btnReloadAfterUpgrade" type="button">刷新页面</button></div>');
+                  clk($('btnReloadAfterUpgrade'), () => location.reload());
+                  return;
+                }
+                let v = null;
+                try {
+                  v = await window.HOST.getSystemVersion();
+                } catch (_) {
+                  return; // transient: the process may still be restarting
+                }
+                const cv = (v && v.current_version) || '';
+                if (v && v.ok && beforeVer && cv && cv !== beforeVer) {
+                  clearInterval(pollTimer);
+                  uMsg('<div class="text-sm text-ok">升级成功，正在刷新...</div>');
+                  location.reload();
+                }
+              }, 2000);
             });
           } else {
             box.innerHTML = `<div class="text-sm text-ok">当前已是最新版本 <strong class="tabular">${eh(data?.current_version || '-')}</strong> (检测于 ${eh(data?.checked_at || '')})</div>`;
@@ -1724,7 +1811,7 @@
         .map((b) => b.dataset.key)
         .filter(Boolean);
 
-      if (!mName) return toast('请输入模型名', 'warn');
+      if (!mName) return toast('请输入路由名', 'warn');
 
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
@@ -1733,7 +1820,7 @@
         state.activeEditorKey = `m_${mName}`;
         toggle(mForm, false);
         renderModelsList();
-        return toast('模型已存在', 'info');
+        return toast('路由已存在', 'info');
       }
 
       if (!prov) return toast('请选择供应商', 'warn');
@@ -1756,32 +1843,41 @@
       state.activeEditorKey = `m_${mName}`;
       toggle(mForm, false);
       resetProbe();
-      await persistConfig('模型添加成功');
+      await persistConfig('路由添加成功');
     });
   }
 
   // --- Provider combobox (searchable dropdown for「首选供应商」) ---
-  // Replaces the bare <select>: an input + an in-flow panel card whose rows show
-  // the provider name plus a small Base URL line, a top search filter and a
-  // bottom「手动输入…」free entry. No new CSS: rows reuse .row/.who/.name from the
-  // provider list, the panel is a plain .card. Keyboard semantics mirror a native
-  // select: ArrowDown/ArrowUp walk the options, Esc closes the panel first and
-  // only then lets the global handler close the modal.
+  // Replaces the bare <select>: an input plus the floating #npPanel (.np-panel,
+  // absolutely positioned under the input by CSS inside the .np-combo wrapper)
+  // whose rows show the provider name plus a small Base URL line, a pinned top
+  // search filter and a pinned bottom「手动输入…」free entry. Rows reuse
+  // .row/.who/.name from the provider list; the panel itself is a .card. Keyboard
+  // semantics mirror a native select: ArrowDown/ArrowUp walk the options, Esc
+  // closes the panel first and only then lets the global handler close the modal.
   function setupProvCombo() {
     const input = $('newModelProvider');
     const panel = $('npPanel');
     if (!input || !panel) return;
 
     const showPanel = () => {
-      const search = $('npSearch');
-      search.value = '';
       syncProvOptions();
       toggle(panel, true);
-      search.focus();
+      $('npSearch')?.focus();
     };
     closeProvPanel = () => toggle(panel, false);
 
     input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
+    // A pointerdown outside the combo (input + floating panel) dismisses the
+    // panel; do not clear the search filter here so returning to the input
+    // keeps the operator's current narrowing (showPanel only runs on a fresh
+    // open after the panel was closed by Esc/outside click — the filter is
+    // intentionally preserved for that re-entry too).
+    document.addEventListener('pointerdown', (e) => {
+      if (panel.hidden) return;
+      const combo = input.closest('.np-combo');
+      if (combo && !combo.contains(e.target)) closeProvPanel();
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !panel.hidden) {
         e.stopPropagation();
@@ -2025,6 +2121,7 @@
 
       if (window.HOST.capabilities.systemUpdate && !state.systemVersion && window.HOST.getSystemVersion) {
         window.HOST.getSystemVersion().then((v) => {
+          setBrandVersion(v);
           if (v && v.ok) {
             state.systemVersion = v;
             renderSettingsView();
@@ -2599,7 +2696,7 @@
       fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
       fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>${presetVersionHint}`),
       `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级配置 (配额重置、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级 (配额重置、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
@@ -3785,7 +3882,7 @@
     if (orderedKeys.length === 0) {
       const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「添加模型」';
+      emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「新增模型路由」';
       container.appendChild(emptyRow);
       return;
     }
@@ -3903,10 +4000,10 @@
     const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
 
     wrap.innerHTML = `
-      <div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="ed_m_name" value="${eh(mName)}"><span class="text-xs text-muted">Agent 客户端看到的模型名</span></div>
-      <div class="section-bar mt-3"><span class="form-label">模型列表</span></div>
+      <div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="ed_m_name" value="${eh(mName)}"><span class="text-xs text-muted">这就是一个路由：Agent 客户端用这个名字调用</span></div>
+      <div class="section-bar mt-3"><span class="form-label">候选池（该路由可用的 供应商×Key 组合）</span><button class="btn btn--sm" id="btn_add_cand" type="button">+ 添加候选</button></div>
+      <div class="text-xs text-muted mb-2">按策略从这里挑一个来发请求；排第一的是首选</div>
       <div class="card" id="m_cl"></div>
-      <div class="form-actions"><button class="btn btn--sm" id="btn_add_cand" type="button">+ 添加模型</button></div>
       <div class="card mt-2 card-pad hidden" id="m_ac" hidden>
         <div class="fields"><input class="input input--code flex-1" id="m_ac_prov" list="datalistProviders" placeholder="选择供应商"></div>
         <div class="probe-pills-wrap" id="m_ac_models"></div>
@@ -3914,7 +4011,7 @@
       </div>
       <div class="section-bar mt-3"><span class="form-label">Key 选择</span><span class="text-xs text-muted">默认任一=全部启用 Key</span></div>
       <div class="card card-pad" id="m_kw"></div>
-      <details class="headers-details mt-3"><summary class="form-label">候选权重 / 并发上限</summary><div id="m_ca" class="mt-2"></div></details>
+      <details class="headers-details mt-3"><summary class="form-label">高级 (候选权重 / 并发上限)</summary><div id="m_ca" class="mt-2"></div></details>
       <div class="form-group mt-4">
         <label class="form-label">路由策略</label>
         <div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div>
@@ -3927,8 +4024,8 @@
         <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_keyfb" ${m.allow_key_fallback ? 'checked' : ''}><span>候选 Key 不可用时回退同供应商其它 Key</span></label>
       </details>
       <div class="form-actions form-actions--split mt-3">
-        <div class="form-actions-group"><button class="btn btn--danger" id="btn_del_model" type="button">删除此模型</button></div>
-        <div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model" type="button">保存模型配置</button></div>
+        <div class="form-actions-group"><button class="btn btn--danger" id="btn_del_model" type="button">删除此路由</button></div>
+        <div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model" type="button">保存路由配置</button></div>
       </div>
     `;
 
@@ -3942,7 +4039,7 @@
       });
     });
 
-    // ② 模型列表 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 上移/下移/移除.
+    // ② 候选池 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 上移/下移/移除.
     // All draws are local so pool edits never collapse the editor via
     // renderModelsList; one delegated handler serves every row. The per-row Key
     // pill is what makes unchecked-but-listed keys visible: without it a checked
@@ -3975,7 +4072,7 @@
     // provider's candidates cyclically (key[i % n]). When more keys are checked
     // than there are candidates, the surplus stays selected but binds nothing —
     // drawKeys badges those as 未绑定候选 so the state is visible, and binding
-    // more candidates (「+ 添加模型」) puts them to work. Selection rides on
+    // more candidates (「+ 添加候选」) puts them to work. Selection rides on
     // m._keySel: it survives the local redraws and dies with the config
     // round-trip on save (persistConfig strips it — on hub too, where the raw
     // KV save would otherwise persist and later replay stale selections).
@@ -4040,7 +4137,7 @@
       else c.max_concurrency = Math.max(0, Number(el.value) || 0);
     });
 
-    //「+ 添加模型」popup: provider (datalist) → check probed model pills → append
+    //「+ 添加候选」popup: provider (datalist) → check probed model pills → append
     // (manual input as fallback). Probe data shares the provider-editor cache
     // state.probedModelsByProvider — probe a provider there once and the pills
     // light up here too.
@@ -4102,7 +4199,7 @@
       const newName = (q('#ed_m_name')?.value || '').trim() || mName;
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
-      if (newName !== mName && state.config.agent_models[newName]) return toast(`模型 ${newName} 已存在`, 'warn');
+      if (newName !== mName && state.config.agent_models[newName]) return toast(`路由 ${newName} 已存在`, 'warn');
       m.enabled = true;
       m.routing_strategy = stratVal;
       m.active_key = (q('#ed_m_act')?.value || '').trim();
@@ -4119,17 +4216,17 @@
         delete state.config.kb_models[mName];
         delete state.config.kb_models[newName];
       }
-      await persistConfig('模型配置保存成功');
+      await persistConfig('路由配置保存成功');
     });
 
     clk(q('#btn_del_model'), async () => {
-      if (!confirm(`确定删除模型 ${mName} 吗？`)) return;
+      if (!confirm(`确定删除路由 ${mName} 吗？`)) return;
       delete state.config.agent_models[mName];
       // Same-name legacy KB channel must go with it: leaving it behind would let
       // the KB fallback resurrect a ghost route on the next config round-trip.
       if (state.config.kb_models) delete state.config.kb_models[mName];
       state.activeEditorKey = null;
-      await persistConfig('模型已删除');
+      await persistConfig('路由已删除');
     });
 
     return wrap;
@@ -4206,6 +4303,26 @@
       const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
       const missing = templateRouteMissingProviders(mName, tpl, localProviders);
       const missingKeys = templateRouteMissingKeyLabels(mName, tpl, localProviders);
+      // A provider missing wholesale also flags every label it binds; those pairs
+      // are covered by the「拉取」buttons above, so only providers that exist
+      // locally but lack the bound labels get a 补拉 button (fetching keys of a
+      // provider the gateway has never pulled would just fail).
+      // A local-origin provider cannot be re-pulled from the hub (Go returns
+      // provider_exists_local); for those, show guidance instead of a button
+      // that can only fail. Vault-origin providers get a working 补拉 action.
+      const keyGapsByProv = {};
+      const localGapProvs = [];
+      for (const pair of missingKeys) {
+        const idx = pair.indexOf(':');
+        const pId = pair.slice(0, idx);
+        if (missing.includes(pId)) continue;
+        if ((localProviders[pId]?.origin || '') !== 'vault') {
+          if (!localGapProvs.includes(pId)) localGapProvs.push(pId);
+          continue;
+        }
+        (keyGapsByProv[pId] = keyGapsByProv[pId] || []).push(pair.slice(idx + 1));
+      }
+      const keyGapPairs = Object.entries(keyGapsByProv).flatMap(([pId, labels]) => labels.map((l) => `${pId}:${l}`));
       const candText = cands.map((c) => `${c.provider}:${c.key_label || '*'}→${c.target_model || mName}`).join(' · ');
       const row = ce('div');
       row.className = 'mb-2';
@@ -4215,8 +4332,9 @@
           <span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span>
         </label>
         ${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
-        ${missing.length ? `<div class="text-xs"><span class="pill pill--red">需先拉取供应商 ${eh(missing.join(', '))}</span></div>` : ''}
-        ${missingKeys.length ? `<div class="text-xs"><span class="pill pill--red">候选绑定的 Key 标签本地缺失：${eh(missingKeys.join(', '))}（请重新拉取对应供应商或调整模板）</span></div>` : ''}
+        ${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 需要先拉取 ${missing.length} 个供应商：${missing.map((pId) => `<button class="btn btn--sm" type="button" data-tpl-fetch="${eh(pId)}">拉取 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
+        ${keyGapPairs.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> Key 标签本地缺失（该供应商已有但缺这些 Key）：${eh(keyGapPairs.join('、'))} → ${Object.entries(keyGapsByProv).map(([pId, labels]) => `<button class="btn btn--sm" type="button" data-tpl-fetch-keys="${eh(pId)}" data-labels="${eh(JSON.stringify(labels))}">点此补拉 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
+        ${localGapProvs.length ? `<div class="text-xs text-muted">${eh(localGapProvs.join('、'))} 为本地自建供应商，不能从中枢补拉 Key；请在供应商页补齐对应 Key 标签，或改用中枢同名供应商。</div>` : ''}
       `;
       listEl.appendChild(row);
     }
@@ -4360,6 +4478,42 @@
         editor.appendChild(window.USAGE.buildTraceWaterfall(t));
         container.appendChild(editor);
       }
+    }
+  }
+
+  // --- Unified settings row (#1): one item per line — title + desc on the left,
+  // control on the right; desc doubles as the hover tooltip via the title attr.
+  function settingRow(title, desc, controlHtml) {
+    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div></div><div class="setting-control">${controlHtml}</div></div>`;
+  }
+
+  // Mounts the routing-policy and concurrency-guard rows once at init; the inputs
+  // keep the same ids, so renderSettingsView keeps filling values by id afterwards.
+  function mountSettingRows() {
+    const routingRows = $('routingPolicyRows');
+    if (routingRows && !routingRows.childElementCount) {
+      routingRows.innerHTML = [
+        settingRow('默认路由策略', '候选 Key 间的调度方式；粘性优先可保住上下文缓存', `<select class="select" id="cfgRoutingStrategy">
+          <option value="sticky_failover">多路会话粘性优先</option>
+          <option value="round_robin">空闲优先轮询</option>
+          <option value="weighted">按权重比例分摊</option>
+          <option value="least_busy">最少并发优先</option>
+          <option value="fast">动态低延迟优先</option>
+          <option value="manual">手动直通</option>
+        </select>`),
+        settingRow('首字超时 (秒)', '5~600；等上游吐出首个字片的时限，超时换下一候选', `<input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120">`),
+        settingRow('429 限流冷却 (秒)', '命中上游限流后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15">`),
+        settingRow('5xx 服务端异常冷却 (秒)', '上游 5xx 后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30">`),
+        settingRow('网络超时冷却 (秒)', '网络超时等异常后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15">`),
+        settingRow('401/403 鉴权失败冷却 (秒)', '鉴权失败封禁该 Key 的时长；0 不封禁', `<input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400">`),
+      ].join('');
+    }
+    const guardRows = $('concurrencyGuardRows');
+    if (guardRows && !guardRows.childElementCount) {
+      guardRows.innerHTML = [
+        settingRow('OCR 预读并发上限', '1~64；大图预读并发上限，防止内存溢出', `<input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4">`),
+        settingRow('固定通道全局并发上限', '1~256；固定通道整体最大并发请求数', `<input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16">`),
+      ].join('');
     }
   }
 

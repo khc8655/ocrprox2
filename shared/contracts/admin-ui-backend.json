@@ -2,6 +2,7 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.5: added POST /api/node/heartbeat (NODE_TOKEN/Bearer stk_node_*; optional X-Node-Version; bodyless 204; no config/payload/projection; 60s server-side debounce on last_seen with zero KV writes on the debounced path; both lite and full node tokens accepted) plus the LLMPROXY_HEARTBEAT_INTERVAL env / --heartbeat-interval flag (default 600s, min 60s, 0/off disables; full enabled by default, lite opt-in).",
     "v3.4: full-node objects carry admin_password (full role only; plaintext in Hub KV by explicit operator choice — Plan A — so the console password is re-viewable; lite nodes never have the field, and patching full→lite drops it); added nodes_credentials (GET /api/admin/nodes/:id/credentials, read-only re-view of the stored admin password + recoverable client key, Cache-Control: no-store, never rotates the token); admin auth accepts URL query-string credentials (?key/?token/?password) on the full-role admin plane by explicit operator tradeoff — see auth_semantics.query_string_credentials.",
     "v3.3: providers.rpm_per_key is the provider's OVERALL RPM ceiling enforced scheduler-side as one provider-wide sliding window (0 = unlimited) and no longer falls back into the per-key check — api_keys[].max_rpm keeps its key-level meaning; probe_models documents api_type and stored-key resolution (empty/masked api_key resolves the provider's first enabled stored key, vault-managed keys refuse base_url overrides with 403); added test_agent_model and test_candidate (the route-line 测试路由 endpoints, full role only).",
     "v3.2: GET /api/admin/presets-extra preset objects carry version/updated_at mirroring the provider's adapter file (shared/presets/<id>.json); both fields are omitted when the preset has no matching adapter file.",
@@ -202,6 +203,27 @@
         "Authorization": "Bearer stk_node_<48hex>",
         "If-None-Match": "optional etag"
       }
+    },
+    "node_heartbeat": {
+      "method": "POST",
+      "path": "/api/node/heartbeat",
+      "auth": "NODE_TOKEN",
+      "roles": [
+        "hub"
+      ],
+      "headers": {
+        "Authorization": "Bearer stk_node_<48hex>",
+        "X-Node-Version": "optional binary version (e.g. v20261123-03); when omitted the previously reported last_binary_version is preserved"
+      },
+      "response": {
+        "status": 204,
+        "body": "empty (no config, no payload, no projection, no telemetry echo)"
+      },
+      "errors": {
+        "401": "node_revoked_or_invalid (invalid/unknown token, or a disabled node)",
+        "405": "method_not_allowed (non-POST)"
+      },
+      "semantics": "low-cost liveness + binary-version signal (EdgeOne Makers meters BOTH invocations and KV writes). Auth reuses findNodeByToken; the endpoint never loads config, never computes a projection and never returns a payload. It only updates last_seen / last_ip / last_binary_version. Server-side debounce uses the existing last_seen field: a heartbeat arriving <60s after the last one returns 204 with ZERO KV writes (no read of the full node array, no save). Both lite and full node tokens are accepted; client IP resolution follows /api/node/config header precedence (eo-connecting-ip > cf-connecting-ip > x-forwarded-for). Touch failures are swallowed so a heartbeat can never break the caller. Client side: LLMPROXY_HEARTBEAT_INTERVAL env / --heartbeat-interval flag in seconds (default 600 = 144 requests/node/day; values <60 are clamped to 60; 0 or off disables); full role enabled by default, lite role only when a non-off value is explicitly configured. First beat fires 5s after startup (so an upgraded binary's version shows up promptly after restart), subsequent beats every interval; failures are debug-logged only, never retried in a storm and never block startup or the data plane."
     },
     "usage": {
       "method": "GET",

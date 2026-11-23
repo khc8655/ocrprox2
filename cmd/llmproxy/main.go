@@ -23,6 +23,7 @@ import (
 	"github.com/khc8655/llmproxy2/internal/admin"
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
+	"github.com/khc8655/llmproxy2/internal/hubheartbeat"
 	"github.com/khc8655/llmproxy2/internal/hubsync"
 	"github.com/khc8655/llmproxy2/internal/kb"
 	"github.com/khc8655/llmproxy2/internal/oauth"
@@ -37,9 +38,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261123-02"
+	version    = "v20261123-03"
 	commit     = "dev"
-	AppVersion = "2.10.0"
+	AppVersion = "2.10.1"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -186,8 +187,17 @@ func main() {
 	hubURLFlag := flag.String("hub-url", envOr("LLMPROXY_HUB_URL", envOr("HUB_URL", envOr("EDGEONE_HUB_URL", ""))), "EdgeOne Hub URL (lite sync / full default vault)")
 	nodeTokenFlag := flag.String("node-token", envOr("LLMPROXY_NODE_TOKEN", envOr("NODE_TOKEN", "")), "Node authorization token (lite sync / full default vault)")
 	allowPrivateFlag := flag.Bool("allow-private", envBoolOr("ALLOW_PRIVATE_IPS", false), "Allow private upstream IPs")
+	// Heartbeat: env seeds the default, CLI flag overrides. Empty => 600s default.
+	// Explicit (non-off) value is required to enable heartbeats on Lite nodes.
+	heartbeatEnvRaw := envOr("LLMPROXY_HEARTBEAT_INTERVAL", "")
+	heartbeatIntervalFlag := flag.String("heartbeat-interval", heartbeatEnvRaw, "Hub heartbeat interval in seconds (default 600; min 60; 0/off disables)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	hbInterval, hbEnabled, hbExplicit, hbErr := hubheartbeat.ParseInterval(*heartbeatIntervalFlag)
+	if hbErr != nil {
+		log.Printf("warn: invalid heartbeat interval %q, using default %s", *heartbeatIntervalFlag, hbInterval)
+	}
 
 	if *versionFlag {
 		fmt.Printf("llmproxy %s (semver %s, commit %s)\n", version, AppVersion, commit)
@@ -485,6 +495,15 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+
+	// Start Hub heartbeat (full by default, lite only when explicitly configured).
+	// Runs entirely in the background: first beat after 5s, never blocks startup or data plane.
+	hbCtx, hbCancel := context.WithCancel(context.Background())
+	defer hbCancel()
+	if hubheartbeat.ShouldEnable(role, hbEnabled, hbExplicit) {
+		hbClient := hubheartbeat.NewClient(*hubURLFlag, *nodeTokenFlag, version, hbInterval, nil)
+		go hbClient.RunBlock(hbCtx)
 	}
 
 	// Graceful shutdown handling

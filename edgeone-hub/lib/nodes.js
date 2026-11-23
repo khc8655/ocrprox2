@@ -320,6 +320,16 @@ export async function findNodeByToken(rawToken, kv) {
 }
 
 /**
+ * Strip unsafe characters from a node-reported binary version and cap its length.
+ * Shared by the config sync path and the lightweight heartbeat path so both
+ * apply exactly the same cleaning (nodes.js historical logic, 32-char cap).
+ */
+function cleanBinaryVersion(val) {
+  if (!val) return '';
+  return String(val).replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 32);
+}
+
+/**
  * Update node last_seen and sync telemetry (throttled only on idle 304s without usage or version change).
  */
 export async function touchNodeLastSeen(nodeId, kv, configVerOrMeta = 0, maybeMeta = {}) {
@@ -334,7 +344,7 @@ export async function touchNodeLastSeen(nodeId, kv, configVerOrMeta = 0, maybeMe
   const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
   const prevBinVer = node.last_binary_version || '';
   const cleanBinVer = meta && meta.binaryVersion
-    ? String(meta.binaryVersion).replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 32)
+    ? cleanBinaryVersion(meta.binaryVersion)
     : '';
   const hasBinVerChange = Boolean(cleanBinVer && cleanBinVer !== prevBinVer);
   const hasUsage = Boolean(meta && meta.usage && typeof meta.usage === 'object');
@@ -406,4 +416,44 @@ export async function touchNodeLastSeen(nodeId, kv, configVerOrMeta = 0, maybeMe
   node.last_seen = nowIso;
   if (configVer) node.last_config_version = configVer;
   await saveNodes(nodes, kv);
+}
+
+/**
+ * Lightweight heartbeat touch: update last_seen / last_ip / last_binary_version only.
+ * Deliberately does NOT touch sync_count, config version, usage or any config
+ * payload — the heartbeat exists purely to keep the node's "online" signal and
+ * reported binary version fresh at the lowest possible EdgeOne Makers cost.
+ *
+ * Server-side debounce uses last_seen itself (no extra KV field): if the node
+ * was seen less than 60s ago we return without loading or writing KV again.
+ * The 60s floor matches the client's minimum heartbeat interval.
+ *
+ * @param node the node object returned by findNodeByToken (auth already loaded it)
+ * @returns {{written: boolean, debounced: boolean}}
+ */
+export async function touchNodeHeartbeat(node, kv, meta = {}) {
+  if (!node) return { written: false, debounced: false };
+
+  const now = Date.now();
+  const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
+  // Debounce on the existing last_seen field. No KV write (not even a read of
+  // the full array) on the hot path — this is the quota-saving decision.
+  if (lastTime > 0 && now - lastTime < 60_000) {
+    return { written: false, debounced: true };
+  }
+
+  const cleanBinVer = cleanBinaryVersion(meta && meta.binaryVersion);
+  const cleanIp = meta && meta.ip ? String(meta.ip) : '';
+
+  const nodes = await loadNodes(kv);
+  const target = nodes.find((n) => n.id === node.id);
+  if (!target) return { written: false, debounced: false };
+
+  target.last_seen = new Date(now).toISOString();
+  if (cleanIp) target.last_ip = cleanIp;
+  // Preserve the previous version when the node omits X-Node-Version — never clear it.
+  if (cleanBinVer) target.last_binary_version = cleanBinVer;
+
+  await saveNodes(nodes, kv);
+  return { written: true, debounced: false };
 }

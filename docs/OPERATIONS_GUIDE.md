@@ -192,3 +192,18 @@ docker rm -f llmproxy-full && rm -rf ./llmproxy-data   # 卸载：含数据
 ```
 
 > 容器部署不提供 `llmproxy-ctl`（该命令由 `install.sh` 安装到宿主的 systemd 场景）；如需 `upgrade` / `uninstall` 等便捷运维，请使用一键安装方式。
+
+---
+
+## 五、节点在线状态与版本上报（心跳）
+
+中枢节点列表的「在线」口径为 15 分钟内有活动，二进制版本取节点最近一次上报的 `last_binary_version`。过去 full 节点只在手动拉配置（`/api/vault/fetch`、`/api/vault/manifest`）时顺带上报版本，不拉配置就一直显示「离线」、升级后仍显示旧版本。为此新增轻量心跳端点 `POST /api/node/heartbeat`（`Bearer` 节点令牌，`X-Node-Version` 可选，成功恒定 `204` 无 body；只更新 `last_seen` / `last_ip` / `last_binary_version`，**不拉配置、不回传任何载荷**，`lite` 与 `full` 令牌均可用）。
+
+**频率与免费额度**：EdgeOne Makers 免费额度**同时限制调用次数（invocations）与 KV 写入数**，两者都要压到最低：
+
+- 客户端间隔由 `LLMPROXY_HEARTBEAT_INTERVAL` 环境变量（或 `--heartbeat-interval` 标志）控制，单位秒；**默认 600 秒（10 分钟）→ 每节点每天约 144 次心跳**，< 60 秒按 60 秒处理，`0` / `off` 关闭。
+- 中枢侧再用既有 `last_seen` 做 **60 秒服务端去抖**：上次心跳后不足 60 秒的那次直接返回 204 且**零 KV 写入**，所以哪怕把间隔调到最小，KV 写也最多每 60 秒一次。
+- **full 角色默认启用**、**lite 角色默认关闭**（lite 仍是零轮询设计）；如需在 lite 上启用，显式配置非 off 的间隔即可，lite 节点令牌同样有效。
+- 启动后延迟 5 秒发首次心跳（不阻塞启动）：**升级重启即自动上报新版本**，无需任何人工操作；心跳失败只记 debug 日志，不重试风暴、不阻塞数据面、不影响启动。
+
+**如何关闭**：在节点环境变量（systemd 的 `.env` 或 Docker 的 `-e`）中设置 `LLMPROXY_HEARTBEAT_INTERVAL=0`（或 `off`），重启进程即可；用命令行直跑时也可加 `--heartbeat-interval=off`。关闭后该节点不再主动上报在线状态与版本，其中枢「在线」与版本将停留在最后一次心跳/拉配置时的值——如需恢复，移除该变量（回到默认 10 分钟）或设为期望的秒数并重启。

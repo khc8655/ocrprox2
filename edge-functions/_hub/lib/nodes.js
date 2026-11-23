@@ -238,6 +238,10 @@ return n;
 }
 return null;
 }
+function cleanBinaryVersion(val) {
+if (!val) return '';
+return String(val).replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 32);
+}
 export async function touchNodeLastSeen(nodeId, kv, configVerOrMeta = 0, maybeMeta = {}) {
 const configVer = typeof configVerOrMeta === 'number' ? configVerOrMeta : 0;
 const meta = configVerOrMeta && typeof configVerOrMeta === 'object' ? configVerOrMeta : (maybeMeta || {});
@@ -248,7 +252,7 @@ const now = Date.now();
 const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
 const prevBinVer = node.last_binary_version || '';
 const cleanBinVer = meta && meta.binaryVersion
-? String(meta.binaryVersion).replace(/[<>"'&\x00-\x1f\x7f]/g, '').trim().slice(0, 32)
+? cleanBinaryVersion(meta.binaryVersion)
 : '';
 const hasBinVerChange = Boolean(cleanBinVer && cleanBinVer !== prevBinVer);
 const hasUsage = Boolean(meta && meta.usage && typeof meta.usage === 'object');
@@ -313,4 +317,22 @@ if (lastTime > 0 && meta?.is304 && !hasUsage && !hasBinVerChange && now - lastTi
 node.last_seen = nowIso;
 if (configVer) node.last_config_version = configVer;
 await saveNodes(nodes, kv);
+}
+export async function touchNodeHeartbeat(node, kv, meta = {}) {
+if (!node) return { written: false, debounced: false };
+const now = Date.now();
+const lastTime = node.last_seen ? new Date(node.last_seen).getTime() : 0;
+if (lastTime > 0 && now - lastTime < 60_000) {
+return { written: false, debounced: true };
+}
+const cleanBinVer = cleanBinaryVersion(meta && meta.binaryVersion);
+const cleanIp = meta && meta.ip ? String(meta.ip) : '';
+const nodes = await loadNodes(kv);
+const target = nodes.find((n) => n.id === node.id);
+if (!target) return { written: false, debounced: false };
+target.last_seen = new Date(now).toISOString();
+if (cleanIp) target.last_ip = cleanIp;
+if (cleanBinVer) target.last_binary_version = cleanBinVer;
+await saveNodes(nodes, kv);
+return { written: true, debounced: false };
 }

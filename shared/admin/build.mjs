@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync, existsSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 
@@ -207,6 +207,7 @@ console.log('\n9. Generating edge-functions/api/ route entry points with explici
 const apiRoutes = [
   { file: 'api/config.js', target: '../_hub/api/config.js' },
   { file: 'api/node/config.js', target: '../../_hub/api/node/config.js' },
+  { file: 'api/node/heartbeat.js', target: '../../_hub/api/node/heartbeat.js' },
   { file: 'api/admin/nodes.js', target: '../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/nodes/[id].js', target: '../../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/nodes/[id]/rotate.js', target: '../../../../_hub/api/admin/nodes.js' },
@@ -216,6 +217,45 @@ const apiRoutes = [
   { file: 'api/vault/manifest.js', target: '../../_hub/api/vault/manifest.js' },
   { file: 'api/vault/fetch.js', target: '../../_hub/api/vault/fetch.js' },
 ];
+
+// Guard: every handler module in edgeone-hub/api/ must have a route entry above.
+// The table is hand-maintained, and a missing entry is invisible at build time —
+// the endpoint simply 404s in production (this happened to /api/node/heartbeat).
+// Resolve each target backwards to its source module and fail the build if a
+// source file has no entry.
+// Map each route entry to the source module it ultimately imports. The target
+// points at the synced copy under edge-functions/_hub/, which mirrors
+// edgeone-hub/ one-to-one, so strip the _hub prefix to get the source path.
+const hubApiDir = join(projectRoot, 'edgeone-hub', 'api');
+const hubMirrorDir = join(edgeFuncDir, '_hub');
+const registeredSources = new Set(
+  apiRoutes.map(({ file, target }) => {
+    const synced = resolve(dirname(join(edgeFuncDir, file)), target);
+    return synced.startsWith(hubMirrorDir + '/')
+      ? join(projectRoot, 'edgeone-hub', synced.slice(hubMirrorDir.length + 1))
+      : synced;
+  })
+);
+const missingEntries = [];
+(function scanHandlers(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      scanHandlers(full);
+    } else if (entry.name.endsWith('.js')) {
+      if (!registeredSources.has(resolve(full))) {
+        missingEntries.push(relative(hubApiDir, full));
+      }
+    }
+  }
+})(hubApiDir);
+if (missingEntries.length > 0) {
+  console.error('   ✖ handler modules without a route entry in apiRoutes:');
+  for (const m of missingEntries) console.error(`     - edgeone-hub/api/${m}`);
+  console.error('   Add the entry to shared/admin/build.mjs apiRoutes, or the endpoint 404s in production.');
+  process.exit(1);
+}
+console.log(`   ✓ all ${registeredSources.size} handler modules have a route entry`);
 
 for (const { file, target } of apiRoutes) {
   const filePath = join(edgeFuncDir, file);
