@@ -58,10 +58,10 @@ func TestShouldEnable(t *testing.T) {
 		explicit bool
 		want     bool
 	}{
-		{"full default on", types.RoleFull, true, false, true},
+		{"full default: no periodic beats (startup-only)", types.RoleFull, true, false, false},
 		{"full explicit on", types.RoleFull, true, true, true},
 		{"full explicit off", types.RoleFull, false, true, false},
-		{"lite default off", types.RoleLite, true, false, false},
+		{"lite default off (installer sets the env, so runtime default stays quiet)", types.RoleLite, true, false, false},
 		{"lite explicit on", types.RoleLite, true, true, true},
 		{"lite explicit off", types.RoleLite, false, true, false},
 		{"unknown role defaults opt-in", types.Role("unknown"), true, false, false},
@@ -72,6 +72,18 @@ func TestShouldEnable(t *testing.T) {
 				t.Fatalf("ShouldEnable(%q, %v, %v) = %v, want %v", tc.role, tc.enabled, tc.explicit, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestShouldSendStartup pins the one-shot startup beat: it is what makes an
+// upgrade visible in the hub immediately, so it must stay on for every role
+// (including Full, whose periodic beats are off by default).
+func TestShouldSendStartup(t *testing.T) {
+	if !ShouldSendStartup(true) {
+		t.Fatal("startup beat must fire when heartbeats are enabled")
+	}
+	if ShouldSendStartup(false) {
+		t.Fatal("startup beat must not fire when heartbeats are explicitly off")
 	}
 }
 

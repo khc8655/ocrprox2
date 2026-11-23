@@ -75,18 +75,32 @@ func ParseInterval(raw string) (interval time.Duration, enabled bool, explicitly
 }
 
 // ShouldEnable applies role gating on top of ParseInterval:
-//   - full: enabled unless explicitly turned off
-//   - lite: only enabled when the user explicitly configured a non-off interval
+//   - lite: enabled only when the user explicitly configured a non-off interval.
+//     Lite has no local UI, so the hub is its only visibility surface and a
+//     periodic beat is what keeps "online" meaningful there.
+//   - full: NOT polled by default. Full has its own admin console and local
+//     encrypted config; a beat every 10 minutes buys almost nothing while
+//     spending the same free-tier invocations. It still reports once at startup
+//     (ShouldSendStartup) so a freshly upgraded binary's version reaches the hub
+//     immediately — that was the actual reason heartbeats were introduced.
+//   - full with an *explicit* interval: the operator asked for periodic beats
+//     (e.g. they want live status in the hub node list), so honour it.
 //
 // Unknown roles fall back to Lite semantics (opt-in) to preserve zero-polling.
 func ShouldEnable(role types.Role, enabled, explicitlySet bool) bool {
 	if !enabled {
 		return false
 	}
-	if role == types.RoleFull {
-		return true
-	}
+	// Both roles need an explicit opt-in for *periodic* beats; the difference is
+	// only in what the default means for each.
 	return explicitlySet
+}
+
+// ShouldSendStartup reports whether the one-shot startup heartbeat should be sent.
+// It costs one invocation per process start and is what makes a node upgrade
+// visible in the hub immediately, regardless of role.
+func ShouldSendStartup(enabled bool) bool {
+	return enabled
 }
 
 // Client sends heartbeats to the hub. All state is immutable after construction,
@@ -117,6 +131,24 @@ func NewClient(hubURL, nodeToken, nodeVersion string, interval time.Duration, de
 		logf:         debugf,
 		initialDelay: InitialDelay,
 	}
+}
+
+// StartOnce sends exactly one heartbeat after InitialDelay and returns. Intended
+// to be launched in its own goroutine at startup. Unlike RunBlock it ignores the
+// interval, so a Full node with periodic beats disabled still reports its version
+// once per process start.
+func (c *Client) StartOnce(ctx context.Context) {
+	if c == nil || c.url == "" || c.nodeToken == "" {
+		return
+	}
+	initial := time.NewTimer(c.initialDelay)
+	defer initial.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-initial.C:
+	}
+	c.send(ctx)
 }
 
 // RunBlock sends a first heartbeat after InitialDelay, then every interval until

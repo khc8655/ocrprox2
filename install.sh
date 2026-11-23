@@ -1534,6 +1534,11 @@ Environment="LLMPROXY_ADDR=${BIND_ADDR}"
 Environment="LLMPROXY_HUB_URL=${FINAL_HUB_URL}"
 Environment="LLMPROXY_NODE_TOKEN=${FINAL_NODE_TOKEN}"
 Environment="LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}"
+# Lite has no local admin console, so the hub node list is its only visibility
+# surface — a periodic heartbeat is what keeps "online" meaningful there. Full
+# nodes deliberately omit this: they have their own console, and only send the
+# one-shot startup beat (sets nothing, so no free-tier invocations are spent).
+Environment="LLMPROXY_HEARTBEAT_INTERVAL=600"
 Environment="GOMEMLIMIT=48MiB"
 ExecStart=${TARGET_DIR}/${BIN_NAME}
 Restart=always

@@ -1,13 +1,14 @@
 {
-  "version": "v20261123-04",
-  "semver": "2.10.2",
+  "version": "v20261123-05",
+  "semver": "2.10.3",
   "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.10.2 — 设置页规范补齐（网关接入 / Vault 链接 / 配置备份）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.10.3 — 心跳按角色分级（full 只发启动心跳，lite 周期上报）",
   "changelog": [
-    "补齐设置页剩余三块的 setting-row 规范：网关接入（Base URL / 主 client_key / 附加 proxy_keys）、Vault 中枢连接（地址 / 节点 Token）、配置备份（导出 / 导入）——此前仅第 2（全局路由 6 项）与第 3（并发护栏 2 项）两块迁移，用户报告点名的这三块仍是旧 form-grid 形态、无说明小字、无悬停提示",
-    "settingRow helper 新增可选 id 参数：Base URL 行需要被角色门控（仅 full 显示），旧实现依赖 #gwBaseUrlGroup 容器，改为把 id 挂到 row 自身；新增 .setting-row[hidden] { display: none } 规则（display:flex 会覆盖 UA 的 [hidden]）",
-    "所有输入框 id 保持原样（gwBaseUrl/gwClientKey/gwProxyKeys/cfgVaultUrl/cfgVaultToken/btnExportConfig/importConfigMode/btnTriggerImport），renderSettingsView 按 id 填值逻辑零改动",
-    "验证：浏览器实测 15 行 setting-row（原 8 + 新增 7）、全部 id 存在、gwBaseUrlGroup 角色门控正常、0 行空说明；值填充实测 gwBaseUrl=http://127.0.0.1:18080/v1、client_key 已填、路由策略 sticky_failover、OCR 并发 4；包体 256,550 / 258,048；G1-G6 全绿"
+    "修正心跳默认策略：2.10.1 把 full 也设为每 10 分钟周期心跳，是修「升级后中枢显示旧版本」时的过度设计——full 有本地管理台、不依赖中枢存活，周期心跳几乎无收益却同样消耗 EdgeOne Makers 免费调用次数（144 次/天/节点）",
+    "新策略：两个角色默认都**只发一次启动心跳**（启动 5 秒后 1 次调用，升级重启即让中枢看到新版本）；**周期性心跳只在显式设置 LLMPROXY_HEARTBEAT_INTERVAL（≥60 秒）时开启**",
+    "lite 例外：lite 无 Web 端、中枢是唯一可见性入口，由 install.sh 给 lite systemd 单元显式写入 LLMPROXY_HEARTBEAT_INTERVAL=600，保持周期上报；full 单元不写该变量，因此不产生周期调用",
+    "新增 Client.StartOnce（单次发送，忽略 interval）与 ShouldSendStartup；ShouldEnable 语义收紧为「两个角色都需显式 opt-in 才周期发送」",
+    "验证：hubheartbeat 单测更新（full 默认 false、显式 true 才开、Startup 恒发）+ go test -race 全绿；OPERATIONS_GUIDE 心跳章节同步新语义；install.sh lite 单元补该变量"
   ]
 }

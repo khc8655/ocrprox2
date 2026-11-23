@@ -38,9 +38,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261123-04"
+	version    = "v20261123-05"
 	commit     = "dev"
-	AppVersion = "2.10.2"
+	AppVersion = "2.10.3"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -497,13 +497,25 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Start Hub heartbeat (full by default, lite only when explicitly configured).
-	// Runs entirely in the background: first beat after 5s, never blocks startup or data plane.
+	// Hub heartbeat, launched in the background so it never blocks startup or the
+	// data plane.
+	//
+	// Two modes, because the two roles need different things:
+	//   - startup-only (the default for BOTH roles): one beat 5s after boot, so a
+	//     freshly upgraded binary's version reaches the hub immediately. Costs one
+	//     invocation per process start.
+	//   - periodic (only when LLMPROXY_HEARTBEAT_INTERVAL is set explicitly): the
+	//     operator wants live status in the hub node list.
+	// A periodic client also sends the startup beat, so the two never double up.
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	defer hbCancel()
-	if hubheartbeat.ShouldEnable(role, hbEnabled, hbExplicit) {
+	if hbEnabled {
 		hbClient := hubheartbeat.NewClient(*hubURLFlag, *nodeTokenFlag, version, hbInterval, nil)
-		go hbClient.RunBlock(hbCtx)
+		if hubheartbeat.ShouldEnable(role, hbEnabled, hbExplicit) {
+			go hbClient.RunBlock(hbCtx)
+		} else if hubheartbeat.ShouldSendStartup(hbEnabled) {
+			go hbClient.StartOnce(hbCtx)
+		}
 	}
 
 	// Graceful shutdown handling

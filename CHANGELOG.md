@@ -4,6 +4,22 @@
 
 ---
 
+## [v20261123-05] - 2026-11-23
+
+### Fixed
+
+- **心跳默认策略按角色分级**：v20261123-03 为了让「升级后中枢显示新版本」立即生效，把 **full** 也设成每 10 分钟周期心跳——这是过度设计。full 有自己的管理台、不依赖中枢存活，周期心跳对它几乎无收益，却要花掉同样的 EdgeOne Makers 免费调用次数（144 次/天/节点）。
+- **新策略**：两个角色默认都**只发一次启动心跳**（启动 5 秒后 1 次调用 → 升级重启即让中枢看到新版本）；**周期性心跳只在显式设置 `LLMPROXY_HEARTBEAT_INTERVAL`（≥60 秒）时开启**。
+- **lite 保持周期上报**：lite 没有 Web 端，中枢是它唯一的可见性入口，因此 `install.sh` 给 lite 的 systemd 单元显式写入 `LLMPROXY_HEARTBEAT_INTERVAL=600`；full 单元不写该变量，因此不产生周期调用。
+
+### Verified
+
+- 新增 `Client.StartOnce`（单次发送、忽略 interval）与 `ShouldSendStartup`；`ShouldEnable` 收紧为「两个角色都需显式 opt-in 才周期发送」。
+- `hubheartbeat` 单测更新并全绿（full 默认 false / 显式 true 才开 / startup 恒发），`go test -race ./internal/hubheartbeat/` 通过。
+- `docs/OPERATIONS_GUIDE.md` 心跳章节同步新语义；`deploy/install.sh`（与根目录 `install.sh` 同步）lite 单元补该变量。
+
+---
+
 ## [v20261123-04] - 2026-11-23
 
 ### Added
