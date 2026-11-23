@@ -2,6 +2,7 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.7: multi-client proxy keys removed end to end — access_info no longer returns proxy_keys_count and access_key no longer accepts/echoes proxy_keys; settings.proxy_keys is gone from the config schema, the Hub's default config, and Go RuntimeSettings, and a legacy array in stored config / Hub payloads is ignored (unknown field) and never authenticates. VerifyClientKey now accepts exactly the single settings.client_key (1st-gen alias proxy_api_key still resolves to it); no extra keys are compared. The Hub drops the removed field too: loadConfig strips it from an older KV, saveConfigWithCAS never writes it back, and projectConfigForNode never ships it. Single key slot applies to BOTH roles: a Hub-projected settings.client_key revokes a Lite node's --client-key once the first projection arrives (bootstrap_env's LLMPROXY_CLIENT_KEY is only the pre-projection fallback).",
     "v3.5: added POST /api/node/heartbeat (NODE_TOKEN/Bearer stk_node_*; optional X-Node-Version; bodyless 204; no config/payload/projection; 60s server-side debounce on last_seen with zero KV writes on the debounced path; both lite and full node tokens accepted) plus LLMPROXY_HEARTBEAT_INTERVAL env / --heartbeat-interval (v3.6: startup-only beat by default for BOTH roles; periodic beats require an explicit interval >=60s; 0/off disables everything; install.sh sets 600 on the Lite unit).",
     "v3.4: full-node objects carry admin_password (full role only; plaintext in Hub KV by explicit operator choice — Plan A — so the console password is re-viewable; lite nodes never have the field, and patching full→lite drops it); added nodes_credentials (GET /api/admin/nodes/:id/credentials, read-only re-view of the stored admin password + recoverable client key, Cache-Control: no-store, never rotates the token); admin auth accepts URL query-string credentials (?key/?token/?password) on the full-role admin plane by explicit operator tradeoff — see auth_semantics.query_string_credentials.",
     "v3.3: providers.rpm_per_key is the provider's OVERALL RPM ceiling enforced scheduler-side as one provider-wide sliding window (0 = unlimited) and no longer falls back into the per-key check — api_keys[].max_rpm keeps its key-level meaning; probe_models documents api_type and stored-key resolution (empty/masked api_key resolves the provider's first enabled stored key, vault-managed keys refuse base_url overrides with 403); added test_agent_model and test_candidate (the route-line 测试路由 endpoints, full role only).",
@@ -499,7 +500,6 @@
         "mode": "string",
         "client_key_configured": "boolean",
         "client_key_masked": "string",
-        "proxy_keys_count": "integer",
         "endpoints": "array of strings",
         "models": "array of strings"
       }

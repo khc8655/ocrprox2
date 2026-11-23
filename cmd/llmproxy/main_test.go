@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -459,7 +460,10 @@ func (p *patternReader) Read(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
-func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *testing.T) {
+// One key slot for both roles: rotating Settings.client_key revokes the CLI/.env
+// key, and a Hub-projected Lite key does the same (the CLI key is only the
+// first-boot fallback until the first projection arrives).
+func TestFullAndLite_AuthSeedRotateRevokesEnvKey(t *testing.T) {
 	tmpDir := t.TempDir()
 	cliKey := "sk-llmproxy-env-initial-key"
 	authMgr := auth.NewAuthenticator(cliKey, "admin-pass")
@@ -469,7 +473,7 @@ func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *tes
 		t.Fatalf("NewLocalSource err: %v", err)
 	}
 	localSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
-		syncAuthKeysForRole(types.RoleFull, cliKey, cfg, authMgr)
+		syncAuthKeysForRole(cliKey, cfg, authMgr)
 	})
 
 	// 1. Cold start on Full mode: _version stays 0, cliKey authenticates, and adminSrv displays defaultClientKey!
@@ -505,7 +509,6 @@ func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *tes
 		Version: 0,
 		Settings: types.RuntimeSettings{
 			ClientKey: rotatedKey,
-			ProxyKeys: []string{"extra-token-1", "extra-token-2"},
 		},
 	})
 	if err != nil {
@@ -522,15 +525,27 @@ func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *tes
 		t.Fatalf("expected rotated key to authenticate")
 	}
 
-	rExtra1 := httptest.NewRequest("GET", "/v1/models", nil)
-	rExtra1.Header.Set("Authorization", "Bearer extra-token-1")
-	if !authMgr.VerifyClientKey(rExtra1) {
-		t.Fatalf("expected extra-token-1 to authenticate")
+	// #8: multi-client keys are gone. A key that used to ride in proxy_keys must NOT
+	// authenticate, and the field must not exist in the config contract any more.
+	rLegacyExtra := httptest.NewRequest("GET", "/v1/models", nil)
+	rLegacyExtra.Header.Set("Authorization", "Bearer extra-token-1")
+	if authMgr.VerifyClientKey(rLegacyExtra) {
+		t.Fatalf("#8 violation: a former proxy_keys entry still authenticated")
+	}
+	if _, ok := reflect.TypeOf(types.RuntimeSettings{}).FieldByName("ProxyKeys"); ok {
+		t.Fatalf("#8 violation: types.RuntimeSettings still carries ProxyKeys")
+	}
+	var legacyCfg types.ProxyConfig
+	if err := json.Unmarshal([]byte(`{"settings":{"client_key":"k-legacy","proxy_keys":["sk-old-extra"]}}`), &legacyCfg); err != nil {
+		t.Fatalf("legacy config carrying proxy_keys must unmarshal cleanly: %v", err)
+	}
+	if legacyCfg.Settings.ClientKey != "k-legacy" {
+		t.Fatalf("legacy unmarshal lost client_key: %+v", legacyCfg.Settings)
 	}
 
 	// Simulate restart: syncAuthKeysForRole must NOT resurrect old cliKey once Settings.ClientKey is set!
 	snapAfterRestart, _ := localSrc.Current(context.Background(), true)
-	syncAuthKeysForRole(types.RoleFull, cliKey, snapAfterRestart.Config, authMgr)
+	syncAuthKeysForRole(cliKey, snapAfterRestart.Config, authMgr)
 	if authMgr.VerifyClientKey(rCLI) {
 		t.Fatalf("old .env cliKey resurrected on restart!")
 	}
@@ -538,21 +553,27 @@ func TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey(t *tes
 		t.Fatalf("rotatedKey stopped working after restart!")
 	}
 
-	// 3. Verify RoleLite preserves BOTH cliKey and Hub-projected Settings keys
+	// 3. Single-key precedence: a Hub-projected client_key replaces the CLI key (no second
+	//    slot exists any more); with no Settings key at all the CLI key stays the fallback.
 	liteAuth := auth.NewAuthenticator(cliKey, "")
-	syncAuthKeysForRole(types.RoleLite, cliKey, &types.ProxyConfig{
+	syncAuthKeysForRole(cliKey, &types.ProxyConfig{
 		Settings: types.RuntimeSettings{
 			ClientKey: "sk-hub-primary",
-			ProxyKeys: []string{"sk-hub-extra"},
 		},
 	}, liteAuth)
-	if !liteAuth.VerifyClientKey(rCLI) {
-		t.Fatalf("Lite mode should keep cliKey valid")
+	if liteAuth.VerifyClientKey(rCLI) {
+		t.Fatalf("#8: with a single key slot, the CLI key must be revoked once Hub projects client_key")
 	}
 	rHub := httptest.NewRequest("GET", "/v1/models", nil)
 	rHub.Header.Set("Authorization", "Bearer sk-hub-primary")
 	if !liteAuth.VerifyClientKey(rHub) {
 		t.Fatalf("Lite mode should accept Hub-projected ClientKey")
+	}
+
+	fallbackAuth := auth.NewAuthenticator("", "")
+	syncAuthKeysForRole(cliKey, &types.ProxyConfig{}, fallbackAuth)
+	if !fallbackAuth.VerifyClientKey(rCLI) {
+		t.Fatalf("expected CLI key to remain the fallback when Settings carries no client_key")
 	}
 }
 
@@ -749,7 +770,7 @@ func TestFullMode_ZeroAuthCooldownDoesNotBan(t *testing.T) {
 	}
 }
 
-func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
+func TestLiteMode_HubSyncedClientKey(t *testing.T) {
 	mockHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Lease-Until", time.Now().Add(1*time.Hour).Format(time.RFC3339Nano))
 		w.WriteHeader(http.StatusOK)
@@ -760,7 +781,6 @@ func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
 				Version: 3,
 				Settings: types.RuntimeSettings{
 					ClientKey: "sk-hub-synced-primary",
-					ProxyKeys: []string{"sk-hub-synced-extra"},
 				},
 			},
 		})
@@ -770,9 +790,7 @@ func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
 	hubSrc := hubsync.NewHubSource(mockHub.URL, "stk_node_abc", true)
 	authMgr := auth.NewAuthenticator("", "")
 	hubSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
-		if cfg != nil {
-			authMgr.UpdateClientKeys(cfg.Settings.ClientKey, cfg.Settings.ProxyKeys)
-		}
+		syncAuthKeysForRole("", cfg, authMgr)
 	})
 
 	// Before first request: unknown key fails auth, so lazy sync is triggered
@@ -790,10 +808,12 @@ func TestLiteMode_HubSyncedClientKeys(t *testing.T) {
 		t.Fatalf("expected Hub-synced primary client_key to authenticate")
 	}
 
+	// #8: the former second slot is gone — an extra key carried in a Hub payload's
+	// proxy_keys must be ignored (unknown field) and must never authenticate.
 	req2 := httptest.NewRequest("GET", "/v1/models", nil)
 	req2.Header.Set("Authorization", "Bearer sk-hub-synced-extra")
-	if !authMgr.VerifyClientKey(req2) {
-		t.Fatalf("expected Hub-synced proxy_keys to authenticate")
+	if authMgr.VerifyClientKey(req2) {
+		t.Fatalf("#8 violation: Hub payload proxy_keys entry still authenticated")
 	}
 }
 
@@ -820,7 +840,7 @@ func TestLiteMode_UnauthRefreshCannotFloodHub(t *testing.T) {
 	hubSrc := hubsync.NewHubSource(mockHub.URL, "stk_node_0123456789abcdef", true)
 	authMgr := auth.NewAuthenticator("", "")
 	hubSrc.OnConfigChange(func(cfg *types.ProxyConfig) {
-		syncAuthKeysForRole(types.RoleLite, "", cfg, authMgr)
+		syncAuthKeysForRole("", cfg, authMgr)
 	})
 
 	wrapAuth := newDataPlaneAuthWrapper(types.RoleLite, authMgr, hubSrc)

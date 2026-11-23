@@ -430,6 +430,16 @@ html, body {
   border-color: var(--khc-primary-500);
 }
 
+/* Read-only inputs read as derived values, not as fields awaiting input. */
+.input[readonly] {
+  background-color: var(--khc-surface-muted);
+  color: var(--khc-text-2);
+}
+
+.input[readonly]:focus {
+  border-color: var(--khc-border-1);
+}
+
 .input--code {
   font-family: var(--khc-font-mono);
   font-size: 12px;
@@ -1026,7 +1036,7 @@ button.row {
 /* Provider combobox floating panel (add-model form, #npPanel): absolutely
  * positioned under #newModelProvider inside .np-combo — spans the full input
  * width, floats above the following fields and never pushes the form layout.
- * Search box and「手动输入」footer stay pinned; only the option list scrolls. */
+ * The search box stays pinned; only the option list scrolls. */
 .np-combo {
   position: relative;
 }
@@ -1054,12 +1064,6 @@ button.row {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-}
-
-.np-panel-foot {
-  flex-shrink: 0;
-  padding: 8px;
-  border-top: 1px solid var(--khc-border-1);
 }
 
 /* Details & Code Snippets */
@@ -1118,13 +1122,31 @@ button.row {
   margin-bottom: 6px;
 }
 
-.snippet-code {
-  display: block;
+/* Click-to-copy chips (gateway access): .btn look reused verbatim; only the
+ * value needs truncation so a long key never widens the row. */
+.copy-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.copy-chip {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.copy-chip-label {
+  flex-shrink: 0;
+}
+
+.copy-chip-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--khc-font-mono);
   font-size: 11px;
-  color: var(--khc-text-1);
-  overflow-x: auto;
-  white-space: nowrap;
+  color: var(--khc-text-2);
 }
 
 /* Waterfall */
@@ -1412,7 +1434,6 @@ button.row {
 .mb-1 { margin-bottom: 4px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
-.mr-2 { margin-right: 8px; }
 .text-sm { font-size: 12px; }
 .text-xs { font-size: 11px; }
 .text-muted { color: var(--khc-text-2); }

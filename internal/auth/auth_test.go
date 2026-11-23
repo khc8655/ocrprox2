@@ -265,7 +265,7 @@ func TestVerifyAdminAuth_BlockRemaining(t *testing.T) {
 	}
 }
 
-func TestUpdateClientKeys_MultiKeyAndHotReload(t *testing.T) {
+func TestSetClientKey_HotReloadSingleKey(t *testing.T) {
 	a := NewAuthenticator("initial-key", "admin-pass")
 
 	// 1. Initial key works
@@ -275,17 +275,16 @@ func TestUpdateClientKeys_MultiKeyAndHotReload(t *testing.T) {
 		t.Errorf("expected initial key to succeed")
 	}
 
-	// 2. Extra key doesn't work yet
+	// 2. A key that was never configured fails
 	req2 := httptest.NewRequest("GET", "/v1/models", nil)
 	req2.Header.Set("Authorization", "Bearer extra-key-1")
 	if a.VerifyClientKey(req2) {
-		t.Errorf("expected extra key to fail before update")
+		t.Errorf("expected unconfigured key to fail")
 	}
 
-	// 3. Hot update with new primary and multiple extra keys
-	a.UpdateClientKeys("primary-v2", []string{"extra-key-1", "extra-key-2", "  extra-key-3  "})
+	// 3. Hot update replaces the single key
+	a.SetClientKey("primary-v2")
 
-	// Primary key works
 	req3 := httptest.NewRequest("GET", "/v1/models", nil)
 	req3.Header.Set("Authorization", "Bearer primary-v2")
 	if !a.VerifyClientKey(req3) {
@@ -297,28 +296,25 @@ func TestUpdateClientKeys_MultiKeyAndHotReload(t *testing.T) {
 		t.Errorf("expected old initial key to fail after update")
 	}
 
-	// All extra keys succeed (via header or query param)
+	// #8: no second slot exists, so the old multi-key extras never authenticate
 	for _, ek := range []string{"extra-key-1", "extra-key-2", "extra-key-3"} {
 		r := httptest.NewRequest("GET", "/v1/models", nil)
 		r.Header.Set("Authorization", "Bearer "+ek)
-		if !a.VerifyClientKey(r) {
-			t.Errorf("expected extra key %q to succeed via Authorization header", ek)
+		if a.VerifyClientKey(r) {
+			t.Errorf("#8 violation: extra key %q authenticated", ek)
 		}
+	}
 
-		// Also test X-Api-Key
+	// The same single key is accepted via X-Api-Key and the x-goog-api-key header
+	for _, header := range []string{"X-Api-Key", "x-goog-api-key"} {
 		rx := httptest.NewRequest("GET", "/v1/models", nil)
-		rx.Header.Set("X-Api-Key", ek)
+		rx.Header.Set(header, "primary-v2")
 		if !a.VerifyClientKey(rx) {
-			t.Errorf("expected extra key %q to succeed via X-Api-Key", ek)
+			t.Errorf("expected single client key to succeed via %s", header)
 		}
 	}
 
-	// Check GetClientKeys
-	prim, extras := a.GetClientKeys()
-	if prim != "primary-v2" {
-		t.Errorf("expected primary-v2, got %s", prim)
-	}
-	if len(extras) != 3 || extras[2] != "extra-key-3" {
-		t.Errorf("expected 3 trimmed extras, got %v", extras)
+	if got := a.GetClientKey(); got != "primary-v2" {
+		t.Errorf("expected primary-v2, got %s", got)
 	}
 }

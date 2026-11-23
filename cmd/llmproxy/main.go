@@ -38,9 +38,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261123-05"
+	version    = "v20261123-06"
 	commit     = "dev"
-	AppVersion = "2.10.3"
+	AppVersion = "2.11.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -230,12 +230,12 @@ func main() {
 		}
 	}
 
-	// Initialize Authenticator (D6: supports hot-reload & multi-keys)
+	// Initialize Authenticator (D6: supports hot-reload of the single client key)
 	cliClientKey := strings.TrimSpace(*clientKeyFlag)
 	authMgr := auth.NewAuthenticator(cliClientKey, *adminPassFlag)
 
 	updateAuthFromSettings := func(cfg *types.ProxyConfig) {
-		syncAuthKeysForRole(role, cliClientKey, cfg, authMgr)
+		syncAuthKeysForRole(cliClientKey, cfg, authMgr)
 	}
 
 	// Initialize Config Source according to Role
@@ -576,66 +576,29 @@ func listenDualStack(addr string) (net.Listener, error) {
 	return lc.Listen(context.Background(), "tcp", addr)
 }
 
-// syncAuthKeysForRole updates Authenticator client keys according to node role:
-//   - RoleFull: once Settings has any client_key / proxy_api_key / proxy_keys configured,
-//     authenticate strictly against Settings so rotating keys in Full Web UI revokes the old CLI/.env key;
-//     fall back to cliClientKey only if Settings has zero client keys configured.
-//   - RoleLite: keep cliClientKey alongside Hub-projected Settings keys.
-func syncAuthKeysForRole(role types.Role, cliClientKey string, cfg *types.ProxyConfig, authMgr *auth.Authenticator) {
+// syncAuthKeysForRole updates the Authenticator client key from Settings:
+//   - Preferred key: Settings.client_key, falling back to the 1st-gen alias proxy_api_key,
+//     then to the CLI/.env client key. Settings wins so that rotating the key in the
+//     Full Web UI (or on the Hub for Lite nodes) revokes the stale CLI/.env key.
+func syncAuthKeysForRole(cliClientKey string, cfg *types.ProxyConfig, authMgr *auth.Authenticator) {
 	if cfg == nil || authMgr == nil {
 		return
 	}
-	cliClientKey = strings.TrimSpace(cliClientKey)
-	settingsPrimary := strings.TrimSpace(cfg.Settings.ClientKey)
-	if settingsPrimary == "" {
-		settingsPrimary = strings.TrimSpace(cfg.Settings.ProxyAPIKey)
+	settingsKey := strings.TrimSpace(cfg.Settings.ClientKey)
+	if settingsKey == "" {
+		settingsKey = strings.TrimSpace(cfg.Settings.ProxyAPIKey)
 	}
-
-	if role == types.RoleFull {
-		var cleanedExtras []string
-		if cfg.Settings.ProxyAPIKey != "" && strings.TrimSpace(cfg.Settings.ProxyAPIKey) != settingsPrimary {
-			cleanedExtras = append(cleanedExtras, strings.TrimSpace(cfg.Settings.ProxyAPIKey))
-		}
-		for _, pk := range cfg.Settings.ProxyKeys {
-			if t := strings.TrimSpace(pk); t != "" && t != settingsPrimary {
-				cleanedExtras = append(cleanedExtras, t)
-			}
-		}
-		if settingsPrimary != "" || len(cleanedExtras) > 0 {
-			if settingsPrimary == "" && len(cleanedExtras) > 0 {
-				settingsPrimary = cleanedExtras[0]
-				cleanedExtras = cleanedExtras[1:]
-			}
-			authMgr.UpdateClientKeys(settingsPrimary, cleanedExtras)
-			return
-		}
-		authMgr.UpdateClientKeys(cliClientKey, nil)
-		return
+	if settingsKey == "" {
+		settingsKey = strings.TrimSpace(cliClientKey)
 	}
-
-	// RoleLite: preserve cliClientKey + Hub-projected Settings keys
-	primary := cliClientKey
-	var extras []string
-	if primary == "" {
-		primary = settingsPrimary
-		extras = cfg.Settings.ProxyKeys
-	} else {
-		if cfg.Settings.ClientKey != "" && cfg.Settings.ClientKey != primary {
-			extras = append(extras, cfg.Settings.ClientKey)
-		}
-		if cfg.Settings.ProxyAPIKey != "" && cfg.Settings.ProxyAPIKey != primary {
-			extras = append(extras, cfg.Settings.ProxyAPIKey)
-		}
-		extras = append(extras, cfg.Settings.ProxyKeys...)
-	}
-	authMgr.UpdateClientKeys(primary, extras)
+	authMgr.SetClientKey(settingsKey)
 }
 
 func newDataPlaneAuthWrapper(role types.Role, authMgr *auth.Authenticator, hubSrc *hubsync.HubSource) func(http.HandlerFunc) http.HandlerFunc {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if !authMgr.VerifyClientKey(r) {
-				// In Lite mode, client_key/proxy_keys can be projected from EdgeOne Hub.
+				// In Lite mode, client_key can be projected from EdgeOne Hub.
 				// RefreshForAuth preserves cold-start and expired-lease sync while ignoring
 				// unauthenticated X-Node-Refresh: 1 floods within MinRefreshDebounce.
 				if role == types.RoleLite && hubSrc != nil && auth.ExtractToken(r) != "" {

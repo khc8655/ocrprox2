@@ -1,7 +1,7 @@
 <!DOCTYPE html><html lang="zh-CN"><head>
   <script>window.__HOST_KIND__="hub";</script><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><title>LLMProxy2 控制台</title><style>
-:root{--khc-primary-500:#1664FF;--khc-primary-600:#0F54E0;--khc-primary-50:#E6EEFF;--khc-primary-100:#D1E0FF;--khc-surface-page:#F8FAFC;--khc-surface-card:#FFFFFF;--khc-surface-hover:#F1F5F9;--khc-surface-muted:#F1F5F9;--khc-border-1:#E2E8F0;--khc-border-2:#CBD5E1;--khc-text-1:#0F172A;--khc-text-2:#475569;--khc-text-3:#94A3B8;--khc-success-500:#10B981;--khc-success-bg:#ECFDF5;--khc-success-text:#047857;--khc-warning-500:#F59E0B;--khc-warning-bg:#FFFBEB;--khc-warning-text:#B45309;--khc-danger-500:#EF4444;--khc-danger-bg:#FEF2F2;--khc-danger-text:#B91C1C;--khc-radius-sm:4px;--khc-radius-md:6px;--khc-radius-lg:8px;--khc-radius-xl:12px;--khc-shadow-sm:0 1px 2px rgba(15,23,42,0.04);--khc-shadow-md:0 4px 12px rgba(15,23,42,0.08);--khc-shadow-lg:0 12px 32px rgba(15,23,42,0.14);--khc-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--khc-font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--khc-weight-body:400;--khc-weight-medium:500;--khc-weight-strong:600;--khc-text-xs:12px;--khc-text-sm:13px;--khc-text-md:14px;--khc-header-h:48px;--khc-ctrl-h:32px}:root[data-theme="dark"]{--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;background-color:var(--khc-surface-page);color:var(--khc-text-1);font-family:var(--khc-font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}[hidden],.hidden{display:none !important}.tabular{font-variant-numeric:tabular-nums;font-family:var(--khc-font-mono)}.mono{font-family:var(--khc-font-mono)}.app-header{position:sticky;top:0;z-index:40;background-color:var(--khc-surface-card);border-bottom:1px solid var(--khc-border-1)}.header-inner{max-width:1120px;margin:0 auto;height:var(--khc-header-h);padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}.brand-mark{width:24px;height:24px;border-radius:var(--khc-radius-md);background:var(--khc-primary-500);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}.brand-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--khc-text-1)}.badge-role{font-size:11px;font-weight:500;padding:2px 6px;border-radius:var(--khc-radius-sm);background-color:var(--khc-primary-50);color:var(--khc-primary-500)}.nav-wrap{display:flex;align-items:center;min-width:0;flex:1;justify-content:center}.seg{display:inline-flex;align-items:center;gap:2px;background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:2px}.seg-btn{appearance:none;border:none;background:transparent;color:var(--khc-text-2);font-family:inherit;font-size:12px;font-weight:500;height:26px;padding:0 12px;border-radius:var(--khc-radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;transition:color 0.15s ease,background-color 0.15s ease}.seg-btn:hover{color:var(--khc-text-1)}.seg-btn.active{background-color:var(--khc-surface-card);color:var(--khc-text-1);font-weight:500;box-shadow:var(--khc-shadow-sm)}.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.version-pill{font-size:11px;font-weight:500;padding:0 8px;height:26px;display:inline-flex;align-items:center;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);color:var(--khc-text-2)}.main-wrap{max-width:1120px;margin:0 auto;padding:20px}.view-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}.view-title{margin:0;font-size:18px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.01em}.view-sub{margin:2px 0 0 0;font-size:12px;color:var(--khc-text-2)}.view-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}.search-box{position:relative;flex:1;min-width:200px;max-width:320px}.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--khc-text-3);pointer-events:none;display:inline-flex}.search-input{padding-left:30px !important}.btn{appearance:none;border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;font-weight:500;height:var(--khc-ctrl-h);padding:0 12px;border-radius:var(--khc-radius-md);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;transition:background-color 0.15s ease,border-color 0.15s ease}.btn:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:var(--khc-border-2)}.btn:disabled{opacity:0.5;cursor:not-allowed}.btn--primary{background-color:var(--khc-primary-500);border-color:var(--khc-primary-500);color:#FFFFFF}.btn--primary:hover:not(:disabled){background-color:var(--khc-primary-600);border-color:var(--khc-primary-600)}.btn--danger{color:var(--khc-danger-text);border-color:var(--khc-border-1)}.btn--danger:hover:not(:disabled){background-color:var(--khc-danger-bg);border-color:var(--khc-danger-500)}.btn--sm{height:26px;padding:0 10px;font-size:11px}.btn--icon{width:var(--khc-ctrl-h);padding:0}.btn--ghost{background-color:transparent;border-color:transparent;color:var(--khc-text-2)}.btn--ghost:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:transparent;color:var(--khc-text-1)}.btn.active{background-color:var(--khc-primary-50);border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.input,.select,.textarea{width:100%;height:var(--khc-ctrl-h);padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;outline:none;transition:border-color 0.15s ease}.input:focus,.select:focus,.textarea:focus{border-color:var(--khc-primary-500)}.input--code{font-family:var(--khc-font-mono);font-size:12px}.textarea{height:auto;min-height:76px;padding:8px 10px;resize:vertical;line-height:1.45}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}.form-group{display:flex;flex-direction:column;gap:5px;min-width:0}.form-group--span2{grid-column:span 2}.form-group--full{grid-column:1 / -1}.setting-row{display:flex;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--khc-border-1)}.setting-row:last-child{border-bottom:0}.setting-row[hidden]{display:none}.setting-main{flex:1;min-width:0}.setting-title{font-size:14px;font-weight:500;color:var(--khc-text-1)}.setting-desc{font-size:12px;color:var(--khc-text-2);margin-top:2px}.setting-control{flex-shrink:0;display:flex;align-items:center;gap:8px}.setting-control .input{width:110px}.setting-control .select{width:auto}.form-label{font-size:12px;font-weight:500;color:var(--khc-text-2);display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px;line-height:18px}.input-row{display:flex;align-items:center;gap:8px;min-width:0}.input-row > .input,.input-row > .select{flex:1 1 auto;min-width:0;width:auto}.input-row > .btn{flex-shrink:0}input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:var(--khc-primary-500);cursor:pointer;flex-shrink:0}.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--khc-border-1)}.form-actions--split{justify-content:space-between;flex-wrap:wrap}.form-actions-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);box-shadow:var(--khc-shadow-sm);overflow:hidden;margin-bottom:16px}.card-pad{padding:16px 20px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);flex-wrap:wrap}.card-title{margin:0;font-size:14px;font-weight:500;color:var(--khc-text-1);display:flex;align-items:center;gap:8px}.card-sub{font-size:12px;color:var(--khc-text-2)}.row{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);cursor:pointer;transition:background-color 0.12s ease}button.row{width:100%;appearance:none;border:0;border-bottom:1px solid var(--khc-border-1);background:transparent;color:var(--khc-text-1);text-align:left;font:inherit}.row:last-child{border-bottom:none}.row:hover{background-color:var(--khc-surface-hover)}.row.expanded{background-color:var(--khc-surface-hover)}.row--static{cursor:default}.row--static:hover{background-color:transparent}.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:var(--khc-text-3)}.dot--ok{background-color:var(--khc-success-500)}.dot--warn{background-color:var(--khc-warning-500)}.dot--err{background-color:var(--khc-danger-500)}.ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--khc-text-2)}.ico svg{width:16px;height:16px}.who{flex:1;min-width:0}.name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:500;color:var(--khc-text-1)}.sub{font-size:11px;color:var(--khc-text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fields{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}.caret{font-size:11px;color:var(--khc-text-3);transition:transform 0.15s ease}.row.expanded .caret{transform:rotate(180deg)}.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--khc-radius-sm);font-size:11px;font-weight:500;background-color:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);white-space:nowrap}.pill--accent{background-color:var(--khc-primary-50);border-color:var(--khc-primary-100);color:var(--khc-primary-500)}.pill--green{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.pill--amber{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.pill--red{background-color:var(--khc-danger-bg);border-color:transparent;color:var(--khc-danger-text)}.editor{padding:16px 20px;background-color:var(--khc-surface-muted);border-bottom:1px solid var(--khc-border-1)}.editor-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--khc-border-1)}.section-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th{text-align:left;font-size:12px;font-weight:500;color:var(--khc-text-2);padding:9px 12px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);white-space:nowrap}.data-table td{padding:9px 12px;border-bottom:1px solid var(--khc-border-1);color:var(--khc-text-1);vertical-align:middle}.data-table th:first-child,.data-table td:first-child{padding-left:20px}.data-table th:last-child,.data-table td:last-child{padding-right:20px;white-space:nowrap}.data-table tr:last-child td{border-bottom:none}.data-table tr:hover td{background-color:var(--khc-surface-hover)}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);padding:14px 16px;box-shadow:var(--khc-shadow-sm);display:flex;flex-direction:column;gap:4px}.kpi-label{font-size:12px;font-weight:500;color:var(--khc-text-2)}.kpi-value{font-size:20px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.kpi-sub{font-size:11px;color:var(--khc-text-3)}.chart-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;color:var(--khc-text-2)}.legend-item{display:inline-flex;align-items:center;gap:5px}.legend-swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}.legend-swatch--in{background-color:var(--khc-primary-500)}.legend-swatch--cache{background-color:var(--khc-success-500)}.legend-swatch--write{background-color:var(--khc-warning-500)}.legend-swatch--out{background-color:var(--khc-primary-100)}.legend-swatch--fail{background-color:var(--khc-danger-500)}.legend-swatch--own{background-color:#64748B}.legend-swatch--queued{background-color:#8B5CF6}.legend-swatch--sent{background-color:#06B6D4}.legend-swatch--ttft{background-color:var(--khc-warning-500)}.legend-swatch--flow{background-color:var(--khc-primary-500)}.legend-swatch--retried{background-color:var(--khc-danger-500)}.chart-empty{padding:20px 12px;text-align:center;color:var(--khc-text-3);font-size:12px}.heat-l1{fill:#DBEAFE}.heat-l2{fill:#93C5FD}.heat-l3{fill:#3B82F6}.heat-l4{fill:#1664FF}:root[data-theme="dark"] .heat-l1{fill:#1E3A8A}:root[data-theme="dark"] .heat-l2{fill:#1D4ED8}:root[data-theme="dark"] .heat-l3{fill:#3B82F6}:root[data-theme="dark"] .heat-l4{fill:#60A5FA}.probe-pills-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.probe-pill{font-family:var(--khc-font-mono);font-size:11px;padding:4px 8px;border-radius:var(--khc-radius-sm);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);cursor:pointer}.probe-pill:hover{border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.probe-pill--managed{background-color:var(--khc-success-bg);color:var(--khc-success-text);border-color:transparent}.np-combo{position:relative}.np-panel{position:absolute;top:100%;left:0;right:0;z-index:30;margin:4px 0 0;max-height:280px;display:flex;flex-direction:column;box-shadow:var(--khc-shadow-md)}.np-panel-search{flex-shrink:0;padding:8px;border-bottom:1px solid var(--khc-border-1)}.np-panel-options{flex:1 1 auto;min-height:0;overflow-y:auto}.np-panel-foot{flex-shrink:0;padding:8px;border-top:1px solid var(--khc-border-1)}.headers-details{border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);padding:8px 12px}.headers-details summary{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-weight:500}.headers-details summary::after{content:"⌄";margin-left:auto;color:var(--khc-text-3);font-size:12px;transition:transform 0.15s ease}.headers-details[open] summary::after{transform:rotate(180deg)}.headers-pre{margin:8px 0 0 0;padding:10px;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);overflow-x:auto;font-size:11px}.snippet-box{background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:10px 12px}.snippet-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.snippet-code{display:block;font-family:var(--khc-font-mono);font-size:11px;color:var(--khc-text-1);overflow-x:auto;white-space:nowrap}.waterfall-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px 12px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md)}.wf-item{font-size:12px;display:flex;align-items:center;gap:4px}.wf-label{color:var(--khc-text-2)}.try-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);margin-top:6px}.wf-bar-svg{width:100%;height:14px;display:block;border-radius:4px;overflow:hidden;background-color:var(--khc-surface-muted)}.wf-seg--own{fill:#64748B}.wf-seg--queued{fill:#8B5CF6}.wf-seg--sent{fill:#06B6D4}.wf-seg--ttft{fill:var(--khc-warning-500)}.wf-seg--flow{fill:var(--khc-primary-500)}.wf-seg--retried{fill:var(--khc-danger-500)}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric-box{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:8px 10px}.metric-box-label{font-size:11px;color:var(--khc-text-2)}.metric-box-val{font-size:14px;font-weight:600;color:var(--khc-text-1);margin-top:2px}.live-strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.live-strip-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.trace-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.trace-toolbar .search-box{flex:1 1 200px}.trace-toolbar .select{width:auto;min-width:120px}.input--compact{height:26px;padding:0 8px;font-size:11px;min-width:68px}.update-box{padding:12px 14px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.update-notes{margin:8px 0 0 18px;padding:0;font-size:12px;color:var(--khc-text-2);line-height:1.55}.step-num{width:20px;height:20px;border-radius:50%;background-color:var(--khc-primary-50);color:var(--khc-primary-500);font-size:11px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.privacy-masked .privacy-mask{filter:blur(5px);user-select:none}.login-overlay{position:fixed;inset:0;z-index:100;background-color:rgba(15,23,42,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}.login-overlay > .login-card{margin:auto;flex-shrink:0}.login-card{width:100%;max-width:380px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-xl);box-shadow:var(--khc-shadow-lg);padding:24px}.login-card--wide{max-width:680px}.login-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.login-error{margin-top:10px;padding:8px 10px;border-radius:var(--khc-radius-md);background-color:var(--khc-danger-bg);color:var(--khc-danger-text);font-size:12px}.toast-box{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:340px}.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);box-shadow:var(--khc-shadow-md);font-size:12px;color:var(--khc-text-1)}.textarea--json{min-height:84px;font-family:var(--khc-font-mono);font-size:11px;line-height:1.45;resize:vertical}.notice-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-2);font-size:12px;line-height:1.45}.notice-strip--ok{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.notice-strip--warn{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.flex-1{flex:1;min-width:0}.flex-end{display:flex;justify-content:flex-end;align-items:flex-end}.gap-2{gap:8px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.mr-2{margin-right:8px}.text-sm{font-size:12px}.text-xs{font-size:11px}.text-muted{color:var(--khc-text-2)}.text-danger{color:var(--khc-danger-text)}.text-ok{color:var(--khc-success-text)}@media (max-width:768px){.header-inner{height:auto;min-height:var(--khc-header-h);padding:8px 12px;flex-wrap:wrap;row-gap:8px}.brand{order:1}.header-actions{order:2}.nav-wrap{order:3;flex-basis:100%;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-wrap::-webkit-scrollbar{display:none}.main-wrap{padding:14px 12px}.kpi-grid,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:12px}.kpi-value{font-size:17px}.form-grid,.form-grid--2{grid-template-columns:minmax(0,1fr);gap:10px}.form-group--span2{grid-column:span 1}.setting-row{flex-wrap:wrap;gap:8px 16px}.setting-control{flex-basis:100%}.search-box{max-width:none;flex-basis:100%}.row{padding:10px 12px;flex-wrap:wrap}.fields{width:100%;justify-content:flex-end;margin-top:4px}.editor{padding:12px}.card-pad{padding:12px 14px}.toast-box{left:12px;right:12px;bottom:12px;max-width:none}}.avatar-initial{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin-right:6px;border-radius:50%;background:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);font-size:11px;font-weight:600;line-height:1;user-select:none}.form-label--check{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer}.key-cell{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span><span class="text-xs text-muted" id="brandVersion"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="login-overlay hidden" id="addProviderForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增供应商</h2></div><button class="btn" id="btnXProv">关闭</button></div><div class="fields mb-3"><button class="btn btn--sm" id="btnToggleCurlPaste">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 自动解析"></textarea></div><div class="form-group mb-3"><label class="form-label" for="newProvSource">供应商来源</label><select class="select" id="newProvSource"><option value="custom">自定义（手动填写）</option><option value="vault">中枢托管（按需拉取）</option></select><span class="text-xs text-muted" id="newProvSourceHint"></span></div><div class="form-group mb-3 hidden" id="newProvVaultGroup" hidden><label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label><div class="probe-pills-wrap" id="newProvVaultPick"></div><span class="text-xs text-muted" id="newProvVaultHint"></span></div><div class="form-group mb-3"><label class="form-label" for="newProvId">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="deepseek"><span class="text-xs text-muted">唯一标识，保存后不可改</span></div><div class="form-group mb-3"><label class="form-label" for="newProvName">显示名称</label><input class="input" id="newProvName" placeholder="DeepSeek 官方"><span class="text-xs text-muted">控制台显示名；厂商名自动匹配预设</span><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group mb-3"><label class="form-label" for="newProvBaseUrl">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider">探测协议</button></div><span class="text-xs text-muted">上游根地址，含版本段</span></div><div class="form-group mb-3"><label class="form-label" for="newProvApiType">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select><span class="text-xs text-muted">访问上游的协议；不确定可探测</span></div><div class="form-group mb-3" id="newProvKeyAliasGroup"><label class="form-label" for="newProvKeyAlias">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="pool-01"><span class="text-xs text-muted">首把 Key 标签；多把时自动递增</span></div><div class="form-group mb-3" id="newProvApiKeyGroup"><label class="form-label" for="newProvApiKey">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="API Key (可选)"><span class="text-xs text-muted">上游密钥；可换行/逗号分隔多把</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddProvider">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider">保存供应商</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all">全部</button><button class="seg-btn" data-filter="enabled">已启用</button><button class="seg-btn" data-filter="healthy">探活通过</button><button class="seg-btn" data-filter="issue">异常 / 未测</button><button class="seg-btn" data-filter="adapted">已适配</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由与多密钥故障转移</p></div><div class="view-actions"><button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button><button class="btn btn--primary" id="btnAddModel">新增模型路由</button></div></div><div class="login-overlay hidden" id="addModelForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增模型路由</h2></div><button class="btn" id="btnXModel">关闭</button></div><div class="form-group mb-3"><label class="form-label" for="newModelName">对外模型名</label><input class="input input--code" id="newModelName" placeholder="claude-sonnet-4-5"><span class="text-xs text-muted">这就是一个路由：Agent 客户端用这个名字调用</span></div><div class="form-group mb-3"><label class="form-label" for="newModelProvider">首选供应商</label><div class="np-combo"><input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商"><div class="card np-panel hidden" id="npPanel" hidden><div class="np-panel-search"><input class="input" id="npSearch" placeholder="搜索"></div><div class="np-panel-options" id="npOptions" role="listbox"></div><div class="np-panel-foot"><button class="btn" id="npManual">手动输入</button></div></div></div><span class="text-xs text-muted">候选 Key 池来源</span></div><div class="form-group mb-3"><label class="form-label" for="newModelTarget">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空同对外名"><span class="text-xs text-muted">上游真实模型 ID，留空同对外名</span></div><div class="form-group mb-3"><label class="form-label">探测上游模型</label><div class="fields"><button class="btn btn--sm" id="btnProbeModel">探测模型</button><span class="text-xs text-muted">用已存 Key 拉上游列表；也可手填</span></div></div><div class="mb-3 hidden" id="npbBox" hidden><input class="input input--code" id="npbFilter" placeholder="过滤模型..."><div class="probe-pills-wrap" id="npbPills"></div></div><div class="form-group mb-3"><label class="form-label">Key 勾选</label><div class="probe-pills-wrap" id="nmKeys"></div><span class="text-xs text-muted">勾选 Key 生成候选；默认全不勾</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddModel">取消</button><button class="btn btn--primary" id="btnConfirmAddModel">确认添加</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div><div class="login-overlay hidden" id="templateImportOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">从模板导入模型路由</h2><p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p></div><button class="btn btn--sm" id="btnCloseTemplateImport" aria-label="关闭导入窗口">关闭</button></div><div id="templateImportList"></div><div class="form-actions"><button class="btn btn--primary" id="btnConfirmImportRoutes">导入选中路由</button></div></div></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeProvAll" checked><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="issueNodeProvs" hidden></div></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeModelAll" checked><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="issueNodeModels" hidden></div></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div><div class="login-overlay hidden" id="nodeCredOverlay" hidden><div class="login-card"><div class="login-head"><div><h2 class="card-title" id="nodeCredTitle">后台密码</h2><p class="card-sub" id="nodeCredSub"></p></div><button class="btn btn--sm" id="btnCloseNodeCred" aria-label="关闭密码查看">关闭</button></div><div id="nodeCredBody"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span></div><div class="setting-rows" id="gatewayAccessRows"></div><div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox"><div class="snippet-box"><div class="snippet-header"><span class="form-label">Claude Code 环境变量</span><button class="btn btn--sm" id="btnCopyClaudeSnippet">复制</button></div><code class="snippet-code" id="snippetClaude"></code></div><div class="snippet-box"><div class="snippet-header"><span class="form-label">OpenAI / Cursor 配置</span><button class="btn btn--sm" id="btnCopyCursorSnippet">复制</button></div><code class="snippet-code" id="snippetCursor"></code></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button></div><div id="routingPolicyRows"></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div id="concurrencyGuardRows"></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnTestVaultLink">测试连接</button></div><div id="vaultLinkRows"></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div id="configBackupRows"></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">高级 (原始 JSON 查看与直接保存，脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson">重新载入当前配置</button><button class="btn" id="btnFormatRawJson">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate">检查程序更新</button><button class="btn btn--danger" id="btnRestartService">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
+:root{--khc-primary-500:#1664FF;--khc-primary-600:#0F54E0;--khc-primary-50:#E6EEFF;--khc-primary-100:#D1E0FF;--khc-surface-page:#F8FAFC;--khc-surface-card:#FFFFFF;--khc-surface-hover:#F1F5F9;--khc-surface-muted:#F1F5F9;--khc-border-1:#E2E8F0;--khc-border-2:#CBD5E1;--khc-text-1:#0F172A;--khc-text-2:#475569;--khc-text-3:#94A3B8;--khc-success-500:#10B981;--khc-success-bg:#ECFDF5;--khc-success-text:#047857;--khc-warning-500:#F59E0B;--khc-warning-bg:#FFFBEB;--khc-warning-text:#B45309;--khc-danger-500:#EF4444;--khc-danger-bg:#FEF2F2;--khc-danger-text:#B91C1C;--khc-radius-sm:4px;--khc-radius-md:6px;--khc-radius-lg:8px;--khc-radius-xl:12px;--khc-shadow-sm:0 1px 2px rgba(15,23,42,0.04);--khc-shadow-md:0 4px 12px rgba(15,23,42,0.08);--khc-shadow-lg:0 12px 32px rgba(15,23,42,0.14);--khc-font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--khc-font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--khc-weight-body:400;--khc-weight-medium:500;--khc-weight-strong:600;--khc-text-xs:12px;--khc-text-sm:13px;--khc-text-md:14px;--khc-header-h:48px;--khc-ctrl-h:32px}:root[data-theme="dark"]{--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--khc-primary-500:#3B82F6;--khc-primary-600:#2563EB;--khc-primary-50:rgba(59,130,246,0.15);--khc-primary-100:rgba(59,130,246,0.25);--khc-surface-page:#0F172A;--khc-surface-card:#1E293B;--khc-surface-hover:#334155;--khc-surface-muted:#162032;--khc-border-1:#334155;--khc-border-2:#475569;--khc-text-1:#F8FAFC;--khc-text-2:#94A3B8;--khc-text-3:#64748B;--khc-success-bg:rgba(16,185,129,0.14);--khc-success-text:#34D399;--khc-warning-bg:rgba(245,158,11,0.14);--khc-warning-text:#FBBF24;--khc-danger-bg:rgba(239,68,68,0.15);--khc-danger-text:#F87171}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;background-color:var(--khc-surface-page);color:var(--khc-text-1);font-family:var(--khc-font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}[hidden],.hidden{display:none !important}.tabular{font-variant-numeric:tabular-nums;font-family:var(--khc-font-mono)}.mono{font-family:var(--khc-font-mono)}.app-header{position:sticky;top:0;z-index:40;background-color:var(--khc-surface-card);border-bottom:1px solid var(--khc-border-1)}.header-inner{max-width:1120px;margin:0 auto;height:var(--khc-header-h);padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:8px;flex-shrink:0}.brand-mark{width:24px;height:24px;border-radius:var(--khc-radius-md);background:var(--khc-primary-500);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}.brand-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--khc-text-1)}.badge-role{font-size:11px;font-weight:500;padding:2px 6px;border-radius:var(--khc-radius-sm);background-color:var(--khc-primary-50);color:var(--khc-primary-500)}.nav-wrap{display:flex;align-items:center;min-width:0;flex:1;justify-content:center}.seg{display:inline-flex;align-items:center;gap:2px;background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:2px}.seg-btn{appearance:none;border:none;background:transparent;color:var(--khc-text-2);font-family:inherit;font-size:12px;font-weight:500;height:26px;padding:0 12px;border-radius:var(--khc-radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;transition:color 0.15s ease,background-color 0.15s ease}.seg-btn:hover{color:var(--khc-text-1)}.seg-btn.active{background-color:var(--khc-surface-card);color:var(--khc-text-1);font-weight:500;box-shadow:var(--khc-shadow-sm)}.header-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}.version-pill{font-size:11px;font-weight:500;padding:0 8px;height:26px;display:inline-flex;align-items:center;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);color:var(--khc-text-2)}.main-wrap{max-width:1120px;margin:0 auto;padding:20px}.view-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px;flex-wrap:wrap}.view-title{margin:0;font-size:18px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.01em}.view-sub{margin:2px 0 0 0;font-size:12px;color:var(--khc-text-2)}.view-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}.search-box{position:relative;flex:1;min-width:200px;max-width:320px}.search-ico{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--khc-text-3);pointer-events:none;display:inline-flex}.search-input{padding-left:30px !important}.btn{appearance:none;border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;font-weight:500;height:var(--khc-ctrl-h);padding:0 12px;border-radius:var(--khc-radius-md);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;transition:background-color 0.15s ease,border-color 0.15s ease}.btn:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:var(--khc-border-2)}.btn:disabled{opacity:0.5;cursor:not-allowed}.btn--primary{background-color:var(--khc-primary-500);border-color:var(--khc-primary-500);color:#FFFFFF}.btn--primary:hover:not(:disabled){background-color:var(--khc-primary-600);border-color:var(--khc-primary-600)}.btn--danger{color:var(--khc-danger-text);border-color:var(--khc-border-1)}.btn--danger:hover:not(:disabled){background-color:var(--khc-danger-bg);border-color:var(--khc-danger-500)}.btn--sm{height:26px;padding:0 10px;font-size:11px}.btn--icon{width:var(--khc-ctrl-h);padding:0}.btn--ghost{background-color:transparent;border-color:transparent;color:var(--khc-text-2)}.btn--ghost:hover:not(:disabled){background-color:var(--khc-surface-hover);border-color:transparent;color:var(--khc-text-1)}.btn.active{background-color:var(--khc-primary-50);border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.input,.select,.textarea{width:100%;height:var(--khc-ctrl-h);padding:0 10px;border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);color:var(--khc-text-1);font-family:inherit;font-size:12px;outline:none;transition:border-color 0.15s ease}.input:focus,.select:focus,.textarea:focus{border-color:var(--khc-primary-500)}.input[readonly]{background-color:var(--khc-surface-muted);color:var(--khc-text-2)}.input[readonly]:focus{border-color:var(--khc-border-1)}.input--code{font-family:var(--khc-font-mono);font-size:12px}.textarea{height:auto;min-height:76px;padding:8px 10px;resize:vertical;line-height:1.45}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}.form-group{display:flex;flex-direction:column;gap:5px;min-width:0}.form-group--span2{grid-column:span 2}.form-group--full{grid-column:1 / -1}.setting-row{display:flex;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--khc-border-1)}.setting-row:last-child{border-bottom:0}.setting-row[hidden]{display:none}.setting-main{flex:1;min-width:0}.setting-title{font-size:14px;font-weight:500;color:var(--khc-text-1)}.setting-desc{font-size:12px;color:var(--khc-text-2);margin-top:2px}.setting-control{flex-shrink:0;display:flex;align-items:center;gap:8px}.setting-control .input{width:110px}.setting-control .select{width:auto}.form-label{font-size:12px;font-weight:500;color:var(--khc-text-2);display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px;line-height:18px}.input-row{display:flex;align-items:center;gap:8px;min-width:0}.input-row > .input,.input-row > .select{flex:1 1 auto;min-width:0;width:auto}.input-row > .btn{flex-shrink:0}input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:var(--khc-primary-500);cursor:pointer;flex-shrink:0}.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--khc-border-1)}.form-actions--split{justify-content:space-between;flex-wrap:wrap}.form-actions-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);box-shadow:var(--khc-shadow-sm);overflow:hidden;margin-bottom:16px}.card-pad{padding:16px 20px}.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);flex-wrap:wrap}.card-title{margin:0;font-size:14px;font-weight:500;color:var(--khc-text-1);display:flex;align-items:center;gap:8px}.card-sub{font-size:12px;color:var(--khc-text-2)}.row{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--khc-border-1);cursor:pointer;transition:background-color 0.12s ease}button.row{width:100%;appearance:none;border:0;border-bottom:1px solid var(--khc-border-1);background:transparent;color:var(--khc-text-1);text-align:left;font:inherit}.row:last-child{border-bottom:none}.row:hover{background-color:var(--khc-surface-hover)}.row.expanded{background-color:var(--khc-surface-hover)}.row--static{cursor:default}.row--static:hover{background-color:transparent}.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background-color:var(--khc-text-3)}.dot--ok{background-color:var(--khc-success-500)}.dot--warn{background-color:var(--khc-warning-500)}.dot--err{background-color:var(--khc-danger-500)}.ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--khc-text-2)}.ico svg{width:16px;height:16px}.who{flex:1;min-width:0}.name{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:500;color:var(--khc-text-1)}.sub{font-size:11px;color:var(--khc-text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fields{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap}.caret{font-size:11px;color:var(--khc-text-3);transition:transform 0.15s ease}.row.expanded .caret{transform:rotate(180deg)}.pill{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:var(--khc-radius-sm);font-size:11px;font-weight:500;background-color:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);white-space:nowrap}.pill--accent{background-color:var(--khc-primary-50);border-color:var(--khc-primary-100);color:var(--khc-primary-500)}.pill--green{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.pill--amber{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.pill--red{background-color:var(--khc-danger-bg);border-color:transparent;color:var(--khc-danger-text)}.editor{padding:16px 20px;background-color:var(--khc-surface-muted);border-bottom:1px solid var(--khc-border-1)}.editor-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--khc-border-1)}.section-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap}.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.data-table{width:100%;border-collapse:collapse;font-size:12px}.data-table th{text-align:left;font-size:12px;font-weight:500;color:var(--khc-text-2);padding:9px 12px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);white-space:nowrap}.data-table td{padding:9px 12px;border-bottom:1px solid var(--khc-border-1);color:var(--khc-text-1);vertical-align:middle}.data-table th:first-child,.data-table td:first-child{padding-left:20px}.data-table th:last-child,.data-table td:last-child{padding-right:20px;white-space:nowrap}.data-table tr:last-child td{border-bottom:none}.data-table tr:hover td{background-color:var(--khc-surface-hover)}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-lg);padding:14px 16px;box-shadow:var(--khc-shadow-sm);display:flex;flex-direction:column;gap:4px}.kpi-label{font-size:12px;font-weight:500;color:var(--khc-text-2)}.kpi-value{font-size:20px;font-weight:600;color:var(--khc-text-1);letter-spacing:-0.02em;font-variant-numeric:tabular-nums}.kpi-sub{font-size:11px;color:var(--khc-text-3)}.chart-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;color:var(--khc-text-2)}.legend-item{display:inline-flex;align-items:center;gap:5px}.legend-swatch{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}.legend-swatch--in{background-color:var(--khc-primary-500)}.legend-swatch--cache{background-color:var(--khc-success-500)}.legend-swatch--write{background-color:var(--khc-warning-500)}.legend-swatch--out{background-color:var(--khc-primary-100)}.legend-swatch--fail{background-color:var(--khc-danger-500)}.legend-swatch--own{background-color:#64748B}.legend-swatch--queued{background-color:#8B5CF6}.legend-swatch--sent{background-color:#06B6D4}.legend-swatch--ttft{background-color:var(--khc-warning-500)}.legend-swatch--flow{background-color:var(--khc-primary-500)}.legend-swatch--retried{background-color:var(--khc-danger-500)}.chart-empty{padding:20px 12px;text-align:center;color:var(--khc-text-3);font-size:12px}.heat-l1{fill:#DBEAFE}.heat-l2{fill:#93C5FD}.heat-l3{fill:#3B82F6}.heat-l4{fill:#1664FF}:root[data-theme="dark"] .heat-l1{fill:#1E3A8A}:root[data-theme="dark"] .heat-l2{fill:#1D4ED8}:root[data-theme="dark"] .heat-l3{fill:#3B82F6}:root[data-theme="dark"] .heat-l4{fill:#60A5FA}.probe-pills-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.probe-pill{font-family:var(--khc-font-mono);font-size:11px;padding:4px 8px;border-radius:var(--khc-radius-sm);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-card);color:var(--khc-text-1);cursor:pointer}.probe-pill:hover{border-color:var(--khc-primary-500);color:var(--khc-primary-500)}.probe-pill--managed{background-color:var(--khc-success-bg);color:var(--khc-success-text);border-color:transparent}.np-combo{position:relative}.np-panel{position:absolute;top:100%;left:0;right:0;z-index:30;margin:4px 0 0;max-height:280px;display:flex;flex-direction:column;box-shadow:var(--khc-shadow-md)}.np-panel-search{flex-shrink:0;padding:8px;border-bottom:1px solid var(--khc-border-1)}.np-panel-options{flex:1 1 auto;min-height:0;overflow-y:auto}.headers-details{border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);background-color:var(--khc-surface-card);padding:8px 12px}.headers-details summary{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-weight:500}.headers-details summary::after{content:"⌄";margin-left:auto;color:var(--khc-text-3);font-size:12px;transition:transform 0.15s ease}.headers-details[open] summary::after{transform:rotate(180deg)}.headers-pre{margin:8px 0 0 0;padding:10px;border-radius:var(--khc-radius-sm);background-color:var(--khc-surface-muted);overflow-x:auto;font-size:11px}.snippet-box{background-color:var(--khc-surface-muted);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:10px 12px}.snippet-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}.copy-chips{display:flex;flex-wrap:wrap;gap:8px}.copy-chip{max-width:100%;overflow:hidden}.copy-chip-label{flex-shrink:0}.copy-chip-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--khc-font-mono);font-size:11px;color:var(--khc-text-2)}.waterfall-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px 12px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md)}.wf-item{font-size:12px;display:flex;align-items:center;gap:4px}.wf-label{color:var(--khc-text-2)}.try-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);margin-top:6px}.wf-bar-svg{width:100%;height:14px;display:block;border-radius:4px;overflow:hidden;background-color:var(--khc-surface-muted)}.wf-seg--own{fill:#64748B}.wf-seg--queued{fill:#8B5CF6}.wf-seg--sent{fill:#06B6D4}.wf-seg--ttft{fill:var(--khc-warning-500)}.wf-seg--flow{fill:var(--khc-primary-500)}.wf-seg--retried{fill:var(--khc-danger-500)}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric-box{background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);padding:8px 10px}.metric-box-label{font-size:11px;color:var(--khc-text-2)}.metric-box-val{font-size:14px;font-weight:600;color:var(--khc-text-1);margin-top:2px}.live-strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.live-strip-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.trace-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;border-bottom:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.trace-toolbar .search-box{flex:1 1 200px}.trace-toolbar .select{width:auto;min-width:120px}.input--compact{height:26px;padding:0 8px;font-size:11px;min-width:68px}.update-box{padding:12px 14px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted)}.update-notes{margin:8px 0 0 18px;padding:0;font-size:12px;color:var(--khc-text-2);line-height:1.55}.step-num{width:20px;height:20px;border-radius:50%;background-color:var(--khc-primary-50);color:var(--khc-primary-500);font-size:11px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.privacy-masked .privacy-mask{filter:blur(5px);user-select:none}.login-overlay{position:fixed;inset:0;z-index:100;background-color:rgba(15,23,42,0.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto}.login-overlay > .login-card{margin:auto;flex-shrink:0}.login-card{width:100%;max-width:380px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-xl);box-shadow:var(--khc-shadow-lg);padding:24px}.login-card--wide{max-width:680px}.login-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.login-error{margin-top:10px;padding:8px 10px;border-radius:var(--khc-radius-md);background-color:var(--khc-danger-bg);color:var(--khc-danger-text);font-size:12px}.toast-box{position:fixed;right:16px;bottom:16px;z-index:120;display:flex;flex-direction:column;gap:8px;max-width:340px}.toast{display:flex;align-items:center;gap:8px;padding:10px 14px;background-color:var(--khc-surface-card);border:1px solid var(--khc-border-1);border-radius:var(--khc-radius-md);box-shadow:var(--khc-shadow-md);font-size:12px;color:var(--khc-text-1)}.textarea--json{min-height:84px;font-family:var(--khc-font-mono);font-size:11px;line-height:1.45;resize:vertical}.notice-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-radius:var(--khc-radius-md);border:1px solid var(--khc-border-1);background-color:var(--khc-surface-muted);color:var(--khc-text-2);font-size:12px;line-height:1.45}.notice-strip--ok{background-color:var(--khc-success-bg);border-color:transparent;color:var(--khc-success-text)}.notice-strip--warn{background-color:var(--khc-warning-bg);border-color:transparent;color:var(--khc-warning-text)}.flex-1{flex:1;min-width:0}.flex-end{display:flex;justify-content:flex-end;align-items:flex-end}.gap-2{gap:8px}.mt-1{margin-top:4px}.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mt-4{margin-top:16px}.mb-1{margin-bottom:4px}.mb-2{margin-bottom:8px}.mb-3{margin-bottom:12px}.text-sm{font-size:12px}.text-xs{font-size:11px}.text-muted{color:var(--khc-text-2)}.text-danger{color:var(--khc-danger-text)}.text-ok{color:var(--khc-success-text)}@media (max-width:768px){.header-inner{height:auto;min-height:var(--khc-header-h);padding:8px 12px;flex-wrap:wrap;row-gap:8px}.brand{order:1}.header-actions{order:2}.nav-wrap{order:3;flex-basis:100%;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.nav-wrap::-webkit-scrollbar{display:none}.main-wrap{padding:14px 12px}.kpi-grid,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kpi-card{padding:12px}.kpi-value{font-size:17px}.form-grid,.form-grid--2{grid-template-columns:minmax(0,1fr);gap:10px}.form-group--span2{grid-column:span 1}.setting-row{flex-wrap:wrap;gap:8px 16px}.setting-control{flex-basis:100%}.search-box{max-width:none;flex-basis:100%}.row{padding:10px 12px;flex-wrap:wrap}.fields{width:100%;justify-content:flex-end;margin-top:4px}.editor{padding:12px}.card-pad{padding:12px 14px}.toast-box{left:12px;right:12px;bottom:12px;max-width:none}}.avatar-initial{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin-right:6px;border-radius:50%;background:var(--khc-surface-muted);color:var(--khc-text-2);border:1px solid var(--khc-border-1);font-size:11px;font-weight:600;line-height:1;user-select:none}.form-label--check{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer}.key-cell{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+</style></head><body><header class="app-header"><div class="header-inner"><div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">LLMProxy2</span><span class="badge-role" id="brandRole"></span><span class="text-xs text-muted" id="brandVersion"></span></div><nav class="nav-wrap" aria-label="主导航"><div class="seg" id="navSeg"><button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button><button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button><button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button><button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>中转节点</button><button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button></div></nav><div class="header-actions"><span class="version-pill tabular" id="topVersionBox" hidden><span id="configVersionDisplay"></span></span><button class="btn btn--icon btn--ghost" id="btnPrivacyMask" type="button" title="切换隐私遮罩" aria-label="切换隐私遮罩"></button><button class="btn btn--icon btn--ghost" id="themeToggleBtn" type="button" title="切换主题" aria-label="切换主题"></button><button class="btn btn--icon btn--ghost" id="logoutBtn" type="button" title="退出登录" aria-label="退出登录"></button></div></div></header><main class="main-wrap"><section id="viewActivity"><div id="hubOverviewBox" hidden><div class="view-header"><div><h1 class="view-title">中枢控制面概览</h1><p class="view-sub" id="hubOverviewSub">统一管理接入的 VM 节点：在线状态、下发内容与实际使用的模型</p></div><div class="view-actions"><button class="btn" id="btnHubRefreshOverview" type="button">刷新总览</button></div></div><div class="kpi-grid" id="hubKpiGrid"></div><div class="card"><div class="card-header"><div><h2 class="card-title">活跃 VM 节点</h2><div class="card-sub" id="hubHealthSummarySub">按最近同步时间排序，超过 15 分钟未同步视为离线</div></div><button class="btn btn--sm" id="btnGoNodesFromHub" type="button">管理节点</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>节点</th><th>角色</th><th>状态</th><th>下发模型</th><th>配置版本 / 同步</th><th>最后同步</th><th>最近 IP</th></tr></thead><tbody id="hubNodeStatsBody"></tbody></table></div></div><div class="card"><div class="card-header"><div><h2 class="card-title">VM 端模型使用分布</h2><div class="card-sub">节点在每次配置同步时上报的模型调用计数（用于确认下发内容是否被真正使用）</div></div><button class="btn btn--sm" id="btnGoProvidersFromHub" type="button">管理供应商</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>使用节点数</th><th>总调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th><th>节点分布</th></tr></thead><tbody id="hubModelUsageBody"></tbody></table></div></div></div></section><section id="viewProviders" hidden><div class="view-header"><div><h1 class="view-title">供应商与密钥池</h1><p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p></div><div class="view-actions"><button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button></div></div><div class="login-overlay hidden" id="addProviderForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增供应商</h2></div><button class="btn" id="btnXProv">关闭</button></div><div class="fields mb-3"><button class="btn btn--sm" id="btnToggleCurlPaste">从 cURL 自动解析</button></div><div class="form-group mb-3 hidden" id="curlPasteWrap" hidden><textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 自动解析"></textarea></div><div class="form-group mb-3"><label class="form-label" for="newProvSource">供应商来源</label><select class="select" id="newProvSource"><option value="custom">自定义（手动填写）</option><option value="vault">中枢托管（按需拉取）</option></select><span class="text-xs text-muted" id="newProvSourceHint"></span></div><div class="form-group mb-3 hidden" id="newProvVaultGroup" hidden><label class="form-label">选择中枢托管供应商（仅列出本地尚未配置的）</label><div class="probe-pills-wrap" id="newProvVaultPick"></div><span class="text-xs text-muted" id="newProvVaultHint"></span></div><div class="form-group mb-3"><label class="form-label" for="newProvId">供应商 ID</label><input class="input input--code" id="newProvId" placeholder="deepseek"><span class="text-xs text-muted">唯一标识，保存后不可改</span></div><div class="form-group mb-3"><label class="form-label" for="newProvName">显示名称</label><input class="input" id="newProvName" placeholder="DeepSeek 官方"><span class="text-xs text-muted">控制台显示名；厂商名自动匹配预设</span><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span></div><div class="form-group mb-3"><label class="form-label" for="newProvBaseUrl">Base URL</label><div class="input-row"><input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1"><button class="btn" id="btnDetectProvider">探测协议</button></div><span class="text-xs text-muted">上游根地址，含版本段</span></div><div class="form-group mb-3"><label class="form-label" for="newProvApiType">上游协议类型</label><select class="select" id="newProvApiType"><option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option><option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option><option value="gemini">Gemini 兼容</option><option value="ocr">原生 OCR 接口 (/v1/ocr)</option></select><span class="text-xs text-muted">访问上游的协议；不确定可探测</span></div><div class="form-group mb-3" id="newProvKeyAliasGroup"><label class="form-label" for="newProvKeyAlias">初始 Key 标签</label><input class="input" id="newProvKeyAlias" placeholder="pool-01"><span class="text-xs text-muted">首把 Key 标签；多把时自动递增</span></div><div class="form-group mb-3" id="newProvApiKeyGroup"><label class="form-label" for="newProvApiKey">初始 API Key</label><input class="input input--code privacy-mask" id="newProvApiKey" placeholder="API Key (可选)"><span class="text-xs text-muted">上游密钥；可换行/逗号分隔多把</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddProvider">取消</button><button class="btn btn--primary" id="btnConfirmAddProvider">保存供应商</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="providerSearchIcon"></span><input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL"></div><div class="seg" id="providerFilterSeg"><button class="seg-btn active" data-filter="all">全部</button><button class="seg-btn" data-filter="enabled">已启用</button><button class="seg-btn" data-filter="healthy">探活通过</button><button class="seg-btn" data-filter="issue">异常 / 未测</button><button class="seg-btn" data-filter="adapted">已适配</button></div></div><div class="card" id="providersList"></div></section><section id="viewModels" hidden><div class="view-header"><div><h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1><p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由与多密钥故障转移</p></div><div class="view-actions"><button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button><button class="btn btn--primary" id="btnAddModel">新增模型路由</button></div></div><div class="login-overlay hidden" id="addModelForm" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">新增模型路由</h2></div><button class="btn" id="btnXModel">关闭</button></div><div class="form-group mb-3"><div class="section-bar"><label class="form-label" for="newModelName">对外模型名</label><button class="btn btn--sm" id="btnCustomModelName" type="button">自定义名称</button></div><input class="input input--code" id="newModelName" placeholder="默认使用上游模型 ID" readonly><span class="text-xs text-muted">默认使用上游模型 ID；多候选命名不同时再自定义</span></div><div class="form-group mb-3"><label class="form-label" for="newModelProvider">首选供应商</label><div class="np-combo"><input class="input input--code" id="newModelProvider" role="combobox" autocomplete="off" placeholder="选择供应商"><div class="card np-panel hidden" id="npPanel" hidden><div class="np-panel-search"><input class="input" id="npSearch" placeholder="搜索"></div><div class="np-panel-options" id="npOptions" role="listbox"></div></div></div><span class="text-xs text-muted">候选 Key 池来源</span></div><div class="form-group mb-3"><label class="form-label" for="newModelTarget">上游目标模型 ID</label><input class="input input--code" id="newModelTarget" placeholder="留空同对外名"><span class="text-xs text-muted">上游真实模型 ID，留空同对外名</span></div><div class="form-group mb-3"><label class="form-label">探测上游模型</label><div class="fields"><button class="btn btn--sm" id="btnProbeModel">探测模型</button><span class="text-xs text-muted">用已存 Key 拉上游列表；也可手填</span></div></div><div class="mb-3 hidden" id="npbBox" hidden><input class="input input--code" id="npbFilter" placeholder="过滤模型..."><div class="probe-pills-wrap" id="npbPills"></div></div><div class="form-group mb-3"><div class="section-bar"><label class="form-label">Key 勾选</label><span class="text-xs text-muted" id="nmKeysVaultHint" hidden>中枢托管 Key（只读）：由中枢统一管理，删除会本地移除、可重新拉取</span></div><div class="probe-pills-wrap" id="nmKeys"></div><span class="text-xs text-muted">勾选 Key 生成候选；默认全不勾</span></div><div class="form-actions form-actions--split"><button class="btn" id="btnCancelAddModel">取消</button><button class="btn btn--primary" id="btnConfirmAddModel">确认添加</button></div></div></div><div class="toolbar"><div class="search-box"><span class="search-ico" id="modelSearchIcon"></span><input class="input search-input" id="modelSearchInput" placeholder="搜索模型名称或关联供应商"></div></div><div class="card" id="modelsList"></div><div class="login-overlay hidden" id="templateImportOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title">从模板导入模型路由</h2><p class="card-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p></div><button class="btn btn--sm" id="btnCloseTemplateImport" aria-label="关闭导入窗口">关闭</button></div><div id="templateImportList"></div><div class="form-actions"><button class="btn btn--primary" id="btnConfirmImportRoutes">导入选中路由</button></div></div></div></section><section id="viewNodes" hidden><div class="view-header"><div><h1 class="view-title">中转节点管理</h1><p class="view-sub">添加节点、获取一键安装脚本、轮换及吊销下游网关的 Vault 同步凭证</p></div><div class="view-actions"><button class="btn btn--primary" id="btnIssueNode">添加节点</button></div></div><div class="card card-pad" id="issueNodeForm" hidden><h2 class="card-title mb-3">添加节点</h2><div class="form-grid form-grid--2"><div class="form-group"><label class="form-label">节点名称</label><input class="input" id="issueNodeName" placeholder="例如 hk-edge-01"></div></div><details class="headers-details"><summary class="form-label">高级 (角色 / 租约 / 权限范围，一般无需修改)</summary><div class="form-grid mt-2"><div class="form-group"><label class="form-label">节点角色</label><select class="select" id="issueNodeRole"><option value="full">Full (全功能代理网关)</option><option value="lite">Lite (轻量本地代理)</option></select></div><div class="form-group"><label class="form-label">租约时长 (秒)</label><input class="input tabular" id="issueNodeTTL" type="number" placeholder="86400"></div><div class="form-group"><label class="form-label">断网宽限期 (秒 grace_ttl)</label><input class="input tabular" id="issueNodeGraceTTL" type="number" placeholder="3600"></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeProvAll" checked><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="issueNodeProvs" hidden></div></div><div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="issueNodeModelAll" checked><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="issueNodeModels" hidden></div></div></div></details><div class="form-actions"><button class="btn btn--primary" id="btnDoIssue">添加节点</button></div></div><div class="card" id="nodesList"></div><div class="login-overlay hidden" id="nodeInstallOverlay" hidden><div class="login-card login-card--wide"><div class="login-head"><div><h2 class="card-title" id="nodeInstallTitle">一键安装</h2><p class="card-sub" id="nodeInstallSub"></p></div><button class="btn btn--sm" id="btnCloseNodeInstall" aria-label="关闭安装指引">关闭</button></div><div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden><span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span></div><div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden><span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span></div><div id="nodeInstallPanel"></div></div></div><div class="login-overlay hidden" id="nodeCredOverlay" hidden><div class="login-card"><div class="login-head"><div><h2 class="card-title" id="nodeCredTitle">后台密码</h2><p class="card-sub" id="nodeCredSub"></p></div><button class="btn btn--sm" id="btnCloseNodeCred" aria-label="关闭密码查看">关闭</button></div><div id="nodeCredBody"></div></div></div></section><section id="viewSettings" hidden><div class="view-header"><div><h1 class="view-title">系统设置与备份</h1><p class="view-sub">配置全局路由策略、异常冷却时间、接入鉴权及配置导入导出</p></div><div class="view-actions"><button class="btn btn--primary" id="btnSaveSettings">保存全部设置</button></div></div><div class="card card-pad" id="gatewayAccessCenter"><div class="section-bar"><h2 class="card-title"><span class="step-num">1</span>网关接入与客户端密钥</h2><span class="pill" id="gwAccessSummaryPill"></span></div><div class="notice-strip mb-3" id="gwHubNotice" hidden><span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令。<strong>投影到达后以中枢密钥为准</strong>：Lite 本地 <code>--client-key</code> 只在首次投影之前可用，中枢密钥一生效该本地密钥随即失效。</span></div><div class="setting-rows" id="gatewayAccessRows"></div><div class="mt-3" id="gwLocalOnlyBox"><div class="copy-chips" id="gwCopyChips"><button class="btn copy-chip" type="button" data-copy="base"><span class="copy-chip-label">Base URL</span><span class="copy-chip-value" id="chipBaseValue"></span></button><button class="btn copy-chip" type="button" data-copy="key"><span class="copy-chip-label">Client Key</span><span class="copy-chip-value privacy-mask" id="chipKeyValue"></span></button><button class="btn copy-chip" type="button" data-copy="model"><span class="copy-chip-label">Model ID</span><span class="copy-chip-value" id="chipModelValue"></span></button></div></div></div><div class="card card-pad" id="routingPolicyBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">2</span><span id="routingPolicyTitle">全局路由与异常冷却策略</span></h2><div class="card-sub" id="routingPolicySub">控制默认路由策略、首字超时及上游异常自动冷却时长</div></div><button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button></div><div id="routingPolicyRows"></div></div><div class="card card-pad" id="concurrencyGuardBox"><div class="section-bar"><div><h2 class="card-title"><span class="step-num">3</span><span>高并发与多模态护栏</span></h2><div class="card-sub" id="concurrencyGuardSub">限制 OCR 大图并发预读与固定通道全局并发上限</div></div></div><div id="concurrencyGuardRows"></div></div><div class="card card-pad" id="cfgVaultLinkBox" hidden><div class="section-bar"><h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2><button class="btn btn--sm" id="btnTestVaultLink">测试连接</button></div><div id="vaultLinkRows"></div></div><div class="card card-pad" id="configBackupBox"><div class="section-bar"><h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2></div><div id="configBackupRows"></div><details class="headers-details mt-3" id="rawJsonDetails"><summary class="form-label">高级 (原始 JSON 查看与直接保存，脱敏快照下保留未改密钥)</summary><div class="mt-2"><textarea class="textarea textarea--json" id="rawConfigTextarea" placeholder="展开后自动加载当前配置 JSON..."></textarea><div class="form-actions"><button class="btn" id="btnRefreshRawJson">重新载入当前配置</button><button class="btn" id="btnFormatRawJson">格式化 JSON</button><button class="btn btn--primary" id="btnSaveRawJson">应用此 JSON 配置</button></div></div></details></div><div class="card card-pad" id="systemUpdateBox" hidden><div class="section-bar"><div><h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2><div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div></div><div class="fields"><button class="btn" id="btnCheckSystemUpdate">检查程序更新</button><button class="btn btn--danger" id="btnRestartService">平滑重启服务</button></div></div><div class="update-box mt-2 hidden" id="systemUpdateResult" hidden></div></div><datalist id="datalistProviders"></datalist></section></main><div class="login-overlay hidden" id="loginScreen" hidden><div class="login-card"><div class="login-head"><div class="brand"><span class="brand-mark" id="loginBrandMark"></span><span class="brand-name">LLMProxy2</span></div><span class="badge-role" id="loginHostBadge"></span></div><form id="loginForm"><div class="form-group"><label class="form-label" for="loginPassword">管理员密码</label><input class="input" id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入控制台访问密码"></div><div class="login-error hidden" id="loginError" hidden></div><div class="form-actions"><button class="btn btn--primary" type="submit">验证并登录</button></div></form></div></div><div class="toast-box" id="toastBox"></div><script>
 (function () {
 function initialOf(idOrName) {
 const raw = String(idOrName || '').trim();
@@ -615,10 +615,11 @@ oauthExpireTimer: null,
 nodesTimer: null,
 batchVerifying: false,
 probedModelsByProvider: {},
-probeFilterByProvider: {},
 vaultManifest: null,
 addProvVaultPick: '',
 addModelProbed: null,
+importRunId: 0,
+importing: false,
 };
 function byIdIn(root, id) {
 if (!root || !id) return null;
@@ -905,6 +906,12 @@ return String(str)
 .replace(/"/g, '&quot;')
 .replace(/'/g, '&#39;');
 }
+function setupNumberWheelGuard() {
+document.addEventListener('wheel', (e) => {
+const t = e.target;
+if (t && t.type === 'number') t.blur();
+}, { passive: true });
+}
 function setupStaticIcons() {
 const setIcon = (id, name) => {
 const el = $(id);
@@ -919,6 +926,7 @@ setIcon('traceSearchIcon', 'search');
 }
 async function init() {
 setupStaticIcons();
+setupNumberWheelGuard();
 setupLoginScreen();
 setupCapabilities();
 setupTheme();
@@ -1303,21 +1311,18 @@ if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
 const templateImportList = $('templateImportList');
 if (templateImportList) {
 templateImportList.addEventListener('click', async (ev) => {
-const btn = ev.target instanceof Element ? ev.target.closest('button[data-tpl-fetch], button[data-tpl-fetch-keys]') : null;
+const btn = ev.target instanceof Element ? ev.target.closest('button[data-tpl-fetch-keys]') : null;
 if (!btn || btn.disabled) return;
-const keysOnly = btn.hasAttribute('data-tpl-fetch-keys');
-const prov = (keysOnly ? btn.getAttribute('data-tpl-fetch-keys') : btn.getAttribute('data-tpl-fetch')) || '';
+const prov = btn.getAttribute('data-tpl-fetch-keys') || '';
 if (!prov) return;
-const labels = keysOnly
-? JSON.parse(btn.getAttribute('data-labels') || '[]')
-: undefined;
-if (keysOnly && (!labels || labels.length === 0)) return;
+const labels = JSON.parse(btn.getAttribute('data-labels') || '[]');
+if (!labels || labels.length === 0) return;
 btn.disabled = true;
-toast(keysOnly ? `正在补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签...` : `正在从中枢拉取供应商 ${prov}（规则与全部 Key）...`, 'info');
+toast(`正在补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签...`, 'info');
 try {
 const res = await window.HOST.fetchVaultCredentials(prov, undefined, undefined, undefined, labels);
 if (res && res.ok) {
-toast(keysOnly ? `已补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签` : `已拉取供应商 ${prov}`, 'ok');
+toast(`已补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签`, 'ok');
 await loadData();
 renderTemplateImportList();
 } else {
@@ -2057,13 +2062,30 @@ closeProvPanel();
 const provInput = $('newModelProvider');
 if (provInput) provInput.value = '';
 const nameInput = $('newModelName');
-if (nameInput) nameInput.value = '';
+if (nameInput) {
+nameInput.value = '';
+nameInput.readOnly = true;
+}
 renderKeyPills();
 }
 });
+clk($('btnCustomModelName'), () => {
+const nameInput = $('newModelName');
+if (!nameInput) return;
+nameInput.readOnly = false;
+nameInput.focus();
+});
+$('newModelTarget')?.addEventListener('input', () => {
+const targetVal = ($('newModelTarget')?.value || '').trim();
+const nameInput = $('newModelName');
+if (nameInput && nameInput.readOnly) nameInput.value = targetVal;
+document.querySelectorAll('#npbPills .probe-pill--managed').forEach((b) => {
+if ((b.textContent || '').trim() !== targetVal) b.classList.remove('probe-pill--managed');
+});
+});
 clk($('btnCancelAddModel'), cancelAddModel);
 $('newModelProvider')?.addEventListener('change', () => {
-resetProbe();
+resetProbe({ resetName: true });
 renderKeyPills();
 });
 const probeBtn = $('btnProbeModel');
@@ -2088,6 +2110,7 @@ const models = Array.isArray(res?.models) ? res.models : [];
 if (models.length > 0) {
 resetProbe();
 state.addModelProbed = models;
+state.probedModelsByProvider[prov] = models;
 renderProbePills();
 toast(`探测成功: ${models.length} 个模型`, 'ok');
 } else {
@@ -2106,13 +2129,16 @@ probeBtn.disabled = false;
 }
 });
 clk($('btnConfirmAddModel'), async () => {
-const mName = ($('newModelName')?.value || '').trim();
+const nameVal = ($('newModelName')?.value || '').trim();
+const targetVal = ($('newModelTarget')?.value || '').trim();
+const pickedPill = document.querySelector('#npbPills .probe-pill--managed');
+const mName = nameVal || targetVal || (pickedPill?.textContent || '').trim();
 const prov = ($('newModelProvider')?.value || '').trim();
-const target = ($('newModelTarget')?.value || '').trim() || mName;
+const target = targetVal || mName;
 const pickedLabels = [...document.querySelectorAll('#nmKeys .probe-pill--managed')]
 .map((b) => b.dataset.key)
 .filter(Boolean);
-if (!mName) return toast('请输入路由名', 'warn');
+if (!mName) return toast('请先选择或填写模型', 'warn');
 state.config = state.config || { providers: {}, agent_models: {} };
 state.config.agent_models = state.config.agent_models || {};
 if (state.config.agent_models[mName]) {
@@ -2147,6 +2173,7 @@ $('npSearch')?.focus();
 };
 closeProvPanel = () => toggle(panel, false);
 input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
+input.addEventListener('click', () => { if (panel.hidden) showPanel(); });
 document.addEventListener('pointerdown', (e) => {
 if (panel.hidden) return;
 const combo = input.closest('.np-combo');
@@ -2176,11 +2203,6 @@ e.preventDefault();
 const idx = rows.indexOf(document.activeElement);
 (e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
 });
-clk($('npManual'), () => {
-const v = (input.value || '').trim();
-if (!v) return toast('请先输入供应商 ID', 'warn');
-pickProv(v);
-});
 }
 function syncProvOptions() {
 const box = $('npOptions');
@@ -2194,7 +2216,7 @@ return `${pId} ${p.name || ''} ${p.base_url || ''}`.toLowerCase().includes(f);
 });
 box.innerHTML = '';
 if (ids.length === 0) {
-box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商，可手动输入</div>';
+box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商（请先在供应商页添加）</div>';
 return;
 }
 ids.forEach((pId) => {
@@ -2203,6 +2225,7 @@ const rowBtn = ce('button');
 rowBtn.className = 'row';
 rowBtn.setAttribute('role', 'option');
 rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
+rowBtn.addEventListener('mousedown', (e) => e.preventDefault());
 clk(rowBtn, () => pickProv(pId));
 box.appendChild(rowBtn);
 });
@@ -2211,10 +2234,11 @@ function pickProv(pId) {
 const input = $('newModelProvider');
 if (input) input.value = pId;
 closeProvPanel();
-resetProbe();
+resetProbe({ resetName: true });
 renderKeyPills();
+$('newModelTarget')?.focus();
 }
-function resetProbe() {
+function resetProbe(opts = {}) {
 state.addModelProbed = null;
 const filterEl = $('npbFilter');
 if (filterEl) filterEl.value = '';
@@ -2223,6 +2247,11 @@ const pills = $('npbPills');
 if (pills) pills.innerHTML = '';
 const targetEl = $('newModelTarget');
 if (targetEl) targetEl.value = '';
+const nameEl = $('newModelName');
+if (nameEl && (nameEl.readOnly || opts.resetName)) {
+nameEl.value = '';
+if (opts.resetName) nameEl.readOnly = true;
+}
 }
 function renderKeyPills() {
 const box = $('nmKeys');
@@ -2233,16 +2262,19 @@ const allKeys = state.config?.providers?.[provId]?.api_keys || [];
 const keys = allKeys.filter((k) => k && k.enabled !== false);
 if (!provId || keys.length === 0) {
 box.innerHTML = `<span class="text-xs text-muted">${!provId ? '请先选择供应商' : '该供应商没有已启用的 Key'}</span>`;
+toggle('nmKeysVaultHint', false);
 return;
 }
+const prov = state.config?.providers?.[provId] || {};
+const hasVaultKey = !isHubMode() && (prov.origin === 'vault' || keys.some((k) => k?.origin === 'vault'));
+toggle('nmKeysVaultHint', hasVaultKey);
 keys.forEach((k, idx) => {
 const label = k?.label || k?.id || `key-${idx}`;
 const pill = ce('button');
 pill.type = 'button';
 pill.dataset.key = label;
 pill.className = 'probe-pill';
-pill.innerHTML = isHubMode() ? eh(label)
-: `${eh(label)}${k?.origin === 'vault' ? ' <span class="pill">中枢只读</span>' : ' <span class="pill pill--amber">本地</span>'}`;
+pill.textContent = label;
 clk(pill, () => pill.classList.toggle('probe-pill--managed'));
 box.appendChild(pill);
 });
@@ -2270,7 +2302,10 @@ pill.type = 'button';
 pill.className = `probe-pill${curTarget === modelName ? ' probe-pill--managed' : ''}`;
 pill.textContent = modelName;
 clk(pill, () => {
-if (targetInput) targetInput.value = modelName;
+if (targetInput) {
+targetInput.value = modelName;
+targetInput.dispatchEvent(new Event('input'));
+}
 list.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
 });
 list.appendChild(pill);
@@ -2700,87 +2735,6 @@ container.appendChild(editor);
 }
 }
 }
-function renderProbePillsForProvider(q, pId, p) {
-const models = state.probedModelsByProvider[pId];
-const cont = q(`#probe_pills_container_${pId}`);
-const list = q(`#probe_pills_list_${pId}`);
-const countEl = q(`#probe_pills_count_${pId}`);
-const filterEl = q(`#probe_pills_filter_${pId}`);
-if (!cont || !list) return;
-if (!Array.isArray(models) || models.length === 0) {
-cont.hidden = true;
-cont.classList.add('hidden');
-return;
-}
-cont.hidden = false;
-cont.classList.remove('hidden');
-const curFilter = state.probeFilterByProvider[pId] || '';
-if (filterEl && filterEl.value !== curFilter) {
-filterEl.value = curFilter;
-}
-const draw = (rawFilter) => {
-const f = String(rawFilter || '').trim().toLowerCase();
-state.probeFilterByProvider[pId] = rawFilter || '';
-list.innerHTML = '';
-const matched = f ? models.filter((m) => m.toLowerCase().includes(f)) : models;
-const visible = matched.slice(0, 200);
-if (countEl) {
-countEl.textContent = matched.length > visible.length
-? `匹配 ${matched.length} / 共 ${models.length} 个（显示前 ${visible.length} 个），点击一键纳管`
-: `共 ${matched.length} 个，点击一键纳管（已纳管模型自动标记）`;
-}
-visible.forEach((modelName) => {
-const managed = Boolean(state.config?.agent_models?.[modelName]);
-const pill = ce('span');
-pill.className = `probe-pill${managed ? ' probe-pill--managed' : ''}`;
-pill.textContent = managed ? `${modelName} ✓ 已纳管` : `${modelName} +`;
-pill.title = managed ? `${modelName} 已在模型路由列表中` : `点击一键纳管 ${modelName} 到模型路由`;
-clk(pill, async () => {
-state.config = state.config || { providers: {}, agent_models: {} };
-state.config.agent_models = state.config.agent_models || {};
-if (state.config.agent_models[modelName]) {
-const existingRoute = state.config.agent_models[modelName];
-existingRoute.candidates = existingRoute.candidates || [];
-const hasProv = existingRoute.candidates.some((c) => c && c.provider === pId);
-if (hasProv) {
-toast(`模型 ${modelName} 已纳管该供应商`, 'info');
-return;
-}
-const provKeys = p.api_keys || [];
-const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-existingRoute.candidates.push({
-provider: pId,
-key_label: firstKeyLabel,
-target_model: modelName,
-enabled: true,
-weight: 1,
-});
-await persistConfig(`已将供应商 ${pId} 追加至模型 ${modelName}`);
-return;
-}
-const provKeys = p.api_keys || [];
-const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-state.config.agent_models[modelName] = {
-routing_strategy: 'sticky_failover',
-active_key: '',
-enabled: true,
-candidates: [
-{ provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
-],
-};
-await persistConfig(`已成功纳管模型: ${modelName}`);
-});
-list.appendChild(pill);
-});
-};
-draw(curFilter);
-if (filterEl && !filterEl.dataset.bound) {
-filterEl.dataset.bound = '1';
-filterEl.addEventListener('input', (e) => draw(e.target.value));
-}
-}
 function buildProviderEditor(pId, p) {
 const wrap = ce('div');
 const q = makeScopedQuery(wrap);
@@ -2846,7 +2800,7 @@ fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId
 fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
 fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
 fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
+].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
 const tbody = q(`#p_keys_tbody_${pId}`);
 if (tbody && !tbody.dataset.revealWired) {
 tbody.dataset.revealWired = '1';
@@ -3054,31 +3008,6 @@ toast(e.message, 'err');
 }
 });
 }
-renderProbePillsForProvider(q, pId, p);
-clk(q(`#btn_probe_prov_${pId}`), async () => {
-syncDraftFields();
-const baseUrl = p.base_url || '';
-const firstKey = p.api_keys?.[0]?.key || '';
-toast(`正在探测供应商 ${pId} 模型...`, 'info');
-try {
-const res = await window.HOST.probeModels({
-provider: pId,
-base_url: baseUrl,
-api_key: firstKey,
-api_type: normalizeApiType(p.api_type),
-});
-const models = res?.models || [];
-if (models.length > 0) {
-state.probedModelsByProvider[pId] = models;
-toast(`探测成功: 发现 ${models.length} 个可用模型`, 'ok');
-renderProbePillsForProvider(q, pId, p);
-} else {
-toast(res?.error ? `未探测到模型: ${res.error}` : '未探测到可用模型列表', 'warn');
-}
-} catch (e) {
-toast(`探测异常: ${e.message}`, 'err');
-}
-});
 const addKeyBtn = q(`#btn_add_key_${pId}`);
 if (addKeyBtn && !isVaultProv) {
 clk(addKeyBtn, () => {
@@ -3238,7 +3167,6 @@ clk(q(`#btn_del_prov_${pId}`), async () => {
 if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
 delete state.config.providers[pId];
 delete state.probedModelsByProvider[pId];
-delete state.probeFilterByProvider[pId];
 state.activeEditorKey = null;
 await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
 });
@@ -4067,6 +3995,7 @@ renderTemplateImportList();
 function closeTemplateImportOverlay() {
 const overlay = $('templateImportOverlay');
 if (!overlay) return;
+state.importRunId++;
 overlay.hidden = true;
 overlay.classList.add('hidden');
 }
@@ -4130,9 +4059,9 @@ const candText = cands.map((c) => `${c.provider}:${c.key_label || '*'}→${c.tar
 const row = ce('div');
 row.className = 'mb-2';
 row.innerHTML = `
-<label class="form-label form-label--check"><input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${missing.length || missingKeys.length ? 'disabled' : ''}><span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span></label>
+<label class="form-label form-label--check"><input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${keyGapPairs.length || localGapProvs.length ? 'disabled' : ''}><span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span></label>
 ${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
-${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 需要先拉取 ${missing.length} 个供应商：${missing.map((pId) => `<button class="btn btn--sm" type="button" data-tpl-fetch="${eh(pId)}">拉取 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
+${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 导入时自动拉取 ${missing.length} 个缺失供应商：${eh(missing.join('、'))}</div>` : ''}
 ${keyGapPairs.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> Key 标签本地缺失（该供应商已有但缺这些 Key）：${eh(keyGapPairs.join('、'))} → ${Object.entries(keyGapsByProv).map(([pId, labels]) => `<button class="btn btn--sm" type="button" data-tpl-fetch-keys="${eh(pId)}" data-labels="${eh(JSON.stringify(labels))}">点此补拉 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
 ${localGapProvs.length ? `<div class="text-xs text-muted">${eh(localGapProvs.join('、'))} 为本地自建供应商，不能从中枢补拉 Key；请在供应商页补齐对应 Key 标签，或改用中枢同名供应商。</div>` : ''}
 `;
@@ -4140,20 +4069,73 @@ listEl.appendChild(row);
 }
 }
 async function handleConfirmImportRoutes() {
+if (state.importing) return;
+state.importing = true;
+const btn = $('btnConfirmImportRoutes');
+try {
+await runTemplateImport(btn);
+} finally {
+state.importing = false;
+}
+}
+async function runTemplateImport(btn) {
 const listEl = $('templateImportList');
 const picked = [...(listEl?.querySelectorAll('.tpl_import_cb:checked') || [])]
 .map((cb) => cb.getAttribute('data-model'))
 .filter(Boolean);
 if (picked.length === 0) return toast('请先勾选要导入的模型路由', 'warn');
+const runId = state.importRunId;
+const cancelled = () => state.importRunId !== runId;
 const manifestModels = vaultManifestModels();
+const missingProvs = [...new Set(picked.flatMap(
+(mName) => templateRouteMissingProviders(mName, manifestModels[mName], state.config?.providers || {})
+))];
+const failedProvs = [];
+const restoreBtn = (label) => {
+if (!btn) return;
+btn.disabled = false;
+btn.textContent = label;
+};
+if (missingProvs.length > 0) {
+const label = btn?.textContent || '';
+if (btn) btn.disabled = true;
+try {
+for (let i = 0; i < missingProvs.length; i++) {
+if (cancelled()) return;
+const pId = missingProvs[i];
+if (btn) btn.textContent = `正在拉取供应商…（${i + 1}/${missingProvs.length}）`;
+try {
+const res = await window.HOST.fetchVaultCredentials(pId);
+if (!res || !res.ok) failedProvs.push(pId);
+} catch (_) {
+failedProvs.push(pId);
+}
+}
+} finally {
+restoreBtn(label);
+}
+if (cancelled()) return;
+if (missingProvs.length > failedProvs.length) {
+await loadData();
+if (cancelled()) return;
+}
+}
 const localModels = state.config?.agent_models || {};
 const localProviders = state.config?.providers || {};
-let imported = 0;
+const skipped = [];
 for (const mName of picked) {
 const tpl = manifestModels[mName];
-if (!tpl || localModels[mName]) continue;
-if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) continue;
-if (templateRouteMissingKeyLabels(mName, tpl, localProviders).length > 0) continue;
+if (!tpl) { skipped.push(`${mName}（中枢清单已无该模板）`); continue; }
+if (localModels[mName]) { skipped.push(`${mName}（本地已有同名路由）`); continue; }
+if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) {
+skipped.push(`${mName}（供应商未拉取成功）`);
+continue;
+}
+const gapLabels = templateRouteMissingKeyLabels(mName, tpl, localProviders);
+if (gapLabels.length > 0) {
+skipped.push(`${mName}（拉回的 Key 缺标签 ${gapLabels.join('、')}）`);
+continue;
+}
 const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
 state.config = state.config || { providers: {}, agent_models: {} };
 state.config.agent_models = state.config.agent_models || {};
@@ -4174,9 +4156,27 @@ weight: Number(c.weight) || 0,
 max_concurrency: Number(c.max_concurrency) || 0,
 })),
 };
-imported++;
 }
-if (imported === 0) return toast('没有可导入的路由（候选供应商或 Key 缺失，或路由已存在）', 'warn');
+const imported = picked.length - skipped.length;
+if (missingProvs.length > 0) {
+toast(
+failedProvs.length > 0
+? `供应商拉取：成功 ${missingProvs.length - failedProvs.length} / 失败 ${failedProvs.length}（${failedProvs.join('、')}）`
+: `供应商拉取：成功 ${missingProvs.length} / 失败 0`,
+failedProvs.length > 0 ? 'warn' : 'ok'
+);
+}
+if (imported === 0) {
+toast(skipped.length > 0 ? `未导入任何路由：${skipped.join('；')}` : '没有可导入的路由', 'warn');
+renderTemplateImportList();
+return;
+}
+if (skipped.length > 0) {
+toast(`已导入 ${imported} 条，未导入：${skipped.join('；')}`, 'warn');
+renderTemplateImportList();
+await persistConfig(`已从模板导入 ${imported} 条模型路由`);
+return;
+}
 closeTemplateImportOverlay();
 await persistConfig(`已从模板导入 ${imported} 条模型路由`);
 }
@@ -4287,9 +4287,6 @@ settingRow('网关入口地址 (Base URL)',
 settingRow('主客户端鉴权密钥 (client_key)',
 '调用 /v1/* 的主密钥；所有客户端至少需要这一把。修改后旧密钥立即失效',
 `<div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey">随机生成</button><button class="btn" id="btnSaveClientKey">保存密钥</button></div>`),
-settingRow('附加客户端密钥列表 (proxy_keys)',
-'逗号或换行分隔的额外密钥，用于给不同终端分配独立密钥、便于单独吊销；可留空',
-`<textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea>`),
 ].join('');
 }
 const vaultRows = $('vaultLinkRows');
@@ -4324,10 +4321,6 @@ const setVal = (id, val) => {
 const el = $(id);
 if (el) el.value = val !== undefined ? val : '';
 };
-const parseProxyKeys = (raw) => String(raw || '')
-.split(/[\n,;]+/)
-.map((item) => item.trim())
-.filter(Boolean);
 const isZeroVersion = state.config._version === 0;
 setVal('cfgRoutingStrategy', s.agent_routing_strategy || 'sticky_failover');
 setVal('cfgFirstByteTimeout', s.agent_first_byte_timeout_sec || 120);
@@ -4356,58 +4349,62 @@ renumberSettingsSections();
 const baseOrigin = location.origin || 'http://127.0.0.1:3425';
 const localBase = `${baseOrigin}/v1`;
 const clientKey = s.client_key || s.proxy_api_key || '';
-const extraKeys = Array.isArray(s.proxy_keys) ? s.proxy_keys : [];
+const modelNames = Object.keys(state.config?.agent_models || {})
+.filter((m) => state.config.agent_models[m]?.enabled !== false)
+.sort();
+const firstModel = modelNames[0] || '';
 if (gwSummaryPill) {
 gwSummaryPill.textContent = clientKey
-? `主密钥已配置 · 附加 ${extraKeys.length} 把`
+? '主密钥已配置'
 : (isFull ? '主密钥未配置' : '待设置下发至节点');
 }
 const gwBaseUrl = $('gwBaseUrl');
 if (gwBaseUrl) gwBaseUrl.value = localBase;
 const gwClientKey = $('gwClientKey');
 if (gwClientKey) gwClientKey.value = clientKey;
-const gwProxyKeys = $('gwProxyKeys');
-if (gwProxyKeys) gwProxyKeys.value = extraKeys.join('\n');
-const snippetClaude = $('snippetClaude');
-const displayKey = clientKey || 'sk-llmproxy-key';
-if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${displayKey}"`;
-const snippetCursor = $('snippetCursor');
-if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${displayKey}"`;
+if ($('chipBaseValue')) $('chipBaseValue').textContent = localBase;
+if ($('chipKeyValue')) $('chipKeyValue').textContent = clientKey || '未配置';
+const modelChip = $('chipModelValue');
+if (modelChip) modelChip.textContent = firstModel || '暂无路由';
+const modelChipBtn = modelChip?.closest('.copy-chip');
+if (modelChipBtn) {
+modelChipBtn.disabled = !firstModel;
+modelChipBtn.title = firstModel ? `复制 Model ID: ${firstModel}` : '暂无路由';
+}
+const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
+if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
 const btnGen = $('btnGenClientKey');
 if (btnGen) {
 btnGen.onclick = () => {
 const rand = generateClientSecretKey();
 if (gwClientKey) gwClientKey.value = rand;
-if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
-if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
+if ($('chipKeyValue')) $('chipKeyValue').textContent = rand;
 };
 }
 const btnSaveKey = $('btnSaveClientKey');
 if (btnSaveKey) {
 btnSaveKey.onclick = async () => {
 const k = (gwClientKey?.value || '').trim();
-const pk = parseProxyKeys(gwProxyKeys?.value);
 s.client_key = k;
 s.proxy_api_key = k;
-s.proxy_keys = pk;
 await persistConfig(isFull ? '客户端鉴权密钥已保存' : '已保存，将自动投影下发至节点');
 };
 }
+const chipsBox = $('gwCopyChips');
+if (chipsBox && !chipsBox.dataset.bound) {
+chipsBox.dataset.bound = '1';
+chipsBox.addEventListener('click', (ev) => {
+const chip = ev.target instanceof Element ? ev.target.closest('.copy-chip[data-copy]') : null;
+if (!chip || chip.disabled) return;
+const kind = chip.getAttribute('data-copy');
+const value = kind === 'base' ? localBase
+: kind === 'key' ? (gwClientKey?.value || '').trim()
+: (Object.keys(state.config?.agent_models || {}).filter((m) => state.config.agent_models[m]?.enabled !== false).sort()[0] || '');
+if (!value) return toast(kind === 'model' ? '暂无路由' : '该值尚未配置', 'warn');
+copyToClipboard(value, `已复制 ${kind === 'base' ? 'Base URL' : kind === 'key' ? 'Client Key' : 'Model ID'}`);
+});
+}
 if (isFull) {
-const btnCopyClaude = $('btnCopyClaudeSnippet');
-if (btnCopyClaude) {
-btnCopyClaude.onclick = () => {
-navigator.clipboard.writeText(snippetClaude?.textContent || '');
-toast('已复制 Claude Code 配置', 'ok');
-};
-}
-const btnCopyCursor = $('btnCopyCursorSnippet');
-if (btnCopyCursor) {
-btnCopyCursor.onclick = () => {
-navigator.clipboard.writeText(snippetCursor?.textContent || '');
-toast('已复制 Cursor 配置', 'ok');
-};
-}
 const sysSub = $('sysCurrentVersionSub');
 if (sysSub && state.systemVersion) {
 const sv = state.systemVersion;
@@ -4482,7 +4479,6 @@ state.config.vault = { url: '', node_token: '' };
 const ck = (gwClientKey?.value || '').trim();
 s.client_key = ck;
 s.proxy_api_key = ck;
-s.proxy_keys = parseProxyKeys(gwProxyKeys?.value);
 s.agent_routing_strategy = $('cfgRoutingStrategy').value;
 s.agent_first_byte_timeout_sec = fbTimeout.val;
 s.cooldown_rate_limit_sec = cd429.val;

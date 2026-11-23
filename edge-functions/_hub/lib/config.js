@@ -75,6 +75,15 @@ if (!incomingConfig || typeof incomingConfig !== 'object') return incomingConfig
 restoreMaskedKeysInMap(incomingConfig.providers, storedConfig?.providers, 'providers');
 return incomingConfig;
 }
+export function sanitizeStoredConfig(config) {
+if (!config || typeof config !== 'object') return config;
+if (config.settings && typeof config.settings === 'object') {
+const settings = { ...config.settings };
+delete settings.proxy_keys;
+config.settings = settings;
+}
+return config;
+}
 export async function loadConfig(kv) {
 let raw = null;
 if (kv) {
@@ -88,7 +97,7 @@ if (raw) {
 try {
 const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
 if (parsed && typeof parsed._version === 'number') {
-return parsed;
+return sanitizeStoredConfig(parsed);
 }
 } catch (_) {}
 }
@@ -98,7 +107,6 @@ providers: {},
 agent_models: {},
 settings: {
 client_key: '',
-proxy_keys: [],
 agent_routing_strategy: 'sticky_failover',
 agent_first_byte_timeout_sec: 120,
 cooldown_rate_limit_sec: 15,
@@ -129,7 +137,7 @@ throw new ConfigValidationError(
 );
 }
 }
-const sanitized = applyKernelGuard(incomingConfig, stored);
+const sanitized = sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored));
 sanitized._version = currentVer + 1;
 const serialized = JSON.stringify(sanitized);
 if (kv) {

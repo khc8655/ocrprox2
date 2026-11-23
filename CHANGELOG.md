@@ -4,6 +4,42 @@
 
 ---
 
+## [v20261123-06] - 2026-11-23
+
+### Changed
+
+- **包体硬门禁上调 252 KiB → 320 KiB（`327,680` 字节）**：四处同步（`shared/admin/build.mjs` Gate 4、`scripts/verify-release.mjs`、`tests/t1_contracts/verify_contracts.test.mjs`、`docs/ADMIN_UI_BACKEND_CONTRACT.md`）。此前余量仅剩 2.4 KB，任何 UI 改动都会撞闸；这个控制台是自用且持续演进，反复抠字节没有意义。Go 的 `go:embed` 与 Hub 静态托管对单文件 HTML 体积不敏感，320 KiB 给后续预留约 72 KB。后续若仍需腾空间，首选 `usage.js` 懒加载（切到概览页才注入，首屏可省约 30 KB）。
+- **lite 的 `client_key` 语义明确为「中枢投影优先」**：Hub 投影到达后以中枢密钥为准，Lite 本地 `--client-key` 只在首次投影前可用（中枢是 lite 唯一的配置面，它没有 Web 端）。Hub 设置页提示文案已同步为「投影到达后以中枢密钥为准」。
+
+### Removed
+
+- **多客户端密钥（`proxy_keys`）前后端整体删除**：`types.RuntimeSettings.ProxyKeys` 字段、`cmd/llmproxy/main.go` 的 `syncAuthKeysForRole` 按角色合成主密钥 + 附加密钥的分支、`auth.Authenticator.extraKeys` 与 `UpdateClientKeys` / `GetClientKeys`（换成单个 `SetClientKey` / `GetClientKey`）、`/api/admin/access-key` 的 `proxy_keys` 入参与回显、`/api/admin/access-info` 的 `proxy_keys_count`、Hub 默认配置（`edgeone-hub/lib/config.js` 及其镜像 `edge-functions/_hub/lib/config.js`）、`settings.schema.json` 字段、UI「附加客户端密钥列表」行全部移除。**`VerifyClientKey` 收敛为只认单个 `client_key`**（1 代别名 `proxy_api_key` 仍解析为该值）；旧配置里的 `proxy_keys` 按未知 JSON 字段忽略，其中的密钥不再具备鉴权能力。**Hub 侧也彻底丢弃**：`loadConfig` 读出旧 KV 时即剔除该字段、`saveConfigWithCAS` 不再写回、`projectConfigForNode` 投影不带它——此前 Hub 会把旧字段原样回存 KV 并继续下发给节点。
+- **单密钥槽位带来的 Lite 鉴权变化（超出「删字段」范围，单独说明）**：`syncAuthKeysForRole` 不再按角色分支，两角色都是「Settings.client_key → proxy_api_key → CLI/.env key」单槽位覆盖。Lite 因此从「CLI key 与中枢投影 key 并存」变为「中枢投影一到就顶掉 CLI key」。`docs/AGENT_DEPLOY_GUIDE.md` §3.2 新增说明，中枢设置页 `#gwHubNotice` 文案同步改写（原文「Lite 本地未配置 --client-key 时自动生效」已失真）。`TestFullMode_AuthSeedRotateRevokesEnvKey_And_LiteModePreservesEnvKey` 更名为 `TestFullAndLite_AuthSeedRotateRevokesEnvKey`，函数名不再宣称「保留」。该行为变更未经独立评审，若需保留 Lite 双密钥语义应回退 RoleLite 分支。
+- **供应商面板「手动输入」按钮**：供应商必须先存在才能建路由，该自由输入入口多余。面板只列已存在供应商；搜索无结果只提示「无匹配供应商（请先在供应商页添加）」。
+- **供应商编辑器「模型探测与一键纳管」整块**（`btn_probe_prov_*`、`probe_pills_container_*`、`renderProbePillsForProvider`、`state.probeFilterByProvider` 及相关 handler）：探测只在添加模型时进行，编辑供应商时不再重复。
+- **「Claude Code 环境变量」与「OpenAI / Cursor 配置」两个 snippet-box**（`#snippetClaude` / `#snippetCursor` 与各自复制按钮）：换成 Base URL / Client Key / Model ID 三个可点击复制的 chip（`#gwCopyChips`），点一下复制对应值并 toast 提示；复制复用既有的 `copyToClipboard()`（与其余 7 处一致：非安全上下文 / 剪贴板被拒时提示「请手动复制」，不再无条件假报成功）；Model ID 取首个**已启用**路由（与 `/v1/models` 口径一致；禁用路由会让客户端 404），无路由时 chip 置灰。
+
+### Fixed
+
+- **供应商搜索面板选不中（#2）**：点行 → 填入输入框 → 关闭面板 → 焦点移到下一个字段（`#newModelTarget`）。根因是行内没有 `mousedown` 焦点保护：面板搜索框 `#npSearch` 持有焦点时点行，pointerdown 的默认行为会把焦点从搜索框移走并吞掉这次点击——补 `mousedown` 阻止默认行为后点击可正常落到行上（面板本身原本就没有 blur 关面板的监听器，这里补的是焦点保护，不是去删一个不存在的 handler）。已聚焦输入框再点击也能重新打开面板（`click` 监听补上，`focus` 在已聚焦时不触发）。
+- **`<input type="number">` 滚轮误改值（#3）**：`setupNumberWheelGuard()` 在初始化时挂一个 document 级 `wheel` 委托，命中 `type === 'number'` 即 `blur()`；用 blur 而非 `preventDefault`，页面滚动不被吞掉。
+- **「中枢只读」徽章重复且丑（#5）**：从每个 Key 胶囊移除（胶囊只显示 Key 标签名），改为 Key 区块标题旁一行统一说明「中枢托管 Key（只读）：由中枢统一管理，删除会本地移除、可重新拉取」，仅在该供应商确有中枢 Key 时显示；Hub 控制台不显示（那里所有 Key 都是中枢签发）。
+
+### Changed
+
+- **新增模型「对外模型名」默认折叠为只读（#1）**：默认自动取上游模型 ID（跟随 `#newModelTarget` 输入同步），点「自定义名称」才解除只读并聚焦；保存时按「输入值 → 上游模型 ID → 勾选的探测模型」兜底解析路由名，多候选需要区分时再显式命名。两处一致性修正：手动清空/改写 `#newModelTarget` 会同步撤掉探测胶囊的 `.probe-pill--managed` 高亮（否则确认时会静默按残留胶囊的模型名建路由）；切换供应商时 `resetProbe({resetName:true})` 会清掉上一家手填的自定义名并折回只读（否则残留名会经 `targetVal || mName` 变成新供应商上并不存在的 `target_model`）。
+- **模板导入改为批量拉取缺失供应商（#7）**：勾选路由点导入后，先对所选路由依赖的全部缺失供应商去重、按依赖顺序一次性 `fetchVaultCredentials` 拉取（按钮实时显示「正在拉取供应商…（i/n）」），全部完成后重载配置再落地所选路由；单个供应商失败不阻断其它，最后汇总「成功 x / 失败 y（失败名单）」。**取消是真取消**：`closeTemplateImportOverlay()` 递增 `state.importRunId`，拉取循环在每个 await 后检查，Esc / 遮罩 / 关闭后不再 persist（此前循环会跑完并照常落地路由）。**未落地的路由逐条点名**：供应商拉取失败 / 拉回的 Key 缺模板要求的标签 / 同名路由已存在，都会出现在 toast 里，且只要还有未导入项就保持弹层打开（此前被静默丢弃）。行内逐个「拉取」按钮与 `data-tpl-fetch` 分支删除，仅保留「本地已有供应商缺 Key 标签」的补拉入口（这类缺口无法自动解析）。
+
+### Verified
+
+- `npm run test:t1` 8/8 全绿（settings/schema/Go 结构体 1:1、admin-ui 契约与 `host.js` capabilities 对齐、readonly 路由守卫、presets 完整性、UI 零内联样式与体积门禁、hub 纯 Web Standard 门禁）。
+- `npm run test:admin`（build:admin）5 道硬门禁全过：零内联样式 / 零抽屉 / 零左边框 / 体积 **254,024B ≤ 258,048B**（较上版 256,550B 净减 2,526B）/ edge-functions gzip 31,510B ≤ 45,000B；同步再生成 `shared/admin/dist/index.html`、`internal/admin/assets/index.html`、`admin/index.html` 与 `edge-functions/_hub/`（构建产物未手改）。
+- `npm run test:hub` 53/53 全绿；`go build ./...` 通过；`go test ./internal/auth/ ./internal/admin/ ./internal/config/ ./cmd/llmproxy/` 全绿（含新增的 `#8` 守卫：Former `proxy_keys` 条目不再鉴权、旧配置反序列化不报错、`access-key` / `access-info` 不再出现 `proxy_keys`）。
+- 版本号三处同步：`version.json`（v20261123-06 / 2.11.0）、`cmd/llmproxy/main.go` 的 `version`/`AppVersion` 回退字面量（`TestVersionVariables` 守护与 version.json 一致）、`edgeone-hub/lib/generated-version.js` 与 `edge-functions/_hub/lib/generated-version.js`（`npm run build:presets` + `npm run test:admin` 再生成，未手改）。
+- 契约同步：`shared/contracts/admin-ui-backend.json` `$changelog` 增 v3.7 条（删 `proxy_keys_count`、`access-key` 不收/不回显 `proxy_keys`、`VerifyClientKey` 只认单密钥）；`docs/ADMIN_UI_BACKEND_CONTRACT.md` §6.6 补单密钥口径、§7.3.5 删除 `extraKeys` 表述。`docs/OPERATIONS_GUIDE.md` 无「附加客户端密钥」段落，无需改动（全篇只在 §2.1 描述单 `client_key` / `PROXY_API_KEY`）。
+
+---
+
 ## [v20261123-05] - 2026-11-23
 
 ### Fixed

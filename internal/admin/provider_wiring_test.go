@@ -125,8 +125,8 @@ func TestAdmin_DetectProvider(t *testing.T) {
 			t.Fatalf("expected 200 for detect, got %d: %s", rec.Code, rec.Body.String())
 		}
 		var res struct {
-			OK        bool                        `json:"ok"`
-			Protocols []string                    `json:"protocols"`
+			OK        bool                                  `json:"ok"`
+			Protocols []string                              `json:"protocols"`
 			Results   map[string]provider.ProtocolDetection `json:"results"`
 		}
 		_ = json.NewDecoder(rec.Body).Decode(&res)
@@ -378,7 +378,6 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 		},
 		Settings: types.RuntimeSettings{
 			ClientKey: "initial-client-key",
-			ProxyKeys: []string{"extra-1", "extra-2"},
 		},
 	})
 
@@ -399,13 +398,15 @@ func TestAdmin_AccessInfo_And_AccessKey(t *testing.T) {
 			Mode                string   `json:"mode"`
 			ClientKeyConfigured bool     `json:"client_key_configured"`
 			ClientKeyMasked     string   `json:"client_key_masked"`
-			ProxyKeysCount      int      `json:"proxy_keys_count"`
 			Endpoints           []string `json:"endpoints"`
 			Models              []string `json:"models"`
 		}
 		_ = json.NewDecoder(rec.Body).Decode(&res)
 		if !res.OK || res.Mode != "unified" || !res.ClientKeyConfigured || len(res.Models) != 2 {
 			t.Fatalf("unexpected access-info response: %+v", res)
+		}
+		if strings.Contains(rec.Body.String(), "proxy_keys") {
+			t.Fatalf("#8 violation: access-info still reports proxy_keys: %s", rec.Body.String())
 		}
 	}
 

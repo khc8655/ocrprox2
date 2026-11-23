@@ -35,10 +35,14 @@
     nodesTimer: null,
     batchVerifying: false,
     probedModelsByProvider: {},
-    probeFilterByProvider: {},
     vaultManifest: null,
     addProvVaultPick: '',
     addModelProbed: null,
+    // Bumped by closeTemplateImportOverlay(): the batched provider pulls run for
+    // seconds, and Esc / backdrop click during them must actually cancel instead of
+    // letting the loop finish and persist routes the operator just dismissed.
+    importRunId: 0,
+    importing: false,
     // modelSubMode (the「全部/自定义模型」seg toggle) is gone: with the fixed-4-channel
     // generation removed, every route is a custom route and the toggle filtered nothing.
   };
@@ -390,6 +394,17 @@
       .replace(/'/g, '&#39;');
   }
 
+  // Number inputs must not change value on wheel: a stray scroll over a focused
+  // field silently rewrote weights / TTLs. Delegated because the inputs are both
+  // static and re-rendered. blur() (not preventDefault) keeps page scrolling
+  // working — the wheel is never consumed here.
+  function setupNumberWheelGuard() {
+    document.addEventListener('wheel', (e) => {
+      const t = e.target;
+      if (t && t.type === 'number') t.blur();
+    }, { passive: true });
+  }
+
   function setupStaticIcons() {
     const setIcon = (id, name) => {
       const el = $(id);
@@ -406,6 +421,7 @@
   // --- Initializer ---
   async function init() {
     setupStaticIcons();
+    setupNumberWheelGuard();
     setupLoginScreen();
     setupCapabilities();
     setupTheme();
@@ -852,31 +868,28 @@
         if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
       });
     }
-    // Template import「缺依赖」actions: pull a missing provider wholesale, or
-    // re-pull just the missing key labels of a provider that already exists
-    // locally. One delegated listener on the static list element survives the
-    // per-render innerHTML swaps; a successful pull reloads config and redraws
+    // Template import「缺依赖」action: re-pull the missing key labels of a provider
+    // that already exists locally (a missing provider is pulled by the import
+    // button itself). One delegated listener on the static list element survives
+    // the per-render innerHTML swaps; a successful pull reloads config and redraws
     // the list, so the resolved rows re-enable their import checkboxes.
     const templateImportList = $('templateImportList');
     if (templateImportList) {
       templateImportList.addEventListener('click', async (ev) => {
-        const btn = ev.target instanceof Element ? ev.target.closest('button[data-tpl-fetch], button[data-tpl-fetch-keys]') : null;
+        const btn = ev.target instanceof Element ? ev.target.closest('button[data-tpl-fetch-keys]') : null;
         if (!btn || btn.disabled) return;
-        const keysOnly = btn.hasAttribute('data-tpl-fetch-keys');
-        const prov = (keysOnly ? btn.getAttribute('data-tpl-fetch-keys') : btn.getAttribute('data-tpl-fetch')) || '';
+        const prov = btn.getAttribute('data-tpl-fetch-keys') || '';
         if (!prov) return;
-        const labels = keysOnly
-          ? JSON.parse(btn.getAttribute('data-labels') || '[]')
-          : undefined;
-        if (keysOnly && (!labels || labels.length === 0)) return;
+        const labels = JSON.parse(btn.getAttribute('data-labels') || '[]');
+        if (!labels || labels.length === 0) return;
         btn.disabled = true;
-        toast(keysOnly ? `正在补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签...` : `正在从中枢拉取供应商 ${prov}（规则与全部 Key）...`, 'info');
+        toast(`正在补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签...`, 'info');
         try {
           // key_label must stay undefined (matching the 补拉 flow in the provider
           // editor): HOST only omits it from the payload when it is undefined.
           const res = await window.HOST.fetchVaultCredentials(prov, undefined, undefined, undefined, labels);
           if (res && res.ok) {
-            toast(keysOnly ? `已补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签` : `已拉取供应商 ${prov}`, 'ok');
+            toast(`已补拉供应商 ${prov} 的 ${labels.length} 个 Key 标签`, 'ok');
             await loadData();
             renderTemplateImportList();
           } else {
@@ -1741,17 +1754,42 @@
         const provInput = $('newModelProvider');
         if (provInput) provInput.value = '';
         const nameInput = $('newModelName');
-        if (nameInput) nameInput.value = '';
+        if (nameInput) {
+          nameInput.value = '';
+          nameInput.readOnly = true;
+        }
         renderKeyPills();
       }
+    });
+    // 对外模型名 defaults to the upstream model ID: read-only until the operator
+    // explicitly opts into a custom name (only multi-candidate routes need one).
+    clk($('btnCustomModelName'), () => {
+      const nameInput = $('newModelName');
+      if (!nameInput) return;
+      nameInput.readOnly = false;
+      nameInput.focus();
+    });
+    // Keep the read-only name in sync with the upstream target while the operator
+    // has not opted into a custom name: what the client calls it is what it is.
+    $('newModelTarget')?.addEventListener('input', () => {
+      const targetVal = ($('newModelTarget')?.value || '').trim();
+      const nameInput = $('newModelName');
+      if (nameInput && nameInput.readOnly) nameInput.value = targetVal;
+      // A pill may only look picked while it IS the current target: erasing or
+      // rewriting the field by hand must clear the highlight, otherwise the
+      // confirm step would silently bind the stale pill's model id.
+      document.querySelectorAll('#npbPills .probe-pill--managed').forEach((b) => {
+        if ((b.textContent || '').trim() !== targetVal) b.classList.remove('probe-pill--managed');
+      });
     });
     clk($('btnCancelAddModel'), cancelAddModel);
 
     // Switching the provider invalidates the previous probe results, the picked
-    // keys (they belong to the old provider's key pool) and the picked upstream
-    // target (it belongs to the old provider's model list) — resetProbe covers all.
+    // keys (they belong to the old provider's key pool), the picked upstream
+    // target (it belongs to the old provider's model list) and any custom
+    // 对外模型名 typed for the old provider — resetProbe covers all.
     $('newModelProvider')?.addEventListener('change', () => {
-      resetProbe();
+      resetProbe({ resetName: true });
       renderKeyPills();
     });
 
@@ -1783,6 +1821,8 @@
         if (models.length > 0) {
           resetProbe();
           state.addModelProbed = models;
+          // Shared with the route editor's「+ 添加候选」popup.
+          state.probedModelsByProvider[prov] = models;
           renderProbePills();
           toast(`探测成功: ${models.length} 个模型`, 'ok');
         } else {
@@ -1804,14 +1844,19 @@
     });
 
     clk($('btnConfirmAddModel'), async () => {
-      const mName = ($('newModelName')?.value || '').trim();
+      // 对外模型名 is optional now: fall back to the upstream target model ID,
+      // then to the probed model picked in the pill list.
+      const nameVal = ($('newModelName')?.value || '').trim();
+      const targetVal = ($('newModelTarget')?.value || '').trim();
+      const pickedPill = document.querySelector('#npbPills .probe-pill--managed');
+      const mName = nameVal || targetVal || (pickedPill?.textContent || '').trim();
       const prov = ($('newModelProvider')?.value || '').trim();
-      const target = ($('newModelTarget')?.value || '').trim() || mName;
+      const target = targetVal || mName;
       const pickedLabels = [...document.querySelectorAll('#nmKeys .probe-pill--managed')]
         .map((b) => b.dataset.key)
         .filter(Boolean);
 
-      if (!mName) return toast('请输入路由名', 'warn');
+      if (!mName) return toast('请先选择或填写模型', 'warn');
 
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
@@ -1850,11 +1895,12 @@
   // --- Provider combobox (searchable dropdown for「首选供应商」) ---
   // Replaces the bare <select>: an input plus the floating #npPanel (.np-panel,
   // absolutely positioned under the input by CSS inside the .np-combo wrapper)
-  // whose rows show the provider name plus a small Base URL line, a pinned top
-  // search filter and a pinned bottom「手动输入…」free entry. Rows reuse
-  // .row/.who/.name from the provider list; the panel itself is a .card. Keyboard
-  // semantics mirror a native select: ArrowDown/ArrowUp walk the options, Esc
-  // closes the panel first and only then lets the global handler close the modal.
+  // whose rows show the provider name plus a small Base URL line and a pinned top
+  // search filter. Rows reuse .row/.who/.name from the provider list; the panel
+  // itself is a .card. Only existing providers are listed (a route cannot be
+  // created against a provider that does not exist yet). Keyboard semantics mirror
+  // a native select: ArrowDown/ArrowUp walk the options, Esc closes the panel first
+  // and only then lets the global handler close the modal.
   function setupProvCombo() {
     const input = $('newModelProvider');
     const panel = $('npPanel');
@@ -1868,11 +1914,14 @@
     closeProvPanel = () => toggle(panel, false);
 
     input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
-    // A pointerdown outside the combo (input + floating panel) dismisses the
-    // panel; do not clear the search filter here so returning to the input
-    // keeps the operator's current narrowing (showPanel only runs on a fresh
-    // open after the panel was closed by Esc/outside click — the filter is
-    // intentionally preserved for that re-entry too).
+    // Clicking an already-focused input fires no focus event; without this an
+    // Esc-closed panel could never be reopened without blurring the input first.
+    input.addEventListener('click', () => { if (panel.hidden) showPanel(); });
+    // A pointerdown outside the combo (input + floating panel) dismisses the panel.
+    // The panel is never closed from an input event: the operator is typing in
+    // #npSearch when they click a row, and any close keyed to that input would
+    // fire before the row's click lands. Rows are inside .np-combo, so this
+    // handler leaves them alone.
     document.addEventListener('pointerdown', (e) => {
       if (panel.hidden) return;
       const combo = input.closest('.np-combo');
@@ -1906,13 +1955,6 @@
       const idx = rows.indexOf(document.activeElement);
       (e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
     });
-
-    // Free entry: keep whatever is in the combobox input as the provider ID.
-    clk($('npManual'), () => {
-      const v = (input.value || '').trim();
-      if (!v) return toast('请先输入供应商 ID', 'warn');
-      pickProv(v);
-    });
   }
 
   function syncProvOptions() {
@@ -1927,7 +1969,7 @@
     });
     box.innerHTML = '';
     if (ids.length === 0) {
-      box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商，可手动输入</div>';
+      box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商（请先在供应商页添加）</div>';
       return;
     }
     ids.forEach((pId) => {
@@ -1936,19 +1978,27 @@
       rowBtn.className = 'row';
       rowBtn.setAttribute('role', 'option');
       rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
+      // mousedown is prevented so focus never leaves #npSearch mid-click: the click
+      // lands on the row instead of being consumed by a focus transfer (this is a
+      // focus guard, not a close-guard — no input listener closes the panel).
+      rowBtn.addEventListener('mousedown', (e) => e.preventDefault());
       clk(rowBtn, () => pickProv(pId));
       box.appendChild(rowBtn);
     });
   }
 
-  // Commit the picked provider: fill the combobox input, close the panel and
-  // refresh everything that depends on the provider (probe results + key pills).
+  // Commit the picked provider: fill the combobox input, close the panel, move
+  // focus to the next field and refresh everything that depends on the provider
+  // (probe results + key pills). Setting .value programmatically fires no change
+  // event, so the reset that the change handler does for typed input must happen
+  // here too — including the custom 对外模型名, which belongs to the old provider.
   function pickProv(pId) {
     const input = $('newModelProvider');
     if (input) input.value = pId;
     closeProvPanel();
-    resetProbe();
+    resetProbe({ resetName: true });
     renderKeyPills();
+    $('newModelTarget')?.focus();
   }
 
   // --- Add-model form: key picking + upstream model probe ---
@@ -1956,7 +2006,11 @@
   // ID」: a target picked (or typed) against one provider must never survive a
   // provider switch — confirm would otherwise persist the old provider's model id
   // into the new provider's candidates as a silent broken route.
-  function resetProbe() {
+  // opts.resetName also wipes an operator-typed 对外模型名 and folds it back to
+  // read-only: a provider switch is a fresh route, so the previous provider's
+  // custom name must not become the new provider's target_model through the
+  // `targetVal || mName` fallback. A probe re-run on the same provider keeps it.
+  function resetProbe(opts = {}) {
     state.addModelProbed = null;
     const filterEl = $('npbFilter');
     if (filterEl) filterEl.value = '';
@@ -1965,6 +2019,11 @@
     if (pills) pills.innerHTML = '';
     const targetEl = $('newModelTarget');
     if (targetEl) targetEl.value = '';
+    const nameEl = $('newModelName');
+    if (nameEl && (nameEl.readOnly || opts.resetName)) {
+      nameEl.value = '';
+      if (opts.resetName) nameEl.readOnly = true;
+    }
   }
 
   // Key capsules for the selected provider. None is pre-checked on purpose: the
@@ -1981,18 +2040,23 @@
     const keys = allKeys.filter((k) => k && k.enabled !== false);
     if (!provId || keys.length === 0) {
       box.innerHTML = `<span class="text-xs text-muted">${!provId ? '请先选择供应商' : '该供应商没有已启用的 Key'}</span>`;
+      toggle('nmKeysVaultHint', false);
       return;
     }
-    // Badge convention mirrors the provider key table: only the full-node console
-    // distinguishes vault (hub-issued, read-only) from local keys.
+    // Capsules show the key label only: the vault/local distinction is a single
+    // line above the pill group (#nmKeysVaultHint), not a badge repeated per pill.
+    // Not on the hub console itself: there every key is hub-issued, so the
+    //「删除会本地移除、可重新拉取」wording would be wrong.
+    const prov = state.config?.providers?.[provId] || {};
+    const hasVaultKey = !isHubMode() && (prov.origin === 'vault' || keys.some((k) => k?.origin === 'vault'));
+    toggle('nmKeysVaultHint', hasVaultKey);
     keys.forEach((k, idx) => {
       const label = k?.label || k?.id || `key-${idx}`;
       const pill = ce('button');
       pill.type = 'button';
       pill.dataset.key = label;
       pill.className = 'probe-pill';
-      pill.innerHTML = isHubMode() ? eh(label)
-        : `${eh(label)}${k?.origin === 'vault' ? ' <span class="pill">中枢只读</span>' : ' <span class="pill pill--amber">本地</span>'}`;
+      pill.textContent = label;
       clk(pill, () => pill.classList.toggle('probe-pill--managed'));
       box.appendChild(pill);
     });
@@ -2026,7 +2090,11 @@
         pill.className = `probe-pill${curTarget === modelName ? ' probe-pill--managed' : ''}`;
         pill.textContent = modelName;
         clk(pill, () => {
-          if (targetInput) targetInput.value = modelName;
+          if (targetInput) {
+            targetInput.value = modelName;
+            // Reuse the same sync path as typing (read-only name mirrors it).
+            targetInput.dispatchEvent(new Event('input'));
+          }
           list.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
         });
         list.appendChild(pill);
@@ -2538,90 +2606,6 @@
     }
   }
 
-  function renderProbePillsForProvider(q, pId, p) {
-    const models = state.probedModelsByProvider[pId];
-    const cont = q(`#probe_pills_container_${pId}`);
-    const list = q(`#probe_pills_list_${pId}`);
-    const countEl = q(`#probe_pills_count_${pId}`);
-    const filterEl = q(`#probe_pills_filter_${pId}`);
-    if (!cont || !list) return;
-    if (!Array.isArray(models) || models.length === 0) {
-      cont.hidden = true;
-      cont.classList.add('hidden');
-      return;
-    }
-    cont.hidden = false;
-    cont.classList.remove('hidden');
-    const curFilter = state.probeFilterByProvider[pId] || '';
-    if (filterEl && filterEl.value !== curFilter) {
-      filterEl.value = curFilter;
-    }
-
-    const draw = (rawFilter) => {
-      const f = String(rawFilter || '').trim().toLowerCase();
-      state.probeFilterByProvider[pId] = rawFilter || '';
-      list.innerHTML = '';
-      const matched = f ? models.filter((m) => m.toLowerCase().includes(f)) : models;
-      const visible = matched.slice(0, 200);
-      if (countEl) {
-        countEl.textContent = matched.length > visible.length
-          ? `匹配 ${matched.length} / 共 ${models.length} 个（显示前 ${visible.length} 个），点击一键纳管`
-          : `共 ${matched.length} 个，点击一键纳管（已纳管模型自动标记）`;
-      }
-      visible.forEach((modelName) => {
-        const managed = Boolean(state.config?.agent_models?.[modelName]);
-        const pill = ce('span');
-        pill.className = `probe-pill${managed ? ' probe-pill--managed' : ''}`;
-        pill.textContent = managed ? `${modelName} ✓ 已纳管` : `${modelName} +`;
-        pill.title = managed ? `${modelName} 已在模型路由列表中` : `点击一键纳管 ${modelName} 到模型路由`;
-        clk(pill, async () => {
-          state.config = state.config || { providers: {}, agent_models: {} };
-          state.config.agent_models = state.config.agent_models || {};
-          if (state.config.agent_models[modelName]) {
-            const existingRoute = state.config.agent_models[modelName];
-            existingRoute.candidates = existingRoute.candidates || [];
-            const hasProv = existingRoute.candidates.some((c) => c && c.provider === pId);
-            if (hasProv) {
-              toast(`模型 ${modelName} 已纳管该供应商`, 'info');
-              return;
-            }
-            const provKeys = p.api_keys || [];
-            const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-            const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-            existingRoute.candidates.push({
-              provider: pId,
-              key_label: firstKeyLabel,
-              target_model: modelName,
-              enabled: true,
-              weight: 1,
-            });
-            await persistConfig(`已将供应商 ${pId} 追加至模型 ${modelName}`);
-            return;
-          }
-          const provKeys = p.api_keys || [];
-          const firstKey = provKeys.find((k) => k && k.enabled !== false) || provKeys[0];
-          const firstKeyLabel = firstKey ? (firstKey.label || firstKey.id || '') : '';
-          state.config.agent_models[modelName] = {
-            routing_strategy: 'sticky_failover',
-            active_key: '',
-            enabled: true,
-            candidates: [
-              { provider: pId, key_label: firstKeyLabel, target_model: modelName, enabled: true, weight: 1 },
-            ],
-          };
-          await persistConfig(`已成功纳管模型: ${modelName}`);
-        });
-        list.appendChild(pill);
-      });
-    };
-
-    draw(curFilter);
-    if (filterEl && !filterEl.dataset.bound) {
-      filterEl.dataset.bound = '1';
-      filterEl.addEventListener('input', (e) => draw(e.target.value));
-    }
-  }
-
   function buildProviderEditor(pId, p) {
     const wrap = ce('div');
     const q = makeScopedQuery(wrap);
@@ -2700,7 +2684,7 @@
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}<div class="section-bar mt-4"><span class="form-label">模型探测与一键纳管</span><div class="fields"><button class="btn btn--sm" id="btn_probe_prov_${pId}" type="button">探测模型</button></div></div><div id="probe_pills_container_${pId}" class="hidden" hidden><div class="section-bar mt-1"><input class="input input--code flex-1 mr-2" id="probe_pills_filter_${pId}" placeholder="过滤探测到的模型..."><span class="text-muted text-xs" id="probe_pills_count_${pId}"></span></div><div class="probe-pills-wrap" id="probe_pills_list_${pId}"></div></div>${editorActionsHtml}`;
+    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     if (tbody && !tbody.dataset.revealWired) {
@@ -2936,35 +2920,6 @@
       });
     }
 
-    // Restore previously probed models if present
-    renderProbePillsForProvider(q, pId, p);
-
-    // Probe Models and Persistent Clickable Pills (P0-08)
-    clk(q(`#btn_probe_prov_${pId}`), async () => {
-      syncDraftFields();
-      const baseUrl = p.base_url || '';
-      const firstKey = p.api_keys?.[0]?.key || '';
-      toast(`正在探测供应商 ${pId} 模型...`, 'info');
-      try {
-        const res = await window.HOST.probeModels({
-          provider: pId,
-          base_url: baseUrl,
-          api_key: firstKey,
-          api_type: normalizeApiType(p.api_type),
-        });
-        const models = res?.models || [];
-        if (models.length > 0) {
-          state.probedModelsByProvider[pId] = models;
-          toast(`探测成功: 发现 ${models.length} 个可用模型`, 'ok');
-          renderProbePillsForProvider(q, pId, p);
-        } else {
-          toast(res?.error ? `未探测到模型: ${res.error}` : '未探测到可用模型列表', 'warn');
-        }
-      } catch (e) {
-        toast(`探测异常: ${e.message}`, 'err');
-      }
-    });
-
     const addKeyBtn = q(`#btn_add_key_${pId}`);
     if (addKeyBtn && !isVaultProv) {
       clk(addKeyBtn, () => {
@@ -3137,7 +3092,6 @@
       if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
       delete state.config.providers[pId];
       delete state.probedModelsByProvider[pId];
-      delete state.probeFilterByProvider[pId];
       state.activeEditorKey = null;
       await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
     });
@@ -4138,9 +4092,8 @@
     });
 
     //「+ 添加候选」popup: provider (datalist) → check probed model pills → append
-    // (manual input as fallback). Probe data shares the provider-editor cache
-    // state.probedModelsByProvider — probe a provider there once and the pills
-    // light up here too.
+    // (manual input as fallback). Probes are only run in the add-model form; its
+    // results are cached in state.probedModelsByProvider so the pills light up here.
     const drawAddPills = () => {
       const models = state.probedModelsByProvider[(q('#m_ac_prov')?.value || '').trim()] || [];
       q('#m_ac_models').innerHTML = models.map((mo) => `<button class="probe-pill" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('') || '<span class="text-xs text-muted">暂无探测数据</span>';
@@ -4247,6 +4200,9 @@
   function closeTemplateImportOverlay() {
     const overlay = $('templateImportOverlay');
     if (!overlay) return;
+    // Cancel any in-flight batched pull: the button may be mid-loop, and the
+    // operator closing the dialog means "do not land these routes".
+    state.importRunId++;
     overlay.hidden = true;
     overlay.classList.add('hidden');
   }
@@ -4303,10 +4259,9 @@
       const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
       const missing = templateRouteMissingProviders(mName, tpl, localProviders);
       const missingKeys = templateRouteMissingKeyLabels(mName, tpl, localProviders);
-      // A provider missing wholesale also flags every label it binds; those pairs
-      // are covered by the「拉取」buttons above, so only providers that exist
-      // locally but lack the bound labels get a 补拉 button (fetching keys of a
-      // provider the gateway has never pulled would just fail).
+      // A provider missing wholesale is pulled automatically at import time, so its
+      // row stays selectable; only a locally existing provider lacking bound key
+      // labels (which cannot be auto-resolved) keeps the row disabled.
       // A local-origin provider cannot be re-pulled from the hub (Go returns
       // provider_exists_local); for those, show guidance instead of a button
       // that can only fail. Vault-origin providers get a working 补拉 action.
@@ -4328,11 +4283,11 @@
       row.className = 'mb-2';
       row.innerHTML = `
         <label class="form-label form-label--check">
-          <input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${missing.length || missingKeys.length ? 'disabled' : ''}>
+          <input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${keyGapPairs.length || localGapProvs.length ? 'disabled' : ''}>
           <span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span>
         </label>
         ${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
-        ${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 需要先拉取 ${missing.length} 个供应商：${missing.map((pId) => `<button class="btn btn--sm" type="button" data-tpl-fetch="${eh(pId)}">拉取 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
+        ${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 导入时自动拉取 ${missing.length} 个缺失供应商：${eh(missing.join('、'))}</div>` : ''}
         ${keyGapPairs.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> Key 标签本地缺失（该供应商已有但缺这些 Key）：${eh(keyGapPairs.join('、'))} → ${Object.entries(keyGapsByProv).map(([pId, labels]) => `<button class="btn btn--sm" type="button" data-tpl-fetch-keys="${eh(pId)}" data-labels="${eh(JSON.stringify(labels))}">点此补拉 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
         ${localGapProvs.length ? `<div class="text-xs text-muted">${eh(localGapProvs.join('、'))} 为本地自建供应商，不能从中枢补拉 Key；请在供应商页补齐对应 Key 标签，或改用中枢同名供应商。</div>` : ''}
       `;
@@ -4340,21 +4295,92 @@
     }
   }
 
+  // Import flow: pull every missing provider the picked routes depend on (in one
+  // sequential pass), then land the routes whose dependencies are satisfied. A
+  // failing provider never blocks the others; failures are summarised at the end.
+  // Config is reloaded after the pulls because each fetch merges server-side.
+  // Closing the overlay (Esc / backdrop / 关闭) bumps state.importRunId, which the
+  // loop checks between awaits: a cancelled import must not persist anything.
   async function handleConfirmImportRoutes() {
+    if (state.importing) return;
+    state.importing = true;
+    const btn = $('btnConfirmImportRoutes');
+    try {
+      await runTemplateImport(btn);
+    } finally {
+      state.importing = false;
+    }
+  }
+
+  async function runTemplateImport(btn) {
     const listEl = $('templateImportList');
     const picked = [...(listEl?.querySelectorAll('.tpl_import_cb:checked') || [])]
       .map((cb) => cb.getAttribute('data-model'))
       .filter(Boolean);
     if (picked.length === 0) return toast('请先勾选要导入的模型路由', 'warn');
+    const runId = state.importRunId;
+    const cancelled = () => state.importRunId !== runId;
     const manifestModels = vaultManifestModels();
+
+    // Dedupe the missing providers across every picked route: one fetch per
+    // provider even when several routes bind it.
+    const missingProvs = [...new Set(picked.flatMap(
+      (mName) => templateRouteMissingProviders(mName, manifestModels[mName], state.config?.providers || {})
+    ))];
+    const failedProvs = [];
+    // A cancelled run must still hand the button back: it stays in the DOM after the
+    // overlay closes, and leaving it disabled+relabelled would make every later
+    // import a no-op.
+    const restoreBtn = (label) => {
+      if (!btn) return;
+      btn.disabled = false;
+      btn.textContent = label;
+    };
+    if (missingProvs.length > 0) {
+      const label = btn?.textContent || '';
+      if (btn) btn.disabled = true;
+      try {
+        for (let i = 0; i < missingProvs.length; i++) {
+          if (cancelled()) return;
+          const pId = missingProvs[i];
+          if (btn) btn.textContent = `正在拉取供应商…（${i + 1}/${missingProvs.length}）`;
+          try {
+            const res = await window.HOST.fetchVaultCredentials(pId);
+            if (!res || !res.ok) failedProvs.push(pId);
+          } catch (_) {
+            failedProvs.push(pId);
+          }
+        }
+      } finally {
+        restoreBtn(label);
+      }
+      if (cancelled()) return;
+      if (missingProvs.length > failedProvs.length) {
+        // New providers merged server-side; refresh before evaluating deps.
+        await loadData();
+        if (cancelled()) return;
+      }
+    }
+
     const localModels = state.config?.agent_models || {};
     const localProviders = state.config?.providers || {};
-    let imported = 0;
+    // Every pick that does not land is named in the summary: a route whose key
+    // label the pulled provider did not actually carry used to be dropped silently
+    // as long as some other route imported.
+    const skipped = [];
     for (const mName of picked) {
       const tpl = manifestModels[mName];
-      if (!tpl || localModels[mName]) continue;
-      if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) continue;
-      if (templateRouteMissingKeyLabels(mName, tpl, localProviders).length > 0) continue;
+      if (!tpl) { skipped.push(`${mName}（中枢清单已无该模板）`); continue; }
+      if (localModels[mName]) { skipped.push(`${mName}（本地已有同名路由）`); continue; }
+      if (templateRouteMissingProviders(mName, tpl, localProviders).length > 0) {
+        skipped.push(`${mName}（供应商未拉取成功）`);
+        continue;
+      }
+      const gapLabels = templateRouteMissingKeyLabels(mName, tpl, localProviders);
+      if (gapLabels.length > 0) {
+        skipped.push(`${mName}（拉回的 Key 缺标签 ${gapLabels.join('、')}）`);
+        continue;
+      }
       const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
@@ -4379,9 +4405,33 @@
           max_concurrency: Number(c.max_concurrency) || 0,
         })),
       };
-      imported++;
     }
-    if (imported === 0) return toast('没有可导入的路由（候选供应商或 Key 缺失，或路由已存在）', 'warn');
+    const imported = picked.length - skipped.length;
+
+    // Provider pulls always report a summary: X succeeded / Y failed (with names).
+    if (missingProvs.length > 0) {
+      toast(
+        failedProvs.length > 0
+          ? `供应商拉取：成功 ${missingProvs.length - failedProvs.length} / 失败 ${failedProvs.length}（${failedProvs.join('、')}）`
+          : `供应商拉取：成功 ${missingProvs.length} / 失败 0`,
+        failedProvs.length > 0 ? 'warn' : 'ok'
+      );
+    }
+    if (imported === 0) {
+      toast(skipped.length > 0 ? `未导入任何路由：${skipped.join('；')}` : '没有可导入的路由', 'warn');
+      // Pulled providers changed the dependency picture: redraw so the rows and
+      // their checkboxes reflect the current config before the next attempt.
+      renderTemplateImportList();
+      return;
+    }
+    if (skipped.length > 0) {
+      // Keep the overlay open: the un-imported rows stay visible (and can be fixed
+      // via their 补拉 buttons) while the imported ones disappear from the list.
+      toast(`已导入 ${imported} 条，未导入：${skipped.join('；')}`, 'warn');
+      renderTemplateImportList();
+      await persistConfig(`已从模板导入 ${imported} 条模型路由`);
+      return;
+    }
     closeTemplateImportOverlay();
     await persistConfig(`已从模板导入 ${imported} 条模型路由`);
   }
@@ -4528,9 +4578,6 @@
         settingRow('主客户端鉴权密钥 (client_key)',
           '调用 /v1/* 的主密钥；所有客户端至少需要这一把。修改后旧密钥立即失效',
           `<div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey">随机生成</button><button class="btn" id="btnSaveClientKey">保存密钥</button></div>`),
-        settingRow('附加客户端密钥列表 (proxy_keys)',
-          '逗号或换行分隔的额外密钥，用于给不同终端分配独立密钥、便于单独吊销；可留空',
-          `<textarea class="textarea input--code privacy-mask" id="gwProxyKeys" placeholder="每行或逗号分隔一个额外客户端密钥（可选）"></textarea>`),
       ].join('');
     }
     // Vault link (Full only): URL + node token.
@@ -4570,10 +4617,6 @@
       const el = $(id);
       if (el) el.value = val !== undefined ? val : '';
     };
-    const parseProxyKeys = (raw) => String(raw || '')
-      .split(/[\n,;]+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
 
     const isZeroVersion = state.config._version === 0;
     setVal('cfgRoutingStrategy', s.agent_routing_strategy || 'sticky_failover');
@@ -4607,11 +4650,18 @@
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
     const localBase = `${baseOrigin}/v1`;
     const clientKey = s.client_key || s.proxy_api_key || '';
-    const extraKeys = Array.isArray(s.proxy_keys) ? s.proxy_keys : [];
+    // Model ID chip: a route the gateway would actually answer. Enabled-only (a
+    // disabled route 404s in the scheduler) and sorted, because the Go map is
+    // serialized in key order and an arbitrary first key could be the dead one.
+    // Same predicate as /v1/models: route exists and route.enabled.
+    const modelNames = Object.keys(state.config?.agent_models || {})
+      .filter((m) => state.config.agent_models[m]?.enabled !== false)
+      .sort();
+    const firstModel = modelNames[0] || '';
 
     if (gwSummaryPill) {
       gwSummaryPill.textContent = clientKey
-        ? `主密钥已配置 · 附加 ${extraKeys.length} 把`
+        ? '主密钥已配置'
         : (isFull ? '主密钥未配置' : '待设置下发至节点');
     }
 
@@ -4621,23 +4671,26 @@
     const gwClientKey = $('gwClientKey');
     if (gwClientKey) gwClientKey.value = clientKey;
 
-    const gwProxyKeys = $('gwProxyKeys');
-    if (gwProxyKeys) gwProxyKeys.value = extraKeys.join('\n');
-
-    const snippetClaude = $('snippetClaude');
-    const displayKey = clientKey || 'sk-llmproxy-key';
-    if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${displayKey}"`;
-
-    const snippetCursor = $('snippetCursor');
-    if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${displayKey}"`;
+    // Copy chips: one click copies the full value; the label shows the value
+    // truncated by CSS so a long key never widens the row.
+    if ($('chipBaseValue')) $('chipBaseValue').textContent = localBase;
+    if ($('chipKeyValue')) $('chipKeyValue').textContent = clientKey || '未配置';
+    const modelChip = $('chipModelValue');
+    if (modelChip) modelChip.textContent = firstModel || '暂无路由';
+    const modelChipBtn = modelChip?.closest('.copy-chip');
+    if (modelChipBtn) {
+      modelChipBtn.disabled = !firstModel;
+      modelChipBtn.title = firstModel ? `复制 Model ID: ${firstModel}` : '暂无路由';
+    }
+    const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
+    if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
 
     const btnGen = $('btnGenClientKey');
     if (btnGen) {
       btnGen.onclick = () => {
         const rand = generateClientSecretKey();
         if (gwClientKey) gwClientKey.value = rand;
-        if (snippetClaude) snippetClaude.textContent = `export ANTHROPIC_BASE_URL="${localBase}" ANTHROPIC_API_KEY="${rand}"`;
-        if (snippetCursor) snippetCursor.textContent = `OPENAI_BASE_URL="${localBase}" OPENAI_API_KEY="${rand}"`;
+        if ($('chipKeyValue')) $('chipKeyValue').textContent = rand;
       };
     }
 
@@ -4645,31 +4698,36 @@
     if (btnSaveKey) {
       btnSaveKey.onclick = async () => {
         const k = (gwClientKey?.value || '').trim();
-        const pk = parseProxyKeys(gwProxyKeys?.value);
         s.client_key = k;
         s.proxy_api_key = k;
-        s.proxy_keys = pk;
         await persistConfig(isFull ? '客户端鉴权密钥已保存' : '已保存，将自动投影下发至节点');
       };
     }
 
+    // Delegated once: the chips survive re-renders because the container is
+    // static, and every value is read at click time (the key one from the live
+    // input, the model one from the current config).
+    const chipsBox = $('gwCopyChips');
+    if (chipsBox && !chipsBox.dataset.bound) {
+      chipsBox.dataset.bound = '1';
+      chipsBox.addEventListener('click', (ev) => {
+        const chip = ev.target instanceof Element ? ev.target.closest('.copy-chip[data-copy]') : null;
+        if (!chip || chip.disabled) return;
+        const kind = chip.getAttribute('data-copy');
+        // Recompute at click time (the key one from the live input, the model one
+        // from the current config) so a just-typed key / new route is what copies.
+        const value = kind === 'base' ? localBase
+          : kind === 'key' ? (gwClientKey?.value || '').trim()
+            : (Object.keys(state.config?.agent_models || {}).filter((m) => state.config.agent_models[m]?.enabled !== false).sort()[0] || '');
+        if (!value) return toast(kind === 'model' ? '暂无路由' : '该值尚未配置', 'warn');
+        // Same helper as the other 7 copy actions: awaits, catches a rejected write
+        // (insecure http origin / no clipboard permission) and says「请手动复制」
+        // instead of claiming a copy that never happened.
+        copyToClipboard(value, `已复制 ${kind === 'base' ? 'Base URL' : kind === 'key' ? 'Client Key' : 'Model ID'}`);
+      });
+    }
+
     if (isFull) {
-      const btnCopyClaude = $('btnCopyClaudeSnippet');
-      if (btnCopyClaude) {
-        btnCopyClaude.onclick = () => {
-          navigator.clipboard.writeText(snippetClaude?.textContent || '');
-          toast('已复制 Claude Code 配置', 'ok');
-        };
-      }
-
-      const btnCopyCursor = $('btnCopyCursorSnippet');
-      if (btnCopyCursor) {
-        btnCopyCursor.onclick = () => {
-          navigator.clipboard.writeText(snippetCursor?.textContent || '');
-          toast('已复制 Cursor 配置', 'ok');
-        };
-      }
-
       const sysSub = $('sysCurrentVersionSub');
       if (sysSub && state.systemVersion) {
         const sv = state.systemVersion;
@@ -4751,7 +4809,6 @@
         const ck = (gwClientKey?.value || '').trim();
         s.client_key = ck;
         s.proxy_api_key = ck;
-        s.proxy_keys = parseProxyKeys(gwProxyKeys?.value);
         s.agent_routing_strategy = $('cfgRoutingStrategy').value;
         s.agent_first_byte_timeout_sec = fbTimeout.val;
         s.cooldown_rate_limit_sec = cd429.val;

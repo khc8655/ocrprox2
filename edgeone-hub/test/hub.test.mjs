@@ -13,7 +13,7 @@ import { handleVaultManifestRequest } from '../api/vault/manifest.js';
 import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
-import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
+import { CONFIG_KV_KEY, loadConfig, saveConfigWithCAS, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
 import { generateClientKey, NODES_KV_KEY, loadNodes, saveNodes } from '../lib/nodes.js';
 import { projectConfigForNode } from '../lib/projection.js';
@@ -1121,7 +1121,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
 
   describe('10. Hub Lite Projection & Bootstrap Closure', () => {
     test('client_key unmasked in GET/bootstrap_env, provider adapter_rules embedded, grace_ttl & role editable', async () => {
-      // 1. Save Hub config with client_key, proxy_keys, and provider with custom adapter_rules & preset_id
+      // 1. Save Hub config with client_key and provider with custom adapter_rules & preset_id
       const saveResp = await handleConfigRequest(
         makeAdminReq('POST', '/api/config', {
           _version: 1,
@@ -1148,7 +1148,6 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
           },
           settings: {
             client_key: 'sk-lite-hub-primary',
-            proxy_keys: ['sk-lite-extra-01'],
           },
         }),
         TEST_ENV,
@@ -1159,7 +1158,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       // GET /api/config exposes settings.client_key unmasked for admin copy
       const getData = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv)).json();
       assert.equal(getData.settings.client_key, 'sk-lite-hub-primary');
-      assert.deepEqual(getData.settings.proxy_keys, ['sk-lite-extra-01']);
+      assert.equal(getData.settings.proxy_keys, undefined);
 
       // 2. Issue Lite node -> bootstrap_env includes LLMPROXY_CLIENT_KEY
       const issueData = await (
@@ -1206,7 +1205,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(pullResp.status, 200);
       const pullData = await pullResp.json();
       assert.equal(pullData.payload.settings.client_key, 'sk-lite-hub-primary');
-      assert.deepEqual(pullData.payload.settings.proxy_keys, ['sk-lite-extra-01']);
+      assert.equal(pullData.payload.settings.proxy_keys, undefined);
       const ds = pullData.payload.providers.deepseek;
       assert.equal(ds.rpm_per_key, 60);
       assert.equal(ds.refresh_every, undefined);
@@ -2526,6 +2525,112 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       (await edgeNodeHeartbeat.default.fetch(heartbeatReq(issue.node_token), { ...TEST_ENV, KV: kv })).status,
       204
     );
+  });
+});
+
+// #8: the Hub is the other half of "a legacy proxy_keys array is ignored". Go
+// already ignores it (unknown JSON field, never authenticates), but a KV written by
+// an older Hub used to hand it straight back: GET /api/config returned it, the
+// console POSTed it back on the next save, and the projection shipped it to nodes.
+// Every path that reads or writes config must drop it.
+describe('14. Legacy proxy_keys is dropped by the Hub (load / save / projection)', () => {
+  const legacySettings = () => ({
+    client_key: 'sk-main',
+    proxy_keys: ['sk-legacy-extra-1', 'sk-legacy-extra-2'],
+    agent_routing_strategy: 'sticky_failover',
+  });
+
+  async function seedLegacy(kv) {
+    await kv.put(
+      CONFIG_KV_KEY,
+      JSON.stringify({
+        _version: 4,
+        providers: {
+          deepseek: {
+            id: 'deepseek',
+            name: 'DeepSeek',
+            base_url: 'https://api.deepseek.com',
+            enabled: true,
+            api_keys: [{ id: 'ds-01', label: 'ds-01', key: 'sk-deepseek-live', enabled: true }],
+          },
+        },
+        agent_models: {
+          'deepseek-chat': {
+            enabled: true,
+            candidates: [{ provider: 'deepseek', key_label: 'ds-01', enabled: true }],
+          },
+        },
+        settings: legacySettings(),
+      })
+    );
+  }
+
+  test('loadConfig strips proxy_keys from a KV written by an older Hub', async () => {
+    const kv = new MockKV();
+    await seedLegacy(kv);
+    const loaded = await loadConfig(kv);
+    assert.equal(loaded.settings.client_key, 'sk-main');
+    assert.equal(loaded.settings.proxy_keys, undefined, 'loadConfig must not hand back removed fields');
+    // The callers mutate then save what they loaded; the stored copy must stay untouched
+    // until an explicit save (load must not become an implicit write path).
+    assert.match(await kv.get(CONFIG_KV_KEY), /sk-legacy-extra-1/);
+  });
+
+  test('GET/POST /api/config never read or write proxy_keys back to KV', async () => {
+    const kv = new MockKV();
+    await seedLegacy(kv);
+
+    const getData = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv)).json();
+    assert.equal(getData.settings.client_key, 'sk-main');
+    assert.equal(getData.settings.proxy_keys, undefined, 'GET must not echo a removed field');
+
+    // Simulate the console save: POST back exactly what GET returned (the leak's
+    // actual mechanism was `{...config}` round-tripping an untouched field).
+    getData._version = 4;
+    const saveResp = await handleConfigRequest(makeAdminReq('POST', '/api/config', getData), TEST_ENV, kv);
+    assert.equal(saveResp.status, 200);
+
+    const stored = JSON.parse(await kv.get(CONFIG_KV_KEY));
+    assert.equal(stored.settings.proxy_keys, undefined, 'a console save must not persist proxy_keys');
+    assert.equal(stored.settings.client_key, 'sk-main');
+  });
+
+  test('saveConfigWithCAS drops a proxy_keys array submitted directly', async () => {
+    const kv = new MockKV();
+    await seedLegacy(kv);
+    const saved = await saveConfigWithCAS(
+      {
+        _version: 4,
+        providers: {
+          deepseek: {
+            id: 'deepseek',
+            base_url: 'https://api.deepseek.com',
+            enabled: true,
+            api_keys: [{ id: 'ds-01', label: 'ds-01', key: 'sk-deepseek-live', enabled: true }],
+          },
+        },
+        settings: { client_key: 'sk-rotated', proxy_keys: ['sk-should-not-persist'] },
+      },
+      kv
+    );
+    assert.equal(saved.settings.proxy_keys, undefined);
+    assert.equal(saved.settings.client_key, 'sk-rotated');
+    const stored = JSON.parse(await kv.get(CONFIG_KV_KEY));
+    assert.equal(stored.settings.proxy_keys, undefined);
+  });
+
+  test('node projection never ships proxy_keys to lite or full nodes', async () => {
+    const kv = new MockKV();
+    await seedLegacy(kv);
+    const config = await loadConfig(kv);
+    // loadConfig already cleaned it; feed the raw shape too so the projection's own
+    // guard is covered independently of the loader.
+    const rawConfig = { ...config, settings: { ...config.settings, proxy_keys: ['sk-legacy-extra-1'] } };
+    for (const role of ['lite', 'full']) {
+      const projected = projectConfigForNode({ role, scope: { providers: ['*'], models: ['*'] } }, rawConfig, {});
+      assert.equal(projected.settings.client_key, 'sk-main');
+      assert.equal(projected.settings.proxy_keys, undefined, `${role} projection must not carry proxy_keys`);
+    }
   });
 });
 

@@ -4,10 +4,76 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/khc8655/llmproxy2/internal/crypto"
 	"github.com/khc8655/llmproxy2/internal/types"
 )
+
+// TestLocalSource_LoadLegacyProxyKeysConfig covers #8 backwards compatibility: a
+// proxy_config.enc written before multi-client keys were removed still carries
+// "proxy_keys". Go's default JSON decoder ignores unknown fields, so loading must
+// succeed (no panic, no error) and the surviving single client_key must be in effect.
+func TestLocalSource_LoadLegacyProxyKeysConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	pass := "legacy-pass-12345"
+
+	legacy := []byte(`{
+		"_version": 7,
+		"providers": {"p1": {"id": "p1", "base_url": "https://p1.api", "enabled": true}},
+		"settings": {"client_key": "sk-legacy-main", "proxy_keys": ["sk-legacy-extra-1", "sk-legacy-extra-2"]}
+	}`)
+	sealed, err := crypto.Encrypt(legacy, pass)
+	if err != nil {
+		t.Fatalf("Encrypt legacy config err: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, ConfigFileName), sealed, 0o600); err != nil {
+		t.Fatalf("write legacy config err: %v", err)
+	}
+
+	src, err := NewLocalSource(tmpDir, pass)
+	if err != nil {
+		t.Fatalf("NewLocalSource must tolerate legacy proxy_keys config, got err: %v", err)
+	}
+
+	snap, err := src.Current(context.Background(), true)
+	if err != nil {
+		t.Fatalf("Current err: %v", err)
+	}
+	if snap == nil || snap.Config == nil {
+		t.Fatalf("expected a loaded config snapshot")
+	}
+	if got := snap.Config.Settings.ClientKey; got != "sk-legacy-main" {
+		t.Errorf("expected legacy client_key preserved, got %q", got)
+	}
+	if snap.Config.Version != 7 {
+		t.Errorf("expected legacy version 7 preserved, got %d", snap.Config.Version)
+	}
+
+	// Round-trip: re-saving drops proxy_keys entirely instead of persisting it back.
+	if _, err := src.SaveConfig(snap.Config); err != nil {
+		t.Fatalf("SaveConfig err: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("read config err: %v", err)
+	}
+	plain, err := crypto.Decrypt(raw, pass)
+	if err != nil {
+		t.Fatalf("Decrypt err: %v", err)
+	}
+	var roundTripped map[string]any
+	if err := json.Unmarshal(plain, &roundTripped); err != nil {
+		t.Fatalf("unmarshal round-tripped config err: %v", err)
+	}
+	if st, ok := roundTripped["settings"].(map[string]any); ok {
+		if _, exists := st["proxy_keys"]; exists {
+			t.Errorf("proxy_keys must not be written back after removal, got %v", st["proxy_keys"])
+		}
+	}
+}
 
 func TestLocalSource_SaveLoad_KernelGuard_CAS(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -462,7 +528,6 @@ func TestLocalSource_OnConfigChange_Listener(t *testing.T) {
 		},
 		Settings: types.RuntimeSettings{
 			ClientKey: "new-client-key",
-			ProxyKeys: []string{"extra-1", "extra-2"},
 		},
 	})
 	if err != nil {

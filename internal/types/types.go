@@ -104,17 +104,16 @@ type KBCandidate struct {
 
 // RuntimeSettings 与 shared/config/settings.schema.json 一一对齐的规范化设置项
 type RuntimeSettings struct {
-	ClientKey                string   `json:"client_key,omitempty"`         // 客户端鉴权密钥 (等同 PROXY_API_KEY)
-	ProxyAPIKey              string   `json:"proxy_api_key,omitempty"`      // 1 代兼容字段名
-	ProxyKeys                []string `json:"proxy_keys,omitempty"`         // 多客户端鉴权密钥列表
-	AgentRoutingStrategy     string   `json:"agent_routing_strategy"`       // "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
-	AgentFirstByteTimeoutSec int      `json:"agent_first_byte_timeout_sec"` // 默认 120
-	CooldownRateLimitSec     int      `json:"cooldown_rate_limit_sec"`      // 429 模型级冷却秒数，默认 15
-	CooldownServerErrorSec   int      `json:"cooldown_server_error_sec"`    // 5xx 模型级冷却秒数，默认 30
-	CooldownNetworkErrorSec  int      `json:"cooldown_network_error_sec"`   // 网络超时冷却秒数，默认 15
-	CooldownAuthErrorSec     int      `json:"cooldown_auth_error_sec"`      // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
-	OCRMaxInflight           int      `json:"ocr_max_inflight"`             // OCR 预读信号量上限，默认 4
-	KBGlobalMaxConcurrency   int      `json:"kb_global_max_concurrency"`    // 固定通道全局并发上限，默认 16
+	ClientKey                string `json:"client_key,omitempty"`         // 客户端鉴权密钥 (等同 PROXY_API_KEY)
+	ProxyAPIKey              string `json:"proxy_api_key,omitempty"`      // 1 代兼容字段名
+	AgentRoutingStrategy     string `json:"agent_routing_strategy"`       // "sticky_failover" | "round_robin" | "weighted" | "least_busy" | "fast" | "manual"
+	AgentFirstByteTimeoutSec int    `json:"agent_first_byte_timeout_sec"` // 默认 120
+	CooldownRateLimitSec     int    `json:"cooldown_rate_limit_sec"`      // 429 模型级冷却秒数，默认 15
+	CooldownServerErrorSec   int    `json:"cooldown_server_error_sec"`    // 5xx 模型级冷却秒数，默认 30
+	CooldownNetworkErrorSec  int    `json:"cooldown_network_error_sec"`   // 网络超时冷却秒数，默认 15
+	CooldownAuthErrorSec     int    `json:"cooldown_auth_error_sec"`      // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
+	OCRMaxInflight           int    `json:"ocr_max_inflight"`             // OCR 预读信号量上限，默认 4
+	KBGlobalMaxConcurrency   int    `json:"kb_global_max_concurrency"`    // 固定通道全局并发上限，默认 16
 }
 
 // VaultClientConfig Full 节点连接 EdgeOne Hub 的客户端配置
@@ -380,7 +379,6 @@ func (s *RuntimeSnapshot) PurgeSecrets() {
 	}
 	s.Config.Settings.ClientKey = ""
 	s.Config.Settings.ProxyAPIKey = ""
-	s.Config.Settings.ProxyKeys = nil
 	s.Config.Vault = nil
 }
 

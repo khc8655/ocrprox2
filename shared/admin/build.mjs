@@ -131,17 +131,17 @@ if (existsSync(dirname(internalAssetHtml))) {
   writeFileSync(internalAssetHtml, bundledHtml, 'utf8');
 }
 
-// 7. Gate 4: Bundle size <= 258,048 bytes (252 KB)
-console.log('\n6. Verifying Gate 4: Bundle size (<= 258,048 bytes)...');
+// 7. Gate 4: Bundle size <= 327,680 bytes (320 KiB)
+console.log('\n6. Verifying Gate 4: Bundle size (<= 327,680 bytes)...');
 const stat = statSync(distPath);
 const sizeKb = (stat.size / 1024).toFixed(2);
 console.log(`   Bundle size: ${stat.size} bytes (${sizeKb} KB)`);
 
-if (stat.size > 258048) {
-  console.error(`   ✗ FAILED: Bundle size ${stat.size} bytes (${sizeKb} KB) exceeds 258,048 bytes limit!`);
+if (stat.size > 327680) {
+  console.error(`   ✗ FAILED: Bundle size ${stat.size} bytes (${sizeKb} KB) exceeds 327,680 bytes limit!`);
   process.exit(1);
 }
-console.log(`   ✓ Bundle size ${stat.size} bytes (${sizeKb} KB) <= 258,048 bytes limit (100% compliant)`);
+console.log(`   ✓ Bundle size ${stat.size} bytes (${sizeKb} KB) <= 327,680 bytes limit (100% compliant)`);
 
 // 8. Generate static admin/index.html (EdgeOne Pages Static CDN Console)
 console.log('\n7. Generating static admin/index.html (EdgeOne Hub Console)...');

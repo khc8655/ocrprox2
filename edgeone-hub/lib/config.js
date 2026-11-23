@@ -101,6 +101,22 @@ export function applyKernelGuard(incomingConfig, storedConfig) {
 }
 
 /**
+ * Drop settings fields that were removed from the config contract. A KV written by
+ * an older Hub can still carry them; handing them back verbatim keeps them alive
+ * through every console save (the console POSTs back what GET returned) and through
+ * every node projection. Go ignores the fields, so this is hygiene, not auth.
+ */
+export function sanitizeStoredConfig(config) {
+  if (!config || typeof config !== 'object') return config;
+  if (config.settings && typeof config.settings === 'object') {
+    const settings = { ...config.settings };
+    delete settings.proxy_keys;
+    config.settings = settings;
+  }
+  return config;
+}
+
+/**
  * Load config from KV or return default.
  */
 export async function loadConfig(kv) {
@@ -117,7 +133,7 @@ export async function loadConfig(kv) {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (parsed && typeof parsed._version === 'number') {
-        return parsed;
+        return sanitizeStoredConfig(parsed);
       }
     } catch (_) {}
   }
@@ -129,7 +145,6 @@ export async function loadConfig(kv) {
     agent_models: {},
     settings: {
       client_key: '',
-      proxy_keys: [],
       agent_routing_strategy: 'sticky_failover',
       agent_first_byte_timeout_sec: 120,
       cooldown_rate_limit_sec: 15,
@@ -170,8 +185,9 @@ export async function saveConfigWithCAS(incomingConfig, kv) {
     }
   }
 
-  // Apply Kernel Guard to restore masked secrets
-  const sanitized = applyKernelGuard(incomingConfig, stored);
+  // Apply Kernel Guard to restore masked secrets, then drop removed settings
+  // fields so a POST echoing a legacy GET cannot write them back to KV.
+  const sanitized = sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored));
 
   // Bump version
   sanitized._version = currentVer + 1;

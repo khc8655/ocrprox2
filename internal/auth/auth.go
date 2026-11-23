@@ -27,7 +27,6 @@ type Authenticator struct {
 	failedAttempts map[string][]time.Time
 	blockedIPs     map[string]time.Time
 	clientKey      string
-	extraKeys      []string
 	adminPassword  string
 }
 
@@ -48,27 +47,11 @@ func (a *Authenticator) SetClientKey(key string) {
 	a.clientKey = key
 }
 
-// UpdateClientKeys dynamically updates the primary client key and additional proxy keys.
-func (a *Authenticator) UpdateClientKeys(primary string, extra []string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.clientKey = primary
-	a.extraKeys = make([]string, 0, len(extra))
-	for _, k := range extra {
-		trimmed := strings.TrimSpace(k)
-		if trimmed != "" {
-			a.extraKeys = append(a.extraKeys, trimmed)
-		}
-	}
-}
-
-// GetClientKeys returns the current primary key and extra keys.
-func (a *Authenticator) GetClientKeys() (string, []string) {
+// GetClientKey returns the current client key.
+func (a *Authenticator) GetClientKey() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	copied := make([]string, len(a.extraKeys))
-	copy(copied, a.extraKeys)
-	return a.clientKey, copied
+	return a.clientKey
 }
 
 // SetAdminPassword updates the admin password dynamically.
@@ -198,7 +181,7 @@ func ConstantTimeCompare(a, b string) bool {
 
 // VerifyClientKey verifies client request authentication for /v1/* endpoints.
 // Enforced for ALL sources including 127.0.0.1 and ::1.
-// Strictly accepts only configured clientKey or extraKeys (never adminPassword).
+// Strictly accepts only the configured single clientKey (never adminPassword).
 func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 	token := ExtractToken(r)
 	if token == "" {
@@ -207,23 +190,9 @@ func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 
 	a.mu.RLock()
 	ck := a.clientKey
-	extras := make([]string, len(a.extraKeys))
-	copy(extras, a.extraKeys)
 	a.mu.RUnlock()
 
-	// Check against configured CLIENT_KEY
-	if ck != "" && ConstantTimeCompare(token, ck) {
-		return true
-	}
-
-	// Check against extra proxy keys
-	for _, ek := range extras {
-		if ek != "" && ConstantTimeCompare(token, ek) {
-			return true
-		}
-	}
-
-	return false
+	return ck != "" && ConstantTimeCompare(token, ck)
 }
 
 // VerifyAdminAuth verifies admin authentication for management endpoints with anti-bruteforce lockout.

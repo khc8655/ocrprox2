@@ -91,6 +91,7 @@ projectedModels[mName] = projectedRoute;
 }
 }
 const projectedSettings = { ...(config.settings || {}) };
+delete projectedSettings.proxy_keys;
 if (!isFullNode) {
 delete projectedSettings.ocr_max_inflight;
 delete projectedSettings.kb_global_max_concurrency;

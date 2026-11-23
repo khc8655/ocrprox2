@@ -404,7 +404,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		masked := maskConfigSecrets(snap.Config)
-		if masked.Settings.ClientKey == "" && masked.Settings.ProxyAPIKey == "" && len(masked.Settings.ProxyKeys) == 0 && s.defaultClientKey != "" {
+		if masked.Settings.ClientKey == "" && masked.Settings.ProxyAPIKey == "" && s.defaultClientKey != "" {
 			masked.Settings.ClientKey = s.defaultClientKey
 		}
 		if dv := s.maskedEffectiveVault(snap.Config.Vault); dv != nil {
@@ -839,9 +839,6 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request) {
 		}
 		if incoming.Settings.ProxyAPIKey != "" {
 			targetCfg.Settings.ProxyAPIKey = incoming.Settings.ProxyAPIKey
-		}
-		if len(incoming.Settings.ProxyKeys) > 0 {
-			targetCfg.Settings.ProxyKeys = incoming.Settings.ProxyKeys
 		}
 		targetCfg.Version = currentCfg.Version
 	}

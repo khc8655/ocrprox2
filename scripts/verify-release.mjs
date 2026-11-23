@@ -145,10 +145,10 @@ try {
     throw new Error('shared/admin/dist/index.html was not generated');
   }
   const stat = statSync(adminDistPath);
-  if (stat.size > 258048) {
-    throw new Error(`shared/admin/dist/index.html size (${stat.size}B) exceeds 258,048B limit`);
+  if (stat.size > 327680) {
+    throw new Error(`shared/admin/dist/index.html size (${stat.size}B) exceeds 327,680B limit`);
   }
-  logSuccess(`Admin UI built successfully (${stat.size} bytes <= 258,048 bytes)`);
+  logSuccess(`Admin UI built successfully (${stat.size} bytes <= 327,680 bytes)`);
 
   // Synchronize admin dist to internal/admin/assets/index.html to ensure zero build drift
   if (existsSync(internalAssetHtml)) {

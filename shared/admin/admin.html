@@ -365,9 +365,12 @@
           </div>
 
           <div class="form-group mb-3">
-            <label class="form-label" for="newModelName">对外模型名</label>
-            <input class="input input--code" id="newModelName" placeholder="claude-sonnet-4-5">
-            <span class="text-xs text-muted">这就是一个路由：Agent 客户端用这个名字调用</span>
+            <div class="section-bar">
+              <label class="form-label" for="newModelName">对外模型名</label>
+              <button class="btn btn--sm" id="btnCustomModelName" type="button">自定义名称</button>
+            </div>
+            <input class="input input--code" id="newModelName" placeholder="默认使用上游模型 ID" readonly>
+            <span class="text-xs text-muted">默认使用上游模型 ID；多候选命名不同时再自定义</span>
           </div>
 
           <div class="form-group mb-3">
@@ -379,9 +382,6 @@
                   <input class="input" id="npSearch" placeholder="搜索">
                 </div>
                 <div class="np-panel-options" id="npOptions" role="listbox"></div>
-                <div class="np-panel-foot">
-                  <button class="btn" id="npManual">手动输入</button>
-                </div>
               </div>
             </div>
             <span class="text-xs text-muted">候选 Key 池来源</span>
@@ -406,7 +406,10 @@
           </div>
 
           <div class="form-group mb-3">
-            <label class="form-label">Key 勾选</label>
+            <div class="section-bar">
+              <label class="form-label">Key 勾选</label>
+              <span class="text-xs text-muted" id="nmKeysVaultHint" hidden>中枢托管 Key（只读）：由中枢统一管理，删除会本地移除、可重新拉取</span>
+            </div>
             <div class="probe-pills-wrap" id="nmKeys"></div>
             <span class="text-xs text-muted">勾选 Key 生成候选；默认全不勾</span>
           </div>
@@ -560,23 +563,14 @@
           <span class="pill" id="gwAccessSummaryPill"></span>
         </div>
         <div class="notice-strip mb-3" id="gwHubNotice" hidden>
-          <span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令（Lite 本地未配置 <code>--client-key</code> 时自动生效）。</span>
+          <span>Hub 配置的客户端鉴权密钥将通过 <code>/api/node/config</code> 投影下发至所有 Lite 节点及新签发启动命令。<strong>投影到达后以中枢密钥为准</strong>：Lite 本地 <code>--client-key</code> 只在首次投影之前可用，中枢密钥一生效该本地密钥随即失效。</span>
         </div>
         <div class="setting-rows" id="gatewayAccessRows"></div>
-        <div class="form-grid form-grid--2 mt-3" id="gwLocalOnlyBox">
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">Claude Code 环境变量</span>
-              <button class="btn btn--sm" id="btnCopyClaudeSnippet">复制</button>
-            </div>
-            <code class="snippet-code" id="snippetClaude"></code>
-          </div>
-          <div class="snippet-box">
-            <div class="snippet-header">
-              <span class="form-label">OpenAI / Cursor 配置</span>
-              <button class="btn btn--sm" id="btnCopyCursorSnippet">复制</button>
-            </div>
-            <code class="snippet-code" id="snippetCursor"></code>
+        <div class="mt-3" id="gwLocalOnlyBox">
+          <div class="copy-chips" id="gwCopyChips">
+            <button class="btn copy-chip" type="button" data-copy="base"><span class="copy-chip-label">Base URL</span><span class="copy-chip-value" id="chipBaseValue"></span></button>
+            <button class="btn copy-chip" type="button" data-copy="key"><span class="copy-chip-label">Client Key</span><span class="copy-chip-value privacy-mask" id="chipKeyValue"></span></button>
+            <button class="btn copy-chip" type="button" data-copy="model"><span class="copy-chip-label">Model ID</span><span class="copy-chip-value" id="chipModelValue"></span></button>
           </div>
         </div>
       </div>

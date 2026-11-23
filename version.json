@@ -1,14 +1,19 @@
 {
-  "version": "v20261123-05",
-  "semver": "2.10.3",
+  "version": "v20261123-06",
+  "semver": "2.11.0",
   "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.10.3 — 心跳按角色分级（full 只发启动心跳，lite 周期上报）",
+  "title": "LLMProxy2 (OCRProxy v2) 2.11.0 — 控制台精简：删多客户端密钥与冗余入口，只留跑通流程必需的操作",
   "changelog": [
-    "修正心跳默认策略：2.10.1 把 full 也设为每 10 分钟周期心跳，是修「升级后中枢显示旧版本」时的过度设计——full 有本地管理台、不依赖中枢存活，周期心跳几乎无收益却同样消耗 EdgeOne Makers 免费调用次数（144 次/天/节点）",
-    "新策略：两个角色默认都**只发一次启动心跳**（启动 5 秒后 1 次调用，升级重启即让中枢看到新版本）；**周期性心跳只在显式设置 LLMPROXY_HEARTBEAT_INTERVAL（≥60 秒）时开启**",
-    "lite 例外：lite 无 Web 端、中枢是唯一可见性入口，由 install.sh 给 lite systemd 单元显式写入 LLMPROXY_HEARTBEAT_INTERVAL=600，保持周期上报；full 单元不写该变量，因此不产生周期调用",
-    "新增 Client.StartOnce（单次发送，忽略 interval）与 ShouldSendStartup；ShouldEnable 语义收紧为「两个角色都需显式 opt-in 才周期发送」",
-    "验证：hubheartbeat 单测更新（full 默认 false、显式 true 才开、Startup 恒发）+ go test -race 全绿；OPERATIONS_GUIDE 心跳章节同步新语义；install.sh lite 单元补该变量"
+    "新增模型：「对外模型名」不再强制填写——默认自动取上游模型 ID、以只读展示，点「自定义名称」才展开可编辑；多候选需要区分时再显式命名",
+    "供应商搜索面板：点行 = 填入输入框 → 关闭面板 → 焦点移到下一个字段；行按钮补 mousedown 焦点保护（在搜索框里点行时 pointerdown 的默认焦点转移会吞掉点击；面板原本没有 blur 关面板监听器）；已聚焦输入框再点击也能重新打开面板；搜索无结果只提示「无匹配供应商（请先在供应商页添加）」，删除「手动输入」按钮（供应商必须先存在才能建路由）",
+    "全站 <input type=\"number\"> 禁掉鼠标滚轮改值：初始化时一次 document 级 wheel 委托，命中 number 输入即 blur，页面滚动不受影响",
+    "「中枢只读」徽章从每个 Key 胶囊移除（胶囊只显示 Key 标签名），改为 Key 区块标题旁一行统一说明「中枢托管 Key（只读）」，仅在该供应商确有中枢 Key 时显示",
+    "删除供应商编辑器的「模型探测与一键纳管」整块（btn_probe_prov_* / probe_pills_container_* 及其 handler 与状态）：探测只在添加模型时进行",
+    "模板导入改为批量拉取：勾选路由点导入后按依赖顺序一次性拉取全部缺失供应商（进度文案「正在拉取供应商…（i/n）」），单个供应商失败不阻断其它，结束后统一汇总成功/失败清单；未落地的路由逐条点名（供应商拉取失败 / 拉回的 Key 缺标签 / 同名路由已存在）；拉取途中按 Esc 或点遮罩即真正取消，不再继续落地路由；不再逐行点「拉取」",
+    "彻底删除多客户端密钥（proxy_keys）：types.ProxyKeys 字段、main.go 的 auth 合成分支、auth.Authenticator.extraKeys 与 UpdateClientKeys/GetClientKeys、access-key 的 proxy_keys 入参与响应、access-info 的 proxy_keys_count、Hub 默认配置、settings.schema.json 字段、UI「附加客户端密钥列表」行；VerifyClientKey 收敛为只认单个 client_key（1 代别名 proxy_api_key 仍解析为该值）。Hub 侧同样彻底丢弃：loadConfig 读出旧 KV 时即剔除、保存时不写回、节点投影不带该字段；Go 侧旧配置/旧载荷里的 proxy_keys 按未知字段忽略且不再具备鉴权能力。注意单密钥槽位的 Lite 行为变化：中枢投影的 settings.client_key 一到就顶掉本机 --client-key（不再并存），文档与中枢设置页提示已同步",
+    "网关接入：「Claude Code 环境变量」与「OpenAI / Cursor 配置」两个 snippet-box 换成 Base URL / Client Key / Model ID 三个可点击复制的 chip，复制后 toast 提示；复制走统一的 copyToClipboard（非安全上下文/剪贴板被拒时提示「请手动复制」而不是假报成功）；Model ID 取首个已启用路由（与 /v1/models 口径一致，禁用路由会让客户端 404），无路由时置灰",
+    "包体门禁上调：252 KiB (258,048B) → 320 KiB (327,680B)，四处同步（shared/admin/build.mjs Gate 4、scripts/verify-release.mjs、tests/t1_contracts、契约文档）。理由：UI 是持续演进的自用控制台，反复抠字节没有意义，320 KiB 给后续预留约 72 KB 余量；Go embed 与 Hub 静态托管对单文件 HTML 的体积不敏感",
+    "lite 的 client_key 语义明确为「中枢投影优先」：Hub 投影到达后以中枢密钥为准，Lite 本地 --client-key 只在首次投影前可用。同步更新 Hub 设置页提示文案与评审发现的过时表述"
   ]
 }

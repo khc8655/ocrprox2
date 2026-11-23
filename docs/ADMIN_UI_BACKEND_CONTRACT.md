@@ -366,7 +366,6 @@
   "mode": "agent",
   "client_key_configured": true,
   "client_key_masked": "sk-...9876",
-  "proxy_keys_count": 2,
   "endpoints": ["/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/models"],
   "models": ["claude-3-7-sonnet", "deepseek-chat", "gpt-4o-mini"]
 }
@@ -379,6 +378,8 @@
 }
 ```
 返回 `{ "ok": true, "client_key": "sk-llmproxy-...", "masked": "sk-...abcd" }`，并实时热更新 `authMgr`。
+- **单密钥口径（v3.7 契约）**：多客户端密钥（`proxy_keys`）已前后端整体移除。`access-info` 响应不再含 `proxy_keys_count`；`access-key` 请求不再接受 `proxy_keys`（请求体里带该字段会被忽略），响应也不回显。`/v1/*` 数据面 `VerifyClientKey` 只认单个 `settings.client_key`（1 代别名 `proxy_api_key` 仍解析为该值），不再比对任何额外密钥；旧配置或中枢载荷中残留的 `proxy_keys` 数组按未知字段忽略，其中的密钥不再具备鉴权能力。中枢侧同样丢弃该字段：`loadConfig` 读出旧 KV 时剔除、`saveConfigWithCAS` 不写回、`projectConfigForNode` 不下发。
+- **单密钥槽位与 Lite 的 `--client-key`（v3.7 行为变更）**：`syncAuthKeysForRole` 不再按角色分支，两个角色都是同一优先级链「`Settings.client_key` → `Settings.proxy_api_key` → CLI/`.env` key」，且**只有一个槽位**。对 Lite 意味着：中枢投影的 `settings.client_key` 一到（首次 `POST /api/node/config` 即发生），安装时传入的 `--client-key` 立刻失效，两者不能并存。要给 Lite 客户端固定一把密钥，就在中枢设置该 `client_key`；`bootstrap_env` / `install_command` 里的 `--client-key` 只是首次投影前的过渡值。Full 语义不变（中枢/Web 设置的密钥始终覆盖 CLI key）。
 
 ### 6.7 添加模型：上游模型探测 `POST /api/admin/probe-models`（hub + full）
 - **Request**:
@@ -531,7 +532,7 @@
 
 ### 7.3.5 URL 查询串凭据直登（`?key=` / `?token=` / `?password=`，v3.4 契约）
 - **Full 节点管理面（Go）**：`VerifyAdminAuth`（`internal/auth/auth.go`）在请求头之外**接受 URL 查询串凭据**，优先级 **请求头 > `?key` > `?token` > `?password`**——Full 控制台支持书签式一键直登（与 magpie 一致的便利性），如 `https://node.example.com/admin?key=<admin_password>`。
-- **`/v1/*` 数据面（`VerifyClientKey`）并非 header-only**：它取凭据走的 `ExtractToken`（`internal/auth/auth.go`）**在本契约变更之前**就会在无请求头凭据时回退读取 `?key=` / `?token=` 查询串（优先级 请求头 > `?key` > `?token`）——客户端用 `https://node.example.com/v1/chat/completions?key=<client_key>` 调数据面本就是有效形态。v3.4 的放宽只触碰管理面，数据面行为与改动前逐字节一致：**不读取 `?password=`**，且 `adminPassword` 在数据面永不被接受（`VerifyClientKey` 只比对 client_key / extraKeys）。
+- **`/v1/*` 数据面（`VerifyClientKey`）并非 header-only**：它取凭据走的 `ExtractToken`（`internal/auth/auth.go`）**在本契约变更之前**就会在无请求头凭据时回退读取 `?key=` / `?token=` 查询串（优先级 请求头 > `?key` > `?token`）——客户端用 `https://node.example.com/v1/chat/completions?key=<client_key>` 调数据面本就是有效形态。v3.4 的放宽只触碰管理面，数据面行为与改动前逐字节一致：**不读取 `?password=`**，且 `adminPassword` 在数据面永不被接受（`VerifyClientKey` 只比对单个 `client_key`，v3.7 起不再有 `extraKeys`）。
 - **Hub 中枢（EdgeOne）**：HTTP API **未放宽**——`checkAdminAuth`（`edgeone-hub/lib/config.js`）仍只接受 `Authorization: Bearer` / `x-admin-key` 请求头。`?key=` 直登（读取 URL 参数自动填充登录表单并经正常登录路径提交）**只在 Full 控制台实现**（`shared/admin/js/app.js` 仅对 `kind === 'full'` 自动填充/提交）；Hub 控制台**不支持**查询串直登，前端只在页面加载时把 URL 中的 `?key= / ?token= / ?password=` 参数**读取后立即无条件抹除**（`history.replaceState`，无论后续登录成败），防止误留参数长期驻留地址栏。
 - **已接受的取舍与风险（运营者明确选择）**：凭据出现在 URL 中可能进入**浏览器历史、Referrer 头、反向代理访问日志**。本系统为私有部署，运营者已知悉并接受该风险换取一键直登便利。前端「读取后立即抹除（无论登录成败）」只降低驻留时间，不能消除上述三个通道的泄露面。
 - **防暴力破解口径不变**：携带**错误**查询串凭据与错误请求头同等对待——失败并消耗防暴力额度（10 分钟内 5 次错误 → 封禁 IP 10 分钟，守卫测试 `internal/auth/auth_test.go` 的 `TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout`）；完全无凭据的请求（首屏加载、探针）依旧不消耗额度。凭据校验、优先级与锁定逻辑全部在服务端。
@@ -547,7 +548,7 @@
 ## 八、 前端单文件构建预算与门禁规范
 
 - 前端控制台源码统一位于 `shared/admin/`，通过 `node shared/admin/build.mjs` 构建为内嵌单一单页 HTML（输出至 `shared/admin/dist/index.html` 与 `internal/admin/assets/index.html`）。
-- 打包体积硬门禁：**`≤ 252 KB`（`258,048 bytes`）**（执行 G4 门禁校验与 T1 合同测试；2026-11-22 由 240 KB 重标——magpie 骨架重排与探测/策略胶囊等已确认 UI 的真实字节成本，见 v20261122-06 CHANGELOG）。
+- 打包体积硬门禁：**`≤ 320 KiB`（`327,680 bytes`）**（执行 G4 门禁校验与 T1 合同测试；2026-11-22 由 240 KB 重标——magpie 骨架重排与探测/策略胶囊等已确认 UI 的真实字节成本，见 v20261122-06 CHANGELOG）。
 - 零内联样式（严禁 `style="` 与 `.style.xxx`）、零 Drawer 抽屉（全部行内展开 `.editor`）、零彩色左边框条、原生 `[hidden]` 显隐控制。
 - **流程纪律**：任何对 `shared/admin/` 源码（`admin.html` / `js/*` / `css/*`）的改动，必须当场跑 `npm run test:admin`（含全部体积/样式门禁并再生成 dist、`internal/admin/assets`、`admin/index.html` 与 `edge-functions/_hub` 同步产物）；只跑 `verify:release` 之类的下游产物校验不算数——下游校验看到的是上一次构建的陈旧产物，门禁失败会被静默漏掉。
 

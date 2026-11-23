@@ -38,17 +38,6 @@
       "default": "",
       "roles": ["lite", "full"]
     },
-    "proxy_keys": {
-      "group": "routing",
-      "label": "多客户端代理密钥列表",
-      "hint": "允许多把客户端密钥同时鉴权",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": [],
-      "roles": ["lite", "full"]
-    },
     "agent_routing_strategy": {
       "group": "routing",
       "label": "全局默认路由策略",

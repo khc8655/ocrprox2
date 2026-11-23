@@ -307,13 +307,11 @@ func TestHubSource_OnConfigChangeAndAdapterRules(t *testing.T) {
 	src := NewHubSource(ts.URL, "stk_node_test", true)
 	var called int32
 	var gotClientKey string
-	var gotExtraLen int
 	var gotAuthHeader string
 
 	src.OnConfigChange(func(cfg *types.ProxyConfig) {
 		atomic.AddInt32(&called, 1)
 		gotClientKey = cfg.Settings.ClientKey
-		gotExtraLen = len(cfg.Settings.ProxyKeys)
 		if p := cfg.Providers["custom"]; p != nil && p.AdapterRules != nil {
 			gotAuthHeader = p.AdapterRules.AuthHeader
 		}
@@ -326,8 +324,10 @@ func TestHubSource_OnConfigChangeAndAdapterRules(t *testing.T) {
 	if atomic.LoadInt32(&called) != 1 {
 		t.Fatalf("expected callback once, got %d", called)
 	}
-	if gotClientKey != "sk-hub-client-01" || gotExtraLen != 1 {
-		t.Errorf("unexpected synced client keys: primary=%q extras=%d", gotClientKey, gotExtraLen)
+	// A Hub payload still carrying the removed proxy_keys field must decode without
+	// error; only the single client_key survives.
+	if gotClientKey != "sk-hub-client-01" {
+		t.Errorf("unexpected synced client key: %q", gotClientKey)
 	}
 	if gotAuthHeader != "X-API-Key" {
 		t.Errorf("expected embedded provider adapter_rules auth_header=X-API-Key, got %q", gotAuthHeader)

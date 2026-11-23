@@ -88,7 +88,8 @@ func TestSystemVersionCheckUpdateAndMultiAccessKeys(t *testing.T) {
 		t.Fatalf("expected has_update=true & v20261117-01, got %+v", updResp)
 	}
 
-	// 3. /api/admin/access-key with proxy_keys array updates authMgr
+	// 3. /api/admin/access-key sets the single client key; a legacy proxy_keys array in
+	// the request body must be ignored (the field no longer exists).
 	bodyBytes, _ := json.Marshal(map[string]any{
 		"client_key": "sk-new-main",
 		"proxy_keys": []string{"sk-extra-1", "sk-extra-2"},
@@ -100,9 +101,18 @@ func TestSystemVersionCheckUpdateAndMultiAccessKeys(t *testing.T) {
 	if recKey.Code != http.StatusOK {
 		t.Fatalf("access-key status=%d body=%s", recKey.Code, recKey.Body.String())
 	}
-	primary, extras := authMgr.GetClientKeys()
-	if primary != "sk-new-main" || len(extras) != 2 {
-		t.Fatalf("unexpected updated keys: primary=%q extras=%v", primary, extras)
+	if got := authMgr.GetClientKey(); got != "sk-new-main" {
+		t.Fatalf("unexpected client key: %q", got)
+	}
+	if strings.Contains(recKey.Body.String(), "proxy_keys") {
+		t.Fatalf("#8 violation: access-key response still exposes proxy_keys: %s", recKey.Body.String())
+	}
+	for _, legacy := range []string{"sk-extra-1", "sk-extra-2"} {
+		r := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		r.Header.Set("Authorization", "Bearer "+legacy)
+		if authMgr.VerifyClientKey(r) {
+			t.Fatalf("#8 violation: legacy proxy_keys entry %q still authenticates", legacy)
+		}
 	}
 }
 

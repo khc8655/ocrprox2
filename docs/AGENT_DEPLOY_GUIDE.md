@@ -192,6 +192,12 @@ curl -fsSL "$HUB/install.sh" | sudo bash -s -- \
 - 判断是否对外可达只看 `ss -ltn`：`127.0.0.1:PORT` = 仅本机，`*:PORT` = 对外。
 - 传错值会立即报错退出：`--bind 参数必须为 'local' 或 'public'`。
 
+**Lite 的 `--client-key` 是「首个投影前」的临时密钥（v2.11.0 起）**：Lite 只有单密钥槽位，中枢投影里的 `settings.client_key` 一到（首次 `/api/node/config` 即发生）就顶掉启动时传入的本地密钥，两者不能并存。因此：
+
+- 想让客户端用某把固定密钥调用 Lite，**在中枢控制台设置该 `client_key`**，安装命令里的 `--client-key` 只是中枢密钥尚未命中的过渡值；
+- 只想本地调试、不接中枢时，本地密钥才长期有效；
+- 排障先看中枢设置页的「网关接入与客户端密钥」：那才是 Lite 实际生效的值。
+
 ### 3.3 方式 B：Docker
 
 ```bash

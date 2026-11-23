@@ -123,8 +123,11 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     }
   }
 
-  // Project settings according to node role
+  // Project settings according to node role. Removed fields are stripped even when
+  // the KV still carries them from an older Hub: nodes ignore them (unknown field),
+  // but a dead credential field has no business riding in a payload we hand out.
   const projectedSettings = { ...(config.settings || {}) };
+  delete projectedSettings.proxy_keys;
   if (!isFullNode) {
     delete projectedSettings.ocr_max_inflight;
     delete projectedSettings.kb_global_max_concurrency;

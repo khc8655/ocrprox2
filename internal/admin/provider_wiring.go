@@ -270,7 +270,7 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 
-	primaryKey, extraKeys := s.authMgr.GetClientKeys()
+	primaryKey := s.authMgr.GetClientKey()
 
 	masked := ""
 	if primaryKey != "" {
@@ -315,7 +315,6 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 		"mode":                  "unified",
 		"client_key_configured": primaryKey != "",
 		"client_key_masked":     masked,
-		"proxy_keys_count":      len(extraKeys),
 		"endpoints":             endpoints,
 		"models":                models,
 	})
@@ -332,9 +331,8 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		ClientKey string   `json:"client_key"`
-		ProxyKeys []string `json:"proxy_keys"`
-		Generate  bool     `json:"generate"`
+		ClientKey string `json:"client_key"`
+		Generate  bool   `json:"generate"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -345,7 +343,6 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 		newKey = "sk-llmproxy-" + hex.EncodeToString(b)
 	}
 
-	var extraKeys []string
 	var savedVersion int64
 	if s.localSrc != nil {
 		snap, _ := s.localSrc.Current(r.Context(), false)
@@ -356,16 +353,6 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 		}
 		clonedCfg.Settings.ClientKey = newKey
 		clonedCfg.Settings.ProxyAPIKey = newKey
-		if req.ProxyKeys != nil {
-			cleaned := make([]string, 0, len(req.ProxyKeys))
-			for _, pk := range req.ProxyKeys {
-				if t := strings.TrimSpace(pk); t != "" {
-					cleaned = append(cleaned, t)
-				}
-			}
-			clonedCfg.Settings.ProxyKeys = cleaned
-		}
-		extraKeys = clonedCfg.Settings.ProxyKeys
 		savedSnap, err := s.localSrc.SaveConfig(&clonedCfg)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -380,7 +367,7 @@ func (s *Server) handleAccessKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.authMgr.UpdateClientKeys(newKey, extraKeys)
+	s.authMgr.SetClientKey(newKey)
 
 	masked := ""
 	if newKey != "" {
