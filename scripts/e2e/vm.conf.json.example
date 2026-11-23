@@ -1,0 +1,9 @@
+{
+  "_comment": "cp vm.conf.json.example vm.conf.json 并填入测试机凭据；vm.conf.json 已 gitignore",
+  "host": "203.0.113.10",
+  "user": "ubuntu",
+  "key": "/path/to/key.pem",
+  "appPort": 18081,
+  "mockPort": 19090,
+  "release": "v20261123-09"
+}
