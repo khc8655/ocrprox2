@@ -425,6 +425,37 @@
     startNodesPolling();
   }
 
+  // --- URL direct-login helpers (?key= / ?token= / ?password=) ---
+  // User-requested convenience for this private deployment: one-click console access
+  // from a bookmarked URL on the full console. The backend (VerifyAdminAuth) accepts
+  // the query-string credential; here we scrub the parameter from the address bar the
+  // moment it is read — regardless of host kind and of the login outcome (wrong
+  // password, 429 lockout, network error) — so the credential never lingers in the
+  // URL (re-sharing / refresh replay). Auto-fill + submit through the normal login
+  // path happens on the full console only; the hub console rejects query-string
+  // credentials server-side and just gets the scrub.
+  function readUrlAdminCredential() {
+    try {
+      const q = new URLSearchParams(location.search);
+      for (const name of ['key', 'token', 'password']) {
+        const v = (q.get(name) || '').trim();
+        if (v) return v;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function scrubUrlAdminCredential() {
+    if (!/[?&](key|token|password)=/.test(location.search)) return;
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('key');
+      url.searchParams.delete('token');
+      url.searchParams.delete('password');
+      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
+  }
+
   // --- 1. In-Page Magpie Login Overlay (M14) ---
   function setupLoginScreen() {
     const loginForm = $('loginForm');
@@ -470,6 +501,26 @@
     // Auto-prompt login if no token set
     if (!window.HOST.getToken()) {
       window.HOST.showLogin();
+    }
+
+    // URL direct-login (?key= / ?token= / ?password=): scrub the credential from
+    // the address bar as soon as it is read, whatever the host kind and whatever
+    // the login outcome — a failed auto-submit (rotated password, 429 lockout,
+    // network error) must not leave the credential lingering in the URL/history.
+    // Auto-fill once and submit through the normal login path on the full console
+    // only; the hub console does not accept query-string credentials (header-only
+    // server auth) and only gets the scrub.
+    const urlCredential = readUrlAdminCredential();
+    if (urlCredential) {
+      scrubUrlAdminCredential();
+      if (window.HOST.kind === 'full' && !window.HOST.getToken() && loginForm && pwdInput) {
+        pwdInput.value = urlCredential;
+        if (typeof loginForm.requestSubmit === 'function') {
+          loginForm.requestSubmit();
+        } else {
+          loginForm.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+      }
     }
   }
 
@@ -604,6 +655,8 @@
         if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
         const installOverlay = $('nodeInstallOverlay');
         if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
+        const credOverlay = $('nodeCredOverlay');
+        if (credOverlay && !credOverlay.hidden) { closeNodeCredOverlay(); closedSomething = true; }
         const tplImportOverlay = $('templateImportOverlay');
         if (tplImportOverlay && !tplImportOverlay.hidden) { closeTemplateImportOverlay(); closedSomething = true; }
         if (state.activeEditorKey) {
@@ -762,6 +815,17 @@
     if (nodeInstallOverlay) {
       nodeInstallOverlay.addEventListener('click', (ev) => {
         if (ev.target === nodeInstallOverlay) closeNodeInstallOverlay();
+      });
+    }
+
+    const btnCloseNodeCred = $('btnCloseNodeCred');
+    if (btnCloseNodeCred) {
+      clk(btnCloseNodeCred, closeNodeCredOverlay);
+    }
+    const nodeCredOverlay = $('nodeCredOverlay');
+    if (nodeCredOverlay) {
+      nodeCredOverlay.addEventListener('click', (ev) => {
+        if (ev.target === nodeCredOverlay) closeNodeCredOverlay();
       });
     }
 
@@ -3070,9 +3134,11 @@
   // within the same session without forcing another rotation. A page refresh
   // forgets it, and re-opening the overlay then falls back to rotate-and-show.
   const nodeTokenMem = new Map();
-  // Full-node ADMIN_PASSWORDs are generated client-side (the hub never stores
-  // them), so keep them stable per node within a session: re-opening the install
-  // overlay must not silently mint a different password into the command.
+  // Full-node ADMIN_PASSWORDs now live in the Hub KV and ride back on the node
+  // list payload (node.admin_password), so the install overlay reads the stored
+  // value. This session map is only the legacy fallback for a hub old enough to
+  // not store passwords: it keeps a generated value stable within the session so
+  // re-opening the overlay does not silently mint a different password.
   const nodeAdminPassMem = new Map();
   let nodeInstallReturnEl = null;
 
@@ -3108,7 +3174,11 @@
       nodeToken: material.node_token,
       clientKey: material.client_key,
       bootstrapEnv: material.bootstrap_env,
-      adminPass: getStableNodeAdminPass(nodeId, role),
+      // Password priority: the KV-stored value on the node list record, then the
+      // issuance/rotation payload, then the session-stable legacy fallback (see
+      // nodeAdminPassMem above) for hubs that do not store passwords yet.
+      adminPass:
+        node?.admin_password || material.admin_password || material.node?.admin_password || getStableNodeAdminPass(nodeId, role),
     });
     overlay.hidden = false;
     overlay.classList.remove('hidden');
@@ -3127,6 +3197,88 @@
     overlay.classList.add('hidden');
     const back = nodeInstallReturnEl;
     nodeInstallReturnEl = null;
+    if (back && document.contains(back)) back.focus();
+  }
+
+  // --- Node credentials overlay (re-view the stored admin password) ---
+  const CRED_PASS_MASK = '●●●●●●●●●●●●';
+  let nodeCredReturnEl = null;
+
+  async function handleNodeCredClick(nodeId) {
+    try {
+      // Read-only GET: the credentials endpoint never rotates the token.
+      const res = await window.HOST.request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/credentials`);
+      const data = await res.json();
+      if (res.ok && data && data.ok) {
+        openNodeCredOverlay(nodeId, data);
+      } else {
+        toast((data && data.error) || '获取节点密码失败', 'err');
+      }
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  function openNodeCredOverlay(nodeId, data) {
+    const overlay = $('nodeCredOverlay');
+    if (!overlay) return;
+    const node = (state.nodes || []).find((n) => n.id === nodeId);
+    const titleEl = $('nodeCredTitle');
+    const subEl = $('nodeCredSub');
+    if (titleEl) titleEl.textContent = `后台密码 — ${node?.name || nodeId}`;
+    if (subEl) subEl.textContent = 'Full 节点管理控制台 (/admin) 的登录密码，明文保存在 Hub，可随时回看';
+    const body = $('nodeCredBody');
+    if (body) {
+      if (!data || data.role !== 'full') {
+        body.innerHTML = '<div class="notice-strip mb-2"><span>lite 节点无后台密码（Lite 部署没有管理控制台）。</span></div>';
+      } else if (!data.admin_password) {
+        body.innerHTML = `<div class="notice-strip notice-strip--warn mb-2"><span>${eh(
+          data.admin_password_note || '该节点未存有后台密码；重新获取安装命令（将轮换 Token）时会生成新密码并保存。'
+        )}</span></div>`;
+      } else {
+        const ck = String(data.client_key || '');
+        const passStrip = `<div class="notice-strip notice-strip--warn mb-2">
+          <span>后台登录密码: <strong class="tabular" data-cred-pass>${CRED_PASS_MASK}</strong></span>
+          <button class="btn btn--sm" data-cred-reveal type="button">显示</button>
+          <button class="btn btn--sm" data-cred-copy type="button">复制密码</button>
+        </div>`;
+        const ckStrip = ck
+          ? `<div class="notice-strip mb-2"><span>客户端 API Key: <strong class="tabular">${eh(ck)}</strong></span><button class="btn btn--sm" data-cred-copy-ck type="button">复制 API Key</button></div>`
+          : `<div class="notice-strip mb-2"><span>${eh(data.client_key_note || 'Hub 未存有该节点的客户端密钥。')}</span></div>`;
+        body.innerHTML = passStrip + ckStrip;
+
+        // Masked by default; the reveal toggle swaps text content only (no style
+        // writes, per the zero-inline-style gate).
+        const passEl = body.querySelector('[data-cred-pass]');
+        const revealBtn = body.querySelector('[data-cred-reveal]');
+        let revealed = false;
+        if (revealBtn && passEl) {
+          clk(revealBtn, () => {
+            revealed = !revealed;
+            passEl.textContent = revealed ? data.admin_password : CRED_PASS_MASK;
+            revealBtn.textContent = revealed ? '隐藏' : '显示';
+          });
+        }
+        const copyBtn = body.querySelector('[data-cred-copy]');
+        if (copyBtn) clk(copyBtn, () => copyToClipboard(data.admin_password, '后台登录密码已复制'));
+        const ckBtn = body.querySelector('[data-cred-copy-ck]');
+        if (ckBtn) clk(ckBtn, () => copyToClipboard(ck, '客户端 API Key 已复制'));
+      }
+    }
+    overlay.hidden = false;
+    overlay.classList.remove('hidden');
+    nodeCredReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const closeBtn = $('btnCloseNodeCred');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeNodeCredOverlay() {
+    const overlay = $('nodeCredOverlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+    const back = nodeCredReturnEl;
+    nodeCredReturnEl = null;
     if (back && document.contains(back)) back.focus();
   }
 
@@ -3212,11 +3364,19 @@
       editBtn.className = 'btn btn--sm';
       editBtn.type = 'button';
       editBtn.textContent = isExpanded ? '收起' : '编辑';
+      const credBtn = ce('button');
+      credBtn.className = 'btn btn--sm';
+      credBtn.type = 'button';
+      credBtn.textContent = '密码';
       actionTd.appendChild(installBtn);
       actionTd.appendChild(editBtn);
+      actionTd.appendChild(credBtn);
       actionTd.appendChild(document.createTextNode(' '));
 
       clk(installBtn, () => handleNodeInstallClick(node.id));
+      // Works for lite rows too: the credentials endpoint answers with the lite
+      // note, so the overlay explains instead of hiding the affordance.
+      clk(credBtn, () => handleNodeCredClick(node.id));
       clk(editBtn, () => {
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
         renderNodesList();
@@ -3330,9 +3490,9 @@
     const role = payload.role === 'full' ? 'full' : 'lite';
     const clientKey = payload.clientKey || (state.config?.settings?.client_key || state.config?.settings?.proxy_api_key || '');
     const hubUrl = payload.hubUrl || window.location.origin;
-    // Full-node admin password: the caller passes a session-stable one (see
-    // getStableNodeAdminPass); generate only when none was supplied (the
-    // issuance/rotation inline panel mounts once, so a fresh value is right).
+    // Full-node admin password: callers pass the KV-stored value (node payload or
+    // rotation response). The random fallback only fires when the hub did not
+    // supply one (legacy hub that does not store passwords).
     const adminPass = role === 'full' ? (String(payload.adminPass || '').trim() || generateRandomAlphaNum(20)) : '';
     const panelState = {
       mode: 'install',
@@ -3512,7 +3672,9 @@
       try {
         const res = await window.HOST.rotateNode(id);
         if (res && res.ok) {
-          toast('Token 轮换成功！', 'ok');
+          // The Hub reuses the stored admin password across rotations (see
+          // reissueNodeToken), so say so instead of implying a fresh one.
+          toast(res.admin_password ? 'Token 轮换成功，后台密码保持不变' : 'Token 轮换成功！', 'ok');
           if (res.node_token) nodeTokenMem.set(id, res);
           q(`#node_token_display_box_${id}`).hidden = false;
           q(`#node_new_token_val_${id}`).value = res.node_token;
@@ -3523,6 +3685,7 @@
             nodeToken: res.node_token,
             clientKey: res.client_key,
             bootstrapEnv: res.bootstrap_env,
+            adminPass: res.admin_password,
           });
         }
       } catch (e) { toast(e.message, 'err'); }

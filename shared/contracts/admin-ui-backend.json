@@ -2,6 +2,7 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.4: full-node objects carry admin_password (full role only; plaintext in Hub KV by explicit operator choice — Plan A — so the console password is re-viewable; lite nodes never have the field, and patching full→lite drops it); added nodes_credentials (GET /api/admin/nodes/:id/credentials, read-only re-view of the stored admin password + recoverable client key, Cache-Control: no-store, never rotates the token); admin auth accepts URL query-string credentials (?key/?token/?password) on the full-role admin plane by explicit operator tradeoff — see auth_semantics.query_string_credentials.",
     "v3.3: providers.rpm_per_key is the provider's OVERALL RPM ceiling enforced scheduler-side as one provider-wide sliding window (0 = unlimited) and no longer falls back into the per-key check — api_keys[].max_rpm keeps its key-level meaning; probe_models documents api_type and stored-key resolution (empty/masked api_key resolves the provider's first enabled stored key, vault-managed keys refuse base_url overrides with 403); added test_agent_model and test_candidate (the route-line 测试路由 endpoints, full role only).",
     "v3.2: GET /api/admin/presets-extra preset objects carry version/updated_at mirroring the provider's adapter file (shared/presets/<id>.json); both fields are omitted when the preset has no matching adapter file.",
     "v3: removed POST /api/vault/sync (full sync replaced by on-demand fetch); POST /api/vault/fetch gains 409 provider_exists_local, wholesale replace of hub-managed fields on re-fetch, and imported_keys; GET /api/vault/manifest gains the agent_models route-template section; both endpoints now serve hub and full roles.",
@@ -87,7 +88,7 @@
       ],
       "response": {
         "ok": true,
-        "nodes": "array of node objects"
+        "nodes": "array of node objects (each full-role node carries admin_password in plaintext — operator-accepted Plan A; lite nodes carry no admin_password field)"
       }
     },
     "nodes_issue": {
@@ -109,8 +110,9 @@
       },
       "response": {
         "ok": true,
-        "node": "object",
+        "node": "object (full-role node includes admin_password, plaintext — stored in Hub KV so it stays re-viewable)",
         "node_token": "string (stk_node_<48hex>)",
+        "admin_password": "string (full role only; absent for lite)",
         "bootstrap_env": "string",
         "install_command": "string"
       }
@@ -134,9 +136,31 @@
         "ok": true,
         "node_token": "string (stk_node_<48hex>)",
         "client_key": "string",
+        "admin_password": "string (full role only; the KV-stored password is REUSED across rotations — only a legacy node issued before passwords were persisted gets one minted here, and that mint is persisted)",
         "bootstrap_env": "string",
         "install_command": "string"
       }
+    },
+    "nodes_credentials": {
+      "method": "GET",
+      "path": "/api/admin/nodes/:id/credentials",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "response": {
+        "ok": true,
+        "id": "string",
+        "role": "string (lite | full)",
+        "admin_password": "string | null (full role: the KV-stored plaintext; null for lite or a legacy node that never stored one)",
+        "client_key": "string | null (the Hub's global settings.client_key when configured — issuance embeds it on every node; null when the Hub has no global client key configured, i.e. the node got a one-off random key that was never persisted)",
+        "admin_password_note": "string (optional; present for lite nodes, or when a legacy full node has no stored password)",
+        "client_key_note": "string (optional; present when the Hub has no global client key configured)"
+      },
+      "errors": {
+        "404": "node_not_found"
+      },
+      "semantics": "read-only re-view of the admin console password (node list rows' 密码 button): NEVER rotates the node token; Cache-Control: no-store (the body carries a plaintext credential). Legacy full nodes issued before passwords were stored answer with a note; re-obtaining the install command (which rotates the token) mints and persists one."
     },
     "nodes_install_command": {
       "method": "GET",
@@ -147,16 +171,17 @@
       ],
       "response": {
         "ok": true,
-        "node": "object (sanitized)",
+        "node": "object (sanitized; full role includes admin_password)",
         "node_token": "string (stk_node_<48hex>)",
         "client_key": "string",
+        "admin_password": "string (full role only; the KV-stored password is reused — minted and persisted only for legacy nodes that never stored one)",
         "bootstrap_env": "string",
         "install_command": "string"
       },
       "errors": {
         "404": "node_not_found"
       },
-      "semantics": "rotates the node token internally (old token invalidated immediately); Cache-Control: no-store"
+      "semantics": "rotates the node token internally (old token invalidated immediately); the admin password is NOT rotated (KV-stored value reused); Cache-Control: no-store"
     },
     "nodes_delete": {
       "method": "DELETE",
@@ -541,6 +566,12 @@
       "method": "POST",
       "path": "/api/admin/auth/login",
       "auth": "none"
+    },
+    "query_string_credentials": {
+      "accepted": true,
+      "scope": "full-role admin plane only (internal/auth/auth.go VerifyAdminAuth): URL query params ?key= / ?token= / ?password=; priority header > key > token > password. The /v1/* data plane (VerifyClientKey) is NOT header-only and never was: its ExtractToken already falls back to ?key= / ?token= query params when no header credential is present (header > key > token) — a pre-existing behavior predating this change. It never reads ?password= and never accepts adminPassword.",
+      "risk_accepted_by_operator": "私有部署便利性取舍，用户明确接受：凭据出现在 URL 中可能进入浏览器历史、Referrer 头与反向代理访问日志。 Hub 中枢的 HTTP API 未放宽（checkAdminAuth 仍只收 Authorization/x-admin-key 头）；?key= 直登（读取 URL 参数自动填充登录表单并经正常登录路径提交）只在 Full 控制台实现，Hub 控制台不支持查询串直登——前端读取参数后立即从地址栏抹除（history.replaceState，无论登录成败、无论 full/hub），凭据不长期驻留 URL。",
+      "bruteforce_budget": "a WRONG query-string credential fails and consumes the anti-bruteforce budget exactly like a wrong header (5 wrong attempts in 10 minutes lock the IP). Accepted amplification for this private deployment: the full console auto-submits a ?key= page load, so malicious links carrying guessed params can remotely burn the operator IP's budget (DoS only, no credential gain; server-side lockout auto-expires after 10 minutes)."
     },
     "failure_unauthorized": {
       "status": 401,

@@ -13,7 +13,7 @@ import { handleVerifyKey } from '../api/admin/verify-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
 import { CONFIG_KV_KEY, loadConfig, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
-import { generateClientKey } from '../lib/nodes.js';
+import { generateClientKey, NODES_KV_KEY } from '../lib/nodes.js';
 import { projectConfigForNode } from '../lib/projection.js';
 import { PRESET_MAP } from '../lib/generated-presets.js';
 import * as edgeIndex from '../../edge-functions/index.js';
@@ -1873,15 +1873,190 @@ describe('11. Full-node issuance carries an admin password', () => {
     assert.equal(lite.admin_password, undefined, 'lite nodes have no admin console');
     assert.ok(!lite.install_command.includes('--admin-password'));
 
-    // Rotating a full node's install material re-issues a password too.
+    // Rotating a full node's install material REUSES the stored admin password:
+    // KV keeps it in plaintext so the operator's saved value stays valid; only the
+    // node token rotates (legacy nodes without a stored password get one minted).
     const rotateRes = await handleNodesRequest(
       makeAdminReq('POST', `/api/admin/nodes/${full.node.id}/rotate`),
       TEST_ENV,
       kv
     );
     const rotated = await rotateRes.json();
-    assert.ok(rotated.admin_password, 'rotate must return a fresh admin password');
-    assert.ok(rotated.install_command.includes('--admin-password='));
+    assert.ok(rotated.admin_password, 'rotate must return the stored admin password');
+    assert.equal(
+      rotated.admin_password,
+      full.admin_password,
+      'rotate must reuse the KV-stored admin password, not mint a new one'
+    );
+    assert.notEqual(rotated.node_token, full.node_token, 'rotate must still rotate the node token');
+    assert.ok(rotated.install_command.includes(`--admin-password="${full.admin_password}"`));
+  });
+});
+
+describe('11b. Admin password lifecycle (credentials endpoint & role switches)', () => {
+  // Exercises the plaintext-in-KV tradeoff the operator explicitly chose (方案 A):
+  // the stored console password stays re-viewable via GET /:id/credentials, every
+  // credential-bearing GET is no-store, role switches stay symmetric. Synthetic
+  // credentials only — never real key material.
+  const RAW_CLIENT_KEY = "sk-test-We'ird\$Key;|&<>{}!echo";
+
+  test('GET /:id/credentials: auth gate, 404, no-store, full password, lite note', async () => {
+    const kv = new MockKV();
+
+    const full = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_cred_full', role: 'full' }), TEST_ENV, kv)
+    ).json();
+
+    // Auth gate: no admin credential -> 401 before anything else happens.
+    const noAuth = await handleNodesRequest(
+      new Request(`https://hub.example.com/api/admin/nodes/${full.node.id}/credentials`),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(noAuth.status, 401, 'credentials endpoint must require admin auth');
+
+    const missing = await handleNodesRequest(
+      makeAdminReq('GET', '/api/admin/nodes/node_does_not_exist/credentials'),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(missing.status, 404);
+
+    // Full node: no-store header + the issued password, verbatim.
+    const credResp = await handleNodesRequest(
+      makeAdminReq('GET', `/api/admin/nodes/${full.node.id}/credentials`),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(credResp.status, 200);
+    assert.equal(credResp.headers.get('cache-control'), 'no-store', 'credential-bearing GET must be no-store');
+    const cred = await credResp.json();
+    assert.equal(cred.admin_password, full.admin_password, 'credentials must return the stored password');
+    assert.equal(cred.admin_password_note, undefined);
+    // No settings.client_key configured: the one-off key was never persisted — say so.
+    assert.equal(cred.client_key, null);
+    assert.ok(cred.client_key_note.includes('settings.client_key'));
+
+    // Lite node: no password + explanatory note.
+    const lite = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_cred_lite', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+    const liteCred = await (
+      await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${lite.node.id}/credentials`), TEST_ENV, kv)
+    ).json();
+    assert.equal(liteCred.admin_password, null);
+    assert.ok(liteCred.admin_password_note.includes('lite 节点无后台密码'));
+  });
+
+  test('node list carries admin_password for full nodes and is no-store', async () => {
+    const kv = new MockKV();
+    const full = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_list_full', role: 'full' }), TEST_ENV, kv)
+    ).json();
+
+    const listResp = await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv);
+    assert.equal(listResp.headers.get('cache-control'), 'no-store', 'list payload carries plaintext passwords -> no-store');
+    const listData = await listResp.json();
+    const listed = listData.nodes.find((n) => n.id === full.node.id);
+    assert.equal(listed.admin_password, full.admin_password, 'list payload exposes the stored admin password (operator-chosen)');
+  });
+
+  test('full -> lite clears the stored password; lite -> full mints one immediately', async () => {
+    const kv = new MockKV();
+    const full = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_switch', role: 'full' }), TEST_ENV, kv)
+    ).json();
+
+    // full -> lite: a password left over from the full lifetime must not linger in KV.
+    const litePatch = await (
+      await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${full.node.id}`, { role: 'lite' }), TEST_ENV, kv)
+    ).json();
+    assert.equal(litePatch.node.role, 'lite');
+    assert.equal(litePatch.node.admin_password, undefined, 'full -> lite must delete the stored password');
+    const liteCred = await (
+      await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${full.node.id}/credentials`), TEST_ENV, kv)
+    ).json();
+    assert.equal(liteCred.admin_password, null);
+    assert.ok(liteCred.admin_password_note.includes('lite 节点无后台密码'));
+
+    // lite -> full: mint right away so the credentials endpoint works without a
+    // detour through install-command, and a later rotate reuses (not re-mints) it.
+    const fullPatch = await (
+      await handleNodesRequest(makeAdminReq('PATCH', `/api/admin/nodes/${full.node.id}`, { role: 'full' }), TEST_ENV, kv)
+    ).json();
+    assert.ok(fullPatch.node.admin_password, 'lite -> full must mint and persist a console password');
+    assert.ok(fullPatch.node.admin_password.length >= 16);
+    const cred = await (
+      await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${full.node.id}/credentials`), TEST_ENV, kv)
+    ).json();
+    assert.equal(cred.admin_password, fullPatch.node.admin_password);
+    const rotated = await (
+      await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/${full.node.id}/rotate`), TEST_ENV, kv)
+    ).json();
+    assert.equal(rotated.admin_password, fullPatch.node.admin_password, 'rotate must reuse the minted password');
+  });
+
+  test('rotate mints a password exactly once for a legacy node without one', async () => {
+    const kv = new MockKV();
+    // Hand-seed a pre-v3.4 record: full node, no admin_password field.
+    const legacy = {
+      id: 'node_legacy_pwless',
+      name: 'zz_legacy',
+      role: 'full',
+      enabled: true,
+      token_prefix: 'stk_node_legacy01...',
+      token_sha256: hashToken('stk_node_legacy_dummy_token'),
+      scope: { models: ['*'], providers: ['*'] },
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    await kv.put(NODES_KV_KEY, JSON.stringify([legacy]));
+
+    const before = await (
+      await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes/node_legacy_pwless/credentials'), TEST_ENV, kv)
+    ).json();
+    assert.equal(before.admin_password, null);
+    assert.ok(before.admin_password_note.includes('旧版本'), 'legacy node note explains the missing password');
+
+    const rotated = await (
+      await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/node_legacy_pwless/rotate`), TEST_ENV, kv)
+    ).json();
+    assert.ok(rotated.admin_password, 'legacy rotate must mint a password');
+
+    const after = await (
+      await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes/node_legacy_pwless/credentials'), TEST_ENV, kv)
+    ).json();
+    assert.equal(after.admin_password, rotated.admin_password, 'minted password must be persisted for later lookups');
+    assert.equal(after.admin_password_note, undefined, 'note must disappear once a password is stored');
+
+    const rotatedAgain = await (
+      await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/node_legacy_pwless/rotate`), TEST_ENV, kv)
+    ).json();
+    assert.equal(rotatedAgain.admin_password, rotated.admin_password, 'second rotate reuses the persisted password');
+  });
+
+  test('credentials endpoint returns the RAW settings client_key (the value full nodes enforce)', async () => {
+    const kv = new MockKV();
+    await handleConfigRequest(
+      makeAdminReq('POST', '/api/config', {
+        _version: 1,
+        providers: {},
+        settings: { client_key: RAW_CLIENT_KEY },
+      }),
+      TEST_ENV,
+      kv
+    );
+    const full = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_raw_key', role: 'full' }), TEST_ENV, kv)
+    ).json();
+
+    const cred = await (
+      await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${full.node.id}/credentials`), TEST_ENV, kv)
+    ).json();
+    assert.equal(
+      cred.client_key,
+      RAW_CLIENT_KEY,
+      'client_key must be returned verbatim: config sync projects the raw value and the node enforces it'
+    );
   });
 });
 

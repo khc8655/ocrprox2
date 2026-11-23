@@ -1,6 +1,7 @@
 import { checkAdminAuth, loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import {
   listNodes,
+  loadNodes,
   issueNode,
   patchNode,
   rotateNodeToken,
@@ -37,6 +38,14 @@ export async function handleNodesRequest(request, env, kv, params) {
     method === 'GET' &&
     ((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'install-command') ||
       (params && params.action === 'install-command'));
+  // GET /api/admin/nodes/:id/credentials — re-view the admin console password
+  // (Full nodes; KV stores it in plaintext by explicit operator choice) plus the
+  // client key when it is recoverable from the global config. Read-only: viewing
+  // a credential must never rotate the node token.
+  const isCredentials =
+    method === 'GET' &&
+    ((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'credentials') ||
+      (params && params.action === 'credentials'));
 
   const hubUrl = `${url.protocol}//${url.host}`;
 
@@ -45,7 +54,54 @@ export async function handleNodesRequest(request, env, kv, params) {
     const nodes = await listNodes(kv);
     return new Response(
       JSON.stringify({ ok: true, nodes }),
-      { status: 200, headers: { 'content-type': 'application/json' } }
+      // no-store: since v3.4 the list payload carries each Full node's plaintext
+      // admin_password (stored in KV by explicit operator choice); no intermediary
+      // may retain it.
+      { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+    );
+  }
+
+  // 1a. GET /api/admin/nodes/:id/credentials (view admin password + client key)
+  if (isCredentials && targetId) {
+    const nodes = await loadNodes(kv);
+    const node = nodes.find((n) => n.id === targetId);
+    if (!node) {
+      return new Response(
+        JSON.stringify({ ok: false, error: 'node_not_found' }),
+        { status: 404, headers: { 'content-type': 'application/json' } }
+      );
+    }
+    // client_key is not stored per node: issuance embeds the global settings
+    // client_key (same for every node). When that setting is empty the node got
+    // a one-off random key that was never persisted — say so instead of guessing.
+    // Return the RAW value: config sync projects settings.client_key verbatim and
+    // the Full node authenticates against that raw value, so stripping shell
+    // special characters here would show a key that no longer matches the node.
+    const cfg = await loadConfig(kv);
+    const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
+    const adminPassword = node.role === 'full' ? String(node.admin_password || '') : '';
+    const payload = {
+      ok: true,
+      id: node.id,
+      role: node.role,
+      admin_password: adminPassword || null,
+      client_key: clientKey || null,
+    };
+    if (node.role !== 'full') {
+      payload.admin_password_note = 'lite 节点无后台密码（Lite 部署没有管理控制台）';
+    } else if (!adminPassword) {
+      payload.admin_password_note =
+        '该节点签发于未存储后台密码的旧版本；重新获取安装命令（将轮换 Token）时会生成新密码并保存';
+    }
+    if (!clientKey) {
+      payload.client_key_note =
+        'Hub 未配置主客户端密钥（settings.client_key）；节点安装时使用的是一次性随机密钥，未在 Hub 存储，请在系统设置配置后重新获取安装命令';
+    }
+    return new Response(
+      JSON.stringify(payload),
+      // no-store: like install-command, the body carries a plaintext credential;
+      // no intermediary may retain it.
+      { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
     );
   }
 

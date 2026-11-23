@@ -4,6 +4,27 @@
 
 ---
 
+## [v20261123-02] - 2026-11-23
+
+### Added
+
+- **节点后台密码可回看（Hub KV 明文存，运营者明确选择的方案 A）**：Full 节点签发时生成的 `admin_password` 原先只在 `install_command` 里出现一次、KV 不存，忘掉即只能轮换。现改为签发时即写入中枢 KV（明文，私有部署风险已知悉），节点对象随列表返回该字段、控制台可随时查看与复制（`edgeone-hub/lib/nodes.js` `issueNode`/`sanitizeNode`——脱敏哈希照旧剔除、明文密码保留）。Lite 节点没有管理控制台，从不含该字段；full→lite 改角色时 `patchNode` 主动删除残留密码，不留幽灵凭据；lite→full 改角色时 `patchNode` 立即补生成并持久化一份，凭据端点即刻可回看（不再对刚切角色的节点误报「旧版本未存密码」）。
+- **只读凭据端点 `GET /api/admin/nodes/:id/credentials`**：节点列表每行新增「密码」按钮，弹层默认掩码显示（●●●●●●●●●●●●）、「显示/隐藏」切换、「复制密码」「复制 API Key」。端点只读、**绝不轮换 Token**，响应带 `Cache-Control: no-store`（载荷含明文凭据，任何中间层不得缓存；节点列表响应载荷同样携带明文密码，故同加 no-store）；Full 节点返回 KV 明文密码与全局 `client_key`——**原样返回 `settings.client_key` 当前生效值**（full 节点按中枢同步投影的 raw 值鉴权，不做 shell 字符剥离，手打含特殊字符的密钥不会展示成失配值），Lite 节点与「未存过密码的历史版本节点」返回说明性 note 指引（`edgeone-hub/api/admin/nodes.js`）。
+- **契约同步**：`shared/contracts/admin-ui-backend.json` 升 v3.4——`$changelog` 补 v3.4 条目、`nodes_list`/`nodes_issue`/`nodes_rotate`/`nodes_install_command` 响应补 `admin_password` 字段说明、新增 `nodes_credentials` 端点、`auth_semantics` 新增 `query_string_credentials`；`docs/ADMIN_UI_BACKEND_CONTRACT.md` 新增 §2.4（凭据端点契约）与 §7.3.5（查询串直登取舍），§2.1/§2.2/§2.3/§7.4 相应补记。
+
+### Fixed
+
+- **重新获取安装命令必然换后台密码**：`reissueNodeToken` 原先每次都重新生成 `admin_password`，配合「KV 不存」意味着每次重取安装命令都得到一个全新的控制台密码。现语义拆分：`node_token` 照旧轮换（KV 仅存 `token_sha256` 的口径不变），KV 已存的 `admin_password` **原样复用**（运营者可能已另行保存）；仅历史未存密码的 Full 节点在此刻补生成一次并持久化，保证后续凭据端点查看稳定（`edgeone-hub/lib/nodes.js` `reissueNodeToken`）。轮换成功 toast 相应改为「Token 轮换成功，后台密码保持不变」。
+
+### Verified
+
+- Go 守卫测试改写并扩充（`internal/auth/auth_test.go`）：原 `TestVerifyAdminAuth_RejectsQueryStringTokens`（拒绝查询串）按新语义翻转为 `TestVerifyAdminAuth_AcceptsQueryStringTokens`——`?key=/?token=/?password=` 三参直登、请求头优先于查询串（错 `?key` + 正确头 → 成功）、`?key` 优先于 `?token`（错 `?key` + 正确 `?token` → 失败）；新增 `TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout`——错误查询串凭据与错误请求头同等消耗防暴力额度，封禁期内正确 `?key` 同样被拒。
+- `go test ./internal/auth/ -run TestVerifyAdminAuth -v` 全过；`npm run test:t1` 8/8 绿（契约与 host.js capabilities 对齐、hub 实现文件存在性、零内联样式、体积 ≤ 258,048 B 门禁）。
+- Hub 侧测试补齐（`edgeone-hub/test/hub.test.mjs` 新增 11b 组，共 46/46 绿）：credentials 端点鉴权门（无凭据 401）/未知节点 404/`no-store` 头/full 明文回显/lite note；节点列表载荷携带 `admin_password` 且同样 `no-store`；full↔lite 角色切换双向对称（删残留 / 补生成）；legacy 无密码节点轮换恰好 mint 一次并持久化（二次轮换复用）；`settings.client_key` 含 shell 特殊字符时凭据端点原样直传。全仓门禁 `verify:release` G1–G6 全过（含 `go test -race ./...` 与确定性构建零漂移）。
+- 前端零内联样式纪律：凭据弹层的显隐/掩码切换只用 `[hidden]` 与 `textContent`，未引入 `style=`/`.style.xxx`。
+
+---
+
 ## [v20261123-01] - 2026-11-23
 
 ### Fixed

@@ -51,6 +51,8 @@
 }
 ```
 
+> **`admin_password` 字段（v3.4 契约，仅 `role: "full"`）**：Full 节点对象额外携带 `admin_password`——Full 节点管理控制台（`/admin`）的登录密码，**以明文存于中枢 KV**（运营者明确选择方案 A，私有部署，风险已知悉），签发时生成、列表/详情随节点对象返回，控制台可随时回看与复制。Lite 节点没有管理控制台，**从不含该字段**（full→lite 改角色时中枢会主动删除残留值；lite→full 改角色时中枢会立即补生成并持久化一份，节点即刻可在凭据端点回看）。敏感哈希（`token_sha256` 等）仍照旧脱敏。列表响应与凭据端点一样带 `Cache-Control: no-store`（载荷含明文后台密码，任何中间层不得缓存）。
+
 ### 2.2 签发新节点 `POST /api/admin/nodes`
 - **Request**:
 ```json
@@ -65,7 +67,7 @@
   }
 }
 ```
-- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、节点当前生效的客户端鉴权密钥 `client_key`、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`：
+- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、节点当前生效的客户端鉴权密钥 `client_key`、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`；Full 节点另附 `admin_password`（顶层与 `node` 对象内各一份，见 §2.1 的字段说明）：
 ```json
 {
   "ok": true,
@@ -79,9 +81,24 @@
 
 ### 2.3 注销/吊销、恢复、轮换与删除节点
 - **吊销/启用**：`PATCH /api/admin/nodes/:id` `{ "enabled": false, "scope": {...}, "lease_ttl": 3600 }`
-- **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`、`bootstrap_env` 与 `install_command`，旧 Token 立即失效。
-- **重新获取安装命令**：`GET /api/admin/nodes/:id/install-command` → 返回与签发/轮换同构的部署材料（`node`（已脱敏）、`node_token`、`client_key`、`bootstrap_env`、`install_command`）；因 KV 仅存 `token_sha256`，内部即执行一次轮换，旧 Token 立即失效（响应带 `Cache-Control: no-store`；节点不存在返回 `404 {ok:false, error:"node_not_found"}`）。节点列表页每行的「安装」按钮即此契约：同一会话内复用内存缓存的 Token 免轮换，跨会话（页面刷新后）调用本端点轮换取新。路径匹配为精确三段（`/:id/install-command`），`/:id/rotate/install-command` 等畸形路径不触发轮换。
+- **轮换 Token**：`POST /api/admin/nodes/:id/rotate` → 生成新 `node_token`、`bootstrap_env` 与 `install_command`，旧 Token 立即失效。**后台密码不轮换**：KV 明文存有的 `admin_password` 原样复用（运营者可能已另行保存），仅「未存过密码的历史版本节点」在此刻补生成一次并持久化，保证后续查看稳定；Lite 节点响应不含该字段。
+- **重新获取安装命令**：`GET /api/admin/nodes/:id/install-command` → 返回与签发/轮换同构的部署材料（`node`（已脱敏，Full 节点含 `admin_password`）、`node_token`、`client_key`、`admin_password`、`bootstrap_env`、`install_command`）；因 KV 仅存 `token_sha256`，内部即执行一次轮换，旧 Token 立即失效（响应带 `Cache-Control: no-store`；节点不存在返回 `404 {ok:false, error:"node_not_found"}`）。节点列表页每行的「安装」按钮即此契约：同一会话内复用内存缓存的 Token 免轮换，跨会话（页面刷新后）调用本端点轮换取新。路径匹配为精确三段（`/:id/install-command`），`/:id/rotate/install-command` 等畸形路径不触发轮换。
 - **删除节点**：`DELETE /api/admin/nodes/:id` → 物理移除 KV 中的节点记录。
+
+### 2.4 回看节点后台密码 `GET /api/admin/nodes/:id/credentials`（v3.4 契约）
+节点列表每行的「密码」按钮即此契约：**只读**回看已安装节点的后台凭据，**绝不轮换 Token**。响应带 `Cache-Control: no-store`（载荷含明文凭据，任何中间层不得缓存）；节点不存在返回 `404 {ok:false, error:"node_not_found"}`。
+```json
+{
+  "ok": true,
+  "id": "node_hk_full_01",
+  "role": "full",
+  "admin_password": "xxxxxxxxxxxxxxxxxxxx",
+  "client_key": "sk-llmproxy-..."
+}
+```
+- `admin_password`：Full 节点返回 KV 存储的明文密码；Lite 节点为 `null` 并附 `admin_password_note`（「lite 节点无后台密码」）；签发于「未存储密码」旧版本的历史 Full 节点为 `null` 并附指引 note（重新获取安装命令——将轮换 Token——时补生成并持久化）。
+- `client_key`：非节点私有字段——签发时内嵌的是中枢全局 `settings.client_key`（所有节点同一把）。中枢已配置全局密钥时返回该值；未配置（节点装的是一次性随机密钥、中枢从未存储）返回 `null` 并附 `client_key_note` 指引。
+- 控制台密码弹层默认掩码显示（`●●●●●●●●●●●●`），「显示」切换、「复制密码 / 复制 API Key」一键复制。
 
 ---
 
@@ -500,9 +517,18 @@
 - 中枢托管同步：`rpm_per_key` 属中枢托管字段，vault 供应商重拉（`MergeVaultConfig`）时**全量跟随**中枢值——中枢清 0（放开限制）后节点重拉即恢复不限，不单向只增不减。
 - **载荷必须携带**：`GET /api/vault/manifest` 的 `providers.<id>` 与 `POST /api/vault/fetch` 的 `provider_config` 都必须包含 `rpm_per_key`（数值，缺省 0）——否则中枢配置的限流到不了节点，且任何一次 vault 重拉都会把节点本地已设的值静默重置为 0（full 节点 replace 路径整体采纳载荷）。回归守卫：`edgeone-hub/test/hub.test.mjs` 的 vault manifest/fetch 用例同时断言两侧该字段等值。lite 路径同理经 `lib/projection.js` 的 `projectedProvider.rpm_per_key` 下发。
 
+### 7.3.5 URL 查询串凭据直登（`?key=` / `?token=` / `?password=`，v3.4 契约）
+- **Full 节点管理面（Go）**：`VerifyAdminAuth`（`internal/auth/auth.go`）在请求头之外**接受 URL 查询串凭据**，优先级 **请求头 > `?key` > `?token` > `?password`**——Full 控制台支持书签式一键直登（与 magpie 一致的便利性），如 `https://node.example.com/admin?key=<admin_password>`。
+- **`/v1/*` 数据面（`VerifyClientKey`）并非 header-only**：它取凭据走的 `ExtractToken`（`internal/auth/auth.go`）**在本契约变更之前**就会在无请求头凭据时回退读取 `?key=` / `?token=` 查询串（优先级 请求头 > `?key` > `?token`）——客户端用 `https://node.example.com/v1/chat/completions?key=<client_key>` 调数据面本就是有效形态。v3.4 的放宽只触碰管理面，数据面行为与改动前逐字节一致：**不读取 `?password=`**，且 `adminPassword` 在数据面永不被接受（`VerifyClientKey` 只比对 client_key / extraKeys）。
+- **Hub 中枢（EdgeOne）**：HTTP API **未放宽**——`checkAdminAuth`（`edgeone-hub/lib/config.js`）仍只接受 `Authorization: Bearer` / `x-admin-key` 请求头。`?key=` 直登（读取 URL 参数自动填充登录表单并经正常登录路径提交）**只在 Full 控制台实现**（`shared/admin/js/app.js` 仅对 `kind === 'full'` 自动填充/提交）；Hub 控制台**不支持**查询串直登，前端只在页面加载时把 URL 中的 `?key= / ?token= / ?password=` 参数**读取后立即无条件抹除**（`history.replaceState`，无论后续登录成败），防止误留参数长期驻留地址栏。
+- **已接受的取舍与风险（运营者明确选择）**：凭据出现在 URL 中可能进入**浏览器历史、Referrer 头、反向代理访问日志**。本系统为私有部署，运营者已知悉并接受该风险换取一键直登便利。前端「读取后立即抹除（无论登录成败）」只降低驻留时间，不能消除上述三个通道的泄露面。
+- **防暴力破解口径不变**：携带**错误**查询串凭据与错误请求头同等对待——失败并消耗防暴力额度（10 分钟内 5 次错误 → 封禁 IP 10 分钟，守卫测试 `internal/auth/auth_test.go` 的 `TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout`）；完全无凭据的请求（首屏加载、探针）依旧不消耗额度。凭据校验、优先级与锁定逻辑全部在服务端。
+- **已接受的放大面（v3.4 新增，运营者知悉）**：Full 控制台读到 `?key=` 会**页面加载即自动提交**——旧版无凭据的 `?key=` 首屏不耗额度，现在每个带错误参数的加载都计一次失败。诱导运营者浏览器打开 5 个 `https://node/admin?key=<猜解>` 链接即可远程耗尽其 IP 的防暴力预算并封禁 10 分钟（纯拒绝服务，攻击者得不到任何凭据）；私有部署下接受该取舍，缓解手段是服务端锁定逻辑（10 分钟自动解封）而非前端。
+
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
 - `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。
+- Full 节点 `admin_password` **明文存于中枢 KV 并随节点对象/凭据端点返回**（方案 A，运营者明确选择的私有部署取舍，见 §2.1 / §2.4）：节点 Token 明文依旧只出现一次（签发时刻），KV 仅存 `token_sha256` 的口径不变；凭据端点响应带 `Cache-Control: no-store`，不得在任何中间层缓存。
 
 ---
 

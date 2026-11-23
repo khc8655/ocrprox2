@@ -32,7 +32,7 @@ providers: Array.isArray(scope.providers) ? scope.providers : ['*'],
 };
 return copy;
 }
-function sanitizeShellToken(val) {
+export function sanitizeShellToken(val) {
 if (!val || typeof val !== 'string') return '';
 return val.trim().replace(/["'$`\\\s;|&<>(){}!]/g, '');
 }
@@ -129,10 +129,13 @@ last_binary_version: 'v2.1.3',
 sync_count: 0,
 hit_304_count: 0,
 };
+const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
+if (node.role === 'full') {
+node.admin_password = adminPassword;
+}
 nodes.push(node);
 await saveNodes(nodes, kv);
 const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
-const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
 const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 return {
@@ -153,6 +156,12 @@ const prevLastSeen = node.last_seen ?? null;
 const prevConfigVer = node.last_config_version ?? 0;
 if (patch.name !== undefined) node.name = String(patch.name);
 if (patch.role === 'full' || patch.role === 'lite') {
+if (patch.role === 'lite' && node.role === 'full') {
+delete node.admin_password;
+}
+if (patch.role === 'full' && node.role === 'lite') {
+node.admin_password = generateAdminPassword(20);
+}
 node.role = patch.role;
 }
 if (patch.enabled !== undefined) {
@@ -192,10 +201,14 @@ node.token_prefix = tokenPrefix;
 delete node.node_token_enc;
 delete node.status_url;
 delete node.cached_status;
+let adminPassword = node.role === 'full' ? String(node.admin_password || '') : '';
+if (node.role === 'full' && !adminPassword) {
+adminPassword = generateAdminPassword(20);
+node.admin_password = adminPassword;
+}
 nodes[idx] = node;
 await saveNodes(nodes, kv);
 const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
-const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
 const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
 const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 return {

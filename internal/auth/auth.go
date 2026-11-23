@@ -116,6 +116,23 @@ func ExtractToken(r *http.Request) string {
 	return ""
 }
 
+// extractQueryAdminToken extracts the admin credential from URL query parameters,
+// preferring key, then token, then password. Used only by VerifyAdminAuth as the
+// user-requested ?key= direct-login convenience for the admin console; the data
+// plane (VerifyClientKey) is intentionally left untouched.
+func extractQueryAdminToken(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	q := r.URL.Query()
+	for _, name := range []string{"key", "token", "password"} {
+		if v := strings.TrimSpace(q.Get(name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // GetClientIP resolves the client IP, respecting X-Forwarded-For only from loopback
 // (or when TRUST_PROXY_HEADERS=1) and extracting the rightmost non-loopback IP so
 // client-prepended X-Forwarded-For values cannot spoof arbitrary IPs behind a local proxy.
@@ -210,7 +227,12 @@ func (a *Authenticator) VerifyClientKey(r *http.Request) bool {
 }
 
 // VerifyAdminAuth verifies admin authentication for management endpoints with anti-bruteforce lockout.
-// Accepts credentials strictly via HTTP headers (never URL query parameters).
+// Accepts credentials via HTTP headers, falling back to URL query parameters
+// (?key= / ?token= / ?password=, priority header > key > token > password) so the
+// full-role admin console supports ?key=<admin_password> direct login like magpie.
+// The query-string fallback is a deliberate, user-accepted tradeoff for private
+// deployments (URL-leakage risk borne by the operator); the /v1/* data plane
+// (VerifyClientKey) keeps its own strict path and is unaffected.
 func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 	ip := GetClientIP(r)
 
@@ -232,6 +254,9 @@ func (a *Authenticator) VerifyAdminAuth(r *http.Request) bool {
 	}
 
 	token := ExtractHeaderToken(r)
+	if token == "" {
+		token = extractQueryAdminToken(r)
+	}
 	if token == "" {
 		// Credential-less requests (page loads, health probes, unauthenticated
 		// scripts) must NOT consume the brute-force budget: the admin console

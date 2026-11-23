@@ -37,20 +37,93 @@ func TestVerifyClientKey(t *testing.T) {
 	}
 }
 
-func TestVerifyAdminAuth_RejectsQueryStringTokens(t *testing.T) {
+// Query-string credentials are now ACCEPTED by the admin plane. Historically this
+// test asserted the opposite (TestVerifyAdminAuth_RejectsQueryStringTokens); the
+// semantics changed by explicit user request: the admin console must support
+// ?key=<admin_password> direct login, matching magpie's convenience. This is a
+// deliberate security tradeoff for a private deployment — the user accepts the
+// URL-leakage risk (browser history, referrer headers, access logs) in exchange
+// for one-click console access. Only the admin plane relaxes; the /v1/* data
+// plane (VerifyClientKey) is untouched.
+func TestVerifyAdminAuth_AcceptsQueryStringTokens(t *testing.T) {
 	a := NewAuthenticator("my-client-key", "admin-pass")
 
-	req := httptest.NewRequest("GET", "/api/config?key=admin-pass&token=admin-pass", nil)
+	// ?key=<correct> succeeds
+	req := httptest.NewRequest("GET", "/api/config?key=admin-pass", nil)
 	req.RemoteAddr = "192.168.1.77:54321"
-	if a.VerifyAdminAuth(req) {
-		t.Fatalf("expected VerifyAdminAuth to reject credentials supplied via URL query string")
+	if !a.VerifyAdminAuth(req) {
+		t.Fatalf("expected VerifyAdminAuth to accept ?key=<admin_password> (user-requested convenience tradeoff)")
 	}
 
+	// ?token= and ?password= are accepted as fallbacks too
+	reqTok := httptest.NewRequest("GET", "/api/config?token=admin-pass", nil)
+	reqTok.RemoteAddr = "192.168.1.77:54321"
+	if !a.VerifyAdminAuth(reqTok) {
+		t.Fatalf("expected VerifyAdminAuth to accept ?token=<admin_password>")
+	}
+
+	reqPwd := httptest.NewRequest("GET", "/api/config?password=admin-pass", nil)
+	reqPwd.RemoteAddr = "192.168.1.77:54321"
+	if !a.VerifyAdminAuth(reqPwd) {
+		t.Fatalf("expected VerifyAdminAuth to accept ?password=<admin_password>")
+	}
+
+	// Priority: header beats query string — wrong ?key with a correct header must succeed.
+	reqHdrWins := httptest.NewRequest("GET", "/api/config?key=wrong", nil)
+	reqHdrWins.RemoteAddr = "192.168.1.77:54321"
+	reqHdrWins.Header.Set("X-Api-Key", "admin-pass")
+	if !a.VerifyAdminAuth(reqHdrWins) {
+		t.Fatalf("expected header credential to take priority over query string")
+	}
+
+	// Priority within the query string: key beats token — wrong ?key must fail even
+	// when ?token carries the correct password.
+	reqKeyWins := httptest.NewRequest("GET", "/api/config?key=wrong&token=admin-pass", nil)
+	reqKeyWins.RemoteAddr = "192.168.1.77:54321"
+	if a.VerifyAdminAuth(reqKeyWins) {
+		t.Fatalf("expected ?key to take priority over ?token (wrong key must fail)")
+	}
+
+	// Header path still works unchanged
 	reqHdr := httptest.NewRequest("GET", "/api/config", nil)
 	reqHdr.RemoteAddr = "192.168.1.77:54321"
 	reqHdr.Header.Set("X-Api-Key", "admin-pass")
 	if !a.VerifyAdminAuth(reqHdr) {
 		t.Fatalf("expected VerifyAdminAuth to accept X-Api-Key header")
+	}
+}
+
+// A wrong query-string credential must be treated exactly like a wrong header:
+// it fails and consumes the anti-bruteforce budget.
+func TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout(t *testing.T) {
+	a := NewAuthenticator("my-client-key", "admin-pass")
+	ip := "192.168.1.78"
+
+	for i := 0; i < MaxFailedAttempts-1; i++ {
+		req := httptest.NewRequest("GET", "/api/config?key=wrong", nil)
+		req.RemoteAddr = ip + ":54321"
+		if a.VerifyAdminAuth(req) {
+			t.Fatalf("expected wrong ?key to fail")
+		}
+		if a.IsIPBlocked(ip) {
+			t.Fatalf("should not be blocked after %d attempts", i+1)
+		}
+	}
+
+	// 5th failed attempt via ?key= -> should block
+	req := httptest.NewRequest("GET", "/api/config?key=wrong", nil)
+	req.RemoteAddr = ip + ":54321"
+	a.VerifyAdminAuth(req)
+
+	if !a.IsIPBlocked(ip) {
+		t.Fatalf("expected IP %s to be blocked after %d wrong ?key attempts", ip, MaxFailedAttempts)
+	}
+
+	// Correct ?key must then be refused: the block applies regardless of transport.
+	okReq := httptest.NewRequest("GET", "/api/config?key=admin-pass", nil)
+	okReq.RemoteAddr = ip + ":54321"
+	if a.VerifyAdminAuth(okReq) {
+		t.Fatalf("expected blocked IP to fail even with correct ?key")
 	}
 }
 

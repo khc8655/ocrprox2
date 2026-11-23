@@ -39,7 +39,7 @@ function sanitizeNode(n) {
   return copy;
 }
 
-function sanitizeShellToken(val) {
+export function sanitizeShellToken(val) {
   if (!val || typeof val !== 'string') return '';
   return val.trim().replace(/["'$`\\\s;|&<>(){}!]/g, '');
 }
@@ -156,11 +156,19 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', 
     hit_304_count: 0,
   };
 
+  // Full-node admin console password. Stored in KV plaintext by explicit
+  // operator choice so the console password stays re-viewable in the admin UI
+  // instead of being a one-time secret that only the install command ever saw.
+  // Lite nodes have no admin console — no field at all.
+  const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
+  if (node.role === 'full') {
+    node.admin_password = adminPassword;
+  }
+
   nodes.push(node);
   await saveNodes(nodes, kv);
 
   const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
-  const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
   const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 
@@ -187,6 +195,18 @@ export async function patchNode(nodeId, patch, kv) {
   const prevConfigVer = node.last_config_version ?? 0;
   if (patch.name !== undefined) node.name = String(patch.name);
   if (patch.role === 'full' || patch.role === 'lite') {
+    // A lite node has no admin console: a password left over from an earlier
+    // full lifetime must not linger in KV (issueNode never writes one for lite).
+    if (patch.role === 'lite' && node.role === 'full') {
+      delete node.admin_password;
+    }
+    // lite -> full: mint a console password right away so the node is immediately
+    // viewable via the credentials endpoint — otherwise that endpoint would report
+    // admin_password:null with a misleading "legacy node" note for a freshly
+    // switched node until the next install-command reissue mints one.
+    if (patch.role === 'full' && node.role === 'lite') {
+      node.admin_password = generateAdminPassword(20);
+    }
     node.role = patch.role;
   }
   if (patch.enabled !== undefined) {
@@ -228,7 +248,11 @@ export async function rotateNodeToken(nodeId, kv, hubUrl = 'https://hub.example.
  * Re-issue (rotate) the token of a node and return the full deployment material
  * (install command + bootstrap env). This is the only spec-compliant way to
  * re-obtain a one-click install command after the issuance moment: KV stores
- * only the SHA-256 digest, so the plaintext must be regenerated.
+ * only the SHA-256 digest, so the plaintext token must be regenerated. The
+ * admin console password is different: it lives in KV plaintext, so rotation
+ * reuses the stored value (the operator may already have it saved); only a
+ * legacy node issued before passwords were stored gets one minted here, and
+ * that mint is persisted so later lookups stay stable.
  */
 export async function reissueNodeToken(nodeId, kv, hubUrl = 'https://hub.example.com', clientKey = '') {
   const nodes = await loadNodes(kv);
@@ -245,11 +269,17 @@ export async function reissueNodeToken(nodeId, kv, hubUrl = 'https://hub.example
   delete node.node_token_enc;
   delete node.status_url;
   delete node.cached_status;
+  let adminPassword = node.role === 'full' ? String(node.admin_password || '') : '';
+  if (node.role === 'full' && !adminPassword) {
+    // Legacy node issued before passwords were persisted: mint once and write
+    // it back so later lookups (credentials endpoint, next rotation) stay stable.
+    adminPassword = generateAdminPassword(20);
+    node.admin_password = adminPassword;
+  }
   nodes[idx] = node;
   await saveNodes(nodes, kv);
 
   const effectiveClientKey = sanitizeShellToken(clientKey) || generateClientKey();
-  const adminPassword = node.role === 'full' ? generateAdminPassword(20) : '';
   const bootstrapEnv = buildBootstrapEnv(node, rawToken, hubUrl, effectiveClientKey);
   const installCommand = buildInstallCommand(node, rawToken, hubUrl, effectiveClientKey, adminPassword);
 
