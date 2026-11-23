@@ -1,0 +1,19 @@
+{
+  "id": "groq",
+  "name": "Groq",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "Groq 官方端点直通：OpenAI 协议原样透传",
+  "protocol": "openai",
+  "base_url": "https://api.groq.com/openai/v1",
+  "doc_url": null,
+  "description": "Groq 云端推理，OpenAI 兼容端点直通，低延迟场景首选",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": false
+  },
+  "recommended_models": [],
+  "adapter_rules": {}
+}

@@ -16,7 +16,9 @@
     "test:t3": "node --test tests/t3_e2e/e2e.test.mjs",
     "test:full": "npm run test:t1 && npm run test:hub && go test -race ./... && npm run test:t3",
     "verify:release": "node scripts/verify-release.mjs",
-    "test": "npm run test:t1 && npm run test:hub"
+    "test": "npm run test:t1 && npm run test:hub",
+    "magpie:presets:check": "node scripts/magpie-presets.mjs check",
+    "magpie:presets:import": "node scripts/magpie-presets.mjs import"
   },
   "devDependencies": {},
   "dependencies": {}

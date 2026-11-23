@@ -1,0 +1,19 @@
+{
+  "id": "qwen",
+  "name": "通义千问 DashScope",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "DashScope 兼容模式直通：OpenAI 兼容端点为主，Anthropic 端点按原生协议转发",
+  "protocol": "openai",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "doc_url": null,
+  "description": "阿里云 DashScope 兼容模式，OpenAI 兼容与 Anthropic 双通道",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": false
+  },
+  "recommended_models": [],
+  "adapter_rules": {}
+}

@@ -1,0 +1,20 @@
+{
+  "id": "anthropic",
+  "name": "Anthropic 官方",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "Anthropic 官方端点原生直通：网关不做协议转换也不改写请求体",
+  "protocol": "anthropic",
+  "base_url": "https://api.anthropic.com/v1",
+  "doc_url": null,
+  "description": "Anthropic Messages 原生协议直通，不做任何请求改写；/v1/messages 直接透传到官方端点",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {},
+  "anthropic_base_url": "https://api.anthropic.com"
+}

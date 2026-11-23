@@ -1,0 +1,51 @@
+{
+  "id": "minimax-cn",
+  "name": "MiniMax (国内)",
+  "version": "1.5.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "MiniMax 国内站：沿用 minimax 适配规则（output_config 剥离、思考强制、模型名大小写映射）；补齐 Anthropic 端点 https://api.minimaxi.com/anthropic（对齐 yetone/magpie 上游预设）",
+  "protocol": "openai",
+  "base_url": "https://api.minimaxi.com/v1",
+  "doc_url": null,
+  "description": "MiniMax 国内站（api.minimaxi.com），OpenAI 兼容与 Anthropic 双通道",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {
+    "reasoning": {
+      "strategy": "openai_passthrough",
+      "supported_levels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_map": {
+        "none": "low",
+        "minimal": "low"
+      },
+      "force_adaptive_thinking": true,
+      "disallow_reasoning_split_false": true
+    },
+    "case_sensitive_models": {
+      "minimax-m3": "MiniMax-M3",
+      "minimax-m3.1-flash-preview": "MiniMax-M3.1-Flash-Preview"
+    },
+    "tools": {
+      "normalize_choice_to_string": false,
+      "strip_json_schema": false,
+      "rescue_from_text": false
+    },
+    "sanitization": {
+      "strip_params": [
+        "output_config"
+      ]
+    }
+  },
+  "anthropic_base_url": "https://api.minimaxi.com/anthropic"
+}

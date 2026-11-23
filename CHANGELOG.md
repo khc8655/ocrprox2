@@ -4,6 +4,42 @@
 
 ---
 
+## [v20261123-07] - 2026-11-23
+
+### Fixed
+
+- **系统设置输入框显示不全**：Base URL / client_key / Vault 中枢地址 / 节点同步 Token 被裁剪成 `https://hk.1` 一类半截值。根因是 `.setting-control` 只按内容撑开——`flex-shrink: 0` + 内容宽度，而输入框的 `width: 100%` 百分比又反过来解析到这块内容宽度上，形成循环后落在输入框的内在宽度（约 171px）。改法：自由文本行（`.setting-control:has(> .input:not([type="number"]))`）按 `flex: 1 1 300px` 占据行内剩余空间、上限 62%；`.input` 自身 `flex: 1 1 auto` 填满控制区；数字输入保持 `0 0 110px` 固定列宽不参与拉伸；990px 以下换行断点里解除 62% 上限（`:has` 选择器优先级高于原 `.setting-control` 规则，只改 `flex-basis` 会失效）。实测 1038px 行宽下 URL 输入框 171px → 644px，`scrollWidth - clientWidth = 0`。
+- **`适配版本` 徽章在中枢供应商上退化成指纹**：`presetVersionPillHtml` 旧逻辑先判 `isVaultCard && p.rule_hash`，vault 供应商因此永远走指纹分支，即使 `preset_id` 能解析到内置适配文件。改为适配版本优先、指纹仅在规则无法映射时兜底；供应商编辑弹窗里同一处优先级（`versionText`）一并修正。
+- **添加供应商的 ID 必须手填**：输入品牌名命中预设后只填了 Base URL 和协议，ID 仍要自己发明。现在命中预设时自动派生（`Qwen` → `qwen`），人工输入优先；纯中文自定义名在保存时做 ASCII slug 兜底，仍为空才提示。
+
+### Changed
+
+- **两套预设库合为一套（32 品牌一一对应）**：`internal/provider/presets.go` 的 `catalogPresets` 从 26 补到 32（新增 `agnes` / `bai` / `cline` / `opencode` / `sensenova` / `tokenrhythm`，此前只在 `shared/presets/*.json` 里存在，控制台选不到），并为原先缺文件的 16 个品牌补上适配文件（`anthropic` / `bailian-token-plan` / `baidu-qianfan` / `bedrock` / `groq` / `kimi-code` / `kimi-code-cn` / `minimax-cn` / `moonshot` / `moonshot-cn` / `ollama` / `qwen` / `tencent-cloud` / `volcengine` / `zai` / `zhipu`），版本与 `catalogPresets` 严格对齐（`TestCatalog_PresetAdapterVersions` 强制）。`minimax-cn` 的适配规则沿用 `minimax`（`output_config` 剥离、思考强制、模型名大小写映射）。
+- **`presets-extra` 契约变更**：`version` / `updated_at` 从「仅在有适配文件时出现」改为「每个精选品牌都有」——有适配文件取文件版本，否则取内置预设的注册版本。`shared/contracts/admin-ui-backend.json` 已同步。
+- **添加供应商表单的预设提示带版本**：「已按预设 Qwen（适配 v1.0.0 · 2026-11-23）自动填充」，选品牌时就能看到套用的是哪一版适配。
+- **上游协议类型下拉补说明**：客户端只认 `/v1/chat/completions`（OpenAI 兼容）与 `/v1/messages`（Claude 系），协议选择只决定网关往上转发时用哪种协议；同一对外模型接不同协议的上游时，在路由里加多条候选分别绑定供应商。
+
+### Added
+
+- **新增「接入信息」页签**（概览 / 供应商 / 模型路由 / 接入信息 / 系统设置；Hub 模式隐藏，中枢没有数据面）。原系统设置①里的三个 chip 搬到这里，并改成按客户端协议切换的接入卡：`OpenAI 兼容` tab 给 `base_url = http://host/v1` + `POST /v1/chat/completions`，`Claude 系` tab 给 `ANTHROPIC_BASE_URL = http://host`（不带 `/v1`，Claude Code / Anthropic SDK 自己拼 `/v1/messages`）+ `POST /v1/messages`，两者共用同一把 API Key。协议切换只影响粘贴给客户端的值，不影响上游供应商的协议配置（那是「网关怎么跟上游说话」）。系统设置①只留配置，并注明复制用的值在「接入信息」页。
+- **可用模型双行卡片**：每个模型一张卡，第一行是可点击复制的模型 ID（等宽字体），第二行是这条路由绑定到的供应商显示名；候选多于两家时折成「A · B +N」，完整名单在 title 里，卡片宽度固定、名字超长省略号截断，所以一个模型挂十家供应商也不会把网格撑变形。卡片网格 `repeat(auto-fill, minmax(240px, 1fr))`，1920/1280/760 实测分别为 5/4/2 列。另有「复制全部」（逗号分隔）。
+- **支持的接口清单**：同页列出 `/v1/chat/completions`、`/v1/messages`、`/v1/responses`、`/v1/models`、`/v1/ocr`、`/v1/embeddings`、`/v1/rerank` 七条路径，逐个可复制（来自 `access-info.endpoints`）。
+- 此前只有一个 Model ID chip，取的是 `agent_models` 里按字母序第一个 `enabled !== false` 的路由——既漏掉其余模型，也会把 `enabled` 缺省的停用路由当成可用。
+
+### Fixed
+
+- **控制台模型 ID 与 `/v1/models` 口径不一致**：两处各自实现了一遍过滤。`cmd/llmproxy` 要求 `route.Enabled == true` 且额外补 chat/embedding/reranker/ocr 四个 KB 槽位；`handleAccessInfo` 则把所有 `agent_models` 一律列出、KB 槽只看有没有候选。现在统一收敛到 `types.ProxyConfig.AvailableModelIDs(role)`，公开端点与管理端载荷都调它，控制台不可能再宣传一个网关会 404 的模型 ID，也不会漏掉 KB 槽位。实测：11 条路由（1 条停用）下 `/v1/models` 与 `access-info.models` 完全一致，均为 10 条。
+
+- **magpie 预设表转换器 `scripts/magpie-presets.mjs`**：上游 `internal/provider/presets.go` 里那张 `var presets = []PresetDef{...}`（2026-11-23 核对 63 条）与我们 `PresetDef` 同构，所以品牌接入是数据搬运不是代码搬运。`check` 只读报告（已对齐 / 端点不一致 / 缺上游端点 / 本仓缺失 / 无法导入），`import --only=<ids>` / `--all` 把上游条目转成 `shared/presets/<id>.json` + `internal/provider/presets_imported_generated.go`（由 `presets.go` 的 `init()` 追加进 `catalogPresets`）。导入件带 `source: {repo, preset_id, commit}`，重复导入端点未变则跳过、变了则 patch+1。上游源码可来自工作区或 `scripts/magpie-sync.mjs` 已有的 bare 缓存（`git archive` 一次性取出 `internal/provider` 树后本地读取）。`npm run magpie:presets:check` / `magpie:presets:import`。**转不了的是协议改写**——上游把每家厂商的改写写在 `internal/provider/<vendor>.go` 的 Go 代码里，预设表没有任何描述，所以导入件 `adapter_rules` 一律为 `{}`。详见 `docs/MAGPIE_UPSTREAM_SYNC.md` §5.1。
+
+### Changed
+
+- **11 个品牌补齐 Anthropic 端点**（对齐上游预设表，此前只有 OpenAI 兼容端点）：deepseek `https://api.deepseek.com/anthropic`、moonshot `…/anthropic`、moonshot-cn `…/anthropic`、kimi-code `https://api.kimi.ai/coding`、kimi-code-cn `https://api.kimi.com/coding`、zhipu `https://open.bigmodel.cn/api/anthropic`、zai `https://api.z.ai/api/anthropic`、minimax-cn `https://api.minimaxi.com/anthropic`、tencent-cloud `…/plan/anthropic`、bailian-token-plan `…/apps/anthropic`、opencode `https://opencode.ai/zen`。对应适配文件版本 minor+1（deepseek 1.3.0 / opencode 2.1.0 / minimax-cn 1.5.0 / 其余 1.1.0），Go 目录与文件版本仍由 `TestCatalog_PresetAdapterVersions` 强制一致。核对结果：上游 20 个品牌端点全对齐、0 个缺端点；剩 4 个「不一致」是刻意的地区选择（minimax 国际站 vs 国内站、stepfun .ai vs .com、qwen 国际 vs 国内、openrouter `/api` vs `/api/v1`）。
+
+### Tests
+
+- `tests/t1_contracts/verify_contracts.test.mjs` 的预设完整性断言不再硬编码「恰好 16 个文件」，改为「至少 16 个」+「catalog.json 索引每个文件」，保留一一对应约束同时允许品牌扩容。
+
 ## [v20261123-06] - 2026-11-23
 
 ### Changed

@@ -1,0 +1,19 @@
+{
+  "id": "bedrock",
+  "name": "AWS Bedrock",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "Bedrock Runtime 接入：OpenAI 兼容端点直通，模型 ID 原样透传（不自动补前缀）",
+  "protocol": "openai",
+  "base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+  "doc_url": null,
+  "description": "Bedrock 运行时 OpenAI 兼容端点，模型 ID 需带 global./openai. 等前缀",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": false
+  },
+  "recommended_models": [],
+  "adapter_rules": {}
+}

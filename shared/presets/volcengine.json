@@ -1,0 +1,19 @@
+{
+  "id": "volcengine",
+  "name": "火山引擎方舟",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "方舟接入：coding/plan/v3 三档端点，协议按上游原生能力直通",
+  "protocol": "openai",
+  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+  "doc_url": null,
+  "description": "火山方舟 Coding / Agent / 按量 三档端点，OpenAI 兼容与 Anthropic 双通道",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": false
+  },
+  "recommended_models": [],
+  "adapter_rules": {}
+}

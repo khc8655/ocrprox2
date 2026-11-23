@@ -228,12 +228,30 @@ go test -race ./...
 | `docs/magpie-baseline.json` | **唯一事实源**：基线 commit/tag、A/B/C 映射、每个 A 类文件的 `sha256`、watch 列表 |
 | `scripts/magpie-sync.mjs` | `check` / `apply` / `rebaseline` / `baseline` 四个命令，零依赖，首次运行会在 `~/.cache/llmproxy2/magpie.git` 建一个 bare 局部克隆（约 22 MiB，6 秒） |
 | `npm run magpie:check` | 等价于 `node scripts/magpie-sync.mjs check` |
+| `scripts/magpie-presets.mjs` | **预设表转换器**（与代码同步是两件事）：`check` 报告上游品牌缺口与端点漂移，`import --only=<ids>` / `--all` 把上游 `PresetDef` 表转成本仓 `shared/presets/*.json` + `internal/provider/presets_imported_generated.go` |
+| `npm run magpie:presets:check` | 等价于 `node scripts/magpie-presets.mjs check` |
 
 工具行为约定：
 
 - **只读上游，不写上游**；只在 `apply` 时写本仓 A 类文件。
 - `check` 的比较基准是**文件内容哈希**，不是行数或 diff——所以它可以证明「逐字节一致」这件事，而不是靠人眼看。
 - 上游历史用 `--filter=blob:none` 克隆：全量提交（8,894 个）都在，但只有被 `show` 到的文件才下载内容。
+
+### 5.1 预设表（Provider Presets）怎么同步
+
+上游 `internal/provider/presets.go` 里有一张 `var presets = []PresetDef{...}` 表（2026-11-23 核对：63 条），字段与我们 `internal/provider/presets.go` 的 `PresetDef` 几乎同构（`Chat/Anthropic/Responses/Website/KeysURL/NoList/KeyPlans/Regions/Models`）。因此品牌接入是**数据搬运**，不是代码搬运：
+
+```bash
+node scripts/magpie-presets.mjs check                      # 缺口 + 端点漂移报告（只读）
+node scripts/magpie-presets.mjs import --only=xai,longcat  # 导入指定品牌
+node scripts/magpie-presets.mjs import --all               # 全量导入（--dry-run 先看）
+```
+
+- **能转的**：id / name / 端点（Chat→`base_url`、Anthropic→`anthropic_base_url`）/ 官网 / note / 模型清单 / Regions / KeyPlans / NoList。导入后 `shared/presets/<id>.json` 带 `source: {repo, preset_id, commit}` 便于回溯。
+- **转不了的**：**协议改写**。上游把每家厂商的改写写在 `internal/provider/<vendor>.go` 的 Go 代码里，预设表里没有任何描述。所以导入的预设 `adapter_rules` 一律为 `{}`：端点是正确的，行为不等价，需要在本仓 `adapter_rules` 里补规则。
+- **不能导的**：`Decide`-only 的 decision API（magpie 内部路由专用）、函数动态生成 region 的（bedrock / qwencloud / bedrock-mantle，需手工建）、endpoint 由用户自填的（Azure 类）。
+- **版本号**：首次导入 `1.0.0`；再次导入时若上游端点未变则跳过，变了则 patch +1 并刷新 `updated_at`（`--force` 则直接覆盖上游值）。
+- 导入后必须跑 `node shared/presets/build-catalog.mjs && go test ./internal/provider/`：`TestCatalog_PresetAdapterVersions` 强制 Go 目录与适配文件版本一致。
 
 ---
 

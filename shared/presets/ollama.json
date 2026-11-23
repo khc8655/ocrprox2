@@ -1,0 +1,20 @@
+{
+  "id": "ollama",
+  "name": "Ollama 本地",
+  "version": "1.0.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "本机 Ollama 直通：无鉴权、无改写，模型 ID 与 ollama list 一致",
+  "protocol": "openai",
+  "base_url": "http://localhost:11434/v1",
+  "doc_url": null,
+  "description": "本机 Ollama 运行时（默认 127.0.0.1:11434），OpenAI 兼容端点直通",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {},
+  "anthropic_base_url": "http://localhost:11434"
+}

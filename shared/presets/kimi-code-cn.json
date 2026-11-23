@@ -1,0 +1,20 @@
+{
+  "id": "kimi-code-cn",
+  "name": "Kimi Code (国内)",
+  "version": "1.1.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "Kimi 编程套餐国内站接入：OpenAI 兼容与 Anthropic 端点均直通；补齐 Anthropic 端点 https://api.kimi.com/coding（对齐 yetone/magpie 上游预设）",
+  "protocol": "openai",
+  "base_url": "https://api.kimi.com/coding/v1",
+  "doc_url": null,
+  "description": "Kimi 编程套餐国内站，OpenAI 兼容与 Anthropic 双通道",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {},
+  "anthropic_base_url": "https://api.kimi.com/coding"
+}

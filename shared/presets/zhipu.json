@@ -1,0 +1,20 @@
+{
+  "id": "zhipu",
+  "name": "智谱 BigModel",
+  "version": "1.1.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "智谱开放平台接入：api 与 coding 两档端点，Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://open.bigmodel.cn/api/anthropic（对齐 yetone/magpie 上游预设）",
+  "protocol": "openai",
+  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+  "doc_url": null,
+  "description": "智谱开放平台（按量/编程套餐），OpenAI 兼容与 Anthropic 双通道",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {},
+  "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
+}

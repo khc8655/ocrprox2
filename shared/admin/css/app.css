@@ -520,9 +520,36 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+/* Rows holding a free-text value (Base URL / client_key) give the control a
+   real width budget: it claims the slack left by the description, up to 62% of
+   the row. A purely content-sized control resolves to the input's intrinsic
+   width, which clipped values like https://hk.1 after a few characters. The
+   second selector covers rows whose input shares an .input-row with buttons
+   (client_key + 随机生成/保存密钥). */
+.setting-control:has(> .input:not([type="number"])),
+.setting-control:has(> .input-row .input:not([type="number"])) {
+  flex: 1 1 300px;
+  max-width: 62%;
+}
+
+.setting-control > .input-row {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .setting-control .input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 110px;
+}
+
+/* Numeric/short settings keep a fixed compact width so the control column
+   stays aligned across rows. */
+.setting-control .input[type="number"] {
+  flex: 0 0 110px;
   width: 110px;
 }
 
@@ -1130,6 +1157,71 @@ button.row {
   gap: 8px;
 }
 
+/* 接入信息 view: model cards carry two lines — the copyable id, then the
+ * providers its route candidates point at. The provider line is capped in JS
+ * (first two names + "+N") and ellipsised here, so a heavily routed model never
+ * stretches the grid. */
+.gw-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.gw-model-item {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  background-color: var(--khc-surface-card);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.gw-model-item:hover {
+  border-color: var(--khc-border-2);
+  background-color: var(--khc-surface-muted);
+}
+
+.gw-model-item-id {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--khc-font-mono);
+  font-size: 12px;
+  color: var(--khc-text-1);
+}
+
+.gw-model-item-prov {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--khc-text-2);
+}
+
+.gw-model-empty {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--khc-text-2);
+}
+
+.access-note {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--khc-text-2);
+}
+
 .copy-chip {
   max-width: 100%;
   overflow: hidden;
@@ -1502,8 +1594,13 @@ button.row {
     gap: 8px 16px;
   }
 
-  .setting-control {
+  /* Wrapped row: the control owns a full line, so lift the desktop 62% cap
+     (the :has scoped rule above otherwise outranks this one). */
+  .setting-control,
+  .setting-control:has(> .input:not([type="number"])),
+  .setting-control:has(> .input-row .input:not([type="number"])) {
     flex-basis: 100%;
+    max-width: none;
   }
 
   .search-box {

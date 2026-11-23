@@ -1,9 +1,9 @@
 {
   "id": "opencode",
   "name": "OpenCode Zen",
-  "version": "2.0.0",
-  "updated_at": "2026-10-18",
-  "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移",
+  "version": "2.1.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移；补齐 Anthropic 端点 https://opencode.ai/zen（对齐 yetone/magpie 上游预设）",
   "protocol": "openai",
   "base_url": "https://opencode.ai/zen/v1",
   "doc_url": "https://opencode.ai/docs/zen/",
@@ -11,7 +11,8 @@
   "features": {
     "multimodal": true,
     "native_thinking": true,
-    "tools": true
+    "tools": true,
+    "anthropic_messages": true
   },
   "recommended_models": [
     {
@@ -96,5 +97,6 @@
     "user_tracking": {
       "passthrough_user": true
     }
-  }
+  },
+  "anthropic_base_url": "https://opencode.ai/zen"
 }

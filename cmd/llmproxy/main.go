@@ -38,9 +38,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261123-06"
+	version    = "v20261123-07"
 	commit     = "dev"
-	AppVersion = "2.11.0"
+	AppVersion = "2.11.1"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -340,43 +340,16 @@ func main() {
 			OwnedBy string `json:"owned_by"`
 		}
 
-		seen := make(map[string]bool)
+		// One predicate for both this endpoint and /api/admin/access-info, so the
+		// console cannot advertise a model id this handler would omit.
 		list := make([]ModelItem, 0)
-		for mID, route := range snap.Config.AgentModels {
-			if route != nil && route.Enabled {
-				seen[mID] = true
-				list = append(list, ModelItem{
-					ID:      mID,
-					Object:  "model",
-					Created: snap.LoadedAt.Unix(),
-					OwnedBy: "llmproxy",
-				})
-			}
-		}
-
-		// Surface legacy KBModels slots (chat/embedding/reranker/ocr) if configured and not yet in AgentModels
-		fixedCategories := []string{"chat", "embedding", "reranker", "ocr"}
-		for _, cat := range fixedCategories {
-			if seen[cat] {
-				continue
-			}
-			cands := snap.Config.KBModels[cat]
-			hasEnabled := false
-			for _, c := range cands {
-				if c != nil && c.Enabled {
-					hasEnabled = true
-					break
-				}
-			}
-			if hasEnabled && (cat == "chat" || role == types.RoleFull) {
-				seen[cat] = true
-				list = append(list, ModelItem{
-					ID:      cat,
-					Object:  "model",
-					Created: snap.LoadedAt.Unix(),
-					OwnedBy: "llmproxy-kb",
-				})
-			}
+		for _, mID := range snap.Config.AvailableModelIDs(role) {
+			list = append(list, ModelItem{
+				ID:      mID,
+				Object:  "model",
+				Created: snap.LoadedAt.Unix(),
+				OwnedBy: "llmproxy",
+			})
 		}
 
 		w.Header().Set("Content-Type", "application/json")

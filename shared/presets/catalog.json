@@ -43,6 +43,26 @@
       "recommended_models_count": 4
     },
     {
+      "id": "anthropic",
+      "name": "Anthropic 官方",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Anthropic 官方端点原生直通：网关不做协议转换也不改写请求体",
+      "rule_hash": "44136fa355b3",
+      "protocol": "anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "anthropic_base_url": "https://api.anthropic.com",
+      "doc_url": null,
+      "description": "Anthropic Messages 原生协议直通，不做任何请求改写；/v1/messages 直接透传到官方端点",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
       "id": "bai",
       "name": "B.AI",
       "version": "1.4.0",
@@ -60,6 +80,66 @@
         "anthropic_messages": true
       },
       "recommended_models_count": 4
+    },
+    {
+      "id": "baidu-qianfan",
+      "name": "百度千帆",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "千帆接入：personal/team/api 三档端点，协议按上游原生能力直通",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://qianfan.baidubce.com/v2/tokenplan/personal",
+      "anthropic_base_url": null,
+      "doc_url": null,
+      "description": "千帆 Token Plan（个人/企业）与按量付费三档端点，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": false
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "bailian-token-plan",
+      "name": "阿里云百炼 Token Plan",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "百炼 Token 套餐接入：OpenAI 兼容端点直通，Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "anthropic_base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic",
+      "doc_url": null,
+      "description": "百炼 Token 套餐网关，OpenAI 兼容与 Anthropic 双端点直通",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "bedrock",
+      "name": "AWS Bedrock",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Bedrock Runtime 接入：OpenAI 兼容端点直通，模型 ID 原样透传（不自动补前缀）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+      "anthropic_base_url": null,
+      "doc_url": null,
+      "description": "Bedrock 运行时 OpenAI 兼容端点，模型 ID 需带 global./openai. 等前缀",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": false
+      },
+      "recommended_models_count": 0
     },
     {
       "id": "cline",
@@ -83,18 +163,19 @@
     {
       "id": "deepseek",
       "name": "DeepSeek 官方开放平台",
-      "version": "1.2.0",
-      "updated_at": "2026-10-18",
-      "update_notes": "DeepSeek 官方平台直连适配，支持 V3 全尺寸旗舰与 R1 reasoning_content 思考流纯净透传",
+      "version": "1.3.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "DeepSeek 官方平台直连适配，支持 V3 全尺寸旗舰与 R1 reasoning_content 思考流纯净透传；补齐 Anthropic 端点 https://api.deepseek.com/anthropic（对齐 yetone/magpie 上游预设）",
       "rule_hash": "61ae3a7b32fb",
       "protocol": "openai",
       "base_url": "https://api.deepseek.com/v1",
-      "anthropic_base_url": null,
+      "anthropic_base_url": "https://api.deepseek.com/anthropic",
       "doc_url": "https://api-docs.deepseek.com",
       "description": "DeepSeek 官方 API，原生支持 reasoning_content 深度思考与前缀缓存",
       "features": {
         "native_thinking": true,
-        "tools": true
+        "tools": true,
+        "anthropic_messages": true
       },
       "recommended_models_count": 2
     },
@@ -118,6 +199,86 @@
       "recommended_models_count": 5
     },
     {
+      "id": "groq",
+      "name": "Groq",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Groq 官方端点直通：OpenAI 协议原样透传",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.groq.com/openai/v1",
+      "anthropic_base_url": null,
+      "doc_url": null,
+      "description": "Groq 云端推理，OpenAI 兼容端点直通，低延迟场景首选",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": false
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "kimi-code-cn",
+      "name": "Kimi Code (国内)",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Kimi 编程套餐国内站接入：OpenAI 兼容与 Anthropic 端点均直通；补齐 Anthropic 端点 https://api.kimi.com/coding（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "anthropic_base_url": "https://api.kimi.com/coding",
+      "doc_url": null,
+      "description": "Kimi 编程套餐国内站，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "kimi-code",
+      "name": "Kimi Code (国际)",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Kimi 编程套餐国际站接入：OpenAI 兼容与 Anthropic 端点均直通；补齐 Anthropic 端点 https://api.kimi.ai/coding（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.kimi.ai/coding/v1",
+      "anthropic_base_url": "https://api.kimi.ai/coding",
+      "doc_url": null,
+      "description": "Kimi 编程套餐国际站，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "minimax-cn",
+      "name": "MiniMax (国内)",
+      "version": "1.5.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "MiniMax 国内站：沿用 minimax 适配规则（output_config 剥离、思考强制、模型名大小写映射）；补齐 Anthropic 端点 https://api.minimaxi.com/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "e5cff916701c",
+      "protocol": "openai",
+      "base_url": "https://api.minimaxi.com/v1",
+      "anthropic_base_url": "https://api.minimaxi.com/anthropic",
+      "doc_url": null,
+      "description": "MiniMax 国内站（api.minimaxi.com），OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
       "id": "minimax",
       "name": "MiniMax",
       "version": "1.4.0",
@@ -138,6 +299,46 @@
       "recommended_models_count": 2
     },
     {
+      "id": "moonshot-cn",
+      "name": "Moonshot (国内)",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Moonshot 国内站直通：OpenAI 兼容与 Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://api.moonshot.cn/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.moonshot.cn/v1",
+      "anthropic_base_url": "https://api.moonshot.cn/anthropic",
+      "doc_url": null,
+      "description": "Moonshot AI 国内站，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "moonshot",
+      "name": "Moonshot (国际)",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Moonshot 国际站直通：OpenAI 兼容与 Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://api.moonshot.ai/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.moonshot.ai/v1",
+      "anthropic_base_url": "https://api.moonshot.ai/anthropic",
+      "doc_url": null,
+      "description": "Moonshot AI 国际站，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
       "id": "nvidia",
       "name": "NVIDIA NIM",
       "version": "2.0.0",
@@ -155,6 +356,26 @@
         "tools": true
       },
       "recommended_models_count": 6
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama 本地",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "本机 Ollama 直通：无鉴权、无改写，模型 ID 与 ollama list 一致",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "http://localhost:11434/v1",
+      "anthropic_base_url": "http://localhost:11434",
+      "doc_url": null,
+      "description": "本机 Ollama 运行时（默认 127.0.0.1:11434），OpenAI 兼容端点直通",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
     },
     {
       "id": "openai",
@@ -178,19 +399,20 @@
     {
       "id": "opencode",
       "name": "OpenCode Zen",
-      "version": "2.0.0",
-      "updated_at": "2026-10-18",
-      "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移",
+      "version": "2.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "OpenCode Zen 平台标准 OpenAI 协议适配，精简免费模型集合与 403 权限快速故障转移；补齐 Anthropic 端点 https://opencode.ai/zen（对齐 yetone/magpie 上游预设）",
       "rule_hash": "7b700ff3eb3e",
       "protocol": "openai",
       "base_url": "https://opencode.ai/zen/v1",
-      "anthropic_base_url": null,
+      "anthropic_base_url": "https://opencode.ai/zen",
       "doc_url": "https://opencode.ai/docs/zen/",
       "description": "OpenCode Zen 官方托管模型（opencode.ai/zen 登录领取 Key，纯 OpenAI 协议直通透传）。免费档模型限时免费，按账号/IP 计每日限额；超限返回 429 FreeUsageLimitError。注意：免费模型原则上仅限 OpenCode 客户端内调用，第三方直连可能触发 403 FreeTierError。",
       "features": {
         "multimodal": true,
         "native_thinking": true,
-        "tools": true
+        "tools": true,
+        "anthropic_messages": true
       },
       "recommended_models_count": 8
     },
@@ -213,6 +435,26 @@
         "tools": true
       },
       "recommended_models_count": 7
+    },
+    {
+      "id": "qwen",
+      "name": "通义千问 DashScope",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "DashScope 兼容模式直通：OpenAI 兼容端点为主，Anthropic 端点按原生协议转发",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "anthropic_base_url": null,
+      "doc_url": null,
+      "description": "阿里云 DashScope 兼容模式，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": false
+      },
+      "recommended_models_count": 0
     },
     {
       "id": "sensenova",
@@ -272,6 +514,26 @@
       "recommended_models_count": 2
     },
     {
+      "id": "tencent-cloud",
+      "name": "腾讯云 TokenHub",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "TokenHub 接入：plan/cn/intl 三档端点，协议按上游原生能力直通；补齐 Anthropic 端点 https://tokenhub.tencentmaas.com/plan/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://tokenhub.tencentmaas.com/plan/v3",
+      "anthropic_base_url": "https://tokenhub.tencentmaas.com/plan/anthropic",
+      "doc_url": null,
+      "description": "腾讯云 TokenHub（国内/国际、套餐/按量）多档端点，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
       "id": "tokenrhythm",
       "name": "TokenRhythm",
       "version": "1.2.0",
@@ -309,6 +571,66 @@
         "require_location": true
       },
       "recommended_models_count": 1
+    },
+    {
+      "id": "volcengine",
+      "name": "火山引擎方舟",
+      "version": "1.0.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "方舟接入：coding/plan/v3 三档端点，协议按上游原生能力直通",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "anthropic_base_url": null,
+      "doc_url": null,
+      "description": "火山方舟 Coding / Agent / 按量 三档端点，OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": false
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "zai",
+      "name": "Z.ai",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "Z.ai 接入：api 与 coding 两档端点，Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://api.z.ai/api/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "anthropic_base_url": "https://api.z.ai/api/anthropic",
+      "doc_url": null,
+      "description": "Z.ai 平台（按量/编程套餐），OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
+    },
+    {
+      "id": "zhipu",
+      "name": "智谱 BigModel",
+      "version": "1.1.0",
+      "updated_at": "2026-11-23",
+      "update_notes": "智谱开放平台接入：api 与 coding 两档端点，Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://open.bigmodel.cn/api/anthropic（对齐 yetone/magpie 上游预设）",
+      "rule_hash": "44136fa355b3",
+      "protocol": "openai",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "anthropic_base_url": "https://open.bigmodel.cn/api/anthropic",
+      "doc_url": null,
+      "description": "智谱开放平台（按量/编程套餐），OpenAI 兼容与 Anthropic 双通道",
+      "features": {
+        "native_thinking": false,
+        "multimodal": false,
+        "tools": true,
+        "anthropic_messages": true
+      },
+      "recommended_models_count": 0
     }
   ]
 }

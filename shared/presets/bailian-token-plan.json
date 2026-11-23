@@ -1,0 +1,20 @@
+{
+  "id": "bailian-token-plan",
+  "name": "阿里云百炼 Token Plan",
+  "version": "1.1.0",
+  "updated_at": "2026-11-23",
+  "update_notes": "百炼 Token 套餐接入：OpenAI 兼容端点直通，Anthropic 端点按原生协议转发；补齐 Anthropic 端点 https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic（对齐 yetone/magpie 上游预设）",
+  "protocol": "openai",
+  "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+  "doc_url": null,
+  "description": "百炼 Token 套餐网关，OpenAI 兼容与 Anthropic 双端点直通",
+  "features": {
+    "native_thinking": false,
+    "multimodal": false,
+    "tools": true,
+    "anthropic_messages": true
+  },
+  "recommended_models": [],
+  "adapter_rules": {},
+  "anthropic_base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+}

@@ -241,19 +241,22 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
   });
 
   describe('T1.presets_integrity', () => {
-    test('shared/presets/*.json 16 vendor presets are valid syntax and match catalog.json', () => {
+    test('shared/presets/*.json vendor presets are valid syntax and match catalog.json', () => {
       const presetsDir = join(projectRoot, 'shared/presets');
       const allFiles = readdirSync(presetsDir);
       const presetFiles = allFiles
         .filter((f) => f.endsWith('.json') && f !== 'catalog.json')
         .sort();
 
-      assert.strictEqual(presetFiles.length, 16, `Must have exactly 16 preset files, found ${presetFiles.length}`);
+      // The adapter library grows as brands are onboarded; the invariant that
+      // matters is that every shipped file is indexed by catalog.json (and that
+      // the historical 16-brand coverage never regresses).
+      assert.ok(presetFiles.length >= 16, `Expected at least 16 preset files, found ${presetFiles.length}`);
 
       const catalogPath = join(presetsDir, 'catalog.json');
       const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
       assert.ok(Array.isArray(catalog.providers), 'catalog.json must have providers array');
-      assert.strictEqual(catalog.providers.length, 16, 'catalog.json must index all 16 presets');
+      assert.strictEqual(catalog.providers.length, presetFiles.length, 'catalog.json must index every preset file');
 
       const catalogMap = new Map(catalog.providers.map((p) => [p.id, p]));
 

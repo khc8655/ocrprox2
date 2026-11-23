@@ -6,7 +6,8 @@
     "v3.5: added POST /api/node/heartbeat (NODE_TOKEN/Bearer stk_node_*; optional X-Node-Version; bodyless 204; no config/payload/projection; 60s server-side debounce on last_seen with zero KV writes on the debounced path; both lite and full node tokens accepted) plus LLMPROXY_HEARTBEAT_INTERVAL env / --heartbeat-interval (v3.6: startup-only beat by default for BOTH roles; periodic beats require an explicit interval >=60s; 0/off disables everything; install.sh sets 600 on the Lite unit).",
     "v3.4: full-node objects carry admin_password (full role only; plaintext in Hub KV by explicit operator choice — Plan A — so the console password is re-viewable; lite nodes never have the field, and patching full→lite drops it); added nodes_credentials (GET /api/admin/nodes/:id/credentials, read-only re-view of the stored admin password + recoverable client key, Cache-Control: no-store, never rotates the token); admin auth accepts URL query-string credentials (?key/?token/?password) on the full-role admin plane by explicit operator tradeoff — see auth_semantics.query_string_credentials.",
     "v3.3: providers.rpm_per_key is the provider's OVERALL RPM ceiling enforced scheduler-side as one provider-wide sliding window (0 = unlimited) and no longer falls back into the per-key check — api_keys[].max_rpm keeps its key-level meaning; probe_models documents api_type and stored-key resolution (empty/masked api_key resolves the provider's first enabled stored key, vault-managed keys refuse base_url overrides with 403); added test_agent_model and test_candidate (the route-line 测试路由 endpoints, full role only).",
-    "v3.2: GET /api/admin/presets-extra preset objects carry version/updated_at mirroring the provider's adapter file (shared/presets/<id>.json); both fields are omitted when the preset has no matching adapter file.",
+    "v3.8: access_info.models is now the authoritative list GET /v1/models answers with — both the public handler and the admin payload call types.ProxyConfig.AvailableModelIDs (enabled agent routes plus the legacy KB slots that still have an enabled candidate; embedding/reranker/ocr only on a full node). Previously each side re-implemented the filter: the console listed disabled routes and omitted KB slots, so its copyable Model ID was wrong. The「接入信息」tab (its own nav view, hidden on the hub) renders every id as a two-line card — copyable model id, then the provider display names its candidates bind (first two + 「+N」, ellipsised) — plus copy-all, and switches between the OpenAI-compatible entry point (base_url = origin/v1, POST /v1/chat/completions) and the Anthropic one (ANTHROPIC_BASE_URL = origin, POST /v1/messages). It also lists access_info.endpoints as copyable paths.",
+    "v3.2: GET /api/admin/presets-extra preset objects always carry version/updated_at: they mirror the provider's adapter file (shared/presets/<id>.json) when one ships, otherwise the built-in preset revision registered in internal/provider/presets.go. Every curated brand therefore shows a 适配 <id> · v<version> · <date> badge.",
     "v3: removed POST /api/vault/sync (full sync replaced by on-demand fetch); POST /api/vault/fetch gains 409 provider_exists_local, wholesale replace of hub-managed fields on re-fetch, and imported_keys; GET /api/vault/manifest gains the agent_models route-template section; both endpoints now serve hub and full roles.",
     "v3.1: vault fetch no longer accepts caller-supplied hub_url/node_token (target is always the stored vault config; anti-exfiltration); provider_config gains api_type/rule_hash and no longer touches enabled; manifest candidates rename max_conc to max_concurrency and rule_hash is hub-computed from adapter_rules; /api/vault/manifest accepts POST (credentials in body instead of the query string); provider IDs with unsafe characters are refused at adoption.",
     "v2: initial published revision."
@@ -485,7 +486,7 @@
       ],
       "response": {
         "ok": true,
-        "presets": "array of preset objects (PresetDef); each may carry version/updated_at mirroring the provider's adapter file shared/presets/<id>.json — omitted (omitempty) when the preset has no matching adapter file"
+        "presets": "array of preset objects (PresetDef); each carries version/updated_at — the adapter file version (shared/presets/<id>.json) when one ships, otherwise the built-in preset revision"
       }
     },
     "access_info": {
@@ -501,7 +502,7 @@
         "client_key_configured": "boolean",
         "client_key_masked": "string",
         "endpoints": "array of strings",
-        "models": "array of strings"
+        "models": "array of strings — exactly the ids GET /v1/models answers (enabled agent routes + legacy KB slots still backed by an enabled candidate), sorted; both sides call types.ProxyConfig.AvailableModelIDs so the console cannot advertise a model the gateway would 404 on"
       }
     },
     "access_key": {

@@ -1,19 +1,16 @@
 {
-  "version": "v20261123-06",
-  "semver": "2.11.0",
+  "version": "v20261123-07",
+  "semver": "2.11.1",
   "release_date": "2026-11-23",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.11.0 — 控制台精简：删多客户端密钥与冗余入口，只留跑通流程必需的操作",
+  "title": "LLMProxy2 (OCRProxy v2) 2.11.1 — 客户端接入面板（OpenAI / Claude 双入口 + 完整模型列表）、配置输入框完整可见、预设库统一为 32 品牌",
   "changelog": [
-    "新增模型：「对外模型名」不再强制填写——默认自动取上游模型 ID、以只读展示，点「自定义名称」才展开可编辑；多候选需要区分时再显式命名",
-    "供应商搜索面板：点行 = 填入输入框 → 关闭面板 → 焦点移到下一个字段；行按钮补 mousedown 焦点保护（在搜索框里点行时 pointerdown 的默认焦点转移会吞掉点击；面板原本没有 blur 关面板监听器）；已聚焦输入框再点击也能重新打开面板；搜索无结果只提示「无匹配供应商（请先在供应商页添加）」，删除「手动输入」按钮（供应商必须先存在才能建路由）",
-    "全站 <input type=\"number\"> 禁掉鼠标滚轮改值：初始化时一次 document 级 wheel 委托，命中 number 输入即 blur，页面滚动不受影响",
-    "「中枢只读」徽章从每个 Key 胶囊移除（胶囊只显示 Key 标签名），改为 Key 区块标题旁一行统一说明「中枢托管 Key（只读）」，仅在该供应商确有中枢 Key 时显示",
-    "删除供应商编辑器的「模型探测与一键纳管」整块（btn_probe_prov_* / probe_pills_container_* 及其 handler 与状态）：探测只在添加模型时进行",
-    "模板导入改为批量拉取：勾选路由点导入后按依赖顺序一次性拉取全部缺失供应商（进度文案「正在拉取供应商…（i/n）」），单个供应商失败不阻断其它，结束后统一汇总成功/失败清单；未落地的路由逐条点名（供应商拉取失败 / 拉回的 Key 缺标签 / 同名路由已存在）；拉取途中按 Esc 或点遮罩即真正取消，不再继续落地路由；不再逐行点「拉取」",
-    "彻底删除多客户端密钥（proxy_keys）：types.ProxyKeys 字段、main.go 的 auth 合成分支、auth.Authenticator.extraKeys 与 UpdateClientKeys/GetClientKeys、access-key 的 proxy_keys 入参与响应、access-info 的 proxy_keys_count、Hub 默认配置、settings.schema.json 字段、UI「附加客户端密钥列表」行；VerifyClientKey 收敛为只认单个 client_key（1 代别名 proxy_api_key 仍解析为该值）。Hub 侧同样彻底丢弃：loadConfig 读出旧 KV 时即剔除、保存时不写回、节点投影不带该字段；Go 侧旧配置/旧载荷里的 proxy_keys 按未知字段忽略且不再具备鉴权能力。注意单密钥槽位的 Lite 行为变化：中枢投影的 settings.client_key 一到就顶掉本机 --client-key（不再并存），文档与中枢设置页提示已同步",
-    "网关接入：「Claude Code 环境变量」与「OpenAI / Cursor 配置」两个 snippet-box 换成 Base URL / Client Key / Model ID 三个可点击复制的 chip，复制后 toast 提示；复制走统一的 copyToClipboard（非安全上下文/剪贴板被拒时提示「请手动复制」而不是假报成功）；Model ID 取首个已启用路由（与 /v1/models 口径一致，禁用路由会让客户端 404），无路由时置灰",
-    "包体门禁上调：252 KiB (258,048B) → 320 KiB (327,680B)，四处同步（shared/admin/build.mjs Gate 4、scripts/verify-release.mjs、tests/t1_contracts、契约文档）。理由：UI 是持续演进的自用控制台，反复抠字节没有意义，320 KiB 给后续预留约 72 KB 余量；Go embed 与 Hub 静态托管对单文件 HTML 的体积不敏感",
-    "lite 的 client_key 语义明确为「中枢投影优先」：Hub 投影到达后以中枢密钥为准，Lite 本地 --client-key 只在首次投影前可用。同步更新 Hub 设置页提示文案与评审发现的过时表述"
+    "系统设置里被截断的输入框恢复正常：Base URL / client_key / Vault 地址 / 同步 Token 不再显示成 https://hk.1 这种半截值。根因是 .setting-control 只按内容撑开（内容尺寸绕回输入框自身的内在宽度），现改为自由文本行按 62% 上限占据行内剩余空间，数字输入保持 110px 固定列宽；窄屏换行时解除上限",
+    "适配版本徽章统一：供应商卡片、添加供应商表单、供应商编辑弹窗三处都以「适配 <预设> · v<版本> · <日期>」呈现，中枢规则指纹只在规则无法映射到内置适配文件时兜底；添加供应商时输入品牌名即可看到将要套用的适配版本",
+    "预设库合二为一：内置供应商目录从 26 个补到 32 个（新增 Agnes AI / B.AI / Cline / OpenCode Zen / 商汤日日新 / TokenRhythm），并为原先缺失的 16 个品牌补上适配文件（Anthropic、百炼 Token Plan、千帆、Bedrock、Groq、Kimi Code 国际/国内、MiniMax 国内、Moonshot 国际/国内、Ollama、通义千问、腾讯云 TokenHub、火山方舟、Z.ai、智谱），Go 目录与 shared/presets 现在 32:32 一一对应，版本号由 TestCatalog_PresetAdapterVersions 强制对齐",
+    "添加供应商不再强制手填 ID：输入品牌名命中预设时自动派生（如 Qwen → qwen），仍可手工改写；自定义品牌名会做 ASCII slug 兜底",
+    "上游协议类型下拉补说明：客户端只调 /v1/chat/completions 或 /v1/messages，协议选择只决定网关往上转发时用哪种协议；同一对外模型要接不同协议的上游时，在路由里加多条候选分别绑定供应商",
+    "新增 magpie 预设表转换器（scripts/magpie-presets.mjs）：check 报告上游品牌缺口与端点漂移，import 把上游 PresetDef 表转成本仓适配文件 + Go 目录条目；11 个品牌顺手补齐 Anthropic 端点，上游 20 个品牌端点全部对齐",
+    "新增「接入信息」页签：OpenAI 兼容 / Claude 系两个 tab 各给一段 base_url 与完整请求地址（Claude 用的是不带 /v1 的 ANTHROPIC_BASE_URL），可用模型改成双行卡片（第一行可复制模型 ID、第二行供应商显示名，多于两家折成 +N），别再让一个模型挂十家供应商把界面撑爆；支持的 7 条接口路径也逐个可复制"
   ]
 }

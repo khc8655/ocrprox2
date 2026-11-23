@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -287,26 +286,14 @@ func (s *Server) handleAccessInfo(w http.ResponseWriter, r *http.Request) {
 		"/v1/rerank",
 	}
 
-	modelSet := make(map[string]bool)
+	// Same predicate as the public GET /v1/models handler: enabled agent routes
+	// plus the legacy KB slots still backed by an enabled candidate. Reusing it
+	// keeps the console's copyable Model ID list from inventing or hiding ids.
+	models := []string{}
 	if s.localSrc != nil {
 		if snap, _ := s.localSrc.Current(r.Context(), false); snap != nil && snap.Config != nil {
-			for m := range snap.Config.AgentModels {
-				modelSet[m] = true
-			}
-			for cat, list := range snap.Config.KBModels {
-				if len(list) > 0 {
-					modelSet[cat] = true
-				}
-			}
+			models = snap.Config.AvailableModelIDs(types.RoleFull) // the admin console only exists on a full node
 		}
-	}
-	var models []string
-	for m := range modelSet {
-		models = append(models, m)
-	}
-	sort.Strings(models)
-	if models == nil {
-		models = []string{}
 	}
 
 	w.WriteHeader(http.StatusOK)

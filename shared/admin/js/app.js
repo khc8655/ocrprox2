@@ -558,6 +558,7 @@
 
     const navModels = $('navModels');
     const navNodes = $('navNodes');
+    const navAccess = $('navAccess');
     const navActivity = $('navActivity');
     const topVersionBox = $('topVersionBox');
     const cfgVaultLinkBox = $('cfgVaultLinkBox');
@@ -568,6 +569,9 @@
 
     if (navModels) navModels.hidden = false;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
+    // 接入信息 only describes a gateway this console can answer for: the Hub is
+    // a config plane with no data plane of its own.
+    if (navAccess) navAccess.hidden = isHub;
     if (navActivity) navActivity.hidden = false;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
     if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
@@ -1543,7 +1547,10 @@
     const hintEl = $('newProvPresetHint');
     const meta = matchPresetMeta($('newProvName')?.value) || matchPresetMeta($('newProvId')?.value);
     if (hintEl) {
-      hintEl.textContent = meta ? `已按预设 ${meta.label} 自动填充` : '';
+      // Surface the adapter revision right here: picking a brand must tell the
+      // operator which built-in adaptation is about to be applied.
+      const rev = meta && meta.version ? `（适配 v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}）` : '';
+      hintEl.textContent = meta ? `已按预设 ${meta.label}${rev} 自动填充` : '';
       hintEl.hidden = !meta;
       hintEl.classList.toggle('hidden', !meta);
     }
@@ -1553,6 +1560,214 @@
     if (apiSel && [...apiSel.options].some((o) => o.value === apiType)) apiSel.value = apiType;
     const baseEl = $('newProvBaseUrl');
     if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
+    // Typing the brand name is enough: the ID is a machine handle nobody wants
+    // to invent twice, so derive it from the matched preset while it is still
+    // empty. It stays editable for anyone who wants a custom handle.
+    const idEl = $('newProvId');
+    if (idEl && !idEl.value.trim()) idEl.value = meta.preset_id || meta.id;
+  }
+
+  // --- 4b. 接入信息 view (its own tab) --------------------------------------
+  // The gateway serves two entry points and the client's dialect decides which
+  // one to paste. Neither depends on how an upstream provider is configured:
+  // the protocol picker on a provider only says how we talk *to* the upstream.
+  function gatewayOrigin() {
+    return location.origin || 'http://127.0.0.1:3425';
+  }
+
+  function gatewayClientKind() {
+    return state.gwClient === 'anthropic' ? 'anthropic' : 'openai';
+  }
+
+  // OpenAI SDKs want base_url ending in /v1 (they append /chat/completions);
+  // Anthropic SDKs and Claude Code want ANTHROPIC_BASE_URL without /v1 (they
+  // append /v1/messages themselves).
+  function gatewayClientValues() {
+    const origin = gatewayOrigin();
+    return gatewayClientKind() === 'anthropic'
+      ? { label: 'ANTHROPIC_BASE_URL', base: origin, endpoint: `${origin}/v1/messages` }
+      : { label: 'base_url', base: `${origin}/v1`, endpoint: `${origin}/v1/chat/completions` };
+  }
+
+  function paintGatewayClientValues() {
+    const v = gatewayClientValues();
+    if ($('chipBaseLabel')) $('chipBaseLabel').textContent = v.label;
+    if ($('chipBaseValue')) $('chipBaseValue').textContent = v.base;
+    if ($('chipEndpointValue')) $('chipEndpointValue').textContent = v.endpoint;
+    if ($('gwAccessNote')) {
+      $('gwAccessNote').textContent = gatewayClientKind() === 'anthropic'
+        ? 'Claude Code / Anthropic SDK：把 ANTHROPIC_BASE_URL 填上面的基址（结尾不要带 /v1），SDK 会自己拼 /v1/messages；密钥填 ANTHROPIC_AUTH_TOKEN。'
+        : 'OpenAI SDK / Cursor / Cherry Studio 等：base_url 填上面的基址（含 /v1），SDK 会自己拼 /chat/completions；密钥填 API Key。';
+    }
+    const seg = $('gwClientSeg');
+    if (seg) seg.querySelectorAll('[data-gw-client]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-gw-client') === gatewayClientKind()));
+  }
+
+  // Model → the providers its route candidates point at, resolved to display
+  // names. A route can bind many candidates; the card shows the first two and
+  // folds the rest into +N so a heavily-routed model never stretches the row.
+  function modelProviderNames(modelId) {
+    const cfg = state.config || {};
+    const ids = [];
+    const push = (pid) => {
+      if (pid && !ids.includes(pid)) ids.push(pid);
+    };
+    const route = (cfg.agent_models || {})[modelId];
+    if (route && Array.isArray(route.candidates)) route.candidates.forEach((c) => push(c && c.provider));
+    // Fixed KB slots are addressed by their category name.
+    const kb = cfg.kb_models || {};
+    if (Array.isArray(kb[modelId])) kb[modelId].forEach((c) => push(c && c.provider));
+    const providers = cfg.providers || {};
+    return ids.map((pid) => {
+      const p = providers[pid];
+      return (p && (p.name || p.id)) || pid;
+    });
+  }
+
+  const MODEL_PROVIDER_PREVIEW = 2;
+
+  function formatProviderNames(names) {
+    if (!names.length) return '未绑定供应商';
+    const shown = names.slice(0, MODEL_PROVIDER_PREVIEW);
+    const rest = names.length - shown.length;
+    return rest > 0 ? `${shown.join(' · ')} +${rest}` : shown.join(' · ');
+  }
+
+  // Model ids come from /api/admin/access-info, which shares its predicate with
+  // the public GET /v1/models (types.ProxyConfig.AvailableModelIDs): enabled
+  // agent routes plus the legacy KB slots still backed by an enabled candidate.
+  // Rendering every one of them is the point — the old single chip showed only
+  // the alphabetically first enabled route and silently dropped the rest.
+  function renderGatewayModels() {
+    const box = $('gwModelChips');
+    const countPill = $('gwModelCount');
+    const btnAll = $('btnCopyAllModels');
+    const models = Array.isArray(state.gwModels) ? state.gwModels : [];
+    if (countPill) countPill.textContent = String(models.length);
+    if (btnAll) btnAll.hidden = models.length < 2;
+    if (!box) return;
+    if (!models.length) {
+      box.innerHTML = '<div class="gw-model-empty">暂无可用模型：到「模型路由」添加并启用路由后，这里会列出 /v1/models 实际返回的全部模型 ID</div>';
+      return;
+    }
+    box.innerHTML = models.map((m) => {
+      const names = modelProviderNames(m);
+      const provText = formatProviderNames(names);
+      const full = names.length ? names.join(' · ') : '';
+      return `<button class="gw-model-item" type="button" data-copy="model" data-model="${eh(m)}" title="复制 Model ID: ${eh(m)}${full ? `&#10;供应商: ${eh(full)}` : ''}">`
+        + `<span class="gw-model-item-id">${eh(m)}</span>`
+        + `<span class="gw-model-item-prov" title="${eh(full)}">${eh(provText)}</span>`
+        + '</button>';
+    }).join('');
+  }
+
+  function renderGatewayEndpoints() {
+    const box = $('gwEndpointChips');
+    if (!box) return;
+    const eps = Array.isArray(state.gwEndpoints) && state.gwEndpoints.length ? state.gwEndpoints : [];
+    if (!eps.length) {
+      box.innerHTML = '<span class="text-xs text-muted">接口清单暂不可用</span>';
+      return;
+    }
+    box.innerHTML = eps.map((p) => `<button class="btn copy-chip" type="button" data-copy="endpoint-path" data-path="${eh(p)}" title="复制 ${eh(p)}"><span class="copy-chip-value">${eh(p)}</span></button>`).join('');
+  }
+
+  function renderAccessView() {
+    const cfg = state.config || {};
+    const settings = cfg.settings || {};
+    const clientKey = settings.client_key || settings.proxy_api_key || '';
+    paintGatewayClientValues();
+    if ($('chipKeyValue')) $('chipKeyValue').textContent = clientKey || '未配置';
+    if ($('accessKeyState')) {
+      $('accessKeyState').textContent = clientKey
+        ? '密钥在「系统设置 ①」里修改或随机生成'
+        : '尚未配置客户端密钥：去「系统设置 ①」生成一把，否则所有请求都会被 401';
+    }
+    const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
+    if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
+    renderGatewayModels();
+    renderGatewayEndpoints();
+    loadAccessInfo();
+    bindGatewayClientSeg();
+    bindGatewayCopyChips();
+  }
+
+  let gwAccessInFlight = false;
+  async function loadAccessInfo() {
+    if (gwAccessInFlight || !window.HOST || typeof window.HOST.getAccessInfo !== 'function') return;
+    gwAccessInFlight = true;
+    try {
+      const info = await window.HOST.getAccessInfo();
+      if (info) {
+        if (Array.isArray(info.models)) state.gwModels = info.models;
+        if (Array.isArray(info.endpoints)) state.gwEndpoints = info.endpoints;
+        renderGatewayModels();
+        renderGatewayEndpoints();
+      }
+    } catch (_) {
+      // Informational view: keep whatever was last rendered rather than blanking it.
+    } finally {
+      gwAccessInFlight = false;
+    }
+  }
+
+  function bindGatewayClientSeg() {
+    const seg = $('gwClientSeg');
+    if (!seg || seg.dataset.bound) return;
+    seg.dataset.bound = '1';
+    seg.addEventListener('click', (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest('[data-gw-client]') : null;
+      if (!btn) return;
+      state.gwClient = btn.getAttribute('data-gw-client') === 'anthropic' ? 'anthropic' : 'openai';
+      paintGatewayClientValues();
+    });
+  }
+
+  function bindGatewayCopyChips() {
+    const chipValue = (kind, chip) => {
+      if (kind === 'model') return chip.getAttribute('data-model') || '';
+      if (kind === 'endpoint-path') return chip.getAttribute('data-path') || '';
+      const v = gatewayClientValues();
+      if (kind === 'base') return v.base;
+      if (kind === 'endpoint') return v.endpoint;
+      if (kind === 'key') {
+        const cfg = state.config || {};
+        const settings = cfg.settings || {};
+        return String(settings.client_key || settings.proxy_api_key || '').trim();
+      }
+      return '';
+    };
+
+    for (const [boxId, selector, label] of [
+      ['gwCopyChips', '.copy-chip[data-copy]', (k) => (k === 'base' ? '基址' : k === 'key' ? '客户端密钥' : '请求地址')],
+      ['gwEndpointChips', '.copy-chip[data-copy]', (k) => (k === 'endpoint-path' ? '接口路径' : '')],
+      ['gwModelChips', '.gw-model-item[data-copy="model"]', (k) => 'Model ID'],
+    ]) {
+      const box = $(boxId);
+      if (!box || box.dataset.bound) continue;
+      box.dataset.bound = '1';
+      box.addEventListener('click', (ev) => {
+        const chip = ev.target instanceof Element ? ev.target.closest(selector) : null;
+        if (!chip || chip.disabled) return;
+        const kind = chip.getAttribute('data-copy') || '';
+        const value = chipValue(kind, chip);
+        if (!value) return toast(kind === 'key' ? '主密钥尚未配置' : '该值尚未配置', 'warn');
+        // Same helper as the other copy actions: awaits, catches a rejected write
+        // (insecure http origin / no clipboard permission) and says「请手动复制」
+        // instead of claiming a copy that never happened.
+        copyToClipboard(value, `已复制 ${label(kind)}`);
+      });
+    }
+
+    const btnAll = $('btnCopyAllModels');
+    if (btnAll && !btnAll.dataset.bound) {
+      btnAll.dataset.bound = '1';
+      btnAll.onclick = () => {
+        const models = Array.isArray(state.gwModels) ? state.gwModels : [];
+        if (!models.length) return;
+        copyToClipboard(models.join(', '), `已复制全部 ${models.length} 个模型 ID`);
+      };
+    }
   }
 
   // Closes the provider combobox panel of the add-model modal. Assigned by
@@ -1680,7 +1895,7 @@
         return;
       }
 
-      const id = ($('newProvId')?.value || '').trim();
+      let id = ($('newProvId')?.value || '').trim();
       const name = ($('newProvName')?.value || '').trim() || id;
       const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
       const apiType = normalizeApiType($('newProvApiType')?.value);
@@ -1690,6 +1905,9 @@
       const resolvedPresetId = matchedMeta
         ? (matchedMeta.preset_id || matchedMeta.id)
         : (PRESETS_META[id]?.preset_id || '');
+      // Last-resort handle: the ID field is auto-filled by the preset match, but
+      // a custom provider named purely in Chinese still needs an ASCII id.
+      if (!id) id = resolvedPresetId || name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
 
       if (!id) return toast('请输入供应商标识 ID', 'warn');
       if (!baseUrl) return toast('请输入 Base URL', 'warn');
@@ -2126,6 +2344,7 @@
       providers: $('viewProviders'),
       nodes: $('viewNodes'),
       activity: $('viewActivity'),
+      access: $('viewAccess'),
       settings: $('viewSettings'),
     };
 
@@ -2139,6 +2358,11 @@
       } else if (window.HOST.capabilities.usageAndTraces) {
         loadActivityData();
       }
+    }
+
+    if (tab === 'access') {
+      // Re-read on every visit: routes and keys change on other tabs.
+      renderAccessView();
     }
 
     if (tab === 'providers' && !isHubMode() && window.HOST.capabilities.vaultClient) {
@@ -2557,13 +2781,17 @@
 
       const who = ce('div');
       who.className = 'who';
-      // Vault-pulled providers carry no version field in the hub manifest; show the
-      // rule_hash fingerprint (same source as the drift check) instead of a version.
-      // Without a hash they fall back to the standard adapted/custom badge.
+      // Adapter version wins whenever we can resolve it — including vault-pulled
+      // providers, whose preset_id arrives in the hub manifest and resolves against
+      // the local preset catalog. The rule_hash fingerprint is only the fallback for
+      // vault rules we cannot map to a shipped adapter file.
       const isVaultCard = !isHubMode() && p.origin === 'vault';
-      const versionPill = isVaultCard && p.rule_hash
-        ? `<span class="pill tabular" title="中枢规则指纹 (rule_hash 前 8 位)">指纹 ${eh(String(p.rule_hash).slice(0, 8))}</span>`
-        : presetVersionPillHtml(p);
+      const adaptedPill = presetVersionPillHtml(p);
+      const versionPill = adaptedPill
+        ? adaptedPill
+        : (isVaultCard && p.rule_hash
+          ? `<span class="pill tabular" title="中枢规则指纹 (rule_hash 前 8 位；未匹配到内置适配文件)">指纹 ${eh(String(p.rule_hash).slice(0, 8))}</span>`
+          : '');
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
@@ -2629,11 +2857,10 @@
       : '';
     // Adapter-file version/date note under the preset binding input; rendered for
     // vault providers too (the input itself is locked, the note stays read-only).
-    // Mirrors the card badge: adapter file → version, hub rules → 指纹, none →
-    // 自定义（无适配文件）. A preset_id without an adapter file is NOT「适配 …」.
-    const versionText = isVaultProv && p.rule_hash
-      ? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}`
-      : (presetVersionText(presetMetaForProvider(p, String(p?.preset_id || '').trim())) || '自定义（无适配文件）');
+    // Same precedence as the card badge: resolved adapter file → version, hub
+    // rules we cannot map to a shipped file → 指纹, otherwise 自定义（无适配文件）.
+    const versionText = presetVersionText(presetMetaForProvider(p, String(p?.preset_id || '').trim()))
+      || (p.rule_hash ? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}` : '自定义（无适配文件）');
     const presetVersionHint = `<span class="text-xs text-muted mt-1">${eh(versionText)}</span>`;
 
     const lockAttr = isVaultProv ? ' disabled' : '';
@@ -2642,7 +2869,8 @@
       + `<option value="anthropic-messages" ${curApiType === 'anthropic-messages' ? 'selected' : ''}>Anthropic 原生 (/v1/messages)</option>`
       + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
       + `<option value="ocr" ${curApiType === 'ocr' ? 'selected' : ''}>原生 OCR 接口 (/v1/ocr)</option>`
-      + `</select>`;
+      + `</select>`
+      + `<span class="text-xs text-muted">决定网关用哪种协议把请求转发到这个上游。客户端不用管它：调 /v1/chat/completions（OpenAI 兼容）或 /v1/messages（Claude 系）即可，网关按这里选择转换。上游协议不同但共用同一个对外模型时，在路由里加多条候选、分别绑定对应供应商即可。</span>`;
 
     const syncDraftFields = () => {
       if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
@@ -4631,7 +4859,6 @@
     // Gateway Access Center: open on BOTH Hub (for Lite projection) and Full
     const gwBox = $('gatewayAccessCenter');
     const gwBaseUrlGroup = $('gwBaseUrlGroup');
-    const gwLocalOnlyBox = $('gwLocalOnlyBox');
     const gwHubNotice = $('gwHubNotice');
     const gwSummaryPill = $('gwAccessSummaryPill');
     const guardBox = $('concurrencyGuardBox');
@@ -4640,7 +4867,6 @@
 
     if (gwBox) gwBox.hidden = false;
     if (gwBaseUrlGroup) gwBaseUrlGroup.hidden = !isFull;
-    if (gwLocalOnlyBox) gwLocalOnlyBox.hidden = !isFull;
     if (gwHubNotice) gwHubNotice.hidden = isFull;
     if (guardBox) guardBox.hidden = false;
     if (backupBox) backupBox.hidden = false;
@@ -4650,14 +4876,6 @@
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
     const localBase = `${baseOrigin}/v1`;
     const clientKey = s.client_key || s.proxy_api_key || '';
-    // Model ID chip: a route the gateway would actually answer. Enabled-only (a
-    // disabled route 404s in the scheduler) and sorted, because the Go map is
-    // serialized in key order and an arbitrary first key could be the dead one.
-    // Same predicate as /v1/models: route exists and route.enabled.
-    const modelNames = Object.keys(state.config?.agent_models || {})
-      .filter((m) => state.config.agent_models[m]?.enabled !== false)
-      .sort();
-    const firstModel = modelNames[0] || '';
 
     if (gwSummaryPill) {
       gwSummaryPill.textContent = clientKey
@@ -4671,26 +4889,11 @@
     const gwClientKey = $('gwClientKey');
     if (gwClientKey) gwClientKey.value = clientKey;
 
-    // Copy chips: one click copies the full value; the label shows the value
-    // truncated by CSS so a long key never widens the row.
-    if ($('chipBaseValue')) $('chipBaseValue').textContent = localBase;
-    if ($('chipKeyValue')) $('chipKeyValue').textContent = clientKey || '未配置';
-    const modelChip = $('chipModelValue');
-    if (modelChip) modelChip.textContent = firstModel || '暂无路由';
-    const modelChipBtn = modelChip?.closest('.copy-chip');
-    if (modelChipBtn) {
-      modelChipBtn.disabled = !firstModel;
-      modelChipBtn.title = firstModel ? `复制 Model ID: ${firstModel}` : '暂无路由';
-    }
-    const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
-    if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
-
     const btnGen = $('btnGenClientKey');
     if (btnGen) {
       btnGen.onclick = () => {
         const rand = generateClientSecretKey();
         if (gwClientKey) gwClientKey.value = rand;
-        if ($('chipKeyValue')) $('chipKeyValue').textContent = rand;
       };
     }
 
@@ -4704,28 +4907,11 @@
       };
     }
 
-    // Delegated once: the chips survive re-renders because the container is
-    // static, and every value is read at click time (the key one from the live
-    // input, the model one from the current config).
-    const chipsBox = $('gwCopyChips');
-    if (chipsBox && !chipsBox.dataset.bound) {
-      chipsBox.dataset.bound = '1';
-      chipsBox.addEventListener('click', (ev) => {
-        const chip = ev.target instanceof Element ? ev.target.closest('.copy-chip[data-copy]') : null;
-        if (!chip || chip.disabled) return;
-        const kind = chip.getAttribute('data-copy');
-        // Recompute at click time (the key one from the live input, the model one
-        // from the current config) so a just-typed key / new route is what copies.
-        const value = kind === 'base' ? localBase
-          : kind === 'key' ? (gwClientKey?.value || '').trim()
-            : (Object.keys(state.config?.agent_models || {}).filter((m) => state.config.agent_models[m]?.enabled !== false).sort()[0] || '');
-        if (!value) return toast(kind === 'model' ? '暂无路由' : '该值尚未配置', 'warn');
-        // Same helper as the other 7 copy actions: awaits, catches a rejected write
-        // (insecure http origin / no clipboard permission) and says「请手动复制」
-        // instead of claiming a copy that never happened.
-        copyToClipboard(value, `已复制 ${kind === 'base' ? 'Base URL' : kind === 'key' ? 'Client Key' : 'Model ID'}`);
-      });
-    }
+    // Delegated once: the chips survive re-renders because the containers are
+    // static, and every value is read at click time (the key from the live input,
+    // a model id from the chip's own data-model), so a just-typed key or a
+    // freshly enabled route is what copies.
+    bindGatewayCopyChips();
 
     if (isFull) {
       const sysSub = $('sysCurrentVersionSub');
