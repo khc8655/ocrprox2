@@ -4,6 +4,26 @@
 
 ---
 
+## [v20261123-09] - 2026-11-24
+
+### Added
+
+- **入口协议与供应商端点不匹配时直接 400**（`internal/scheduler/protocol.go` + `Dispatch` 前置校验）。真机验收实测：`POST /v1/messages` 打只有 OpenAI 端点的模型（`gpt-test`）时，网关把 Anthropic 请求体（`system` / `max_tokens`）原样转到 `<base>/v1/messages` 并返回 200 + OpenAI 形状的 `chat.completion`——Claude SDK 会因缺 `type`/`content` 解析失败；反向（OpenAI 客户端拿 `type: message` 体）同样。现在这类调用**在花掉任何 Key 之前**就返回 `400 invalid_request_error`，错误体点名模型、入口、以及每个候选实际支持的方言：
+
+  ```
+  model "gpt-test" cannot be served over /v1/messages:
+  mocka (openai-compatible only), mockb (openai-compatible only).
+  Call /v1/chat/completions instead, or set an Anthropic Base URL on it
+  when the upstream serves both dialects.
+  ```
+
+  判定规则（`protocolHints`）：`api_type: anthropic-messages` → 只有 Anthropic 端点；`anthropic_base_url` 非空 → 同时具备 Anthropic 端点（双端点厂商，与 api_type 无关）；其它 OpenAI 家族 `api_type`（`openai-completions` / `gemini` / `vertex` / `responses` …）→ 只有 OpenAI 端点。**没写 `api_type`、也没写 `protocols`、也没写 `anthropic_base_url` 的旧配置一律视为「未声明」，保持原来的宽松转发**——这条边界保证 `test:t3` 里的 `gpt-4o`（无 api_type）打 `/v1/messages` 仍然 200，也保证老配置升级后不会突然 400。
+- **协议能力判定与四条回归测试**（`protocol_test.go`）：`EntryProtocol` 路径映射（含 `?query`）、`ProviderServesProtocol` 九种声明组合、`RouteServesProtocol` 的 note 文案（含"未声明"与"未知供应商"）、两个 `Dispatch` 级用例——不匹配时 400 且**上游 0 次命中**、同模型换正确入口仍 200、Anthropic-only 供应商走 `/v1/messages` 成功而反向被拒。
+
+### Changed
+
+- 供应商编辑器的协议说明补上「对不上时直接返回 400 并点名哪个候选不支持，不会把错误协议的请求体发出去」。
+
 ## [v20261123-08] - 2026-11-24
 
 ### Fixed

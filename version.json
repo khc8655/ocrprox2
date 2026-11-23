@@ -1,13 +1,13 @@
 {
-  "version": "v20261123-08",
-  "semver": "2.11.2",
+  "version": "v20261123-09",
+  "semver": "2.11.3",
   "release_date": "2026-11-24",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.11.2 — 修复线上 Hub 被「file too big」打挂：Edge Function 只带适配规则与端点",
+  "title": "LLMProxy2 (OCRProxy v2) 2.11.3 — 入口协议与供应商端点不匹配时直接 400，不再把错误协议的请求发出去",
   "changelog": [
-    "紧急修复：v20261123-07 上线后线上 Hub 全站返回 545（XX-Script-Debug: query bu_script_*.js failed: file too big）。根因是 generated-presets.js 把整份预设（描述、能力位、推荐模型清单）打进边缘函数，预设库从 16 涨到 32 后边缘包体越过平台单脚本上限",
-    "generated-presets.js 只保留 Hub 真正读的两类字段：adapter_rules（投影 / vault manifest / fetch / node config）与 base_url（probe-models / verify-key）。edge-functions 的 gzip 体积从 33,147 降到 26,933 字节（−6.2 KB），留出约 5.7 KB 余量",
-    "shared/presets/catalog.json 与管理端行为不变：完整预设（名称、版本、描述、推荐模型）仍供控制台使用",
-    "上游协议下拉的说明文字修正：网关不做协议转换，客户端入口必须与供应商实际提供的端点对上（先前写成「网关按这里选择转换」，与实现不符）"
+    "真机验收发现：/v1/messages 打只有 OpenAI 端点的模型时，网关会把 Anthropic 请求体原样转发到 <base>/v1/messages，上游要么 404 要么返回 OpenAI 形状的 200，Claude SDK 解析直接炸。现在这类请求在花掉任何 Key 之前就返回 400，错误体点名「model 不能走这个入口」+ 每个候选实际支持的方言 + 两条修复路径",
+    "只对「显式声明过协议」的供应商生效：api_type 为 anthropic-messages（只有 Anthropic 端点）、或 api_type 为 OpenAI 家族且没填 Anthropic Base URL（只有 OpenAI 端点）。没写 api_type、也没写 protocols 的旧配置保持原来的宽松转发，不会被这次改动打断",
+    "反向同理：OpenAI 入口打只有 Anthropic 端点的模型现在返回 400 并提示改调 /v1/messages",
+    "同时给供应商编辑器的协议说明补了一句「对不上时直接 400，不会把错误协议的请求体发出去」"
   ]
 }

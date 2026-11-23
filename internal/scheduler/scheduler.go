@@ -28,6 +28,10 @@ const (
 var (
 	ErrNoCandidateAvailable = errors.New("scheduler: all candidates are cooled down or exhausted")
 	ErrAllRetriesExhausted  = errors.New("scheduler: all upstream candidates failed within budget")
+	// ErrProtocolUnsupported: the client called a dialect no candidate speaks.
+	// Rejected with 400 before anything is sent upstream — forwarding would just
+	// hand an Anthropic body to an OpenAI endpoint (or the reverse).
+	ErrProtocolUnsupported = errors.New("scheduler: no candidate speaks the requested protocol")
 )
 
 // OAuthRefresher enables dynamic token refresh before dispatching requests.
@@ -733,6 +737,26 @@ func (s *Scheduler) Dispatch(
 		}
 		if route.ForceNonStream {
 			clientStream = false
+		}
+	}
+
+	// The gateway forwards bodies untouched and only swaps the endpoint, so a
+	// client dialect no candidate speaks would reach the upstream as a malformed
+	// request. Reject it here, before any key is spent, with a message that
+	// names the fix (call the other entry point, or declare anthropic_base_url).
+	if r != nil {
+		if proto := EntryProtocol(r.URL.Path); proto != "" {
+			if ok, notes := RouteServesProtocol(route, snap.Config.Providers, proto); !ok && len(notes) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error": map[string]any{
+						"message": protocolMismatchMessage(reqModel, proto, r.URL.Path, notes),
+						"type":    "invalid_request_error",
+					},
+				})
+				return ErrProtocolUnsupported
+			}
 		}
 	}
 

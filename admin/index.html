@@ -2944,7 +2944,7 @@ const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAtt
 + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
 + `<option value="ocr" ${curApiType === 'ocr' ? 'selected' : ''}>原生 OCR 接口 (/v1/ocr)</option>`
 + `</select>`
-+ `<span class="text-xs text-muted">决定网关往上游转发时选哪套端点。网关不做协议转换：客户端入口必须和供应商实际提供的端点对上——上游是 OpenAI 兼容端点就调 /v1/chat/completions，是 Anthropic 端点（填了下方 Anthropic Base URL）就调 /v1/messages。多数官方厂商两套端点都有，两种客户端都能接。</span>`;
++ `<span class="text-xs text-muted">决定网关往上游转发时选哪套端点。网关不做协议转换：客户端入口必须和供应商实际提供的端点对上——上游是 OpenAI 兼容端点就调 /v1/chat/completions，是 Anthropic 端点（填了下方 Anthropic Base URL）就调 /v1/messages。对不上时网关直接返回 400 并点名哪个候选不支持，不会把错误协议的请求体发出去。多数官方厂商两套端点都有，两种客户端都能接。</span>`;
 const syncDraftFields = () => {
 if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
 if (q(`#ed_p_base_${pId}`)) p.base_url = q(`#ed_p_base_${pId}`).value.trim();
