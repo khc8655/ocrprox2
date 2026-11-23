@@ -157,11 +157,18 @@ export function normalizeAdapterRules(rawRules) {
   return out;
 }
 
+// The Hub only ever reads two fields from a preset: adapter_rules (projection,
+// vault manifest/fetch, node config) and base_url (probe-models / verify-key).
+// Shipping the whole preset (descriptions, feature flags, recommended models)
+// inflated the deployed edge bundle for nothing — and in v20261123-07 the grown
+// library pushed the bundle past the platform's per-script limit, which took
+// the Hub down with `XX-Script-Debug: file too big`. Emit the two fields only.
 const presetMap = {};
 for (const p of presets) {
   if (p && p.id) {
     presetMap[p.id] = {
-      ...p,
+      base_url: p.base_url || '',
+      ...(p.anthropic_base_url ? { anthropic_base_url: p.anthropic_base_url } : {}),
       adapter_rules: normalizeAdapterRules(p.adapter_rules),
     };
   }

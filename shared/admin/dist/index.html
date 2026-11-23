@@ -3531,7 +3531,7 @@ const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAtt
 + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
 + `<option value="ocr" ${curApiType === 'ocr' ? 'selected' : ''}>原生 OCR 接口 (/v1/ocr)</option>`
 + `</select>`
-+ `<span class="text-xs text-muted">决定网关用哪种协议把请求转发到这个上游。客户端不用管它：调 /v1/chat/completions（OpenAI 兼容）或 /v1/messages（Claude 系）即可，网关按这里选择转换。上游协议不同但共用同一个对外模型时，在路由里加多条候选、分别绑定对应供应商即可。</span>`;
++ `<span class="text-xs text-muted">决定网关往上游转发时选哪套端点。网关不做协议转换：客户端入口必须和供应商实际提供的端点对上——上游是 OpenAI 兼容端点就调 /v1/chat/completions，是 Anthropic 端点（填了下方 Anthropic Base URL）就调 /v1/messages。多数官方厂商两套端点都有，两种客户端都能接。</span>`;
 const syncDraftFields = () => {
 if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
 if (q(`#ed_p_base_${pId}`)) p.base_url = q(`#ed_p_base_${pId}`).value.trim();

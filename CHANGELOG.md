@@ -4,6 +4,17 @@
 
 ---
 
+## [v20261123-08] - 2026-11-24
+
+### Fixed
+
+- **线上 Hub 全站 545（P0，v20261123-07 引入）**：`GET https://key.khc6.cn/healthz` 返回 `HTTP/1.1 545 Unknown Status` + `XX-Script-Debug: query bu_script_1265948.js failed: file too big`，根路径、`/admin/`、`/api/v1/health` 全部同样失败——边缘函数整包加载不起来。触发点是本版把预设库从 16 个扩到 32 个：`edgeone-hub/lib/generated-presets.js` 用的是 `{...p}` 整份预设（含 `description` / `update_notes` / `features` / `recommended_models`），体积从约 16 KB 涨到 30.8 KB，边缘包体随之越过平台单脚本上限。修复：该文件只输出 Hub 真正读取的两类字段——`adapter_rules`（`lib/projection.js`、`api/vault/manifest.js`、`api/vault/fetch.js`、`api/node/config.js` 用它做规则回填）与 `base_url` / `anthropic_base_url`（`api/admin/probe-models.js`、`api/admin/verify-key.js` 用它兜底地址）。`edge-functions/` 的 gzip 总量从 **33,147 → 26,933 字节**，比出事前（31,588）还低 4.6 KB。`shared/presets/catalog.json`（控制台用的完整目录）不受影响。
+- **上游协议下拉的说明文字与实现不符**：原写「网关按这里选择转换」，实测网关不做任何请求体协议改写——它按入口选端点（`/v1/chat/completions` 走 `base_url`，`/v1/messages` 走 `anthropic_base_url`），请求体原样转发（用 mock 上游核对：Anthropic 形状的 `system` / `max_tokens` 被原样送到 OpenAI 端点路径）。改为「网关不做协议转换，客户端入口必须与供应商实际提供的端点对上」，并说明多数官方厂商两套端点都有。
+
+### Changed
+
+- `shared/presets/build-catalog.mjs` 生成 Hub 预设映射时收敛字段，并写明为什么只能带这两类字段——下次再加品牌不会再悄悄把边缘包体顶爆。
+
 ## [v20261123-07] - 2026-11-23
 
 ### Fixed

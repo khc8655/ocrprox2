@@ -1,16 +1,13 @@
 {
-  "version": "v20261123-07",
-  "semver": "2.11.1",
-  "release_date": "2026-11-23",
+  "version": "v20261123-08",
+  "semver": "2.11.2",
+  "release_date": "2026-11-24",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.11.1 — 客户端接入面板（OpenAI / Claude 双入口 + 完整模型列表）、配置输入框完整可见、预设库统一为 32 品牌",
+  "title": "LLMProxy2 (OCRProxy v2) 2.11.2 — 修复线上 Hub 被「file too big」打挂：Edge Function 只带适配规则与端点",
   "changelog": [
-    "系统设置里被截断的输入框恢复正常：Base URL / client_key / Vault 地址 / 同步 Token 不再显示成 https://hk.1 这种半截值。根因是 .setting-control 只按内容撑开（内容尺寸绕回输入框自身的内在宽度），现改为自由文本行按 62% 上限占据行内剩余空间，数字输入保持 110px 固定列宽；窄屏换行时解除上限",
-    "适配版本徽章统一：供应商卡片、添加供应商表单、供应商编辑弹窗三处都以「适配 <预设> · v<版本> · <日期>」呈现，中枢规则指纹只在规则无法映射到内置适配文件时兜底；添加供应商时输入品牌名即可看到将要套用的适配版本",
-    "预设库合二为一：内置供应商目录从 26 个补到 32 个（新增 Agnes AI / B.AI / Cline / OpenCode Zen / 商汤日日新 / TokenRhythm），并为原先缺失的 16 个品牌补上适配文件（Anthropic、百炼 Token Plan、千帆、Bedrock、Groq、Kimi Code 国际/国内、MiniMax 国内、Moonshot 国际/国内、Ollama、通义千问、腾讯云 TokenHub、火山方舟、Z.ai、智谱），Go 目录与 shared/presets 现在 32:32 一一对应，版本号由 TestCatalog_PresetAdapterVersions 强制对齐",
-    "添加供应商不再强制手填 ID：输入品牌名命中预设时自动派生（如 Qwen → qwen），仍可手工改写；自定义品牌名会做 ASCII slug 兜底",
-    "上游协议类型下拉补说明：客户端只调 /v1/chat/completions 或 /v1/messages，协议选择只决定网关往上转发时用哪种协议；同一对外模型要接不同协议的上游时，在路由里加多条候选分别绑定供应商",
-    "新增 magpie 预设表转换器（scripts/magpie-presets.mjs）：check 报告上游品牌缺口与端点漂移，import 把上游 PresetDef 表转成本仓适配文件 + Go 目录条目；11 个品牌顺手补齐 Anthropic 端点，上游 20 个品牌端点全部对齐",
-    "新增「接入信息」页签：OpenAI 兼容 / Claude 系两个 tab 各给一段 base_url 与完整请求地址（Claude 用的是不带 /v1 的 ANTHROPIC_BASE_URL），可用模型改成双行卡片（第一行可复制模型 ID、第二行供应商显示名，多于两家折成 +N），别再让一个模型挂十家供应商把界面撑爆；支持的 7 条接口路径也逐个可复制"
+    "紧急修复：v20261123-07 上线后线上 Hub 全站返回 545（XX-Script-Debug: query bu_script_*.js failed: file too big）。根因是 generated-presets.js 把整份预设（描述、能力位、推荐模型清单）打进边缘函数，预设库从 16 涨到 32 后边缘包体越过平台单脚本上限",
+    "generated-presets.js 只保留 Hub 真正读的两类字段：adapter_rules（投影 / vault manifest / fetch / node config）与 base_url（probe-models / verify-key）。edge-functions 的 gzip 体积从 33,147 降到 26,933 字节（−6.2 KB），留出约 5.7 KB 余量",
+    "shared/presets/catalog.json 与管理端行为不变：完整预设（名称、版本、描述、推荐模型）仍供控制台使用",
+    "上游协议下拉的说明文字修正：网关不做协议转换，客户端入口必须与供应商实际提供的端点对上（先前写成「网关按这里选择转换」，与实现不符）"
   ]
 }
