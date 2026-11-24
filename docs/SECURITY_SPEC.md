@@ -62,8 +62,10 @@
    - 在 Go Full 节点，凡从中枢同步下来的 `origin === "vault"` 供应商，其连接核心字段（`base_url`、`anthropic_base_url`）在本地 UI 锁定只读，但允许管理员追加本地私有 Key（标记为 `origin: "local"`）。
 2. **Kernel Guard（防掩码覆盖内核守卫）**：
    - 在 EdgeOne `api/config` 与 Go Full `internal/config/local_source.go` 的保存路径中，强制检测所有传入的密钥字符串：若包含掩码字符 `●`、全星号 `***` 或与脱敏预览格式匹配，**强制回退保留原存储中的真实明文 Key**，从内核层杜绝前端误把脱敏占位符写回磁盘。
-3. **严格单向拉取与 KV 摘要隔离（无明文/密文 `node_token` 持久化）**：
-   - EdgeOne Hub 仅保存 `NODE_TOKEN` 的单向 SHA-256 摘要（`token_sha256`），**不存储可逆密文且不发起任何 Hub → 节点反向状态回调请求**。
+3. **节点 Token 的存储与回看**（v20261124 修订）：
+   - EdgeOne Hub 同时保存 `NODE_TOKEN` 的两份数据：单向 SHA-256 摘要（`token_sha256`，唯一鉴权依据）与**明文**（`node_token_plaintext`，仅供运营者在控制台「节点详情」里回看/复制）。
+   - 这是运营者的明确选择，与 `admin_password` 明文存 KV 是同一决策——自用控制台、私有部署、风险已知悉。列表接口 `sanitizeNode` 会剥离明文字段；仅 `GET /api/admin/nodes/:id/credentials` 按需返回，响应带 `Cache-Control: no-store`。
+   - Hub 仍不发起任何 Hub → 节点反向状态回调请求，保持严格单向拉取。
 4. **Vault URL 变更防凭据泄露守卫**：
    - 当管理员在 Full 节点修改 `vault.url`（指向新的中枢域名）时，若请求未同时提交新的明文 `vault.token`，后端强制清空旧 Token，防止旧中枢的 `NODE_TOKEN` 被发送到恶意第三方地址。
 

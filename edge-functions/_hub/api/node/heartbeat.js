@@ -23,13 +23,18 @@ JSON.stringify({ ok: false, error: 'node_revoked_or_invalid' }),
 { status: 401, headers: { 'content-type': 'application/json' } }
 );
 }
-const clientIp =
+const headerIp =
 (request.headers.get('eo-connecting-ip') ||
 request.headers.get('cf-connecting-ip') ||
 request.headers.get('x-forwarded-for') ||
 '')
 .split(',')[0]
-.trim() || null;
+.trim();
+const edgeOneIp =
+request && request.eo && typeof request.eo.clientIp === 'string'
+? request.eo.clientIp.trim()
+: '';
+const clientIp = headerIp || edgeOneIp || null;
 try {
 await touchNodeHeartbeat(node, kv, {
 ip: clientIp,

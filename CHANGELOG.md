@@ -4,6 +4,44 @@
 
 ---
 
+## [v20261124-02] - 2026-11-24
+
+### Changed
+
+- **供应商编辑器重构**（用户图1反馈）：
+  - 删除「上游协议类型」下拉下面那段长说明文字（移到 title 悬停）。
+  - 协议选择从单选改为 **OpenAI 兼容端点 + Anthropic Messages 端点** 两个独立 checkbox。开就有默认 URL（来自预设），可自定义；不开就没有该端点。多数官方厂商两套端点都有，两种客户端都能接。
+  - 「预设规则绑定」改为**只读徽章**：程序按 `preset_id` 匹配预设库，用户不能手填；版本徽章仍显示「适配 <id> · vX.Y · 日期」。
+  - 高级折叠里的「模型别名映射」**删掉**（映射在模型路由页配，不在供应商上）。高级折叠标题改为「高级 (配额重置 / 适配规则)」。
+  - Hub 端「一键测全部 Key」改名为「逐把测 Key」并加 title 说明「逐把发一次最小请求，能拿到上游响应就记为可用」。
+
+- **供应商列表换字母索引条**（用户图2反馈）：过滤从「全部 / 已启用 / 探活通过 / 异常 / 已适配」换成 **A–Z + #** 字母索引条。每个字母胶囊带数量徽标，点击直接过滤；首字符非字母的归 `#`（如中文品牌名「通义千问」）。已启用/探活状态在每行的胶囊里已有，字母才是「查找供应商」的正确维度。
+
+### Added
+
+- **节点详情弹层**（用户图3反馈）：节点列表新增「详情」按钮，弹层展示：
+  - 节点 ID / 名称 / 角色 / 创建时间
+  - **Token**（默认 `●●●●●●●●●●●●` 遮罩，点眼睛展开为完整 48 位 hex，可复制）
+  - **客户端密钥 client_key**（同样遮罩 + 复制）
+  - **后台密码**（full 节点显示；lite 节点显示「lite 无控制台密码」）
+  - 心跳时间 / 配置版本 / 同步次数 / 最近 IP / 供应商范围 / 模型范围
+  - 底部：吊销节点 / 轮换 Token / 关闭
+  - lite 节点行不再显示「密码」按钮（上一轮已加）。
+
+- **Token 明文存 Hub KV**（用户拍板）：签发时同时写 `token_sha256`（唯一鉴权依据）与 `node_token_plaintext`（仅供控制台回看），轮换时同步更新。`GET /api/admin/nodes/:id/credentials` 响应加 `node_token` 字段（lite / full 都返回）；列表 `sanitizeNode` 剥离明文字段，凭据端点响应带 `Cache-Control: no-store`。与 `admin_password` 明文存 KV 是同一决策。
+
+### Fixed
+
+- **节点 IP 在本地/直连环境下全是「—」**：EdgeOne Functions 的 EventContext 只暴露 `request/params/env/waitUntil`，**没有 socket 对端地址**。但 `request.eo.clientIp` 是 EdgeOne 运行时解析好的客户端 IP（[官方文档](https://cloud.tencent.com/document/product/1552/81902)）。心跳 `clientIp` 现在按 `(eo-connecting-ip || cf-connecting-ip || x-forwarded-for) || request.eo.clientIp || null` 取。UI 上空 IP 单元格从「—」改为「未上报」。
+  - 实测（真实 `handleHeartbeatRequest` + 真实 `lib/nodes.js`）：A 无头+eo → 取 eo；B 头+eo → 头优先；C `eo-connecting-ip` 最高优先级；D 无头无 eo → `null`（UI 显示「未上报」）；E `eo.clientIp` 全空格 → `null`。
+
+### Docs
+
+- `SECURITY_SPEC.md` 第 3 条改为「同时保存 `token_sha256` 与 `node_token_plaintext`」。
+- `ADMIN_UI_BACKEND_CONTRACT.md` §2.1/§2.4 补 `node_token` 字段说明（v3.10 契约）。
+- `shared/contracts/admin-ui-backend.json` 加 v3.10 条目。
+- `UI_DESIGN_SPEC.md` 单文件体积上限从 252 KiB 更正为 **320 KiB**（v20261123-06 已调过，文档滞后）。
+
 ## [v20261124-01] - 2026-11-24
 
 ### Fixed

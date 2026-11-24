@@ -17,6 +17,7 @@ return `sk-llmproxy-${hex}`;
 function sanitizeNode(n) {
 const copy = { ...n };
 delete copy.token_sha256;
+delete copy.node_token_plaintext;
 delete copy.node_token_enc;
 delete copy.status_url;
 delete copy.has_status_url;
@@ -115,6 +116,7 @@ role: params.role === 'full' ? 'full' : 'lite',
 enabled: true,
 token_prefix: tokenPrefix,
 token_sha256: tokenSha,
+node_token_plaintext: rawToken,
 lease_ttl: Number(params.lease_ttl) || 86400,
 grace_ttl: Number(params.grace_ttl) || 3600,
 scope: {
@@ -198,6 +200,7 @@ const tokenSha = hashToken(rawToken);
 const tokenPrefix = rawToken.slice(0, 17) + '...';
 node.token_sha256 = tokenSha;
 node.token_prefix = tokenPrefix;
+node.node_token_plaintext = rawToken;
 delete node.node_token_enc;
 delete node.status_url;
 delete node.cached_status;

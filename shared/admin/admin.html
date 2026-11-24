@@ -329,13 +329,7 @@
           <span class="search-ico" id="providerSearchIcon"></span>
           <input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
         </div>
-        <div class="seg" id="providerFilterSeg">
-          <button class="seg-btn active" data-filter="all">全部</button>
-          <button class="seg-btn" data-filter="enabled">已启用</button>
-          <button class="seg-btn" data-filter="healthy">探活通过</button>
-          <button class="seg-btn" data-filter="issue">异常 / 未测</button>
-          <button class="seg-btn" data-filter="adapted">已适配</button>
-        </div>
+        <div class="alpha-bar" id="providerAlphaBar" role="tablist" aria-label="按首字母过滤"></div>
       </div>
 
       <div class="card" id="providersList"></div>
@@ -541,6 +535,29 @@
             <button class="btn btn--sm" id="btnCloseNodeCred" aria-label="关闭密码查看">关闭</button>
           </div>
           <div id="nodeCredBody"></div>
+        </div>
+      </div>
+
+      <!-- Node Detail Overlay -->
+      <div class="login-overlay hidden" id="nodeDetailOverlay" hidden>
+        <div class="login-card login-card--wide">
+          <div class="login-head">
+            <div>
+              <h2 class="card-title" id="nodeDetailTitle">节点详情</h2>
+              <p class="card-sub" id="nodeDetailSub"></p>
+            </div>
+            <button class="btn btn--sm" id="btnCloseNodeDetail" aria-label="关闭节点详情">关闭</button>
+          </div>
+          <div id="nodeDetailBody"></div>
+          <div class="form-actions form-actions--split">
+            <div class="form-actions-group">
+              <button class="btn btn--danger" id="btnNodeDetailToggle" type="button">吊销节点</button>
+            </div>
+            <div class="form-actions-group">
+              <button class="btn" id="btnNodeDetailRotate" type="button">轮换 Token</button>
+              <button class="btn" id="btnCloseNodeDetailFoot" type="button">关闭</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>

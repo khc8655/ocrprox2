@@ -51,7 +51,7 @@
 }
 ```
 
-> **`admin_password` 字段（v3.4 契约，仅 `role: "full"`）**：Full 节点对象额外携带 `admin_password`——Full 节点管理控制台（`/admin`）的登录密码，**以明文存于中枢 KV**（运营者明确选择方案 A，私有部署，风险已知悉），签发时生成、列表/详情随节点对象返回，控制台可随时回看与复制。Lite 节点没有管理控制台，**从不含该字段**（full→lite 改角色时中枢会主动删除残留值；lite→full 改角色时中枢会立即补生成并持久化一份，节点即刻可在凭据端点回看）。敏感哈希（`token_sha256` 等）仍照旧脱敏。列表响应与凭据端点一样带 `Cache-Control: no-store`（载荷含明文后台密码，任何中间层不得缓存）。
+> **`admin_password` 字段（v3.4 契约，仅 `role: "full"`）**：Full 节点对象额外携带 `admin_password`——Full 节点管理控制台（`/admin`）的登录密码，**以明文存于中枢 KV**（运营者明确选择方案 A，私有部署，风险已知悉），签发时生成、列表/详情随节点对象返回，控制台可随时回看与复制。Lite 节点没有管理控制台，**从不含该字段**（full→lite 改角色时中枢会主动删除残留值；lite→full 改角色时中枢会立即补生成并持久化一份，节点即刻可在凭据端点回看）。**`node_token` 字段（v3.10 契约）**：与 `admin_password` 同一决策——运营者选择 Token 也明文存 KV（`node_token_plaintext`），签发时写入、轮换时同步更新。`sanitizeNode` 在列表/安装载荷中剥离该字段，仅 `credentials` 端点按需返回；`token_sha256` 仍是唯一鉴权依据。列表响应与凭据端点一样带 `Cache-Control: no-store`。
 
 ### 2.2 签发新节点 `POST /api/admin/nodes`
 - **Request**:
@@ -67,7 +67,7 @@
   }
 }
 ```
-- **Response (`200 OK`)**：返回一次性明文 `node_token`（后续查询不再返回明文，KV 仅存 `token_sha256`）、节点当前生效的客户端鉴权密钥 `client_key`、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`；Full 节点另附 `admin_password`（顶层与 `node` 对象内各一份，见 §2.1 的字段说明）：
+- **Response (`200 OK`)**：返回明文 `node_token`（v3.10 起 KV 同时存 `token_sha256` 与 `node_token_plaintext`，可在「节点详情」中回看）、节点当前生效的客户端鉴权密钥 `client_key`、启动环境变量模板 `bootstrap_env` 以及直接可执行的一键安装命令 `install_command`；Full 节点另附 `admin_password`（顶层与 `node` 对象内各一份，见 §2.1 的字段说明）：
 ```json
 {
   "ok": true,
@@ -93,9 +93,11 @@
   "id": "node_hk_full_01",
   "role": "full",
   "admin_password": "xxxxxxxxxxxxxxxxxxxx",
-  "client_key": "sk-llmproxy-..."
+  "client_key": "sk-llmproxy-...",
+  "node_token": "stk_node_<48hex>"
 }
 ```
+- `node_token`（v3.10 契约）：KV 明文存于 `node_token_plaintext`，签发时写入、轮换时同步更新；旧节点若无此字段返回 `null` 并附轮换提示。Lite 节点同样返回。
 - `admin_password`：Full 节点返回 KV 存储的明文密码；Lite 节点为 `null` 并附 `admin_password_note`（「lite 节点无后台密码」）；签发于「未存储密码」旧版本的历史 Full 节点为 `null` 并附指引 note（重新获取安装命令——将轮换 Token——时补生成并持久化）。
 - `client_key`：非节点私有字段——签发时内嵌的是中枢全局 `settings.client_key`（所有节点同一把）。中枢已配置全局密钥时返回该值；未配置（节点装的是一次性随机密钥、中枢从未存储）返回 `null` 并附 `client_key_note` 指引。
 - 控制台密码弹层默认掩码显示（`●●●●●●●●●●●●`），「显示」切换、「复制密码 / 复制 API Key」一键复制。
@@ -545,7 +547,7 @@
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
 - `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。
-- Full 节点 `admin_password` **明文存于中枢 KV 并随节点对象/凭据端点返回**（方案 A，运营者明确选择的私有部署取舍，见 §2.1 / §2.4）：节点 Token 明文依旧只出现一次（签发时刻），KV 仅存 `token_sha256` 的口径不变；凭据端点响应带 `Cache-Control: no-store`，不得在任何中间层缓存。
+- Full 节点 `admin_password` 与（v3.10 起）`node_token` **均明文存于中枢 KV 并随凭据端点返回**（运营者明确选择的私有部署取舍，见 §2.1 / §2.4）。`token_sha256` 仍是唯一鉴权依据；`sanitizeNode` 在列表/安装载荷中剥离明文字段。凭据端点响应带 `Cache-Control: no-store`，不得在任何中间层缓存。
 
 ---
 

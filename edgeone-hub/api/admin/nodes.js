@@ -38,10 +38,11 @@ export async function handleNodesRequest(request, env, kv, params) {
     method === 'GET' &&
     ((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'install-command') ||
       (params && params.action === 'install-command'));
-  // GET /api/admin/nodes/:id/credentials — re-view the admin console password
-  // (Full nodes; KV stores it in plaintext by explicit operator choice) plus the
-  // client key when it is recoverable from the global config. Read-only: viewing
-  // a credential must never rotate the node token.
+  // GET /api/admin/nodes/:id/credentials — re-view the node's stored credentials:
+  // the node token (plaintext, KV-stored by explicit operator choice), the admin
+  // console password (Full nodes; same plaintext tradeoff) and the client key when
+  // it is recoverable from the global config. Read-only: viewing a credential must
+  // never rotate the node token.
   const isCredentials =
     method === 'GET' &&
     ((nodesIdx >= 0 && pathParts.length === nodesIdx + 3 && pathParts[nodesIdx + 2] === 'credentials') ||
@@ -80,13 +81,24 @@ export async function handleNodesRequest(request, env, kv, params) {
     const cfg = await loadConfig(kv);
     const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
     const adminPassword = node.role === 'full' ? String(node.admin_password || '') : '';
+    // Plaintext node token: stored in KV since v3.10 (operator chose re-viewability
+    // over digest-only). Both roles get it — a lite node authenticates with the
+    // same NODE_TOKEN; only the admin console password is full-only.
+    const nodeToken = String(node.node_token_plaintext || '');
     const payload = {
       ok: true,
       id: node.id,
       role: node.role,
+      node_token: nodeToken || null,
       admin_password: adminPassword || null,
       client_key: clientKey || null,
     };
+    if (!nodeToken) {
+      // Node issued by a hub that only kept the SHA-256 digest: the old token
+      // cannot be recovered, so point at the one action that mints a new one.
+      payload.node_token_note =
+        '该节点签发于未存储 Token 明文的旧版本；轮换 Token 后即可回看（旧 Token 会立即失效）';
+    }
     if (node.role !== 'full') {
       payload.admin_password_note = 'lite 节点无后台密码（Lite 部署没有管理控制台）';
     } else if (!adminPassword) {

@@ -45,14 +45,29 @@ export async function handleHeartbeatRequest(request, env, kv) {
     );
   }
 
-  // 2. Derive the client IP with the same header precedence as /api/node/config.
-  const clientIp =
+  // 2. Derive the client IP. Header precedence matches /api/node/config:
+  //    the platform's own header first (a caller cannot spoof it), then
+  //    Cloudflare's, then a proxy-supplied X-Forwarded-For chain.
+  const headerIp =
     (request.headers.get('eo-connecting-ip') ||
       request.headers.get('cf-connecting-ip') ||
       request.headers.get('x-forwarded-for') ||
       '')
       .split(',')[0]
-      .trim() || null;
+      .trim();
+
+  // 2b. No proxy header (direct hit on the edge, local/dev runtime): fall back
+  //     to the platform's own client-IP property. EdgeOne Functions get no
+  //     socket peer address — EventContext carries only request / params / env /
+  //     waitUntil, with no remoteAddr — but the Request object exposes
+  //     `request.eo.clientIp` (IncomingRequestEoProperties.clientIp: "客户端请求
+  //     IP"). Optional-chained because the local Node test harness has no `eo`.
+  const edgeOneIp =
+    request && request.eo && typeof request.eo.clientIp === 'string'
+      ? request.eo.clientIp.trim()
+      : '';
+
+  const clientIp = headerIp || edgeOneIp || null;
 
   // 3. Touch liveness only. touchNodeHeartbeat debounces < 60s on last_seen
   // and never writes on the debounced path. A version-less heartbeat keeps the

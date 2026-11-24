@@ -686,6 +686,8 @@
         if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
         const credOverlay = $('nodeCredOverlay');
         if (credOverlay && !credOverlay.hidden) { closeNodeCredOverlay(); closedSomething = true; }
+        const detailOverlay = $('nodeDetailOverlay');
+        if (detailOverlay && !detailOverlay.hidden) { closeNodeDetailOverlay(); closedSomething = true; }
         const tplImportOverlay = $('templateImportOverlay');
         if (tplImportOverlay && !tplImportOverlay.hidden) { closeTemplateImportOverlay(); closedSomething = true; }
         if (state.activeEditorKey) {
@@ -857,6 +859,19 @@
         if (ev.target === nodeCredOverlay) closeNodeCredOverlay();
       });
     }
+
+    const btnCloseNodeDetail = $('btnCloseNodeDetail');
+    if (btnCloseNodeDetail) clk(btnCloseNodeDetail, closeNodeDetailOverlay);
+    const btnCloseNodeDetailFoot = $('btnCloseNodeDetailFoot');
+    if (btnCloseNodeDetailFoot) clk(btnCloseNodeDetailFoot, closeNodeDetailOverlay);
+    const nodeDetailOverlay = $('nodeDetailOverlay');
+    if (nodeDetailOverlay) {
+      nodeDetailOverlay.addEventListener('click', (ev) => {
+        if (ev.target === nodeDetailOverlay) closeNodeDetailOverlay();
+      });
+    }
+    clk($('btnNodeDetailRotate'), handleNodeDetailRotate);
+    clk($('btnNodeDetailToggle'), handleNodeDetailToggle);
 
     clk($('btnImportFromTemplate'), async () => {
       // Force a reload: the cached manifest is a snapshot, and template routes newly
@@ -1230,17 +1245,18 @@
       });
     }
 
-    const provFilter = $('providerFilterSeg');
-    if (provFilter) {
-      provFilter.querySelectorAll('.seg-btn').forEach((btn) => {
-        clk(btn, () => {
-          const f = btn.getAttribute('data-filter') || 'all';
-          state.providerFilter = f;
-          provFilter.querySelectorAll('.seg-btn').forEach((b) => {
-            b.classList.toggle('active', b.getAttribute('data-filter') === f);
-          });
-          renderProvidersList();
-        });
+    // A–Z index bar: delegated on the container because mountProviderAlphaBar()
+    // rebuilds the chips whenever the provider buckets change.
+    const alphaBar = $('providerAlphaBar');
+    if (alphaBar) {
+      alphaBar.addEventListener('click', (e) => {
+        const chip = e.target.closest('.alpha-chip');
+        if (!chip) return;
+        const next = chip.getAttribute('data-alpha') || 'all';
+        if (next === state.providerFilter) return;
+        state.providerFilter = next;
+        syncProviderAlphaActive();
+        renderProvidersList();
       });
     }
 
@@ -2574,7 +2590,7 @@
           <td class="text-sm">${modelText}</td>
           <td class="tabular">配置 #${n.last_config_version || 1} · ${n.sync_count || 0} 次</td>
           <td class="tabular">${eh(lastMs ? formatTime(lastMs / 1000) : '从未同步')}</td>
-          <td class="tabular">${eh(n.last_ip || '-')}</td>
+          <td class="tabular">${eh(n.last_ip || '未上报')}</td>
         `;
         nodeBody.appendChild(tr);
       }
@@ -2714,10 +2730,97 @@
     }
   }
 
+  // --- Provider A–Z index bar (全部 + A–Z + #) ---
+  // Bucket rule shared with renderProvidersList(): first character of the display
+  // name, [a-zA-Z] folded to upper case, anything else filed under '#'. Sharing
+  // one helper is what keeps a chip from ever filtering down to an empty list.
+  function providerBucketOf(p, pId) {
+    const label = String(p?.name || pId || '').trim();
+    const first = label[0] || '';
+    return /[a-zA-Z]/.test(first) ? first.toUpperCase() : '#';
+  }
+
+  // Selection is a class flip, not a rebuild: rebuilding would drop keyboard
+  // focus from the chip the operator just activated.
+  function syncProviderAlphaActive() {
+    const bar = $('providerAlphaBar');
+    if (!bar) return;
+    const active = state.providerFilter || 'all';
+    bar.querySelectorAll('.alpha-chip').forEach((btn) => {
+      const on = btn.getAttribute('data-alpha') === active;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+
+  // Mirrors state.config.providers into the bar. Every config mutation (loadData /
+  // persistConfig / raw-JSON save) funnels through renderProvidersList(), which
+  // calls this; the signature guard keeps per-keystroke search re-renders from
+  // churning the DOM.
+  function mountProviderAlphaBar() {
+    const bar = $('providerAlphaBar');
+    if (!bar) return;
+    const providers = (state.config && state.config.providers) || {};
+    const counts = {};
+    let total = 0;
+    for (const [pId, p] of Object.entries(providers)) {
+      const bucket = providerBucketOf(p, pId);
+      counts[bucket] = (counts[bucket] || 0) + 1;
+      total += 1;
+    }
+    // A filter left pointing at a bucket that no longer exists (provider renamed
+    // or removed) would strand the list on the empty state with no chip left to
+    // click back, so fall through to 全部.
+    if (state.providerFilter !== 'all' && !counts[state.providerFilter]) {
+      state.providerFilter = 'all';
+    }
+    if (total === 0) {
+      bar.innerHTML = '';
+      bar.dataset.sig = 'empty';
+      bar.hidden = true;
+      return;
+    }
+    const chips = [{ key: 'all', label: '全部', hint: '全部供应商', count: total }];
+    for (const letter of Object.keys(counts).filter((k) => k !== '#').sort()) {
+      chips.push({ key: letter, label: letter, hint: `${letter} 开头`, count: counts[letter] });
+    }
+    if (counts['#']) chips.push({ key: '#', label: '#', hint: '非 A–Z 开头', count: counts['#'] });
+    bar.hidden = false;
+    const sig = chips.map((c) => `${c.key}:${c.count}`).join('|');
+    if (bar.dataset.sig === sig) {
+      syncProviderAlphaActive();
+      return;
+    }
+    bar.dataset.sig = sig;
+    bar.innerHTML = '';
+    for (const c of chips) {
+      const btn = ce('button');
+      btn.type = 'button';
+      btn.className = 'alpha-chip';
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('data-alpha', c.key);
+      btn.setAttribute('aria-label', `${c.hint}，${c.count} 个供应商`);
+      btn.title = `${c.hint} · ${c.count} 个`;
+      const keyEl = ce('span');
+      keyEl.className = 'alpha-chip-key';
+      keyEl.textContent = c.label;
+      const cntEl = ce('span');
+      cntEl.className = 'alpha-chip-count tabular';
+      cntEl.textContent = String(c.count);
+      btn.appendChild(keyEl);
+      btn.appendChild(cntEl);
+      bar.appendChild(btn);
+    }
+    syncProviderAlphaActive();
+  }
+
   // --- View: Providers (M1~M6, U2, U4) ---
   function renderProvidersList() {
     const container = $('providersList');
     if (!container) return;
+    // Every config mutation ends in this render, so this is the one place the
+    // index bar needs to re-sync with state.config.providers.
+    mountProviderAlphaBar();
     container.innerHTML = '';
 
     const providers = (state.config && state.config.providers) || {};
@@ -2731,13 +2834,12 @@
         const hay = `${pId} ${p.name || ''} ${p.base_url || ''} ${p.preset_id || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (f === 'enabled') return p.enabled !== false && keys.length > 0;
-      if (f === 'healthy') return keys.some((k) => k.last_ok === true);
-      if (f === 'issue') return keys.length === 0 || keys.some((k) => k.last_ok !== true);
-      // 已适配: the provider runs a real adapter script — adapter-file preset,
-      // hub rules (rule_hash) or inline adapter_rules (plan D). A preset_id that
-      // only names a protocol (anthropic, no adapter file) is NOT adapted.
-      if (f === 'adapted') return providerHasAdapter(p);
+      // Alphabetical bucket: the only filter that earns its slot. Status pills on
+      // the card already say enabled/healthy; the only question an operator has
+      // is "where in the list is <brand>", and A–Z answers it directly. Bucketing
+      // goes through providerBucketOf() so the chip counts and this filter can
+      // never disagree.
+      if (f !== 'all' && providerBucketOf(p, pId) !== f) return false;
       return true;
     });
 
@@ -2852,9 +2954,6 @@
       manifestProv && manifestProv.rule_hash && p.rule_hash && manifestProv.rule_hash !== p.rule_hash
     );
 
-    const aliasText = Object.entries(p.model_aliases || {})
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n');
     const adapterText = p.adapter_rules && Object.keys(p.adapter_rules).length > 0
       ? JSON.stringify(p.adapter_rules, null, 2)
       : '';
@@ -2867,20 +2966,37 @@
     const presetVersionHint = `<span class="text-xs text-muted mt-1">${eh(versionText)}</span>`;
 
     const lockAttr = isVaultProv ? ' disabled' : '';
-    const apiTypeSelectHtml = `<select class="select" id="ed_p_type_${pId}"${lockAttr}>`
-      + `<option value="openai-completions" ${curApiType === 'openai-completions' ? 'selected' : ''}>OpenAI 兼容 (/v1/chat/completions)</option>`
-      + `<option value="anthropic-messages" ${curApiType === 'anthropic-messages' ? 'selected' : ''}>Anthropic 原生 (/v1/messages)</option>`
-      + `<option value="gemini" ${curApiType === 'gemini' ? 'selected' : ''}>Gemini 兼容</option>`
-      + `<option value="ocr" ${curApiType === 'ocr' ? 'selected' : ''}>原生 OCR 接口 (/v1/ocr)</option>`
-      + `</select>`
-      + `<span class="text-xs text-muted">决定网关往上游转发时选哪套端点。网关不做协议转换：客户端入口必须和供应商实际提供的端点对上——上游是 OpenAI 兼容端点就调 /v1/chat/completions，是 Anthropic 端点（填了下方 Anthropic Base URL）就调 /v1/messages。对不上时网关直接返回 400 并点名哪个候选不支持，不会把错误协议的请求体发出去。多数官方厂商两套端点都有，两种客户端都能接。</span>`;
+    // Two independent toggles. Each one names an upstream endpoint the gateway
+    // will route to; having both enabled is the common case for vendors that
+    // ship OpenAI and Anthropic front doors off the same account. "默认" pulls
+    // the URL from the preset; "自定义" lets the operator override it (a
+    // proxy, a regional endpoint, a different plan).
+    const baseIsCustom = Boolean(p.base_url && presetMetaForProvider(p, p.preset_id)?.base_url && p.base_url !== presetMetaForProvider(p, p.preset_id).base_url);
+    const antIsCustom = Boolean(p.anthropic_base_url && presetMetaForProvider(p, p.preset_id)?.anthropic_base_url && p.anthropic_base_url !== presetMetaForProvider(p, p.preset_id).anthropic_base_url);
+    const openaiEnabled = Boolean(p.base_url) || curApiType === 'openai-completions' || curApiType === 'gemini';
+    const anthropicEnabled = Boolean(p.anthropic_base_url) || curApiType === 'anthropic-messages';
+    const meta = presetMetaForProvider(p, p.preset_id);
+    const baseDefault = meta?.base_url || '';
+    const antDefault = meta?.anthropic_base_url || '';
+    const openaiRow = `<label class="form-label form-label--check"><input type="checkbox" id="ed_p_openai_on_${pId}" ${openaiEnabled ? 'checked' : ''}${lockAttr}><span>OpenAI 兼容端点（/v1/chat/completions）</span></label>`
+      + `<div class="input-row mt-1"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || baseDefault)}" placeholder="${eh(baseDefault || 'https://api.example.com/v1')}" ${openaiEnabled ? '' : 'disabled'}${lockAttr}><button class="btn btn--sm" id="btn_base_default_${pId}" type="button" title="重置为预设默认" ${baseDefault ? '' : 'disabled'}>默认</button><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`;
+    const anthropicRow = `<label class="form-label form-label--check"><input type="checkbox" id="ed_p_ant_on_${pId}" ${anthropicEnabled ? 'checked' : ''}${lockAttr}><span>Anthropic Messages 端点（/v1/messages）</span></label>`
+      + `<div class="input-row mt-1"><input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || antDefault)}" placeholder="${eh(antDefault || 'https://api.example.com/anthropic')}" ${anthropicEnabled ? '' : 'disabled'}${lockAttr}><button class="btn btn--sm" id="btn_ant_default_${pId}" type="button" title="重置为预设默认" ${antDefault ? '' : 'disabled'}>默认</button></div>`;
 
     const syncDraftFields = () => {
       if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
-      if (q(`#ed_p_base_${pId}`)) p.base_url = q(`#ed_p_base_${pId}`).value.trim();
-      if (q(`#ed_p_ant_${pId}`)) p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
+      // OpenAI endpoint: presence of the checkbox decides whether this provider
+      // serves OpenAI clients at all; api_type tracks which one is primary.
+      const openaiOn = q(`#ed_p_openai_on_${pId}`)?.checked !== false;
+      const anthOn = q(`#ed_p_ant_on_${pId}`)?.checked === true;
+      if (openaiOn && q(`#ed_p_base_${pId}`)) p.base_url = q(`#ed_p_base_${pId}`).value.trim();
+      else if (!openaiOn) delete p.base_url;
+      if (anthOn && q(`#ed_p_ant_${pId}`)) p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
+      else if (!anthOn) delete p.anthropic_base_url;
       if (q(`#ed_p_preset_${pId}`)) p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
-      if (q(`#ed_p_type_${pId}`)) p.api_type = normalizeApiType(q(`#ed_p_type_${pId}`).value);
+      // api_type drives the gateway's primary dispatch. Anthropic-only providers
+      // route /v1/messages; everything else routes /v1/chat/completions.
+      p.api_type = anthOn && !openaiOn ? 'anthropic-messages' : (anthOn && p.api_type === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions');
       if (q(`#ed_p_hide_ua_${pId}`)) {
         if (q(`#ed_p_hide_ua_${pId}`).checked) p.hide_client_name = true;
         else delete p.hide_client_name;
@@ -2901,21 +3017,21 @@
       : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`;
     const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div>${isVaultProv ? '' : `<div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div>`}</div>`;
 
+    // Preset binding is read-only: the gateway resolves it against the shipped
+    // preset library, so letting the operator type a different id here would
+    // drift from the adapter file that actually runs. Show it as a badge.
+    const presetReadOnly = `<span class="pill">${eh(p.preset_id || '（未绑定预设）')}</span>${presetVersionHint}`;
+
     wrap.innerHTML = `<div class="form-grid">${[
       fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
-      fg('Base URL', `<div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}"${lockAttr}><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`),
-      fg('上游协议类型', apiTypeSelectHtml),
-      // Plan C: rpm_per_key is the provider's OVERALL RPM ceiling — it lives at
-      // the top of the provider editor, not folded away and not per-key.
-      fg('该供应商整体 RPM 上限 (rpm_per_key)', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`),
-      fg('Anthropic Base URL (可选)', `<input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || '')}"${lockAttr}>`),
-      fg('预设规则绑定', `<input class="input input--code" id="ed_p_preset_${pId}" value="${eh(p.preset_id || '')}" placeholder="如 minimax, deepseek"${lockAttr}>${presetVersionHint}`),
+      `<div class="form-group"><label class="form-label">请求地址（可同时启用两种，客户端按入口调用）</label><div class="mt-1">${openaiRow}</div><div class="mt-2">${anthropicRow}</div></div>`,
+      fg('该供应商整体 RPM 上限', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`),
+      fg('预设', presetReadOnly),
       `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级 (配额重置、模型别名与适配器规则)</summary><div class="form-grid mt-2">${[
+    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级 (配额重置 / 适配规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
-      fg('模型别名映射 (每行 对外名=上游名)', `<textarea class="textarea input--code" id="ed_p_aliases_${pId}" placeholder="fast-model=deepseek-chat">${eh(aliasText)}</textarea>`),
       fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button">一键测全部 Key</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
+    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="逐把发一次最小请求，能拿到上游响应就记为可用">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     if (tbody && !tbody.dataset.revealWired) {
@@ -3282,23 +3398,42 @@
       });
     }
 
+    // Toggle an endpoint: enabling it seeds the input with the preset's default
+    // URL if it was empty; disabling it clears the saved URL on save (see
+    // syncDraftFields). The two endpoints are independent — most vendors serve
+    // both, and that's exactly when an operator wants them both on.
+    clk(q(`#ed_p_openai_on_${pId}`), () => {
+      const on = q(`#ed_p_openai_on_${pId}`).checked;
+      const inp = q(`#ed_p_base_${pId}`);
+      if (inp) {
+        inp.disabled = !on;
+        if (on && !inp.value.trim() && baseDefault) inp.value = baseDefault;
+      }
+    });
+    clk(q(`#ed_p_ant_on_${pId}`), () => {
+      const on = q(`#ed_p_ant_on_${pId}`).checked;
+      const inp = q(`#ed_p_ant_${pId}`);
+      if (inp) {
+        inp.disabled = !on;
+        if (on && !inp.value.trim() && antDefault) inp.value = antDefault;
+      }
+    });
+    clk(q(`#btn_base_default_${pId}`), () => {
+      const inp = q(`#ed_p_base_${pId}`);
+      if (inp && baseDefault) inp.value = baseDefault;
+    });
+    clk(q(`#btn_ant_default_${pId}`), () => {
+      const inp = q(`#ed_p_ant_${pId}`);
+      if (inp && antDefault) inp.value = antDefault;
+    });
+
     clk(q(`#btn_save_prov_${pId}`), async () => {
       syncDraftFields();
       delete p.refresh_every;
       delete p.auto_include;
-
-      const rawAliases = q(`#ed_p_aliases_${pId}`)?.value || '';
-      const aliasMap = {};
-      rawAliases.split('\n').forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.includes('=')) return;
-        const eqIdx = trimmed.indexOf('=');
-        const k = trimmed.slice(0, eqIdx).trim();
-        const v = trimmed.slice(eqIdx + 1).trim();
-        if (k && v) aliasMap[k] = v;
-      });
-      if (Object.keys(aliasMap).length > 0) p.model_aliases = aliasMap;
-      else delete p.model_aliases;
+      // Model alias mapping lives on the route (模型路由页), not on the
+      // provider — the field is no longer edited here, so preserve whatever the
+      // provider already carries and stop trying to read a control we removed.
 
       const rawRules = (q(`#ed_p_rules_${pId}`)?.value || '').trim();
       if (rawRules) {
@@ -3564,6 +3699,221 @@
     if (back && document.contains(back)) back.focus();
   }
 
+  // --- Node detail overlay (identity + credentials + runtime state) ---
+  // The detail view is read-only on open: it only GETs the credentials endpoint,
+  // so looking at a node never rotates its token. Rotation and revoke/restore are
+  // explicit footer actions, each behind its own confirmation.
+  const NODE_DETAIL_MASK = '●●●●●●●●●●●●';
+  const NODE_DETAIL_SECRET_LABELS = { token: '节点 Token', client_key: '客户端密钥', admin_password: '后台登录密码' };
+  let nodeDetailReturnEl = null;
+  let nodeDetailNodeId = null;
+
+  function formatDateTime(val) {
+    if (!val) return '';
+    const d = typeof val === 'number' ? new Date(val * 1000) : new Date(val);
+    return Number.isNaN(d.getTime()) ? String(val) : d.toLocaleString();
+  }
+
+  function nodeScopeText(list, label) {
+    const arr = Array.isArray(list) ? list.filter(Boolean) : [];
+    if (!arr.length || arr.includes('*')) return `全部${label} (*)`;
+    return arr.join('、');
+  }
+
+  // Same one-row-per-item layout as the settings page (docs §6.4). `desc` is
+  // mirrored into title= for hover, and the value goes in the control column.
+  function nodeDetailRow(title, desc, valueHtml) {
+    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div></div><div class="setting-control">${valueHtml}</div></div>`;
+  }
+
+  // A credential row: masked by default, eye toggle reveals in place, copy button
+  // works on the stored plaintext regardless of the mask state.
+  function nodeDetailSecretRow(title, desc, key, value, emptyNote) {
+    const shown = value
+      ? `<div class="tabular node-detail-secret" data-detail-secret="${key}">${NODE_DETAIL_MASK}</div>`
+      : `<div class="node-detail-secret text-muted">${eh(emptyNote || '未保存')}</div>`;
+    const buttons = value
+      ? `<button class="btn btn--sm" type="button" data-detail-eye="${key}" aria-label="显示${eh(title)}" aria-pressed="false">${window.uiIcon ? window.uiIcon('eye') : ''}<span data-detail-eye-label>显示</span></button>`
+        + `<button class="btn btn--sm" type="button" data-detail-copy="${key}">复制</button>`
+      : '';
+    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div>${shown}</div><div class="setting-control">${buttons}</div></div>`;
+  }
+
+  async function handleNodeDetailClick(nodeId) {
+    try {
+      // Read-only GET: like 密码, viewing 详情 must never rotate the token.
+      const res = await window.HOST.request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/credentials`);
+      const data = await res.json();
+      if (res.ok && data && data.ok) {
+        openNodeDetailOverlay(nodeId, data);
+      } else {
+        toast((data && data.error) || '获取节点详情失败', 'err');
+      }
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  function openNodeDetailOverlay(nodeId, data) {
+    const overlay = $('nodeDetailOverlay');
+    if (!overlay) return;
+    nodeDetailNodeId = nodeId;
+    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
+    const role = node.role === 'full' || data.role === 'full' ? 'full' : 'lite';
+    const secrets = {
+      token: String(data.node_token || ''),
+      client_key: String(data.client_key || ''),
+      admin_password: role === 'full' ? String(data.admin_password || '') : '',
+    };
+
+    const titleEl = $('nodeDetailTitle');
+    if (titleEl) titleEl.textContent = `节点详情 — ${node.name || nodeId}`;
+    const subEl = $('nodeDetailSub');
+    if (subEl) subEl.textContent = '节点凭据与运行状态；Token / 密钥默认遮住，点「显示」展开';
+
+    const body = $('nodeDetailBody');
+    if (body) {
+      const providers = Array.isArray(node.scope?.providers) ? node.scope.providers : ['*'];
+      const models = Array.isArray(node.scope?.models) ? node.scope.models : ['*'];
+      const heartbeat = node.last_seen ? formatDateTime(node.last_seen) : '尚未上报心跳';
+      const ttlHint = `租约 ${Number(node.lease_ttl) || 86400}s / 宽限 ${Number(node.grace_ttl) || 3600}s 后判离线`;
+      const rows = [
+        nodeDetailRow('节点 ID', 'Hub KV 中的主键，安装命令与鉴权都用它', `<span class="tabular node-detail-value">${eh(node.id || nodeId)}</span>`),
+        nodeDetailRow('名称', '运营者备注名，仅显示用', `<span class="node-detail-value">${eh(node.name || '（未命名）')}</span>`),
+        nodeDetailRow('角色', 'full 含管理控制台；lite 为极简代理', `<span class="pill pill--accent">${eh(role)}</span>`),
+        nodeDetailRow('创建时间', '节点签发时间', `<span class="tabular node-detail-value">${eh(formatDateTime(node.created_at) || '—')}</span>`),
+        nodeDetailSecretRow(
+          '节点 Token',
+          'NODE_TOKEN：节点侧 LLMPROXY_NODE_TOKEN / 安装命令 --node-token',
+          'token',
+          secrets.token,
+          data.node_token_note || '未保存明文（旧版本节点，轮换后可回看）'
+        ),
+        nodeDetailSecretRow(
+          '客户端密钥',
+          'client_key：节点侧 LLMPROXY_CLIENT_KEY，由 Hub 全局设置下发',
+          'client_key',
+          secrets.client_key,
+          data.client_key_note || 'Hub 未配置主客户端密钥'
+        ),
+        nodeDetailSecretRow(
+          '后台密码',
+          'Full 节点管理控制台 (/admin) 的登录密码',
+          'admin_password',
+          secrets.admin_password,
+          role === 'full' ? (data.admin_password_note || '该节点未存有后台密码') : 'lite 无控制台密码'
+        ),
+        nodeDetailRow('最后心跳', ttlHint, `<span class="tabular node-detail-value">${eh(heartbeat)}</span>`),
+        nodeDetailRow('配置版本', '节点最近一次拉取生效的配置版本号', `<span class="tabular node-detail-value">${node.last_config_version ? `#${eh(String(node.last_config_version))}` : '—'}</span>`),
+        nodeDetailRow('同步次数', `其中 304 命中 ${Number(node.hit_304_count) || 0} 次`, `<span class="tabular node-detail-value">${Number(node.sync_count) || 0} 次</span>`),
+        nodeDetailRow('最近 IP', '节点最近一次同步 / 心跳的来源地址', `<span class="tabular node-detail-value">${eh(node.last_ip || '—')}</span>`),
+        nodeDetailRow('供应商范围', '节点可访问的上游供应商白名单', `<span class="node-detail-value">${eh(nodeScopeText(providers, '供应商'))}</span>`),
+        nodeDetailRow('模型范围', '节点可路由的模型白名单', `<span class="node-detail-value">${eh(nodeScopeText(models, '模型'))}</span>`),
+      ];
+      body.innerHTML = rows.join('');
+
+      // Masked by default; the toggle swaps text/icon only (zero inline style).
+      body.querySelectorAll('[data-detail-eye]').forEach((btn) => {
+        clk(btn, () => {
+          const key = btn.getAttribute('data-detail-eye');
+          const valEl = body.querySelector(`[data-detail-secret="${key}"]`);
+          const revealed = btn.getAttribute('aria-pressed') === 'true';
+          if (valEl) valEl.textContent = revealed ? NODE_DETAIL_MASK : secrets[key];
+          btn.setAttribute('aria-pressed', revealed ? 'false' : 'true');
+          btn.setAttribute('aria-label', `${revealed ? '显示' : '隐藏'}${NODE_DETAIL_SECRET_LABELS[key] || ''}`);
+          if (window.uiIcon) {
+            btn.innerHTML = `${window.uiIcon(revealed ? 'eye' : 'eyeOff')}<span data-detail-eye-label>${revealed ? '显示' : '隐藏'}</span>`;
+          } else {
+            btn.textContent = revealed ? '显示' : '隐藏';
+          }
+        });
+      });
+      body.querySelectorAll('[data-detail-copy]').forEach((btn) => {
+        clk(btn, () => {
+          const key = btn.getAttribute('data-detail-copy');
+          copyToClipboard(secrets[key], `${NODE_DETAIL_SECRET_LABELS[key] || '凭据'} 已复制`);
+        });
+      });
+    }
+
+    // Footer state follows the node: an active node offers 吊销 (danger), a
+    // revoked one offers 恢复 (normal).
+    const toggleBtn = $('btnNodeDetailToggle');
+    if (toggleBtn) {
+      const revoked = node.enabled === false;
+      toggleBtn.textContent = revoked ? '恢复节点' : '吊销节点';
+      toggleBtn.classList.toggle('btn--danger', !revoked);
+    }
+
+    // Only capture the opener on a fresh open: rotate / revoke re-renders this
+    // overlay in place, and focus must return to the list's 详情 button.
+    if (overlay.hidden) {
+      nodeDetailReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
+    overlay.hidden = false;
+    overlay.classList.remove('hidden');
+    const closeBtn = $('btnCloseNodeDetail');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function closeNodeDetailOverlay() {
+    const overlay = $('nodeDetailOverlay');
+    if (!overlay) return;
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+    nodeDetailNodeId = null;
+    const back = nodeDetailReturnEl;
+    nodeDetailReturnEl = null;
+    if (back && document.contains(back)) back.focus();
+  }
+
+  async function handleNodeDetailRotate() {
+    const nodeId = nodeDetailNodeId;
+    if (!nodeId) return;
+    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
+    if (!confirm(`轮换 ${node.name || nodeId} 的 Token？\n旧 Token 立即失效，节点在更新 NODE_TOKEN 并重新同步前会一直鉴权失败。`)) {
+      return;
+    }
+    try {
+      const res = await window.HOST.rotateNode(nodeId);
+      if (!res || !res.ok || !res.node_token) {
+        toast((res && res.error) || '轮换 Token 失败', 'err');
+        return;
+      }
+      // The install overlay caches the latest deploy material; this rotation is
+      // exactly that, so the cache must not keep serving the dead token.
+      nodeTokenMem.set(nodeId, res);
+      await loadNodesData();
+      await handleNodeDetailClick(nodeId);
+      toast('Token 已轮换', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function handleNodeDetailToggle() {
+    const nodeId = nodeDetailNodeId;
+    if (!nodeId) return;
+    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
+    const enable = node.enabled === false;
+    const ask = enable
+      ? `恢复 ${node.name || nodeId}？恢复后节点在下一次心跳 / 同步时重新校验 Token 并继续工作。`
+      : `吊销 ${node.name || nodeId}？吊销后该节点立即无法同步配置，节点侧会在鉴权失败后停服。`;
+    if (!confirm(ask)) return;
+    try {
+      const res = await window.HOST.patchNode(nodeId, { enabled: enable });
+      if (!res || !res.ok) {
+        toast((res && res.error) || (enable ? '恢复节点失败' : '吊销节点失败'), 'err');
+        return;
+      }
+      await loadNodesData();
+      await handleNodeDetailClick(nodeId);
+      toast(enable ? '节点已恢复' : '节点已吊销', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
   async function handleNodeInstallClick(nodeId) {
     const cached = nodeTokenMem.get(nodeId);
     if (cached && cached.node_token) {
@@ -3621,7 +3971,10 @@
 
       const ipTd = ce('td');
       ipTd.className = 'tabular';
-      ipTd.textContent = node.last_ip || '—';
+      // A node that never reported an IP (local/direct install: no proxy header,
+      // no EdgeOne eo.clientIp) gets a word, not a dash — "—" reads like "the
+      // column is unimplemented" rather than "nothing reported yet".
+      ipTd.textContent = node.last_ip || '未上报';
 
       const snap = getNodeSyncSnapshotStatus(node);
       // Two separate clocks by design: the table's "online" follows the hub
@@ -3656,18 +4009,27 @@
       credBtn.className = 'btn btn--sm';
       credBtn.type = 'button';
       credBtn.textContent = '密码';
+      const detailBtn = ce('button');
+      detailBtn.className = 'btn btn--sm';
+      detailBtn.type = 'button';
+      detailBtn.textContent = '详情';
       actionTd.appendChild(installBtn);
+      actionTd.appendChild(document.createTextNode(' '));
       actionTd.appendChild(editBtn);
+      actionTd.appendChild(document.createTextNode(' '));
       // A lite node has no console at all, so offering 密码 only to answer
       // 「lite 节点无后台密码」 wastes a click. The button is full-only; the
-      // endpoint still explains itself if hit directly.
+      // endpoint still explains itself if hit directly. 详情 is for every node:
+      // it carries the token, client key, heartbeat and scope in one place.
       if (node.role !== 'lite') {
         actionTd.appendChild(credBtn);
         actionTd.appendChild(document.createTextNode(' '));
       }
+      actionTd.appendChild(detailBtn);
 
       clk(installBtn, () => handleNodeInstallClick(node.id));
       clk(credBtn, () => handleNodeCredClick(node.id));
+      clk(detailBtn, () => handleNodeDetailClick(node.id));
       clk(editBtn, () => {
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
         renderNodesList();

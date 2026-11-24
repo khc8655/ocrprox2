@@ -276,7 +276,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.ok(cmdData.bootstrap_env.includes('LLMPROXY_HUB_URL='));
       // The node payload must be sanitized exactly like the list endpoint:
       // no digest, no reversible ciphertext, no cached secrets.
-      for (const forbidden of ['token_sha256', 'node_token_enc', 'status_url', 'has_status_url', 'cached_status', 'mcp_url', 'telemetry', 'kind', 'service_type']) {
+      for (const forbidden of ['token_sha256', 'node_token_plaintext', 'node_token_enc', 'status_url', 'has_status_url', 'cached_status', 'mcp_url', 'telemetry', 'kind', 'service_type']) {
         assert.equal(cmdData.node[forbidden], undefined, `install-command node payload must not expose ${forbidden}`);
       }
       assert.ok(cmdData.node.id && cmdData.node.name, 'sanitized node payload keeps its identity fields');
@@ -2058,6 +2058,105 @@ describe('11b. Admin password lifecycle (credentials endpoint & role switches)',
       RAW_CLIENT_KEY,
       'client_key must be returned verbatim: config sync projects the raw value and the node enforces it'
     );
+  });
+
+  test('GET /:id/credentials returns the KV-stored plaintext token for full and lite nodes', async () => {
+    const kv = new MockKV();
+    const full = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_tok_full', role: 'full' }), TEST_ENV, kv)
+    ).json();
+    const lite = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_tok_lite', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+
+    for (const issued of [full, lite]) {
+      const resp = await handleNodesRequest(
+        makeAdminReq('GET', `/api/admin/nodes/${issued.node.id}/credentials`),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(resp.status, 200);
+      assert.equal(resp.headers.get('cache-control'), 'no-store', 'plaintext token GET must not be cacheable');
+      const cred = await resp.json();
+      assert.equal(cred.node_token, issued.node_token, 'credentials must return the exact issued token');
+      assert.match(cred.node_token, /^stk_node_[a-f0-9]{48}$/);
+      assert.equal(cred.node_token_note, undefined, 'no legacy note once the plaintext is stored');
+    }
+
+    // The KV record keeps both forms: plaintext for re-view, digest for auth.
+    const stored = (await loadNodes(kv)).find((n) => n.id === lite.node.id);
+    assert.equal(stored.node_token_plaintext, lite.node_token, 'plaintext token is persisted in KV (operator choice)');
+    assert.equal(stored.token_sha256, hashToken(lite.node_token), 'digest remains the authentication value');
+
+    // Neither the list payload nor the install-command node payload may carry it.
+    const listData = await (await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes'), TEST_ENV, kv)).json();
+    for (const n of listData.nodes) {
+      assert.equal(n.node_token_plaintext, undefined, 'list payload must not carry plaintext tokens');
+    }
+
+    // The reported plaintext is the live credential, not a stale copy.
+    const sync = await handleNodeConfigRequest(
+      makeNodeReq('POST', '/api/node/config', lite.node_token, null),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(sync.status, 200, 'the token returned by credentials authenticates');
+  });
+
+  test('rotate refreshes node_token_plaintext so credentials never shows a dead token', async () => {
+    const kv = new MockKV();
+    const issued = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes', { name: 'zz_tok_rot', role: 'lite' }), TEST_ENV, kv)
+    ).json();
+    const rotated = await (
+      await handleNodesRequest(makeAdminReq('POST', `/api/admin/nodes/${issued.node.id}/rotate`), TEST_ENV, kv)
+    ).json();
+    assert.notEqual(rotated.node_token, issued.node_token);
+
+    const cred = await (
+      await handleNodesRequest(makeAdminReq('GET', `/api/admin/nodes/${issued.node.id}/credentials`), TEST_ENV, kv)
+    ).json();
+    assert.equal(cred.node_token, rotated.node_token, 'credentials follows the rotation');
+    assert.notEqual(cred.node_token, issued.node_token, 'the pre-rotation plaintext is gone');
+
+    const stale = await handleNodeConfigRequest(
+      makeNodeReq('POST', '/api/node/config', issued.node_token, null),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(stale.status, 401, 'the pre-rotation token must not authenticate');
+  });
+
+  test('legacy digest-only node reports node_token null with a rotate hint, then rotates into view', async () => {
+    const kv = new MockKV();
+    const legacy = {
+      id: 'node_legacy_tokless',
+      name: 'zz_legacy_tok',
+      role: 'lite',
+      enabled: true,
+      token_prefix: 'stk_node_legacy01...',
+      token_sha256: hashToken('stk_node_legacy_dummy_token'),
+      scope: { models: ['*'], providers: ['*'] },
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    await kv.put(NODES_KV_KEY, JSON.stringify([legacy]));
+
+    const before = await (
+      await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes/node_legacy_tokless/credentials'), TEST_ENV, kv)
+    ).json();
+    assert.equal(before.node_token, null);
+    assert.ok(before.node_token_note.includes('轮换'), 'legacy note points at rotation');
+
+    const rotated = await (
+      await handleNodesRequest(makeAdminReq('POST', '/api/admin/nodes/node_legacy_tokless/rotate'), TEST_ENV, kv)
+    ).json();
+    assert.match(rotated.node_token, /^stk_node_[a-f0-9]{48}$/);
+
+    const after = await (
+      await handleNodesRequest(makeAdminReq('GET', '/api/admin/nodes/node_legacy_tokless/credentials'), TEST_ENV, kv)
+    ).json();
+    assert.equal(after.node_token, rotated.node_token, 'rotation persists the plaintext for later re-view');
+    assert.equal(after.node_token_note, undefined, 'note disappears once the plaintext is stored');
   });
 });
 

@@ -241,6 +241,72 @@ html, body {
   box-shadow: var(--khc-shadow-sm);
 }
 
+/* Provider A–Z index bar: one compact row of letter pills (全部 + A–Z + #).
+ * Chips mirror .seg-btn's metrics (12px/500 text, 26~32px control band) but sit
+ * on their own full-width toolbar row so all 26 letters (A–Z) + 全部 + # fit
+ * at 1120px; narrow viewports scroll horizontally with the scrollbar hidden
+ * (same treatment as .nav-wrap on phones). */
+.alpha-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--khc-ctrl-h);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.alpha-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.alpha-chip {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--khc-text-2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border-radius: var(--khc-radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.alpha-chip:hover {
+  color: var(--khc-text-1);
+  background-color: var(--khc-surface-muted);
+}
+
+.alpha-chip.active {
+  color: var(--khc-primary-500);
+  background-color: var(--khc-primary-50);
+  border-color: var(--khc-primary-100);
+}
+
+.alpha-chip-count {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--khc-text-3);
+}
+
+.alpha-chip.active .alpha-chip-count {
+  color: var(--khc-primary-500);
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -490,6 +556,24 @@ html, body {
 
 .setting-row:last-child {
   border-bottom: 0;
+}
+
+/* Node detail overlay (节点详情): read-only rows. A node token is 57 monospace
+   characters, so values must wrap inside the card instead of widening it —
+   especially at 375px, where the control column owns a full line. */
+.node-detail-value {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  text-align: right;
+  color: var(--khc-text-1);
+  font-size: 12px;
+}
+
+.node-detail-secret {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--khc-text-1);
+  font-size: 12px;
 }
 
 /* A row gated by role uses the hidden attribute; display:flex above would
@@ -1614,6 +1698,13 @@ button.row {
   .setting-row {
     flex-wrap: wrap;
     gap: 8px 16px;
+  }
+
+  /* Detail rows: the control owns a full line, so a right-aligned value would
+     strand itself at the far edge — left-align and drop the desktop cap. */
+  .node-detail-value {
+    max-width: none;
+    text-align: left;
   }
 
   /* Wrapped row: the control owns a full line, so lift the desktop 62% cap

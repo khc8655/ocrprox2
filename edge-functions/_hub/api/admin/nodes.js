@@ -49,13 +49,19 @@ JSON.stringify({ ok: false, error: 'node_not_found' }),
 const cfg = await loadConfig(kv);
 const clientKey = cfg?.settings?.client_key || cfg?.settings?.proxy_api_key || '';
 const adminPassword = node.role === 'full' ? String(node.admin_password || '') : '';
+const nodeToken = String(node.node_token_plaintext || '');
 const payload = {
 ok: true,
 id: node.id,
 role: node.role,
+node_token: nodeToken || null,
 admin_password: adminPassword || null,
 client_key: clientKey || null,
 };
+if (!nodeToken) {
+payload.node_token_note =
+'该节点签发于未存储 Token 明文的旧版本；轮换 Token 后即可回看（旧 Token 会立即失效）';
+}
 if (node.role !== 'full') {
 payload.admin_password_note = 'lite 节点无后台密码（Lite 部署没有管理控制台）';
 } else if (!adminPassword) {

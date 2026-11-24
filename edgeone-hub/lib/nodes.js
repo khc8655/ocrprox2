@@ -20,6 +20,11 @@ export function generateClientKey() {
 function sanitizeNode(n) {
   const copy = { ...n };
   delete copy.token_sha256;
+  // The plaintext token is reachable only through GET /:id/credentials (the
+  // explicit operator "show me the token" action, no-store). The nodes list is
+  // polled every 15s and rendered as a table, so it never carries token material
+  // it cannot display.
+  delete copy.node_token_plaintext;
   delete copy.node_token_enc;
   delete copy.status_url;
   delete copy.has_status_url;
@@ -141,6 +146,11 @@ export async function issueNode(params, kv, hubUrl = 'https://hub.example.com', 
     enabled: true,
     token_prefix: tokenPrefix,
     token_sha256: tokenSha,
+    // Plaintext token kept in KV by explicit operator choice (same tradeoff as
+    // admin_password): the Hub console can re-show the node's credential at any
+    // time via GET /:id/credentials instead of forcing a rotation just to read
+    // it. token_sha256 stays the only value used for authentication.
+    node_token_plaintext: rawToken,
     lease_ttl: Number(params.lease_ttl) || 86400,
     grace_ttl: Number(params.grace_ttl) || 3600,
     scope: {
@@ -266,6 +276,9 @@ export async function reissueNodeToken(nodeId, kv, hubUrl = 'https://hub.example
 
   node.token_sha256 = tokenSha;
   node.token_prefix = tokenPrefix;
+  // Rotation must move the plaintext copy forward too: leaving the old value
+  // would make the credentials endpoint show a token that no longer works.
+  node.node_token_plaintext = rawToken;
   delete node.node_token_enc;
   delete node.status_url;
   delete node.cached_status;
