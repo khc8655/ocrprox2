@@ -4,6 +4,27 @@
 
 ---
 
+## [v20261124-03] - 2026-11-24
+
+### Fixed
+
+- **节点 IP 在「只同步配置、不发心跳」的节点上永远为空**：`POST /api/node/config` 的 `clientIp` 只认三个代理头，没有回退到 `request.eo.clientIp`。心跳路径上一版已修，但配置同步是另一条写入路径（`touchNodeLastSeen` 也写 `last_ip`）——关闭心跳的 lite、或只靠配置同步上报的节点，即使跑在 EdgeOne 上也永远显示「未上报」。现在两条路径用完全相同的回退链：
+
+  ```
+  eo-connecting-ip > cf-connecting-ip > x-forwarded-for > request.eo.clientIp > null
+  ```
+
+### Tests
+
+- 新增 **7 条永久回归用例**，把回退链的顺序钉死：
+  - 心跳路径 4 条：`eo.clientIp` 兜底、代理头优先于 eo、两者皆无记 `null`、`eo.clientIp` 为纯空格视为缺失。
+  - 配置同步路径 3 条：同三项，证明「只同步配置的 lite 也能拿到 IP」。
+  - 此前这条逻辑只由一次性脚本验证，后续重构可能悄悄回退。
+
+### Docs
+
+- `ADMIN_UI_BACKEND_CONTRACT.md` §三·补 与 `shared/contracts/admin-ui-backend.json`：客户端 IP 解析段落更新为完整回退链，并注明配置同步路径同样适用。
+
 ## [v20261124-02] - 2026-11-24
 
 ### Changed

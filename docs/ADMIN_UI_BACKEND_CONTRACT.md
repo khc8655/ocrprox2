@@ -126,7 +126,7 @@
 > **动机**：full 节点原本只在手动 `/api/vault/fetch`、`/api/vault/manifest` 时上报 `X-Node-Version`，不拉配置就一直显示「离线」（15 分钟口径），升级后中枢仍显示旧版本。心跳以极低成本补上在线与版本信号——EdgeOne Makers 免费额度**同时限制调用次数与 KV 写入数**，故端点与客户端都按「压到最低」设计。
 
 - **鉴权**：`Authorization: Bearer stk_node_<48hex>`（`NODE_TOKEN`，复用 `findNodeByToken`）；**`lite` 与 `full` 令牌均可调用**。未知/吊销/禁用令牌返回 `401 { ok:false, error:"node_revoked_or_invalid" }`；非 POST 返回 `405 method_not_allowed`。
-- **请求头**：`X-Node-Version` 可选（如 `v20261123-03`）；缺省时保留节点既有的 `last_binary_version`，不清空。客户端 IP 解析沿用 `/api/node/config` 的头优先级（`eo-connecting-ip` > `cf-connecting-ip` > `x-forwarded-for`）。
+- **请求头**：`X-Node-Version` 可选（如 `v20261123-03`）；缺省时保留节点既有的 `last_binary_version`，不清空。客户端 IP 解析：`eo-connecting-ip` > `cf-connecting-ip` > `x-forwarded-for`（取逗号前第一个），三者都没有时回退到 `request.eo.clientIp`（EdgeOne 运行时解析好的客户端 IP）；仍为空则记 `null`，控制台显示「未上报」。`/api/node/config` 的同步路径使用完全相同的回退链——只同步配置、不发心跳的节点（如关闭心跳的 lite）同样能记录 IP。
 - **响应（v3.9 变更）**：`200 OK` + `{"ok": true, "config_version": <N>}`。不拉配置、不做投影、不返回 payload、不回显遥测——只带一个版本号。
   - **为什么改**：节点只有在租约到期（默认 24h）才复验 Hub，所以此前「运营者改了模板」和「运营者吊销了节点」都要等一天才生效。心跳是唯一周期性触达 Hub 的通道，一个整数就能解决两件事。
   - **节点的两个动作**：版本号与本地不一致 → 拉取模板（一次 304/200）；`401/403` → 立即清空内存配置并停服（吊销语义）。

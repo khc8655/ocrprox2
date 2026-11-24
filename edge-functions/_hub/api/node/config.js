@@ -42,13 +42,16 @@ payload,
 });
 const ifNoneMatch = request.headers.get('if-none-match');
 const is304 = Boolean(ifNoneMatch && ifNoneMatch === etag);
-const clientIp =
+const headerIp =
 (request.headers.get('eo-connecting-ip') ||
 request.headers.get('cf-connecting-ip') ||
 request.headers.get('x-forwarded-for') ||
 '')
 .split(',')[0]
 .trim() || null;
+const edgeOneIp =
+request.eo && typeof request.eo.clientIp === 'string' ? request.eo.clientIp.trim() || null : null;
+const clientIp = headerIp || edgeOneIp || null;
 const binaryVersion = (request.headers.get('x-node-version') || '').trim();
 let usageDigest = null;
 const usageHeader = request.headers.get('x-node-usage');

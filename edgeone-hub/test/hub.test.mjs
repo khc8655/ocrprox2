@@ -2424,6 +2424,64 @@ describe('12. Vault manifest agent_models (on-demand route templates)', () => {
 // last_seen (no KV write on the debounced path), preserve last_binary_version
 // when X-Node-Version is absent, and never load or return config payloads.
 // ---------------------------------------------------------------------------
+describe('12b. Node config sync records the client IP with the same fallback chain as the heartbeat', () => {
+  let kv;
+
+  beforeEach(() => {
+    kv = new MockKV();
+  });
+
+  async function issueNode(name) {
+    const res = await handleNodesRequest(
+      makeAdminReq('POST', '/api/admin/nodes', { name, role: 'lite' }),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(res.status, 200);
+    return res.json();
+  }
+
+  async function lastIpOf(nodeId) {
+    return (await loadNodes(kv)).find((n) => n.id === nodeId)?.last_ip ?? null;
+  }
+
+  test('a config sync with no proxy header records request.eo.clientIp', async () => {
+    const issue = await issueNode('zz_cfg_eoip');
+    const req = makeNodeReq('POST', '/api/node/config', issue.node_token);
+    req.eo = { clientIp: '203.0.113.11' };
+
+    const resp = await handleNodeConfigRequest(req, TEST_ENV, kv);
+    assert.equal(resp.status, 200);
+    assert.equal(
+      await lastIpOf(issue.node.id),
+      '203.0.113.11',
+      'a lite that only syncs config (heartbeat disabled) must still record an IP'
+    );
+  });
+
+  test('a proxy header still wins on the config sync path', async () => {
+    const issue = await issueNode('zz_cfg_hdr');
+    const req = makeNodeReq('POST', '/api/node/config', issue.node_token, null, null, {
+      'x-forwarded-for': '198.51.100.7',
+    });
+    req.eo = { clientIp: '203.0.113.11' };
+
+    await handleNodeConfigRequest(req, TEST_ENV, kv);
+    assert.equal(await lastIpOf(issue.node.id), '198.51.100.7');
+  });
+
+  test('no header and no eo.clientIp leaves the config-sync IP null', async () => {
+    const issue = await issueNode('zz_cfg_noip');
+    const resp = await handleNodeConfigRequest(
+      makeNodeReq('POST', '/api/node/config', issue.node_token),
+      TEST_ENV,
+      kv
+    );
+    assert.equal(resp.status, 200);
+    assert.equal(await lastIpOf(issue.node.id), null);
+  });
+});
+
 describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
   let kv;
   beforeEach(() => {
@@ -2485,6 +2543,49 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
     assert.equal(after.sync_count, before.sync_count, 'heartbeat does not inflate sync_count');
     assert.equal(after.last_config_version, before.last_config_version, 'heartbeat does not touch config version');
     assert.notEqual(after.last_binary_version, initialVersion, 'version actually advanced from the issued default');
+  });
+
+  // The IP fallback chain, pinned so a later refactor cannot quietly drop it.
+  // EdgeOne exposes no socket peer address; request.eo.clientIp is the platform-
+  // parsed client IP, and it is the only source when a proxy adds no headers.
+  test('client IP falls back to request.eo.clientIp when no proxy header is present', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_eoip');
+    const req = heartbeatReq(issue.node_token, { 'x-node-version': 'v-eoip' });
+    // EdgeOne attaches `eo` to the Request object; simulate that shape.
+    req.eo = { clientIp: '203.0.113.9' };
+
+    const resp = await handleHeartbeatRequest(req, TEST_ENV, kv);
+    assert.equal(resp.status, 200);
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_ip, '203.0.113.9', 'eo.clientIp is used when no header supplies an IP');
+  });
+
+  test('a proxy header wins over request.eo.clientIp', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_eopre');
+    const req = heartbeatReq(issue.node_token, { 'x-forwarded-for': '198.51.100.42, 10.0.0.1' });
+    req.eo = { clientIp: '203.0.113.9' };
+
+    await handleHeartbeatRequest(req, TEST_ENV, kv);
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_ip, '198.51.100.42', 'the explicit header keeps precedence over eo.clientIp');
+  });
+
+  test('no header and no eo.clientIp leaves last_ip null (UI shows 未上报)', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_noip');
+    const resp = await handleHeartbeatRequest(heartbeatReq(issue.node_token), TEST_ENV, kv);
+    assert.equal(resp.status, 200);
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_ip, null, 'no IP source means null, never a placeholder string');
+  });
+
+  test('blank eo.clientIp is treated as absent', async () => {
+    const issue = await issueHeartbeatNode(kv, 'zz_hb_blankip');
+    const req = heartbeatReq(issue.node_token);
+    req.eo = { clientIp: '   ' };
+
+    await handleHeartbeatRequest(req, TEST_ENV, kv);
+    const after = await findRawNode(kv, issue.node.id);
+    assert.equal(after.last_ip, null);
   });
 
   test('second heartbeat within 60s → 204 and last_seen unchanged (debounce, no KV write)', async () => {

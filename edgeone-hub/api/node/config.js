@@ -56,13 +56,20 @@ export async function handleNodeConfigRequest(request, env, kv) {
 
   const ifNoneMatch = request.headers.get('if-none-match');
   const is304 = Boolean(ifNoneMatch && ifNoneMatch === etag);
-  const clientIp =
+  // Same precedence as the heartbeat: explicit proxy headers first, then the IP
+  // EdgeOne itself parsed (request.eo.clientIp). Without the second step a node
+  // that only syncs config — heartbeat disabled, or a lite that never beats —
+  // would never record an IP even though the platform already knows it.
+  const headerIp =
     (request.headers.get('eo-connecting-ip') ||
       request.headers.get('cf-connecting-ip') ||
       request.headers.get('x-forwarded-for') ||
       '')
       .split(',')[0]
       .trim() || null;
+  const edgeOneIp =
+    request.eo && typeof request.eo.clientIp === 'string' ? request.eo.clientIp.trim() || null : null;
+  const clientIp = headerIp || edgeOneIp || null;
 
   // Touch node's last_seen and sync counters (plus the real binary version the node reports)
   const binaryVersion = (request.headers.get('x-node-version') || '').trim();
