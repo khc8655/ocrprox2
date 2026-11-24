@@ -1,9 +1,15 @@
 // Package hubheartbeat implements the low-cost full-node heartbeat to EdgeOne Hub.
 //
-// It performs exactly one thing: POST /api/node/heartbeat so the hub can refresh
-// last_seen / last_ip / last_binary_version. It never pulls configuration, never
-// projects payloads, and never blocks the data plane. All failures are silent
-// (debug log only) — no retry storm, no service exit, no ticker stop.
+// It performs exactly two things, both off the data plane:
+//   - POST /api/node/heartbeat so the hub can refresh last_seen / last_ip /
+//     last_binary_version;
+//   - read the config_version the hub answers with, and tell the caller when it
+//     differs from the version the node holds, so the caller can pull a fresh
+//     template. Without this a node only refreshed on lease expiry (24h by
+//     default), which made an operator's edit look like it did nothing.
+//
+// All failures are silent (debug log only) — no retry storm, no service exit,
+// no ticker stop.
 //
 // Cost budget: default 10-minute interval (144 requests/node/day). The hub
 // additionally debounces writes (<60s) using last_seen, so KV writes stay low.
@@ -11,7 +17,9 @@ package hubheartbeat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -114,6 +122,11 @@ type Client struct {
 	logf        func(format string, args ...any)
 	// initialDelay defaults to InitialDelay; tests may shorten it.
 	initialDelay time.Duration
+	// onBeat receives the hub's answer to every beat: whether the node is still
+	// authorized, and the hub's current config_version. The heartbeat package
+	// never fetches config itself: it reports what the hub said and lets the
+	// caller decide. Nil is safe (nothing is reported).
+	onBeat func(Beat)
 }
 
 // NewClient builds a heartbeat client. It performs no network I/O. When debugf
@@ -131,6 +144,26 @@ func NewClient(hubURL, nodeToken, nodeVersion string, interval time.Duration, de
 		logf:         debugf,
 		initialDelay: InitialDelay,
 	}
+}
+
+// Beat is what one heartbeat learned from the hub.
+type Beat struct {
+	// Revoked is true when the hub answered 401/403 — the node was disabled or
+	// deleted. A node holding a still-valid lease would otherwise keep serving
+	// cached keys for up to 24h after the operator revoked it, so this is the
+	// signal that makes revocation take effect promptly.
+	Revoked bool
+	// ConfigVersion is the hub's current template version; 0 when unknown
+	// (legacy hub, revoked, or an unreachable hub).
+	ConfigVersion int64
+}
+
+// SetBeatHandler registers the callback invoked after each beat attempt.
+func (c *Client) SetBeatHandler(fn func(Beat)) {
+	if c == nil {
+		return
+	}
+	c.onBeat = fn
 }
 
 // StartOnce sends exactly one heartbeat after InitialDelay and returns. Intended
@@ -201,4 +234,34 @@ func (c *Client) send(ctx context.Context) {
 
 	// Never log the token or any response body; only URL and status at debug level.
 	c.logf("hubheartbeat: POST %s -> %d", c.url+heartbeatPath, resp.StatusCode)
+
+	if c.onBeat == nil {
+		return
+	}
+
+	// 401/403: the node is disabled or deleted on the hub. Report it so the
+	// caller can stop serving immediately — a node with a live lease would
+	// otherwise keep using cached keys for up to 24h after revocation.
+	switch resp.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		c.onBeat(Beat{Revoked: true})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return
+	}
+
+	var body struct {
+		ConfigVersion *int64 `json:"config_version"`
+	}
+	// Cap the read: this response is one small object, and a heartbeat must never
+	// block on a chatty hub.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); err != nil {
+		return
+	}
+	beat := Beat{}
+	if body.ConfigVersion != nil {
+		beat.ConfigVersion = *body.ConfigVersion
+	}
+	c.onBeat(beat)
 }

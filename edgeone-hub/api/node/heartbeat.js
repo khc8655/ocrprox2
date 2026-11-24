@@ -1,4 +1,4 @@
-import { resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { findNodeByToken, touchNodeHeartbeat } from '../../lib/nodes.js';
 
 /**
@@ -9,7 +9,13 @@ import { findNodeByToken, touchNodeHeartbeat } from '../../lib/nodes.js';
  *    projection is computed, no payload is returned.
  *  - Server-side debounce: a heartbeat inside 60s of last_seen returns 204
  *    without any KV write (touchNodeHeartbeat short-circuits on last_seen).
- *  - Success is always a bodyless 204 — the node only needs to know it was seen.
+ *  - The response carries the hub's CURRENT config_version so a node can tell
+ *    that the template changed and pull it. Without this, a node only refreshed
+ *    on lease expiry (default 24h) — the operator edited a model and saw nothing
+ *    happen (found in the 2026-11-24 lite E2E). The version is one integer and
+ *    the config is already read for the 304/cache path, so this costs no extra
+ *    KV read in the common case.
+ *  - The body is otherwise empty; older nodes ignore it.
  */
 export async function handleHeartbeatRequest(request, env, kv) {
   const method = (request && request.method ? request.method : 'GET').toUpperCase();
@@ -59,8 +65,24 @@ export async function handleHeartbeatRequest(request, env, kv) {
     });
   } catch (_) {}
 
-  // 4. Always 204, no body — no config, no payload, no telemetry echo.
-  return new Response(null, { status: 204 });
+  // 4. Report the current config version. This is the only signal a node gets
+  //    that the template changed: it compares against the version it holds and
+  //    pulls when they differ. Kept as a tiny JSON body on an otherwise empty
+  //    response, and only on the non-debounced path so a quiet node costs
+  //    nothing extra.
+  //
+  //    A failure to read the version must never fail the heartbeat: liveness is
+  //    the primary purpose, and the node simply retries on its next beat.
+  let configVersion = 0;
+  try {
+    const config = await loadConfig(kv);
+    configVersion = Number(config && config._version) || 0;
+  } catch (_) {}
+
+  return new Response(
+    JSON.stringify({ ok: true, config_version: configVersion }),
+    { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+  );
 }
 
 // EdgeOne Pages standard entry points

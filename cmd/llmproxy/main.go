@@ -38,9 +38,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261123-09"
+	version    = "v20261124-01"
 	commit     = "dev"
-	AppVersion = "2.11.3"
+	AppVersion = "2.12.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -484,6 +484,31 @@ func main() {
 	defer hbCancel()
 	if hbEnabled {
 		hbClient := hubheartbeat.NewClient(*hubURLFlag, *nodeTokenFlag, version, hbInterval, nil)
+		// The heartbeat is the only channel that reaches the hub while a node sits
+		// on its lease (24h by default). Two things need it:
+		//   - revoke: without this a disabled node keeps serving cached keys until
+		//     the lease runs out, so revocation took up to a day to bite;
+		//   - template edits: a node that never re-checks makes an operator's
+		//     change look like it did nothing.
+		if hubSrc != nil {
+			hbClient.SetBeatHandler(func(beat hubheartbeat.Beat) {
+				if beat.Revoked {
+					log.Printf("debug: hub revoked this node — purging cached config")
+					hubSrc.MarkRevoked()
+					return
+				}
+				if beat.ConfigVersion <= 0 || beat.ConfigVersion == hubSrc.ConfigVersion() {
+					return
+				}
+				hbCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if _, err := hubSrc.ForceRefreshNow(hbCtx); err != nil {
+					log.Printf("debug: config version %d -> pull failed: %v", beat.ConfigVersion, err)
+					return
+				}
+				log.Printf("debug: config version %d -> template refreshed", beat.ConfigVersion)
+			})
+		}
 		if hubheartbeat.ShouldEnable(role, hbEnabled, hbExplicit) {
 			go hbClient.RunBlock(hbCtx)
 		} else if hubheartbeat.ShouldSendStartup(hbEnabled) {

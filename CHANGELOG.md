@@ -4,6 +4,26 @@
 
 ---
 
+## [v20261124-01] - 2026-11-24
+
+### Fixed
+
+- **P0 吊销不生效（最长延迟 24 小时）**：Hub 把节点 `enabled` 置为 false 后，lite 因为租约（`lease_ttl` 默认 86400）还没到期，继续用缓存里的 Key 正常服务——实测吊销当场数据面仍 `200`，要等租约到期才会去 Hub 复验。现在心跳把 `401/403` 当作吊销信号（`hubheartbeat.Beat.Revoked`），节点收到立刻 `MarkRevoked()` 清空内存配置并停服。**实测：吊销 → 54 秒后 503**（心跳 30s 周期）。
+- **P0 Hub 改配置不生效**：`POST /api/node/heartbeat` 原为 `204` 无 body，节点无从得知模板变了，只能等租约到期（24h）或手动加 `X-Node-Refresh: 1`。心跳现在返回 `200 {"ok":true,"config_version":N}`，节点比对本地版本后自动拉取。**实测：Hub 保存 → 49 秒后 lite 拿到新路由。**
+- **P0 吊销后恢复永久 503**：`purgeAndRevoke()` 会把 `nodeToken` 清空，而 Hub 侧恢复节点（`enabled: true`）后节点再无凭据可验证，只能重启 systemd。现在保留 token，`revokedRetryAfter = 60s` 后重新校验；`Current`/`RefreshForAuth`/singleflight 三处 revoked 短路都过这个闸。**实测：恢复 → 50 秒自愈，未重启。** 吊销期间仍然零转发（上游账本条数不变）。
+- **P1 安装指引给了一个永远连不上的地址**：弹窗固定显示 `API Base URL: http://<VM_IP>:8787/v1`，而 `install.sh` 默认 `--bind=local` → systemd `LLMPROXY_ADDR=127.0.0.1:8787`。安装弹窗新增「监听范围」选择，接入地址随选择切换（local 显示 `127.0.0.1` 并提示 `ssh -L`）。
+- **P1 lite 无法使用内网/本机上游**：SSRF 防护会拒绝这类地址，但 `install.sh` 根本没有开关，只能手工写 systemd drop-in。新增 `--allow-private`，lite 单元与 full 的 `.env` 都会写入 `ALLOW_PRIVATE_IPS=true`；安装弹窗同时提供勾选项。
+- **P1 Docker 安装命令端口映射无效**：缺 `LLMPROXY_ADDR`，容器内进程只绑 `127.0.0.1`。三种安装模式（systemd / Docker / 单行直跑）现在都跟随弹窗的监听范围选择。
+- **P2 模型路由的 Key 勾选看不出可选**：`probe-pill` 长得像静态标签，实测两次在「未勾选」状态下提交被拒。加前置方框（未选空心 / 选中实心）。
+- **P2 lite 节点的「密码」按钮是死路**：点进去只有「lite 节点无后台密码」。按 role 隐藏。
+- **P2 三种版本号另一种说法**：概览与节点表把心跳时间写成「最后同步」、配置版本写成 `v1`、二进制版本写成 `v2026xxxx`，「未上报」实际指用量。现在拆开表述：`心跳 <时间> · 配置 #N`、`用量未上报`。
+
+### Tests
+
+- `internal/hubsync/revoked_test.go`：吊销后可自愈（且窗口内不打扰 Hub）、`MarkRevoked` 立即清空缓存、吊销重试被限流（20 次调用 0 次额外请求）。
+- `internal/hubheartbeat/configversion_test.go`：上报版本、401/403 报告 Revoked、200 不误报、旧 Hub 的 204 与超大 body 都安全忽略。
+- `edgeone-hub/test/hub.test.mjs`：心跳断言从「204 无 body」改为「200 + 只含 config_version」，并明确「每次非去抖心跳恰好一次 config 读取」。
+
 ## [v20261123-09] - 2026-11-24
 
 ### Added

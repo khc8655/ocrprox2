@@ -189,6 +189,7 @@ show_help() {
     echo "  --mirror=<URL>             前置自定义 GitHub 下载加速镜像 (如 https://ghfast.top)"
     echo "  -p, --port=<PORT>          服务监听端口 [默认: 8787]"
     echo "      --bind=<local|public>  监听范围: local=仅 127.0.0.1 (默认); public=0.0.0.0 对外"
+    echo "      --allow-private        允许上游地址是内网/本机 (默认禁止，SSRF 防护)"
     echo "  -k, --client-key=<KEY>     客户端接入 API Key (空则自动生成 sk-llmproxy-...)"
     echo "  -w, --admin-password=<PW>  管理控制台密码 (仅 full 模式，空则自动生成)"
     echo "      --admin-pass=<PW>      同 --admin-password"
@@ -213,6 +214,7 @@ CLI_HUB_URL=""
 CLI_NODE_TOKEN=""
 CLI_PORT=""
 CLI_BIND=""
+CLI_ALLOW_PRIVATE=""
 CLI_ADMIN_PASS=""
 CLI_CLIENT_KEY=""
 CLI_ENCRYPT_KEY=""
@@ -284,6 +286,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bind=*)
             CLI_BIND="${1#*=}"
+            shift
+            ;;
+        --allow-private)
+            CLI_ALLOW_PRIVATE="true"
             shift
             ;;
         -w|--password|--admin-pass|--admin-password)
@@ -1448,6 +1454,13 @@ Group=nogroup'
 NoNewPrivileges=yes'
 fi
 
+# A private upstream (LAN host, 127.0.0.1, CGNAT) is blocked by the SSRF guard
+# unless the operator opts in. Off by default: an upstream address is user input.
+LITE_PRIVATE_BLOCK=""
+if [[ "$CLI_ALLOW_PRIVATE" == "true" ]]; then
+    LITE_PRIVATE_BLOCK='Environment="ALLOW_PRIVATE_IPS=true"'
+fi
+
 # 监听地址由 FINAL_PORT + BIND_MODE 一次性定稿，供下方 .env 与 systemd 单元共用
 BIND_ADDR="$(addr_for_mode "$BIND_MODE" "$FINAL_PORT")"
 
@@ -1477,6 +1490,7 @@ if [[ "$FINAL_ROLE" == "full" ]]; then
         # return 1 under `set -e`, aborting a fresh full install with no node token.
         if [[ -n "$FINAL_HUB_URL" ]]; then printf 'LLMPROXY_HUB_URL=%s\n' "$FINAL_HUB_URL"; fi
         if [[ -n "$FINAL_NODE_TOKEN" ]]; then printf 'LLMPROXY_NODE_TOKEN=%s\n' "$FINAL_NODE_TOKEN"; fi
+        if [[ "$CLI_ALLOW_PRIVATE" == "true" ]]; then printf 'ALLOW_PRIVATE_IPS=true\n'; fi
     ) > "$TMP_ENV_FILE"
     run_sudo sh -c 'umask 077 && cat "$1" > "$2" && chmod 600 "$2"' _ "$TMP_ENV_FILE" "$ENV_FILE"
     rm -f "$TMP_ENV_FILE"
@@ -1539,6 +1553,7 @@ Environment="LLMPROXY_CLIENT_KEY=${FINAL_CLIENT_KEY}"
 # nodes deliberately omit this: they have their own console, and only send the
 # one-shot startup beat (sets nothing, so no free-tier invocations are spent).
 Environment="LLMPROXY_HEARTBEAT_INTERVAL=600"
+${LITE_PRIVATE_BLOCK}
 Environment="GOMEMLIMIT=48MiB"
 ExecStart=${TARGET_DIR}/${BIN_NAME}
 Restart=always

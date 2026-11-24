@@ -1,13 +1,19 @@
 {
-  "version": "v20261123-09",
-  "semver": "2.11.3",
+  "version": "v20261124-01",
+  "semver": "2.12.0",
   "release_date": "2026-11-24",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.11.3 — 入口协议与供应商端点不匹配时直接 400，不再把错误协议的请求发出去",
+  "title": "LLMProxy2 (OCRProxy v2) 2.12.0 — lite 全链路真机验收修复：吊销即时生效、配置靠心跳自动下发、安装命令可用",
   "changelog": [
-    "真机验收发现：/v1/messages 打只有 OpenAI 端点的模型时，网关会把 Anthropic 请求体原样转发到 <base>/v1/messages，上游要么 404 要么返回 OpenAI 形状的 200，Claude SDK 解析直接炸。现在这类请求在花掉任何 Key 之前就返回 400，错误体点名「model 不能走这个入口」+ 每个候选实际支持的方言 + 两条修复路径",
-    "只对「显式声明过协议」的供应商生效：api_type 为 anthropic-messages（只有 Anthropic 端点）、或 api_type 为 OpenAI 家族且没填 Anthropic Base URL（只有 OpenAI 端点）。没写 api_type、也没写 protocols 的旧配置保持原来的宽松转发，不会被这次改动打断",
-    "反向同理：OpenAI 入口打只有 Anthropic 端点的模型现在返回 400 并提示改调 /v1/messages",
-    "同时给供应商编辑器的协议说明补了一句「对不上时直接 400，不会把错误协议的请求体发出去」"
+    "P0 安全：Hub 吊销节点后，lite 因租约未到期（默认 24h）继续用缓存 Key 正常服务，吊销最多延迟一天才生效。现在心跳把 401/403 视为吊销信号，节点收到即刻清空内存配置并停服——实测延迟从 24 小时降到 54 秒（心跳 30s 周期）",
+    "P0 可用性：Hub 改配置后节点不生效。心跳响应从 204 无 body 改为返回当前 config_version，节点比对后自动拉取——实测 49 秒生效（此前要等 24 小时租约，或手动加 X-Node-Refresh 头）",
+    "P0 可用性：Hub 吊销后再恢复，节点永久 503，只能重启 systemd。根因是 purgeAndRevoke 把 nodeToken 清空了，节点再无凭据可验证。现在保留 token，60 秒重试窗口后自动重新校验——实测恢复后 50 秒自愈，无需重启",
+    "P1 安装：Hub 安装指引固定写 <VM_IP>:port，但 install.sh 默认 --bind=local（只听 127.0.0.1），照抄必连不上。安装弹窗新增「监听范围」选择，接入地址随选择切换：local 显示 127.0.0.1 并提示 ssh -L",
+    "P1 安装：lite 一律拒绝内网/本机上游（netguard SSRF 防护），但 install.sh 没有开关、UI 也没提，只能用 systemd drop-in 手工绕过。新增 --allow-private 参数与安装弹窗勾选项，systemd 单元与 full 的 .env 都会带上 ALLOW_PRIVATE_IPS=true",
+    "P1 安装：Docker 命令缺 LLMPROXY_ADDR，容器内进程只绑 127.0.0.1，-p 端口映射形同虚设；单行直跑却用 [::] 公开。三种模式的监听范围现在都跟随安装弹窗的选择",
+    "P2 UI：模型路由的 Key 勾选是 probe-pill 按钮，长得像静态标签，实测两次都是在「没勾选」的情况下点确认被拒。加了前置方框（未选空心 / 选中实心），与站内 checkbox 语义一致",
+    "P2 UI：lite 节点行仍有「密码」按钮，点进去只有一句「lite 节点无后台密码」。按 role 隐藏",
+    "P2 UI：概览与节点表同一行里「最后同步」其实是心跳时间、旁边的 v1/v2 是配置版本、节点上的 v2026xxxx 是二进制版本，三种 v 混在一起且「未上报」指的其实是用量。现在拆分表述：心跳 <时间> · 配置 #N，用量列改「用量未上报」，配置版本带 # 前缀",
+    "P2 UI：供应商编辑器的协议说明补充「对不上时直接 400 并点名哪个候选不支持」"
   ]
 }

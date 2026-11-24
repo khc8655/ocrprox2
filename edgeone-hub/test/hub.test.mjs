@@ -2354,7 +2354,7 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
     return (await loadNodes(kv)).find((n) => n.id === nodeId);
   }
 
-  test('valid token first heartbeat → 204 with no body, updates last_seen and last_binary_version', async () => {
+  test('valid token first heartbeat → 200 + config_version, updates last_seen and last_binary_version', async () => {
     const issue = await issueHeartbeatNode(kv, 'zz_hb_first');
     const before = await findRawNode(kv, issue.node.id);
     assert.equal(before.last_seen, null, 'fresh node has no last_seen');
@@ -2368,8 +2368,15 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       TEST_ENV,
       kv
     );
-    assert.equal(resp.status, 204, 'heartbeat success is a bodyless 204');
-    assert.equal(await resp.text(), '', '204 carries no body — no config payload, no telemetry echo');
+    assert.equal(resp.status, 200, 'heartbeat success is 200');
+    // v20261124-XX: the body carries exactly one field — the hub's current
+    // config_version — so a node can tell the template changed and pull it.
+    // Before this, a node only refreshed on lease expiry (24h by default) and an
+    // operator's edit looked like it did nothing (found in the lite E2E).
+    const hbBody = await resp.json();
+    assert.equal(hbBody.ok, true);
+    assert.ok(Number.isInteger(hbBody.config_version), 'config_version is an integer');
+    assert.deepEqual(Object.keys(hbBody).sort(), ['config_version', 'ok'], 'no config payload, no telemetry echo');
 
     const after = await findRawNode(kv, issue.node.id);
     assert.ok(after.last_seen, 'last_seen is now set');
@@ -2389,7 +2396,7 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       TEST_ENV,
       kv
     );
-    assert.equal(first.status, 204);
+    assert.equal(first.status, 200);
     const afterFirst = await findRawNode(kv, issue.node.id);
     const firstSeen = afterFirst.last_seen;
     const firstVersion = afterFirst.last_binary_version;
@@ -2410,7 +2417,7 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       TEST_ENV,
       spyingKv
     );
-    assert.equal(second.status, 204, 'debounced heartbeat still returns 204');
+    assert.equal(second.status, 200, 'debounced heartbeat still answers');
     assert.equal(kvWrites.length, 0, 'debounced heartbeat issues ZERO KV.put calls');
 
     const afterSecond = await findRawNode(kv, issue.node.id);
@@ -2459,7 +2466,7 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       TEST_ENV,
       kv
     );
-    assert.equal(seeded.status, 204);
+    assert.equal(seeded.status, 200);
     const withVersion = await findRawNode(kv, issue.node.id);
     assert.equal(withVersion.last_binary_version, 'v-keep-me');
 
@@ -2471,13 +2478,17 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
     await saveNodes(nodes, kv);
 
     const noHeader = await handleHeartbeatRequest(heartbeatReq(issue.node_token), TEST_ENV, kv);
-    assert.equal(noHeader.status, 204);
+    assert.equal(noHeader.status, 200);
     const after = await findRawNode(kv, issue.node.id);
     assert.equal(after.last_binary_version, 'v-keep-me', 'absent X-Node-Version never clears the stored version');
     assert.ok(new Date(after.last_seen).getTime() > new Date(withVersion.last_seen).getTime(), 'liveness still advanced');
   });
 
-  test('never loads config: no llmproxy_config read, no payload; non-POST rejected', async () => {
+  // v20261124-XX: the heartbeat now returns the hub's config_version so a node
+  // can notice a changed template without waiting out its lease (24h default).
+  // That costs exactly ONE config read per non-debounced beat, and the body
+  // still carries nothing but `{ok, config_version}` — never a config payload.
+  test('returns only config_version: one config read, no payload; non-POST rejected', async () => {
     const issue = await issueHeartbeatNode(kv, 'zz_hb_noconfig');
     const configReads = [];
     const auditKv = {
@@ -2493,13 +2504,17 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
       TEST_ENV,
       auditKv
     );
-    assert.equal(resp.status, 204);
-    const text = await resp.text();
-    assert.equal(text, '', 'no body at all');
-    assert.equal(configReads.includes('llmproxy_config'), false, 'heartbeat must never read llmproxy_config');
+    assert.equal(resp.status, 200);
+    const body = await resp.json();
+    assert.deepEqual(Object.keys(body).sort(), ['config_version', 'ok'], 'body is version-only — no config payload');
+    assert.equal(
+      configReads.filter((k) => k === 'llmproxy_config').length,
+      1,
+      'exactly one config read per non-debounced beat (needed for config_version)'
+    );
     assert.ok(
-      configReads.every((key) => key === NODES_KV_KEY),
-      'heartbeat only ever reads the node store (auth + touch), never a config key'
+      configReads.every((key) => key === NODES_KV_KEY || key === 'llmproxy_config'),
+      'heartbeat reads only the node store and the config version'
     );
 
     const getResp = await handleHeartbeatRequest(
@@ -2513,18 +2528,21 @@ describe('13. Node heartbeat (low-cost liveness & binary version)', () => {
     assert.equal(getResp.status, 405, 'non-POST method is rejected');
   });
 
-  test('EdgeOne onRequest/onRequestPost/default.fetch entry points all return 204', async () => {
+  test('EdgeOne onRequest/onRequestPost/default.fetch entry points all answer with config_version', async () => {
     const issue = await issueHeartbeatNode(kv, 'zz_hb_entries');
     const context = {
       request: heartbeatReq(issue.node_token, { 'x-node-version': 'v-entry' }),
       env: { ...TEST_ENV, KV: kv },
     };
-    assert.equal((await edgeNodeHeartbeat.onRequest(context)).status, 204);
-    assert.equal((await edgeNodeHeartbeat.onRequestPost(context)).status, 204);
-    assert.equal(
-      (await edgeNodeHeartbeat.default.fetch(heartbeatReq(issue.node_token), { ...TEST_ENV, KV: kv })).status,
-      204
-    );
+    const a = await edgeNodeHeartbeat.onRequest(context);
+    assert.equal(a.status, 200);
+    assert.ok(Number.isInteger((await a.json()).config_version));
+    const b = await edgeNodeHeartbeat.onRequestPost(context);
+    assert.equal(b.status, 200);
+    assert.ok(Number.isInteger((await b.json()).config_version));
+    const c = await edgeNodeHeartbeat.default.fetch(heartbeatReq(issue.node_token), { ...TEST_ENV, KV: kv });
+    assert.equal(c.status, 200);
+    assert.ok(Number.isInteger((await c.json()).config_version));
   });
 });
 

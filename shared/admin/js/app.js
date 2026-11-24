@@ -2555,10 +2555,13 @@
             ? '<span class="pill pill--green">在线</span>'
             : '<span class="pill pill--amber">离线</span>';
 
+        // “未上报” here always meant USAGE (which models the node actually served),
+        // not the delivered template — reading it as “config didn't land” was a
+        // real support case in the lite E2E. Name it for what it is.
         const usageModels = n.usage && n.usage.models ? Object.keys(n.usage.models) : [];
         const modelText = usageModels.length
           ? usageModels.slice(0, 3).map((m) => eh(m)).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
-          : '<span class="text-muted">未上报</span>';
+          : '<span class="text-muted">用量未上报</span>';
 
         const binBadge = n.last_binary_version
           ? ` <span class="pill tabular">${eh(n.last_binary_version)}</span>`
@@ -2569,7 +2572,7 @@
           <td><span class="pill pill--accent">${eh(n.role || 'full')}</span>${binBadge}</td>
           <td>${statusHtml}</td>
           <td class="text-sm">${modelText}</td>
-          <td class="tabular">${eh(`v${n.last_config_version || 1}`)} · ${n.sync_count || 0} 次</td>
+          <td class="tabular">配置 #${n.last_config_version || 1} · ${n.sync_count || 0} 次</td>
           <td class="tabular">${eh(lastMs ? formatTime(lastMs / 1000) : '从未同步')}</td>
           <td class="tabular">${eh(n.last_ip || '-')}</td>
         `;
@@ -3631,8 +3634,14 @@
       else if (online) statusPill = '<span class="pill pill--green">在线</span>';
       else if (snap.syncMs) statusPill = `<span class="pill pill--amber">${snap.key === 'grace' ? '宽限期内' : '离线'}</span>`;
       else statusPill = '<span class="pill">未安装</span>';
+      // Two different clocks, two different words. `last_seen` is the heartbeat
+      // (600s), while the config version is what the node actually pulled — the
+      // old single “最后同步” label made operators think a config change had
+      // already landed when only a heartbeat had.
       const statusTd = ce('td');
-      statusTd.innerHTML = `${statusPill}<div class="text-sm text-muted">${snap.syncMs ? `最后同步 ${formatTime(snap.syncMs / 1000)}` : '尚未安装'}</div>`;
+      const hbText = snap.syncMs ? `心跳 ${formatTime(snap.syncMs / 1000)}` : '尚未安装';
+      const cfgText = node.last_config_version ? `配置 #${node.last_config_version}` : '';
+      statusTd.innerHTML = `${statusPill}<div class="text-sm text-muted">${eh(hbText)}${cfgText ? ` · ${eh(cfgText)}` : ''}</div>`;
 
       const actionTd = ce('td');
       const installBtn = ce('button');
@@ -3649,12 +3658,15 @@
       credBtn.textContent = '密码';
       actionTd.appendChild(installBtn);
       actionTd.appendChild(editBtn);
-      actionTd.appendChild(credBtn);
-      actionTd.appendChild(document.createTextNode(' '));
+      // A lite node has no console at all, so offering 密码 only to answer
+      // 「lite 节点无后台密码」 wastes a click. The button is full-only; the
+      // endpoint still explains itself if hit directly.
+      if (node.role !== 'lite') {
+        actionTd.appendChild(credBtn);
+        actionTd.appendChild(document.createTextNode(' '));
+      }
 
       clk(installBtn, () => handleNodeInstallClick(node.id));
-      // Works for lite rows too: the credentials endpoint answers with the lite
-      // note, so the overlay explains instead of hiding the affordance.
       clk(credBtn, () => handleNodeCredClick(node.id));
       clk(editBtn, () => {
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
@@ -3726,10 +3738,15 @@
       const common = `-p ${port}:8787`;
       const hubEnv = `-e LLMPROXY_HUB_URL="${cleanHub}" -e LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` -e LLMPROXY_CLIENT_KEY="${clientKey}"` : ''}`;
       if (role === 'full') {
-        return `mkdir -p "$(pwd)/llmproxy-data" && docker run -d --name llmproxy-full --restart unless-stopped ${common} ${vol} -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data -e ADMIN_PASSWORD="${adminPass}" ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
+        return `mkdir -p "$(pwd)/llmproxy-data" && docker run -d --name llmproxy-full --restart unless-stopped ${common} ${vol} -e LLMPROXY_ROLE=full -e CONFIG_DIR=/data -e LLMPROXY_ADDR=[::]:8787 -e ADMIN_PASSWORD="${adminPass}"${opts.allowPrivate ? ' -e ALLOW_PRIVATE_IPS=true' : ''} ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
       }
+      // The image listens on LLMPROXY_ADDR: without it the process binds
+      // 127.0.0.1 inside the container and `-p port:8787` publishes nothing that
+      // answers. Both roles therefore set the wildcard address explicitly.
+      const addrEnv = '-e LLMPROXY_ADDR=[::]:8787';
+      const privEnv = opts.allowPrivate ? ' -e ALLOW_PRIVATE_IPS=true' : '';
       // Lite is zero-disk by design: no volume needed at all.
-      return `docker run -d --name llmproxy-lite --restart unless-stopped ${common} -e LLMPROXY_ROLE=lite ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
+      return `docker run -d --name llmproxy-lite --restart unless-stopped ${common} -e LLMPROXY_ROLE=lite ${addrEnv}${privEnv} ${hubEnv} ghcr.io/khc8655/ocrprox2:latest`;
     }
 
     if (opts.mode === 'binary') {
@@ -3739,10 +3756,19 @@
       const archDetect = `ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')`;
       const fetch = `mkdir -p ./llmproxy-data && cd ./llmproxy-data && curl -fL --retry 2 -o llmproxy "https://github.com/khc8655/ocrprox2/releases/latest/download/llmproxy-linux-\${ARCH}" && chmod +x ./llmproxy`;
       if (role === 'full') {
-        return `${archDetect} && ${fetch} && ADMIN_PASSWORD="${adminPass}" CONFIG_DIR="$(pwd)/cfg" LLMPROXY_ROLE=full LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy --addr="[::]:${port}"`;
+        const fullAddr = opts.bind === 'public' ? `[::]:${port}` : `127.0.0.1:${port}`;
+        return `${archDetect} && ${fetch} && ADMIN_PASSWORD="${adminPass}" CONFIG_DIR="$(pwd)/cfg" LLMPROXY_ROLE=full LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''}${opts.allowPrivate ? ' ALLOW_PRIVATE_IPS=true' : ''} ./llmproxy --addr="${fullAddr}"`;
       }
-      return `${archDetect} && ${fetch} && LLMPROXY_ROLE=lite LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''} ./llmproxy --addr="[::]:${port}"`;
+      const binAddr = opts.bind === 'public' ? `[::]:${port}` : `127.0.0.1:${port}`;
+      const privEnv = opts.allowPrivate ? ' ALLOW_PRIVATE_IPS=true' : '';
+      return `${archDetect} && ${fetch} && LLMPROXY_ROLE=lite LLMPROXY_HUB_URL="${cleanHub}" LLMPROXY_NODE_TOKEN="${token}"${clientKey ? ` LLMPROXY_CLIENT_KEY="${clientKey}"` : ''}${privEnv} ./llmproxy --addr="${binAddr}"`;
     }
+
+    // `--bind` and `--allow-private` are what decide whether the pasted command
+    // actually connects: the installer defaults to a loopback bind, and lite
+    // refuses LAN upstreams unless told otherwise.
+    const bindFlag = opts.bind === 'public' ? '--bind=public' : '--bind=local';
+    const privateFlag = opts.allowPrivate ? '--allow-private' : '';
 
     let scriptUrl = `${cleanHub}/install.sh`;
     if (opts.scriptSource === 'ghraw') {
@@ -3759,6 +3785,8 @@
     if (role === 'full' && adminPass) flags.push(`--admin-password="${adminPass}"`);
     if (clientKey) flags.push(`--client-key="${clientKey}"`);
     flags.push(`-p ${port}`);
+    flags.push(bindFlag);
+    if (privateFlag) flags.push(privateFlag);
     if (opts.mirror === 'ghfast') flags.push('--mirror="https://ghfast.top"');
     if (opts.autoYes) flags.push('-y');
     return `curl -fsSL ${scriptUrl} | sudo bash -s -- ${flags.join(' ')}`;
@@ -3780,6 +3808,12 @@
       mirror: 'auto',
       autoYes: true,
       adminPass,
+      // Listen scope and private-upstream access are the two settings that
+      // decide whether the pasted command actually works: the installer defaults
+      // to 127.0.0.1 (so `<VM_IP>:port` never answered) and lite blocks LAN
+      // upstreams without an explicit opt-in.
+      bind: 'local',
+      allowPrivate: false,
     };
 
     container.innerHTML = `<div class="snippet-box">
@@ -3829,6 +3863,20 @@
             <span>无人值守 (-y)，取消可交互确认</span>
           </label>
         </div>
+        <div class="form-group" data-cmd-bind-wrap>
+          <label class="form-label">监听范围</label>
+          <select class="select" data-cmd-bind>
+            <option value="local">仅本机 127.0.0.1（需 ssh -L / 反代）</option>
+            <option value="public">对外 0.0.0.0（需自行做鉴权与防火墙）</option>
+          </select>
+        </div>
+        <div class="form-group" data-cmd-private-wrap>
+          <label class="form-label">内网上游</label>
+          <label class="form-label form-label--check">
+            <input type="checkbox" data-cmd-private>
+            <span>允许内网 / 本机上上游地址</span>
+          </label>
+        </div>
       </div>
       <textarea class="textarea input--code" data-cmd-output readonly rows="3"></textarea>
     </div>`;
@@ -3843,6 +3891,8 @@
     const srcEl = q('[data-cmd-source]');
     const mirrorEl = q('[data-cmd-mirror]');
     const yesEl = q('[data-cmd-yes]');
+    const bindEl = q('[data-cmd-bind]');
+    const privEl = q('[data-cmd-private]');
 
     const refresh = () => {
       const isInstall = panelState.mode === 'install';
@@ -3851,7 +3901,12 @@
       if (yesWrap) yesWrap.hidden = !isInstall;
       const port = Math.max(1, Math.min(65535, Number(panelState.port) || 8787));
       if (baseHintEl) {
-        baseHintEl.textContent = `API Base URL: http://<VM_IP>:${port}/v1`;
+        // Match what the command actually installs. A local bind is reachable
+        // only from the VM itself, so advertising `<VM_IP>:port` sent operators
+        // chasing a connection that could never work.
+        baseHintEl.textContent = panelState.bind === 'public'
+          ? `API Base URL: http://<VM_IP>:${port}/v1`
+          : `API Base URL: http://127.0.0.1:${port}/v1（仅本机可达：ssh -L ${port}:127.0.0.1:${port} 或反代）`;
       }
       if (outEl) {
         outEl.value = buildNodeShellCommands({
@@ -3878,6 +3933,8 @@
     if (srcEl) srcEl.addEventListener('change', () => { panelState.scriptSource = srcEl.value; refresh(); });
     if (mirrorEl) mirrorEl.addEventListener('change', () => { panelState.mirror = mirrorEl.value; refresh(); });
     if (yesEl) yesEl.addEventListener('change', () => { panelState.autoYes = yesEl.checked; refresh(); });
+    if (bindEl) bindEl.addEventListener('change', () => { panelState.bind = bindEl.value === 'public' ? 'public' : 'local'; refresh(); });
+    if (privEl) privEl.addEventListener('change', () => { panelState.allowPrivate = privEl.checked; refresh(); });
     const copyBtn = q('[data-cmd-copy]');
     if (copyBtn) clk(copyBtn, () => copyToClipboard(outEl?.value, '部署命令已复制'));
     const copyPassBtn = q('[data-copy-admin-pass]');

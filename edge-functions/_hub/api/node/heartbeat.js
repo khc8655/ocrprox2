@@ -1,4 +1,4 @@
-import { resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { findNodeByToken, touchNodeHeartbeat } from '../../lib/nodes.js';
 export async function handleHeartbeatRequest(request, env, kv) {
 const method = (request && request.method ? request.method : 'GET').toUpperCase();
@@ -36,7 +36,15 @@ ip: clientIp,
 binaryVersion: (request.headers.get('x-node-version') || '').trim(),
 });
 } catch (_) {}
-return new Response(null, { status: 204 });
+let configVersion = 0;
+try {
+const config = await loadConfig(kv);
+configVersion = Number(config && config._version) || 0;
+} catch (_) {}
+return new Response(
+JSON.stringify({ ok: true, config_version: configVersion }),
+{ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }
+);
 }
 export async function onRequest(context) {
 const kv = resolveKvBinding(context);

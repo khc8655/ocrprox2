@@ -1060,6 +1060,28 @@ button.row {
   border-color: transparent;
 }
 
+/* These pills ARE the multi-select control in 新增模型路由 / 供应商候选, but they
+ * look like static labels: in the lite E2E the model form was submitted with
+ * nothing selected twice, and the only feedback was the reject toast. A leading
+ * box that fills on selection makes the affordance readable, matching the
+ * checkbox look used elsewhere. */
+.probe-pill::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 1px solid var(--khc-border-2);
+  border-radius: 3px;
+  background-color: transparent;
+}
+
+.probe-pill--managed::before {
+  border-color: var(--khc-success-text);
+  background-color: var(--khc-success-text);
+}
+
 /* Provider combobox floating panel (add-model form, #npPanel): absolutely
  * positioned under #newModelProvider inside .np-combo — spans the full input
  * width, floats above the following fields and never pushes the form layout.

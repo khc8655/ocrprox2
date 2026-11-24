@@ -61,8 +61,12 @@ type HubSource struct {
 	lastErr       error
 	refreshCond   *sync.Cond
 	lastRefresh   time.Time
-	cbMu          sync.RWMutex
-	callbacks     []func(*types.ProxyConfig)
+	// revokedAt is when the hub last answered 401/403. It gates re-validation so a
+	// revoked node retries slowly instead of spamming the hub, while a re-enabled
+	// node still recovers without a restart.
+	revokedAt time.Time
+	cbMu      sync.RWMutex
+	callbacks []func(*types.ProxyConfig)
 }
 
 // SetUsageProvider registers a callback returning a JSON-serializable usage digest.
@@ -162,7 +166,13 @@ func (s *HubSource) HealthState() (status string, state string, leaseValid bool,
 func (s *HubSource) Current(ctx context.Context, forceRefresh bool) (*types.RuntimeSnapshot, error) {
 	st, _ := s.state.Load().(string)
 	if st == StateRevoked {
-		return nil, ErrNodeUnauthorized
+		// A revoked node keeps its token so an operator who re-enables it on the
+		// hub gets it back without a restart. Until the retry window elapses this
+		// still fails fast; afterwards the call below re-validates against the hub.
+		if !s.mayRetryAfterRevocation() {
+			return nil, ErrNodeUnauthorized
+		}
+		forceRefresh = true
 	}
 
 	snap := s.snapshot.Load()
@@ -183,7 +193,10 @@ func (s *HubSource) Current(ctx context.Context, forceRefresh bool) (*types.Runt
 // MinRefreshDebounce are ignored to prevent Hub request flooding.
 func (s *HubSource) RefreshForAuth(ctx context.Context, forceRequested bool) (*types.RuntimeSnapshot, error) {
 	if st, _ := s.state.Load().(string); st == StateRevoked {
-		return nil, ErrNodeUnauthorized
+		if !s.mayRetryAfterRevocation() {
+			return nil, ErrNodeUnauthorized
+		}
+		return s.Current(ctx, true)
 	}
 
 	snap := s.snapshot.Load()
@@ -200,6 +213,39 @@ func (s *HubSource) RefreshForAuth(ctx context.Context, forceRequested bool) (*t
 	if recent {
 		return snap, nil
 	}
+	return s.Current(ctx, true)
+}
+
+// MarkRevoked is the shortcut for "the hub says this node is disabled": drop
+// every cached secret and stop serving at once.
+//
+// The heartbeat calls it, because a node holding an unexpired lease would
+// otherwise keep serving cached keys for up to 24h after the operator revoked
+// it — the data plane only re-checks the hub when the lease runs out. It is the
+// same purge as a 401 on a config pull, just reached sooner.
+func (s *HubSource) MarkRevoked() {
+	s.purgeAndRevoke()
+}
+
+// ConfigVersion reports the version of the template this node currently holds
+// (0 when nothing is loaded). The heartbeat compares it against the hub's
+// reported version to decide whether a pull is due.
+func (s *HubSource) ConfigVersion() int64 {
+	snap := s.snapshot.Load()
+	if snap == nil || snap.Config == nil {
+		return 0
+	}
+	return snap.Config.Version
+}
+
+// ForceRefreshNow pulls a fresh template, bypassing the lease but keeping the
+// revoked-retry gate. Used when the heartbeat reports a newer config_version
+// than this node holds: the operator just changed something in the hub.
+//
+// It is cheap by construction — the hub answers 304 (empty body) when its
+// projection hash is unchanged — and it never surfaces errors to the caller's
+// call path: the heartbeat ignores the outcome and retries on the next beat.
+func (s *HubSource) ForceRefreshNow(ctx context.Context) (*types.RuntimeSnapshot, error) {
 	return s.Current(ctx, true)
 }
 
@@ -230,8 +276,10 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 		return res, err
 	}
 
-	// Double check state and lease after acquiring lock
-	if st, _ := s.state.Load().(string); st == StateRevoked {
+	// Double check state and lease after acquiring lock. A revoked source that is
+	// inside its retry window is allowed through here: that is the re-validation
+	// attempt itself, and the caller already checked mayRetryAfterRevocation.
+	if st, _ := s.state.Load().(string); st == StateRevoked && !forceRefresh {
 		s.mu.Unlock()
 		return nil, ErrNodeUnauthorized
 	}
@@ -401,14 +449,39 @@ func (s *HubSource) syncWithHub(_ context.Context, currentSnap *types.RuntimeSna
 	}
 }
 
+// purgeAndRevoke drops all cached secrets and marks the source revoked.
+//
+// It deliberately KEEPS s.nodeToken: revocation on the hub is reversible (the
+// operator can re-enable the node), and wiping the token here made that
+// impossible — the process had nothing left to authenticate with, so a restored
+// node stayed 503 until systemd restarted it (found in the 2026-11-24 lite E2E).
+// The re-check cost is one hub call per cooldown window, see revokedRetryAfter.
 func (s *HubSource) purgeAndRevoke() {
 	snap := s.snapshot.Swap(nil)
 	if snap != nil {
 		snap.PurgeSecrets()
 	}
-	s.nodeToken = ""
+	s.mu.Lock()
+	s.revokedAt = time.Now()
+	s.mu.Unlock()
 	s.state.Store(StateRevoked)
 	runtime.GC()
+}
+
+// revokedRetryAfter is how long a revoked node waits before re-validating its
+// token against the hub. Long enough that a genuinely revoked node does not
+// hammer the hub (which is metered), short enough that an operator who
+// re-enables a node sees it recover without touching the VM.
+const revokedRetryAfter = 60 * time.Second
+
+// mayRetryAfterRevocation reports whether a revoked source should try the hub
+// again. Every revoked short-circuit in this file goes through it, so a restored
+// node heals on its own.
+func (s *HubSource) mayRetryAfterRevocation() bool {
+	s.mu.Lock()
+	at := s.revokedAt
+	s.mu.Unlock()
+	return !at.IsZero() && time.Since(at) >= revokedRetryAfter
 }
 
 func (s *HubSource) handleSyncError(_ error, currentSnap *types.RuntimeSnapshot) (*types.RuntimeSnapshot, error) {

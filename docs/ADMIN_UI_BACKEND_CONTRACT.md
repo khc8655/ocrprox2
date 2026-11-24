@@ -111,7 +111,7 @@
 | **首次激活拉取** | 无 `If-None-Match` | `200 OK` | `ETag`, `X-Config-Version`, `X-Lease-Until`, `X-Grace-Until` | `{ ok: true, config_version, lease_ttl, grace_ttl, lease_until, payload: { providers, agent_models, settings, adapter_rules } }` | 原子构建内存 `RuntimeSnapshot` 并开始服务 |
 | **租约到期续租（配置未变）** | `If-None-Match: "<etag>"` 与当前版本一致 | `304 Not Modified` | `ETag`, `X-Config-Version`, `X-Lease-Until`, `X-Grace-Until` | **空（0 字节）** | 零反序列化开销，直接更新内存 `lease_until` 与 `grace_until` |
 | **租约到期续租（配置已变）** | `If-None-Match: "<old_etag>"` | `200 OK` | 新 `ETag`, `X-Config-Version`, `X-Lease-Until` | 最新投影 JSON | 原子替换 `RuntimeSnapshot`，旧快照由 GC 回收 |
-| **节点已注销 / Token 无效** | 任意 | `401 Unauthorized` | — | `{ ok: false, error: "node_revoked_or_invalid" }` | **立即调用 `PurgeMemory()` 清空内存 Key**，置为 `revoked`，对客户端回 `503` |
+| **节点已注销 / Token 无效** | 任意 | `401 Unauthorized` | — | `{ ok: false, error: "node_revoked_or_invalid" }` | **立即调用 `PurgeMemory()` 清空内存 Key**，置为 `revoked`，对客户端回 `503`。**v3.9 补**：心跳同样返回 401，节点据此在租约到期前就停服；且 `nodeToken` **不再被清除**——Hub 侧恢复 `enabled: true` 后节点在 60s 重试窗口内自行复验并恢复，无需重启进程 |
 
 **中枢侧投影缓存契约**：
 - 中枢按 `(node_id, config._version, node.scope_hash)` 缓存投影结果与对应的 `ETag`；
@@ -125,7 +125,11 @@
 
 - **鉴权**：`Authorization: Bearer stk_node_<48hex>`（`NODE_TOKEN`，复用 `findNodeByToken`）；**`lite` 与 `full` 令牌均可调用**。未知/吊销/禁用令牌返回 `401 { ok:false, error:"node_revoked_or_invalid" }`；非 POST 返回 `405 method_not_allowed`。
 - **请求头**：`X-Node-Version` 可选（如 `v20261123-03`）；缺省时保留节点既有的 `last_binary_version`，不清空。客户端 IP 解析沿用 `/api/node/config` 的头优先级（`eo-connecting-ip` > `cf-connecting-ip` > `x-forwarded-for`）。
-- **响应**：**恒定 `204 No Content`、零 body**——不拉配置、不做投影、不返回 payload、不回显遥测。
+- **响应（v3.9 变更）**：`200 OK` + `{"ok": true, "config_version": <N>}`。不拉配置、不做投影、不返回 payload、不回显遥测——只带一个版本号。
+  - **为什么改**：节点只有在租约到期（默认 24h）才复验 Hub，所以此前「运营者改了模板」和「运营者吊销了节点」都要等一天才生效。心跳是唯一周期性触达 Hub 的通道，一个整数就能解决两件事。
+  - **节点的两个动作**：版本号与本地不一致 → 拉取模板（一次 304/200）；`401/403` → 立即清空内存配置并停服（吊销语义）。
+  - **代价**：每次非去抖心跳恰好一次 config 读取（KV 的 `get`，不是写入）。去抖路径（<60s）仍然零读取、零写入。
+  - **兼容**：老节点收到 200 会忽略 body；老 Hub 返回 204 时新节点安全跳过版本解析。
 - **服务端去抖**：用节点既有 `last_seen` 自身做依据（不新增 KV 字段）；距上次心跳 **< 60 秒** 直接返回 204 且**不写 KV**（不读整个节点数组、不 `saveNodes`）——KV 写入是免费额度里更贵的一项。只有去抖窗口外才更新 `last_seen` / `last_ip` / `last_binary_version`。touch 失败静默吞掉，绝不影响调用方。
 - **客户端间隔**：`LLMPROXY_HEARTBEAT_INTERVAL` 环境变量 / `--heartbeat-interval` CLI 标志（秒）：**默认 600 秒**（每节点每天 144 次），**最小 60 秒**（小于 60 按 60 处理），`0` / `off` 关闭。**full 角色默认启用**，**lite 角色默认关闭**（保持零轮询）；lite 显式配置非 off 值时按该间隔发送（lite 节点令牌同样有效）。启动后延迟 5 秒发首次心跳、不阻塞启动——升级重启即自动上报新二进制版本，无需用户操作；失败只记 debug 日志，绝不重试风暴、绝不阻塞数据面、绝不影响启动。
 
