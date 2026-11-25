@@ -12,7 +12,13 @@
     config: null,
     nodes: [],
     usage: null,
-    traces: [],
+    // Ledger-backed recent request window (GET /api/admin/recent-requests).
+    // Kept here so the request table and the failure analysis aggregate share one
+    // snapshot: both cards must describe the same 50 records at all times.
+    recentRequests: [],
+    recentSource: '',
+    recentTruncated: false,
+    recentFailedOnly: false,
     lanes: {},
     cooldowns: {},
     cooldownsAll: [],
@@ -24,10 +30,6 @@
     providerFilter: 'all',
     searchQuery: '',
     modelQuery: '',
-    traceQuery: '',
-    traceModeFilter: 'all',
-    traceEndpointFilter: 'all',
-    filterOnlyRetried: false,
     currentPeriod: 'today',
     lanesTimer: null,
     oauthPollTimer: null,
@@ -38,6 +40,13 @@
     vaultManifest: null,
     addProvVaultPick: '',
     addModelProbed: null,
+    // Model catalog meta: the settings card fetches it once per page load; the
+    // config snapshot's copy goes stale the moment an update lands.
+    modelCatalogMetaLoaded: false,
+    // Session memo of per-model capability answers (preset/model -> lookup
+    // response), so the add-model summary and the candidate dropdowns agree and
+    // repeat queries cost nothing. Failed queries are never stored.
+    modelInfoCache: {},
     // Bumped by closeTemplateImportOverlay(): the batched provider pulls run for
     // seconds, and Esc / backdrop click during them must actually cancel instead of
     // letting the loop finish and persist routes the operator just dismissed.
@@ -369,6 +378,78 @@
     return refs;
   }
 
+  // Model hint for the per-key test: the first enabled candidate of the first
+  // agent_models route that names this provider. Passing it makes the probe use
+  // the same upstream model the gateway would send; when no route exists the
+  // field is omitted and the backend falls back (route -> preset -> common model).
+  function firstRouteTargetModel(providerId) {
+    const agentModels = (state.config && state.config.agent_models) || {};
+    const names = Object.keys(agentModels).sort();
+    const pick = (requireEnabled) => {
+      for (const name of names) {
+        const route = agentModels[name];
+        for (const c of (route && route.candidates) || []) {
+          if (!c || c.provider !== providerId) continue;
+          if (requireEnabled && c.enabled === false) continue;
+          const m = String(c.target_model || '').trim();
+          if (m) return m;
+        }
+      }
+      return '';
+    };
+    return pick(true) || pick(false);
+  }
+
+  // Turn a POST /api/admin/test-key response into the KeyEntry.last_test shape.
+  // Stored on the key object and persisted by「保存供应商」so the pill survives a
+  // page reload; it never carries the secret itself.
+  function applyKeyLastTest(k, res) {
+    const lt = {
+      ok: Boolean(res && res.valid === true),
+      status: Number(res?.status) || 0,
+      latency_ms: Number(res?.latency_ms) || 0,
+      reason: String(res?.reason || ''),
+      err_type: String(res?.err_type || ''),
+      error: scrubUiText(String(res?.error || '')),
+      reply_text: scrubUiText(String(res?.reply_text || '')),
+      at: new Date().toISOString(),
+    };
+    k.last_test = lt;
+    // Keep the legacy health fields (provider card counters, status pill) in
+    // step: a real inference test is the strongest health signal we have.
+    k.last_ok = lt.ok;
+    k.last_status = lt.status;
+    k.last_latency_ms = lt.latency_ms;
+    return lt;
+  }
+
+  // The in-row verdict pill. Success: 可用 · {latency}ms · {reply first 40};
+  // failure spells out the reason and upstream code instead of just the
+  // provider name — that was the operator complaint this replaces.
+  function keyLastTestPill(lt) {
+    if (!lt || typeof lt !== 'object') return '';
+    if (lt.ok) {
+      const reply = String(lt.reply_text || '').trim().slice(0, 40);
+      const title = `${String(lt.reply_text || '').trim() || '上游返回 200（未抽到文本）'}${lt.at ? ` · ${lt.at}` : ''}`;
+      return `<span class="pill pill--green pill--test" title="${eh(title)}">可用 · ${Number(lt.latency_ms) || 0}ms${reply ? ` · ${eh(reply)}` : ''}</span>`;
+    }
+    const status = Number(lt.status) || 0;
+    const reason = String(lt.reason || 'unknown');
+    const errType = String(lt.err_type || '');
+    const title = `${lt.error || '上游无响应'}${lt.at ? ` · ${lt.at}` : ''}`;
+    return `<span class="pill pill--red pill--test" title="${eh(title)}">测试失败 · ${status} ${eh(reason)}${errType ? ` · ${eh(errType)}` : ''}</span>`;
+  }
+
+  // Live health for provider card counters. last_ok wins while the page is open
+  // (校验 / 批量探活 set it); once the config round-trips, only last_test is
+  // persisted, so the verdict falls back to that.
+  function keyHealthFlag(k) {
+    if (!k || typeof k !== 'object') return undefined;
+    if (typeof k.last_ok === 'boolean') return k.last_ok;
+    if (k.last_test && typeof k.last_test.ok === 'boolean') return k.last_test.ok;
+    return undefined;
+  }
+
   const eh = escapeHtml;
 
   // Shared show/hide helper. Must live at module scope: the node-issue button is
@@ -696,7 +777,7 @@
           if (state.activeTab === 'providers') renderProvidersList();
           else if (state.activeTab === 'models') renderModelsList();
           else if (state.activeTab === 'nodes') renderNodesList();
-          else if (state.activeTab === 'activity') renderTracesList();
+          else if (state.activeTab === 'activity') renderRecentRequests();
         }
         if (closedSomething) toast('已取消操作并关闭弹层', 'info');
       } else if (e.key === '/') {
@@ -964,25 +1045,36 @@
     const btnClearTraces = $('btnClearTraces');
     if (btnClearTraces) {
       clk(btnClearTraces, async () => {
-        if (!confirm('确定清空所有请求轨迹与监控日志吗？')) return;
+        // The endpoint only empties the in-memory trace ring; the usage ledger
+        // behind「最近请求」/「错误分析」is untouched, so the wording must not
+        // promise more than it does.
+        if (!confirm('确定清空内存中的请求轨迹吗？账本记录（最近请求与错误分析）会保留。')) return;
         try {
           const res = await window.HOST.clearTraces();
           if (res && res.ok) {
-            toast('轨迹已清空', 'ok');
+            toast('内存轨迹已清空', 'ok');
             await loadActivityData();
           }
         } catch (e) {
-          toast(e.message, 'err');
+          toast(scrubUiText(e.message), 'err');
         }
       });
     }
 
-    const btnFilterRetried = $('btnFilterRetried');
-    if (btnFilterRetried) {
-      clk(btnFilterRetried, () => {
-        state.filterOnlyRetried = !state.filterOnlyRetried;
-        btnFilterRetried.classList.toggle('active', state.filterOnlyRetried);
-        renderTracesList();
+    const recentSeg = $('recentReqSeg');
+    if (recentSeg) {
+      recentSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+        clk(btn, async () => {
+          const failed = btn.getAttribute('data-failed') === '1';
+          if (failed === state.recentFailedOnly) return;
+          state.recentFailedOnly = failed;
+          // An expanded row keyed to the previous window would outlive its record.
+          state.activeEditorKey = null;
+          recentSeg.querySelectorAll('.seg-btn').forEach((b) => {
+            b.classList.toggle('active', b === btn);
+          });
+          await loadRecentRequests();
+        });
       });
     }
 
@@ -1005,19 +1097,6 @@
         });
       });
     }
-
-    $('traceSearchInput')?.addEventListener('input', (e) => {
-      state.traceQuery = (e.target.value || '').trim().toLowerCase();
-      renderTracesList();
-    });
-    $('traceModeFilter')?.addEventListener('change', (e) => {
-      state.traceModeFilter = e.target.value || 'all';
-      renderTracesList();
-    });
-    $('traceEndpointFilter')?.addEventListener('change', (e) => {
-      state.traceEndpointFilter = e.target.value || 'all';
-      renderTracesList();
-    });
   }
 
   async function clearSingleCooldown(target) {
@@ -1791,6 +1870,96 @@
   // default keeps the modal-cancel closures safe before that.
   let closeProvPanel = () => {};
 
+  // --- Per-model capability (model catalog) ---
+  // One (preset, model) query via window.HOST.modelInfo — the node answers from
+  // its store (Full) and the Hub from KV. The console never keeps a model table
+  // of its own: a copy here would drift from the catalog the gateway ships.
+  // Last answer per pair is memoized for the session, so moving between
+  // candidates does not re-ask the same question.
+  function modelInfoKey(presetId, modelId) {
+    return `${String(presetId || '').trim()}/${String(modelId || '').trim()}`;
+  }
+
+  function fetchModelInfo(presetId, modelId) {
+    const preset = String(presetId || '').trim();
+    const model = String(modelId || '').trim();
+    if (!preset || !model) return Promise.resolve(null);
+    const key = modelInfoKey(preset, model);
+    const cache = state.modelInfoCache;
+    if (cache[key]) return Promise.resolve(cache[key]);
+    if (typeof window.HOST.modelInfo !== 'function') return Promise.resolve(null);
+    return window.HOST.modelInfo(preset, model).then((res) => {
+      // A failed query is not cached: a transient 503 must not freeze the
+      // "unknown" answer for the rest of the session.
+      if (res && res.ok !== false) cache[key] = res;
+      return res || null;
+    }).catch(() => null);
+  }
+
+  // The upstream preset a candidate actually resolves against: the provider's
+  // preset_id when bound (minimax-cn -> minimax), else the provider id itself.
+  function presetIdForProvider(pId) {
+    const prov = state.config?.providers?.[pId] || {};
+    return String(prov.preset_id || pId || '').trim();
+  }
+
+  // Summary line for the add-model form. Mirrors the catalog contract:
+  //   "上下文 200K · 最大输出 64K · 思考 low / medium / high"    (effort ladder)
+  //   "上下文 128K · 最大输出 16K · 思考：仅开关"                  (toggle)
+  //   "上下文 128K · 思考：不支持"                                (reasoning=false)
+  //   "能力信息未知（models.dev 未收录）"                          (found=false)
+  function capabilitySummary(info) {
+    if (!info || info.ok === false || !info.found) return '能力信息未知（models.dev 未收录）';
+    const parts = [];
+    const ctx = fmtTokens(info.context_tokens);
+    if (ctx) parts.push(`上下文 ${ctx}`);
+    const out = fmtTokens(info.output_tokens);
+    if (out) parts.push(`最大输出 ${out}`);
+    const efforts = Array.isArray(info.efforts) ? info.efforts : [];
+    if (efforts.length > 0) parts.push(`思考 ${efforts.join(' / ')}`);
+    else if (info.supports_toggle || info.toggle) parts.push('思考：仅开关');
+    else if (info.has_budget || info.budget) {
+      const b = info.budget || { min: info.budget_min, max: info.budget_max };
+      const min = fmtTokens(b.min);
+      const max = fmtTokens(b.max);
+      parts.push(`思考：token 预算${min || max ? ` ${min || '?'}~${max || '不限'}` : ''}`);
+    } else if (info.reasoning) parts.push('思考：支持（档位未知）');
+    else parts.push('思考：不支持');
+    return parts.join(' · ');
+  }
+
+  let capSeq = 0;
+
+  // Add-model modal: one debounced query per typed/picked upstream id. Full only
+  // — the Hub ships templates and has no engine to describe, so the container
+  // stays hidden there instead of lingering as an empty box.
+  function updateNewModelCapability() {
+    const box = $('newModelCapability');
+    if (!box) return;
+    if (window.HOST.kind === 'hub') {
+      box.hidden = true;
+      box.classList.add('hidden');
+      box.textContent = '';
+      return;
+    }
+    const pId = ($('newModelProvider')?.value || '').trim();
+    const target = ($('newModelTarget')?.value || '').trim();
+    const seq = ++capSeq;
+    if (!pId || !target) {
+      box.hidden = true;
+      box.classList.add('hidden');
+      box.textContent = '';
+      return;
+    }
+    fetchModelInfo(presetIdForProvider(pId), target).then((info) => {
+      // A slower earlier query must not overwrite the newest answer.
+      if (seq !== capSeq) return;
+      box.textContent = capabilitySummary(info);
+      box.hidden = false;
+      box.classList.remove('hidden');
+    });
+  }
+
   function setupCreationForms() {
     const pForm = $('addProviderForm');
     const mForm = $('addModelForm');
@@ -2015,6 +2184,7 @@
       document.querySelectorAll('#npbPills .probe-pill--managed').forEach((b) => {
         if ((b.textContent || '').trim() !== targetVal) b.classList.remove('probe-pill--managed');
       });
+      updateNewModelCapability();
     });
     clk($('btnCancelAddModel'), cancelAddModel);
 
@@ -2025,6 +2195,7 @@
     $('newModelProvider')?.addEventListener('change', () => {
       resetProbe({ resetName: true });
       renderKeyPills();
+      updateNewModelCapability();
     });
 
     // Probe the upstream model list through the gateway (works for both full and
@@ -2232,6 +2403,7 @@
     closeProvPanel();
     resetProbe({ resetName: true });
     renderKeyPills();
+    updateNewModelCapability();
     $('newModelTarget')?.focus();
   }
 
@@ -2253,6 +2425,14 @@
     if (pills) pills.innerHTML = '';
     const targetEl = $('newModelTarget');
     if (targetEl) targetEl.value = '';
+    // The capability line describes the cleared target, so it goes with it.
+    capSeq++;
+    const capBox = $('newModelCapability');
+    if (capBox) {
+      capBox.hidden = true;
+      capBox.classList.add('hidden');
+      capBox.textContent = '';
+    }
     const nameEl = $('newModelName');
     if (nameEl && (nameEl.readOnly || opts.resetName)) {
       nameEl.value = '';
@@ -2668,12 +2848,36 @@
     }
   }
 
+  // One snapshot feeds both overview cards (recent requests + error analysis), so
+  // the aggregate can never describe a different window than the table above it.
+  function applyRecentRequests(res) {
+    state.recentRequests = Array.isArray(res.requests) ? res.requests : [];
+    state.recentSource = typeof res.source === 'string' ? res.source : '';
+    state.recentTruncated = Boolean(res.truncated);
+    renderRecentRequests();
+    renderErrorAnalysis();
+  }
+
+  // The overview's only request-history source. Used by the regular refresh path
+  // (loadActivityData) and by the 全部 / 仅失败与重试 segment — never by a timer of
+  // its own: the page keeps the existing refresh cadence.
+  async function loadRecentRequests() {
+    try {
+      const res = await window.HOST.getRecentRequests(50, state.recentFailedOnly);
+      if (res && res.ok) applyRecentRequests(res);
+      return res;
+    } catch (e) {
+      toast(`请求记录加载失败: ${scrubUiText(e.message)}`, 'err');
+      return null;
+    }
+  }
+
   async function loadActivityData() {
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
-      const [usageRes, tracesRes, lanesRes, cdRes] = await Promise.all([
+      const [usageRes, recentRes, lanesRes, cdRes] = await Promise.all([
         window.HOST.getUsage(state.currentPeriod, tz),
-        window.HOST.getTraces(),
+        window.HOST.getRecentRequests(50, state.recentFailedOnly).catch(() => null),
         window.HOST.getLanes().catch(() => null),
         window.HOST.getCooldowns().catch(() => null),
       ]);
@@ -2695,9 +2899,8 @@
         window.USAGE.renderStackedBarChart(usageRes);
         window.USAGE.renderBreakdown(usageRes);
       }
-      if (tracesRes && tracesRes.ok) {
-        state.traces = tracesRes.traces || [];
-        renderTracesList();
+      if (recentRes && recentRes.ok) {
+        applyRecentRequests(recentRes);
       }
     } catch (e) {
       toast(`统计加载失败: ${e.message}`, 'err');
@@ -2855,8 +3058,11 @@
       const p = providers[pId] || {};
       const keys = p.api_keys || [];
       const keyCount = keys.length;
-      const okCount = keys.filter((k) => k.last_ok === true).length;
-      const failCount = keys.filter((k) => k.last_ok === false).length;
+      // last_ok is the legacy live field (校验/批量探活 write it); the typed
+      // config only persists last_test, so after a reload the card counters fall
+      // back to the per-key test verdict instead of showing "0 正常".
+      const okCount = keys.filter((k) => keyHealthFlag(k) === true).length;
+      const failCount = keys.filter((k) => keyHealthFlag(k) === false).length;
       const isLocal = p.origin === 'local';
       const isExpanded = state.activeEditorKey === `p_${pId}`;
       const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
@@ -3031,7 +3237,7 @@
     ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级 (配额重置 / 适配规则)</summary><div class="form-grid mt-2">${[
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
       fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="逐把发一次最小请求，能拿到上游响应就记为可用">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
+    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」，验证推理额度而不只是能列模型">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
 
     const tbody = q(`#p_keys_tbody_${pId}`);
     if (tbody && !tbody.dataset.revealWired) {
@@ -3060,13 +3266,23 @@
       const cdInfo = findKeyCooldown(pId, k, idx);
       const cooldownSec = cdInfo.sec;
       const cdTarget = cdInfo.target;
+      // The most recent per-key real-inference test outranks the legacy
+      // last_ok/last_status pill: it is the verdict the operator asked for, with
+      // the failure reason and the actual reply. A live cooldown stays visible.
       let statusHtml = cooldownSec > 0
         ? `<button class="btn btn--sm btn--danger btn_clear_k_cd tabular" type="button" title="点击解除此 Key 冷却">冷却 ${formatCooldown(cooldownSec)} · 解除</button>`
-        : '<span class="pill pill--green">就绪</span>';
-      if (cooldownSec <= 0 && k.last_ok === true) {
-        statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
-      } else if (cooldownSec <= 0 && k.last_ok === false) {
-        statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
+        : '';
+      const lastTestPill = keyLastTestPill(k.last_test);
+      if (lastTestPill) {
+        statusHtml = `${statusHtml}${statusHtml ? ' ' : ''}${lastTestPill}`;
+      } else if (cooldownSec <= 0) {
+        if (k.last_ok === true) {
+          statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
+        } else if (k.last_ok === false) {
+          statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
+        } else {
+          statusHtml = '<span class="pill pill--green">就绪</span>';
+        }
       }
 
       const vaultKey = !isHubMode() && (isVaultProv || k.origin === 'vault');
@@ -3079,6 +3295,7 @@
         <td>${statusHtml}</td>
         <td>
           <div class="fields">
+            <button class="btn btn--sm btn_test_k" data-idx="${idx}" type="button" title="用这把 Key 真发一句「你好」，验证推理额度而不只是能列模型">测试</button>
             <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
             <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
           </div>
@@ -3109,6 +3326,36 @@
           }
         }
         k.enabled = e.target.checked;
+      });
+
+      // Per-key real inference test. The server resolves the stored secret from
+      // key_id/key_label, so nothing secret crosses the wire in this call. The
+      // verdict lands on the key object (persisted by「保存供应商」) and shows in
+      // the status cell immediately.
+      clk(tr.querySelector('.btn_test_k'), async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = '测试中…';
+        const routeModel = firstRouteTargetModel(pId);
+        const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
+        if (routeModel) payload.model = routeModel;
+        toast(`正在测试 Key [${keyLabel}]（真实推理）...`, 'info');
+        try {
+          const res = await window.HOST.testKey(payload);
+          const lt = applyKeyLastTest(k, res);
+          toast(
+            lt.ok
+              ? `Key [${keyLabel}] 可用 · ${lt.latency_ms}ms`
+              : `Key [${keyLabel}] 测试失败: ${lt.status || 0} ${lt.reason || 'unknown'}${lt.err_type ? ` · ${lt.err_type}` : ''}`,
+            lt.ok ? 'ok' : 'err'
+          );
+          renderProvidersList();
+          if (window.HOST.kind === 'hub') renderHubOverview();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = '测试';
+          toast(`测试异常: ${scrubUiText(err.message)}`, 'err');
+        }
       });
 
       clk(tr.querySelector('.btn_verify_k'), async () => {
@@ -3169,34 +3416,25 @@
       tbody.appendChild(tr);
     });
 
-    // Batch Test All Keys (via verifyKey)
+    // Batch test: every key gets the same real inference probe, one at a time,
+    // so the verdict reflects inference quota — not just "can list models".
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
-      syncDraftFields();
-      toast(`正在一键测试 ${keys.length} 把 Key...`, 'info');
+      const routeModel = firstRouteTargetModel(pId);
+      toast(`正在逐把测试 ${keys.length} 把 Key（真实推理）...`, 'info');
       let succ = 0;
-      const baseUrl = p.base_url || '';
-      const selType = normalizeApiType(p.api_type);
-      for (const k of keys) {
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const keyLabel = k.label || k.id || `key-${i}`;
         try {
-          const r = await window.HOST.verifyKey({
-            provider: pId,
-            api_key: k.key,
-            base_url: baseUrl,
-            key_label: k.label,
-            api_type: selType,
-          });
-          syncVersionFromRes(r);
-          if (r && (r.valid === true || (r.ok && r.valid !== false))) {
-            k.last_ok = true;
-            k.last_latency_ms = r.latency_ms ?? r.ms ?? 0;
-            succ++;
-          } else {
-            k.last_ok = false;
-            k.last_status = r?.status || 0;
-          }
-        } catch (_) {}
+          const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
+          if (routeModel) payload.model = routeModel;
+          const r = await window.HOST.testKey(payload);
+          if (applyKeyLastTest(k, r).ok) succ++;
+        } catch (_) {
+          k.last_ok = false;
+        }
       }
-      toast(`一键测试完成: ${succ}/${keys.length} 把 Key 正常可用`, succ === keys.length ? 'ok' : 'warn');
+      toast(`逐把测试完成: ${succ}/${keys.length} 把 Key 可用`, succ === keys.length ? 'ok' : 'warn');
       renderProvidersList();
     });
 
@@ -4506,66 +4744,24 @@
       const who = ce('div');
       who.className = 'who';
       const subDesc = `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
-      // Latest 测试路由 result: verdict + latency + which provider/key answered;
-      // title carries the upstream snippet (testCandidate) or the upstream error.
-      const t = m._lastTest;
-      const testPill = !t ? '' : t.ok
-        ? `<span class="pill pill--green tabular" title="${eh(t.text || '测试通过')}">测试 ${t.latency_ms || 0}ms · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`
-        : `<span class="pill pill--red" title="${eh(t.error || '测试失败')}">测试失败 · ${eh(t.provider)} · ${eh(t.key_label || '任一')}</span>`;
+      // The route row is informational only: per-key testing moved to the key
+      // table (供应商 → Key 行「测试」), where the verdict can name the key and
+      // the failure reason instead of "which of N candidates answered".
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${eh(mName)}</span>
           <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
-          ${testPill}
         </div>
         <div class="sub">${eh(subDesc)}</div>
       `;
 
       const fields = ce('div');
       fields.className = 'fields';
-      const canTest = window.HOST.capabilities.kbModels && cCount > 0;
       fields.innerHTML = `
-        ${canTest ? `<button class="btn btn--sm btn_test_agent_m" data-model="${eh(mName)}" type="button">测试路由</button>` : ''}
         <span class="pill">${cCount} 候选</span>
         <span class="caret">▾</span>
       `;
-
-      const testBtn = fields.querySelector('.btn_test_agent_m');
-      if (testBtn) {
-        clk(testBtn, async (e) => {
-          e.stopPropagation();
-          toast(`正在测试 ${mName} 路由（最小真实推理）...`, 'info');
-          try {
-            if (mName === 'embedding' || mName === 'reranker' || mName === 'ocr') {
-              const first = (m.candidates || []).find((c) => c && c.enabled !== false) || m.candidates[0];
-              if (!first) return toast('该路由没有候选', 'warn');
-              const res = await window.HOST.testCandidate({ provider: first.provider, key_label: first.key_label, model: first.target_model || mName, type: mName });
-              const ok = Boolean(res && res.ok);
-              const text = String(res?.text || '').trim().slice(0, 40);
-              m._lastTest = ok
-                ? { ok: true, latency_ms: res?.latency_ms || res?.ms || 0, provider: first.provider, key_label: first.key_label, text }
-                : { ok: false, provider: first.provider, key_label: first.key_label, error: scrubUiText(res?.error || '路由无响应') };
-              toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
-            } else {
-              // Backend fires one minimal real inference per candidate; report the
-              // fastest passing one (provider + key + latency).
-              const res = await window.HOST.testAgentModel({ model: mName });
-              const results = (res && Array.isArray(res.results) ? res.results : []).filter(Boolean);
-              const best = results.filter((r) => r.ok).sort((a, b) => (a.latency_ms || 0) - (b.latency_ms || 0))[0] || null;
-              const failed = results.find((r) => !r.ok) || results[0] || {};
-              m._lastTest = best
-                ? { ok: true, latency_ms: best.latency_ms || 0, provider: best.provider, key_label: best.key, text: '' }
-                : { ok: false, provider: failed.provider || '', key_label: failed.key || '', error: scrubUiText(failed.error || res?.error || '路由无响应') };
-              const ok = m._lastTest.ok;
-              toast(ok ? `测试通过！${m._lastTest.latency_ms}ms（详情见路由行）` : `测试失败: ${m._lastTest.error}`, ok ? 'ok' : 'err');
-            }
-            renderModelsList();
-          } catch (err) {
-            toast(`测试异常: ${err.message}`, 'err');
-          }
-        });
-      }
 
       row.appendChild(dot);
       row.appendChild(who);
@@ -4640,13 +4836,63 @@
       });
     });
 
-    // ② 候选池 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 上移/下移/移除.
+    // ② 候选池 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 思考档位 + 上移/下移/移除.
     // All draws are local so pool edits never collapse the editor via
     // renderModelsList; one delegated handler serves every row. The per-row Key
     // pill is what makes unchecked-but-listed keys visible: without it a checked
     // key beyond the candidate count silently never routes.
+    //
+    // The 思考档位 control is per candidate, not per provider: the catalog's ladder
+    // is model-level (deepseek-v4-pro accepts low/high/max while the preset file
+    // advertises none/low/medium/high). It is filled asynchronously because the
+    // answer comes from the catalog API; until it lands the slot is empty rather
+    // than showing a placeholder that could be mistaken for a real answer.
+    const effortControlHtml = (c, info) => {
+      const current = String(c.reasoning_effort || '');
+      const follow = '<option value="">跟随客户端</option>';
+      if (!info || info.ok === false || !info.found) {
+        return '<span class="text-xs text-muted">能力信息未知</span>';
+      }
+      const efforts = Array.isArray(info.efforts) ? info.efforts.filter(Boolean) : [];
+      if (efforts.length > 0) {
+        // A value saved against an older catalog that no longer offers that level
+        // stays visible so the change is explicit, never a silent rewrite.
+        const extra = current && !efforts.includes(current) && current !== 'on' && current !== 'off'
+          ? `<option value="${eh(current)}" selected>${eh(current)}（当前已保存）</option>`
+          : '';
+        const opts = efforts.map((lv) => `<option value="${eh(lv)}"${lv === current ? ' selected' : ''}>${eh(lv)}</option>`).join('');
+        return `<select class="select select--compact" data-eff aria-label="思考档位">${follow}${extra}${opts}</select>`;
+      }
+      if (info.supports_toggle || info.toggle) {
+        // Toggle-only models have no ladder: the only meaningful choices are
+        // force-on / force-off / leave the client alone.
+        return `<select class="select select--compact" data-eff aria-label="思考开关">${follow}` +
+          `<option value="on"${current === 'on' ? ' selected' : ''}>强制开启</option>` +
+          `<option value="off"${current === 'off' ? ' selected' : ''}>强制关闭</option></select>`;
+      }
+      return '<span class="text-xs text-muted">该模型无思考档位</span>';
+    };
+
+    const fillCandEffort = (i) => {
+      const box = q(`#m_cand_eff_${i}`);
+      const c = candidates[i];
+      if (!box || !c) return;
+      const preset = presetIdForProvider(c.provider);
+      const model = String(c.target_model || mName).trim();
+      if (!preset || !model) {
+        box.innerHTML = '';
+        return;
+      }
+      fetchModelInfo(preset, model).then((info) => {
+        // The pool may have been reordered/redrawn while the query was in flight.
+        if (!box.isConnected || candidates[i] !== c) return;
+        box.innerHTML = effortControlHtml(c, info);
+      });
+    };
+
     const drawCands = () => {
-      q('#m_cl').innerHTML = candidates.map((c, i) => `<div class="row row--static" data-i="${i}"><div class="who"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><span class="pill">${eh(c.provider)}</span><span class="pill">${c.key_label ? `Key ${eh(c.key_label)}` : '任一 Key'}</span></div><div class="fields"><button class="btn btn--sm" data-a="u"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm" data-a="d"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button><button class="btn btn--sm btn--danger" data-a="r">移除</button></div></div>`).join('') || '<div class="row row--static text-muted">暂无候选</div>';
+      q('#m_cl').innerHTML = candidates.map((c, i) => `<div class="row row--static" data-i="${i}"><div class="who"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><span class="pill">${eh(c.provider)}</span><span class="pill">${c.key_label ? `Key ${eh(c.key_label)}` : '任一 Key'}</span></div><div class="fields"><span class="m-cand-eff" id="m_cand_eff_${i}"></span><button class="btn btn--sm" data-a="u"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm" data-a="d"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button><button class="btn btn--sm btn--danger" data-a="r">移除</button></div></div>`).join('') || '<div class="row row--static text-muted">暂无候选</div>';
+      candidates.forEach((_, i) => fillCandEffort(i));
     };
     const swapCand = (i, j) => {
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
@@ -4666,6 +4912,20 @@
         drawAdv();
         drawKeys();
       }
+    });
+    // 思考档位 is written straight onto the candidate; '' = 跟随客户端 (the field is
+    // omitted on save). "on"/"off" are the toggle-only pair. The scheduler side
+    // that turns this into a request body is out of this phase's scope — until
+    // it lands the value is stored but not yet consumed (see contractNotes).
+    q('#m_cl').addEventListener('change', (ev) => {
+      const sel = ev.target instanceof Element ? ev.target.closest('select[data-eff]') : null;
+      if (!sel) return;
+      const row = sel.closest('[data-i]');
+      const c = candidates[Number(row?.dataset.i)];
+      if (!c) return;
+      const v = String(sel.value || '');
+      if (v) c.reasoning_effort = v;
+      else delete c.reasoning_effort;
     });
 
     // ③ Key 选择: one row per provider in the pool.「任一」(empty selection) leaves
@@ -5050,6 +5310,9 @@
           enabled: c.enabled !== false,
           weight: Number(c.weight) || 0,
           max_concurrency: Number(c.max_concurrency) || 0,
+          // The Hub operator may have picked a thinking ladder per candidate;
+          // dropping it would silently change how the imported route behaves.
+          ...(c.reasoning_effort ? { reasoning_effort: String(c.reasoning_effort) } : {}),
         })),
       };
     }
@@ -5083,98 +5346,335 @@
     await persistConfig(`已从模板导入 ${imported} 条模型路由`);
   }
 
-  // --- View: Activity & Traces (M7~M10, M12) ---
-  function renderTracesList() {
-    const container = $('tracesList');
+  // --- View: Activity — recent requests + failure analysis (ledger-backed) ---
+
+  // Closed failure taxonomy (v3.11). An unknown or empty reason falls back to the
+  // raw English code / — rather than inventing a label the backend never emitted.
+  const FAILURE_REASON_LABELS = {
+    auth_invalid: 'Key 无效或无权限',
+    quota_exhausted: '额度/余额耗尽',
+    rate_limited: '被限流',
+    model_not_found: '模型不存在',
+    context_too_long: '上下文超长',
+    upstream_error: '上游服务错误',
+    timeout: '超时',
+    network: '网络错误',
+    client_disconnected: '客户端断开',
+    bad_response: '上游响应异常',
+    protocol_mismatch: '协议不匹配',
+    no_candidate: '无可用 Key',
+    config_unavailable: '配置不可用',
+    unknown: '未知',
+  };
+
+  function reasonLabel(reason) {
+    const r = String(reason || '');
+    return FAILURE_REASON_LABELS[r] || r;
+  }
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  // Ledger timestamps are whole unix seconds, so the table shows a fixed HH:MM:SS
+  // clock and keeps the full date in title=.
+  function clockOf(unixSec) {
+    const sec = Number(unixSec) || 0;
+    if (!sec) return '-';
+    const d = new Date(sec * 1000);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  }
+
+  function fullTimeOf(unixSec) {
+    const sec = Number(unixSec) || 0;
+    if (!sec) return '';
+    const d = new Date(sec * 1000);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${clockOf(sec)}`;
+  }
+
+  // Console probes carry RequestTrace.Source=="probe" and never reach the usage
+  // ledger, so a probe row should not normally appear in this window. UsageRecord
+  // has no source field today; if one is added later it is honoured, otherwise the
+  // endpoint the probe trace is stamped with identifies it. Both paths covered.
+  function isProbeRecord(rec) {
+    return Boolean(rec) && (rec.source === 'probe' || rec.ep === '/admin/test-key');
+  }
+
+  function statusPillHtml(status) {
+    const code = Number(status) || 0;
+    if (code === 0) return '<span class="pill">无响应</span>';
+    if (code >= 200 && code < 300) return `<span class="pill pill--green tabular">HTTP ${code}</span>`;
+    return `<span class="pill pill--red tabular">HTTP ${code}</span>`;
+  }
+
+  // A successful row shows no reason — failover failures that still ended in a
+  // 2xx are the「尝试」column's job. A failed row is attributed to its final
+  // failed attempt (try_failed is chronological); a local early-exit has none.
+  function finalFailure(rec) {
+    const code = Number(rec.status) || 0;
+    if (code >= 200 && code < 300) return null;
+    const tries = Array.isArray(rec.try_failed) ? rec.try_failed : [];
+    if (tries.length) return tries[tries.length - 1];
+    // Local rejections (protocol mismatch, model not configured, every key
+    // cooling down) never reach a key, so the reason lives on the record.
+    if (rec.reason || rec.err_type || rec.err) {
+      return {
+        provider: String(rec.provider || ''),
+        key_id: String(rec.key_id || ''),
+        status: code,
+        reason: String(rec.reason || ''),
+        err_type: String(rec.err_type || ''),
+        err: String(rec.err || ''),
+        rid: String(rec.rid || ''),
+      };
+    }
+    return null;
+  }
+
+  function renderRecentRequests() {
+    const container = $('recentReqList');
     if (!container) return;
     container.innerHTML = '';
 
-    const traces = state.traces || [];
-    const q = state.traceQuery || '';
-    const mFilter = state.traceModeFilter || 'all';
-    const epFilter = state.traceEndpointFilter || 'all';
+    const sub = $('recentReqSub');
+    if (sub) {
+      sub.textContent = state.recentSource === 'memory'
+        ? '当前无账本文件，记录来自内存窗口（重启后清空）；点击任意行展开失败尝试明细'
+        : '来自账本，重启后仍保留；点击任意行展开失败尝试明细';
+    }
 
-    const filtered = traces.filter((t) => {
-      if (state.filterOnlyRetried) {
-        const isRetried = t.status >= 400 || t.status === 0 || (t.tries && t.tries.length > 1) || (t.retried_ms || 0) > 0;
-        if (!isRetried) return false;
-      }
-      if (mFilter !== 'all' && (t.mode || 'agent') !== mFilter) return false;
-      if (epFilter !== 'all' && t.endpoint !== epFilter) return false;
-      if (q) {
-        const hay = `${t.req_model || ''} ${t.served_model || ''} ${t.winner_provider || ''} ${t.endpoint || ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    // The endpoint returns the window oldest first; newest first is what an
+    // operator reads and keeps「最近发生」aligned with the error analysis.
+    const records = (state.recentRequests || []).slice().reverse();
 
-    if (filtered.length === 0) {
+    if (records.length === 0) {
       const emptyRow = ce('div');
       emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = '暂无符合条件的请求轨迹';
+      emptyRow.textContent = '暂无请求记录';
       container.appendChild(emptyRow);
       return;
     }
 
-    for (const t of filtered) {
-      const isExpanded = state.activeEditorKey === `tr_${t.id}`;
-      const triesCount = (t.tries || []).length;
-      const isOk = t.status >= 200 && t.status < 300;
-      const hasRetries = triesCount > 1 || (t.retried_ms || 0) > 0;
-      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(t.winner_provider || t.req_model) : '';
-      const modePill = (t.mode || 'agent') === 'kb'
-        ? '<span class="pill pill--amber">KB</span>'
-        : '<span class="pill pill--accent">AGENT</span>';
-      const modelRoute = t.served_model && t.served_model !== t.req_model
-        ? `${eh(t.req_model)} → ${eh(t.served_model)}`
-        : eh(t.req_model || '-');
-      const tokBrief = `${t.in_tokens || 0}→${t.out_tokens || 0}${t.cache_read_tokens ? ` (缓存:${t.cache_read_tokens})` : ''}`;
+    const wrap = ce('div');
+    wrap.className = 'table-wrap';
+    const table = ce('table');
+    // Fixed layout is what keeps a long upstream error from stretching the table:
+    // in auto layout the colspan expansion row sizes to the text's max-content and
+    // no wrap property can shrink it.
+    table.className = 'data-table reqlog-table';
+    table.innerHTML = '<thead><tr><th>时间</th><th>模型</th><th>供应商 / Key</th><th>状态</th><th>耗时</th><th>尝试</th><th>原因</th></tr></thead>';
+    const tbody = ce('tbody');
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    container.appendChild(wrap);
 
-      const row = ce('div');
-      row.className = `row ${isExpanded ? 'expanded' : ''}`;
+    records.forEach((rec, idx) => {
+      const rowKey = `rq_${Number(rec.t) || 0}_${idx}`;
+      const isExpanded = state.activeEditorKey === rowKey;
+      const tries = Array.isArray(rec.try_failed) ? rec.try_failed : [];
+      const final = finalFailure(rec);
+      const triesCount = Number(rec.tries) || tries.length;
+      const reqModel = String(rec.req || '');
+      const served = String(rec.served || '');
+      const provider = String(rec.provider || '');
+      const keyId = String(rec.key_id || '');
+      const modelTitle = served && served !== reqModel ? `实际服务模型: ${served}` : '';
 
-      const dot = ce('span');
-      dot.className = `dot ${!isOk ? 'dot--err' : hasRetries ? 'dot--warn' : 'dot--ok'}`;
-
-      const who = ce('div');
-      who.className = 'who';
-      who.innerHTML = `
-        <div class="name">
-          ${brandIcon}
-          ${modePill}
-          <span class="tabular">${formatTime(t.ts)}</span>
-          <span class="tabular">${modelRoute}</span>
-          <span class="text-muted">→</span>
-          <span class="pill">${eh(t.winner_provider || 'none')}${t.winner_key ? ` / ${eh(t.winner_key)}` : ''}</span>
-          ${hasRetries ? `<span class="pill pill--amber">${triesCount}次尝试</span>` : ''}
-        </div>
-        <div class="sub tabular">${eh(t.endpoint)} · ${t.stream ? 'SSE' : 'JSON'} · Tok ${tokBrief} · ${t.total_ms || 0}ms (TTFT ${t.ttft_ms || 0}ms)</div>
+      const tr = ce('tr');
+      tr.className = `reqlog-row${isExpanded ? ' expanded' : ''}`;
+      tr.innerHTML = `
+        <td class="tabular" title="${eh(fullTimeOf(rec.t))}">${isProbeRecord(rec) ? '<span class="pill pill--amber">测试</span> ' : ''}${clockOf(rec.t)}</td>
+        <td class="reqlog-model"${modelTitle ? ` title="${eh(modelTitle)}"` : ''}>${eh(reqModel || '-')}</td>
+        <td class="reqlog-target">${eh(provider || '-')}${keyId ? ` / ${eh(keyId)}` : ''}</td>
+        <td>${statusPillHtml(rec.status)}</td>
+        <td class="tabular">${Number(rec.ms) || 0}ms</td>
+        <td>${triesCount > 1 ? `<span class="pill pill--amber tabular">${triesCount} 次</span>` : '<span class="text-muted">-</span>'}</td>
+        <td>${final && final.reason
+          ? `<span class="reqlog-reason" title="${eh(final.reason)}">${eh(reasonLabel(final.reason))}</span>`
+          : '<span class="text-muted">—</span>'}</td>
       `;
-
-      const fields = ce('div');
-      fields.className = 'fields';
-      fields.innerHTML = `
-        <span class="pill ${isOk ? 'pill--green' : 'pill--red'} tabular">HTTP ${t.status || 0}</span>
-        <span class="caret">▾</span>
-      `;
-
-      row.appendChild(dot);
-      row.appendChild(who);
-      row.appendChild(fields);
-
-      clk(row, () => {
-        state.activeEditorKey = isExpanded ? null : `tr_${t.id}`;
-        renderTracesList();
+      clk(tr, () => {
+        state.activeEditorKey = isExpanded ? null : rowKey;
+        renderRecentRequests();
       });
+      tbody.appendChild(tr);
 
-      container.appendChild(row);
+      if (!isExpanded) return;
 
-      if (isExpanded) {
-        const editor = ce('div');
-        editor.className = 'editor';
-        editor.appendChild(window.USAGE.buildTraceWaterfall(t));
-        container.appendChild(editor);
+      // Inline expansion (.editor inside a full-width row), never an overlay.
+      const expTr = ce('tr');
+      expTr.className = 'reqlog-expand-row';
+      const expTd = ce('td');
+      expTd.className = 'reqlog-expand-td';
+      expTd.colSpan = 7;
+      const editor = ce('div');
+      editor.className = 'editor';
+      const head = ce('div');
+      head.className = 'reqlog-expand-head';
+      head.innerHTML = `<span class="form-label">失败尝试明细</span>
+        <span class="text-muted text-xs tabular">${eh(rec.ep || '')}${rec.mode ? ` · ${eh(String(rec.mode).toUpperCase())}` : ''} · Tok ${Number(rec.in) || 0}→${Number(rec.out) || 0} · 总耗时 ${Number(rec.ms) || 0}ms</span>`;
+      editor.appendChild(head);
+
+      if (tries.length === 0) {
+        const none = ce('div');
+        none.className = 'text-muted text-sm mt-1';
+        if (final && (final.reason || final.err)) {
+          // A local rejection: no upstream was dialed, but the gateway can still
+          // say why it refused (model not configured / protocol mismatch / …).
+          none.innerHTML = `未发出上游请求 · <span class="reqlog-reason">${eh(reasonLabel(final.reason) || '-')}</span>`
+            + (final.err_type ? ` <span class="reqlog-errtype tabular">${eh(final.err_type)}</span>` : '');
+        } else {
+          // A failed request with zero tries never reached an upstream: the
+          // gateway rejected it locally (config unusable / model not configured /
+          // no candidate) — the reason column is empty for exactly this case.
+          none.textContent = Number(rec.status) === 0 || Number(rec.status) >= 400
+            ? '无上游尝试记录（本地早退或未发出请求）'
+            : '无失败尝试';
+        }
+        editor.appendChild(none);
+        if (final && final.err) {
+          const errEl = ce('div');
+          errEl.className = 'reqlog-err';
+          errEl.textContent = scrubUiText(String(final.err));
+          editor.appendChild(errEl);
+        }
+      } else {
+        tries.forEach((f, ti) => {
+          const item = ce('div');
+          item.className = 'reqlog-try';
+          const ms = Number(f.ms) || 0;
+          const line = [
+            `<span class="reqlog-try-head tabular">#${ti + 1}</span>`,
+            `<span class="pill">${eh(f.provider || '-')}${f.key_id ? ` / ${eh(f.key_id)}` : ''}</span>`,
+            statusPillHtml(f.status),
+            f.reason ? `<span class="reqlog-reason">${eh(reasonLabel(f.reason))}</span>` : '',
+            f.err_type ? `<span class="reqlog-errtype tabular">${eh(f.err_type)}</span>` : '',
+            ms > 0 ? `<span class="tabular text-muted">${ms}ms</span>` : '',
+          ].filter(Boolean).join(' ');
+          item.innerHTML = `<div class="reqlog-try-line">${line}</div>`;
+          if (f.err) {
+            const errEl = ce('div');
+            errEl.className = 'reqlog-err';
+            // Server-side the text is already ScrubStringWithSecrets'd; the UI
+            // scrubber is a second net so a secret can never reach the DOM.
+            errEl.textContent = scrubUiText(String(f.err));
+            item.appendChild(errEl);
+          }
+          if (f.rid) {
+            const ridEl = ce('div');
+            ridEl.className = 'reqlog-rid tabular';
+            ridEl.textContent = `rid: ${f.rid}`;
+            item.appendChild(ridEl);
+          }
+          editor.appendChild(item);
+        });
       }
+      expTd.appendChild(editor);
+      expTr.appendChild(expTd);
+      tbody.appendChild(expTr);
+    });
+
+    if (state.recentTruncated) {
+      const foot = ce('div');
+      foot.className = 'reqlog-foot text-muted';
+      foot.textContent = `账本中仅 ${records.length} 条`;
+      container.appendChild(foot);
+    }
+  }
+
+  // Aggregates the failed attempts inside the current window by
+  // (reason, provider, key_id). The window is whatever the table shows — 50
+  // records or the failed-only segment — never the whole day.
+  function aggregateFailures(records) {
+    const map = new Map();
+    const add = (reason, provider, keyId, err, errType, ts) => {
+      const k = `${reason}\u0000${provider}\u0000${keyId}`;
+      let item = map.get(k);
+      if (!item) {
+        item = { reason, provider, keyId, count: 0, lastTs: 0, lastErr: '', lastErrType: '' };
+        map.set(k, item);
+      }
+      item.count += 1;
+      // >= keeps the later record when two share a second: the ledger appends in
+      // order, and「最近一次」must not point at the older of the two.
+      if (ts >= item.lastTs) {
+        item.lastTs = ts;
+        item.lastErr = err;
+        item.lastErrType = errType;
+      }
+    };
+    for (const rec of records) {
+      const ts = Number(rec.t) || 0;
+      const tries = Array.isArray(rec.try_failed) ? rec.try_failed : [];
+      for (const f of tries) {
+        add(String(f.reason || ''), String(f.provider || ''), String(f.key_id || ''),
+          String(f.err || ''), String(f.err_type || ''), ts);
+      }
+      // Local rejections (model not configured, protocol mismatch, every key
+      // cooling down) never reach a key and therefore have no try_failed entry;
+      // their reason lives on the record. Without this they would be missing
+      // from the analysis even though the request table shows them.
+      const failed = Number(rec.status) >= 400 || Number(rec.status) === 0;
+      if (failed && tries.length === 0 && (rec.reason || rec.err_type || rec.err)) {
+        add(String(rec.reason || ''), String(rec.provider || ''), String(rec.key_id || ''),
+          String(rec.err || ''), String(rec.err_type || ''), ts);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count || b.lastTs - a.lastTs);
+  }
+
+  function renderErrorAnalysis() {
+    const container = $('errorAnalysisList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // The scope sentence must match the window actually loaded: the failed-only
+    // segment is narrower than「最近 50 条请求」and must say so.
+    const sub = $('errorAnalysisSub');
+    if (sub) {
+      sub.textContent = state.recentFailedOnly
+        ? '基于当前「仅失败与重试」窗口的失败记录统计'
+        : '基于最近 50 条请求中的失败记录统计';
+    }
+
+    const agg = aggregateFailures(state.recentRequests || []);
+    if (agg.length === 0) {
+      const emptyRow = ce('div');
+      emptyRow.className = 'row row--static text-muted';
+      emptyRow.textContent = '当前窗口内没有失败记录';
+      container.appendChild(emptyRow);
+      return;
+    }
+
+    const shown = agg.slice(0, 10);
+    const wrap = ce('div');
+    wrap.className = 'table-wrap';
+    const table = ce('table');
+    table.className = 'data-table';
+    table.innerHTML = '<thead><tr><th>原因</th><th>供应商 / Key</th><th>次数</th><th>最近发生</th><th>错误类型</th><th>最近一条原文</th></tr></thead>';
+    const tbody = ce('tbody');
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    container.appendChild(wrap);
+
+    for (const item of shown) {
+      const chars = Array.from(item.lastErr || '');
+      const short = chars.slice(0, 80).join('');
+      const tr = ce('tr');
+      tr.innerHTML = `
+        <td><span class="reqlog-reason" title="${eh(item.reason || '')}">${eh(item.reason ? reasonLabel(item.reason) : '—')}</span></td>
+        <td class="reqlog-target">${eh(item.provider || '—')}${item.keyId ? ` / ${eh(item.keyId)}` : ''}</td>
+        <td class="tabular">${item.count}</td>
+        <td class="tabular" title="${eh(fullTimeOf(item.lastTs))}">${clockOf(item.lastTs)}</td>
+        <td class="tabular">${eh(item.lastErrType || '—')}</td>
+        <td class="reqlog-err-cell" title="${eh(item.lastErr || '')}">${eh(short || '—')}${chars.length > short.length ? '…' : ''}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    if (agg.length > shown.length) {
+      const foot = ce('div');
+      foot.className = 'reqlog-foot text-muted';
+      foot.textContent = `还有 ${agg.length - shown.length} 类`;
+      container.appendChild(foot);
     }
   }
 
@@ -5251,9 +5751,112 @@
           `<div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport">选择文件导入</button></div>`),
       ].join('');
     }
+    // Model catalog (Hub only — the Hub owns the KV catalog a Full node pulls,
+    // and it is the only side that may reach models.dev). No .btn--primary here:
+    // updating a cache is maintenance, not the card's primary save action.
+    const catalogRows = $('modelCatalogRows');
+    if (catalogRows && !catalogRows.childElementCount) {
+      catalogRows.innerHTML = [
+        settingRow('上次更新',
+          '当前目录的抓取时间（本地时区）与收录的模型数量；尚未更新时节点各自使用内嵌目录',
+          `<span class="text-xs text-muted tabular" id="modelCatalogMeta">尚未更新</span>`),
+        settingRow('手动更新',
+          '从 models.dev 拉取最新目录并在中枢侧瘦身后写入 KV；失败不会影响现有目录',
+          `<div class="input-row"><a class="text-xs text-link" id="modelCatalogSourceLink" href="https://models.dev" target="_blank" rel="noopener noreferrer" title="数据来源 models.dev">数据来源</a><button class="btn" id="btnUpdateModelCatalog">立即从 models.dev 更新</button></div>`),
+      ].join('');
+    }
   }
 
   // --- View: Settings (M16, U3, U4) ---
+  // Model catalog card (Hub only). The catalog itself never rides on /api/config
+  // (1.6 MB): the page gets meta only, and this card is the single place that
+  // asks for a refresh — no background polling, no automatic network call.
+  // Backend error codes (edgeone-hub/api/admin/model-catalog.js) are dotted for the
+// upstream failures — match them verbatim, or the card would print a raw code.
+  const MODEL_CATALOG_ERROR_TEXT = {
+    'models.dev_unreachable': '连不上 models.dev（20 秒超时），已保留现有目录；节点仍使用内嵌目录',
+    'models.dev_invalid': 'models.dev 返回的不是合法 JSON，已保留现有目录',
+    catalog_invalid: '拉取到的目录校验不通过，已保留现有目录',
+    catalog_not_found: '中枢还没有模型目录',
+    method_not_allowed: '当前接口不接受该操作',
+  };
+
+  function formatLocalDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
+  // ≥1000 -> K, exactly 1000000 -> M (the ask's formatting rule). Values that are
+  // not published stay absent rather than printing a misleading 0.
+  function fmtTokens(n) {
+    const v = Math.floor(Number(n) || 0);
+    if (v <= 0) return '';
+    if (v === 1000000) return '1M';
+    if (v >= 1000) return `${Math.round(v / 1000)}K`;
+    return String(v);
+  }
+
+  function modelCatalogMetaText(m) {
+    if (!m || !m.present) return '尚未更新';
+    const when = formatLocalDateTime(m.fetched_at);
+    const count = Number(m.model_count) || 0;
+    return `${when || '时间未知'} · ${count.toLocaleString('en-US')} 个模型`;
+  }
+
+  function renderModelCatalogCard(refresh) {
+    const metaEl = $('modelCatalogMeta');
+    const btn = $('btnUpdateModelCatalog');
+    if (!metaEl && !btn) return;
+    const apply = (m) => {
+      if (m && typeof m === 'object' && m.ok !== false) {
+        state.config = state.config || {};
+        state.config.model_catalog_meta = {
+          present: Boolean(m.present),
+          fetched_at: m.fetched_at || '',
+          model_count: Number(m.model_count) || 0,
+        };
+      }
+      if (metaEl) metaEl.textContent = modelCatalogMetaText(state.config?.model_catalog_meta);
+    };
+    apply(state.config?.model_catalog_meta);
+    // The config snapshot may predate a previous update (or a different tab's
+    // update), so the authoritative meta is fetched once per page.
+    if (refresh || !state.modelCatalogMetaLoaded) {
+      state.modelCatalogMetaLoaded = true;
+      window.HOST.getModelCatalogMeta().then(apply).catch(() => {});
+    }
+    if (btn) {
+      btn.onclick = async () => {
+        if (btn.disabled) return;
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '更新中…';
+        try {
+          const res = await window.HOST.updateModelCatalog();
+          if (res && res.ok) {
+            apply({ present: true, fetched_at: res.fetched_at, model_count: res.model_count });
+            // A new catalog can change a model's ladder/toggle answer: drop the
+            // session memo so the next dropdown/summary asks again.
+            state.modelInfoCache = {};
+            toast(`模型目录已更新：${Number(res.model_count || 0).toLocaleString('en-US')} 个模型`, 'ok');
+          } else {
+            const code = String(res?.error || '');
+            toast(MODEL_CATALOG_ERROR_TEXT[code] || `更新失败：${scrubUiText(code || '未知错误')}`, 'err');
+            // detail is bounded server-side and carries no key material.
+            console.warn('[model-catalog] update failed', code, String(res?.detail || ''));
+          }
+        } catch (e) {
+          toast(`更新失败：${scrubUiText(e.message)}`, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      };
+    }
+  }
+
   function renderSettingsView() {
     state.config = state.config || {};
     state.config.settings = state.config.settings || {};
@@ -5290,7 +5893,12 @@
     if (guardBox) guardBox.hidden = false;
     if (backupBox) backupBox.hidden = false;
     if (sysBox) sysBox.hidden = !window.HOST.capabilities.systemUpdate;
+    // 模型目录 exists only on the Hub: it is the side that stores the catalog in
+    // KV and may reach models.dev. A Full node pulls the artifact instead.
+    const catalogBox = $('modelCatalogBox');
+    if (catalogBox) catalogBox.hidden = !isHubMode();
     renumberSettingsSections();
+    if (isHubMode()) renderModelCatalogCard();
 
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
     const localBase = `${baseOrigin}/v1`;

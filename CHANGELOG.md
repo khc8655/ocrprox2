@@ -4,6 +4,34 @@
 
 ---
 
+## [v20261125-01] - 2026-11-25
+
+### Added
+
+- **失败原因可归因（三层打通）**：每次失败的尝试都带归一化 `reason`、上游机器码 `err_type`、脱敏后的 `err` 原文与上游 `rid`。`reason` 是封闭枚举：`auth_invalid` / `quota_exhausted` / `rate_limited` / `model_not_found` / `context_too_long` / `upstream_error` / `timeout` / `network` / `client_disconnected` / `bad_response` / `protocol_mismatch` / `no_candidate` / `config_unavailable` / `unknown`（后两个为本版新增）。
+- **拨号前的本地拒绝也进账本与轨迹**：模型未配置（404）、配置不可用（503）、无候选可用（503）、全部 Key 冷却（502）现在都会写一条 `usage.jsonl` 与一条 `RequestTrace`。`UsageRecord` 顶层新增 `reason` / `err_type` / `err` / `rid`，所以「最近请求」的原因列不会再是 `—`；`try_failed` 仍只记具体 Key，不污染 Key 健康统计。
+- **`GET /api/admin/recent-requests?limit=50&failed=1`**：从账本尾部反向回放最近请求，重启后仍在。控制台「请求日志」页签展示最近 50 条，并按 `reason × 供应商` 聚合出「错误分析」。
+- **`POST /api/admin/test-key`（Hub + Full）**：Key 行的「测试」按钮真实发一句「你好」（`max_tokens` 16、`stream:false`、20s），返回回复文本、耗时与失败原因。模型行的「测试路由」按钮已移除。
+- **models.dev 模型目录**：Hub 设置页新增「模型目录」卡片，**手动**点按钮才从 models.dev 更新（不自动联网），瘦身后约 1.6 MB 存 Hub KV；Full 节点内嵌一份兜底目录并带容错查询（手动覆盖 > 映射精确 > 大小写不敏感 > 同族最近亲）。
+- **路由候选的「思考档位」真正生效**：OpenAI 方言写 `reasoning_effort`（就近映射到目录里该模型支持的档位），Anthropic 方言写 `thinking.budget_tokens`（`budget < max_tokens` 不成立时整段跳过，不冒必然 400 的险）；空值仍跟随客户端。
+
+### Fixed
+
+- **`app.log` 的失败行描述的是「最后一次尝试」而不是「最后一次失败」**：故障转移成功时那一行是 `status=200 reason=-`，恰好把要看的原因吞掉。现在取最后一次失败，并补 `recovered_by=provider/key`；全部候选被跳过时补 `note=`。
+- **`PersistKeyEntry` 在只提交元数据（如 `last_test`）时会清空已存密钥**：现在只有提交了非空且非掩码的 `Key` 才覆盖。
+- **Key 测试结果刷新即丢**：改为后端立即落盘——Full 走 `LocalSource.PersistKeyTestState`（按 provider 定位，只写 `last_test`），Hub 走 `persistProviderKeyHealth`；无需再点「保存供应商」。
+- **`usage.jsonl` 的单条记录可顶破上限**：`ReqModel` / `ServedModel` / `StopReason` 来自客户端请求体，单条可达 20 MiB。现在单条封顶 256 KiB，两个文件合计 ≤ 20 MiB，全部日志类文件总上界 30 MiB。
+
+### Tests
+
+- 新增 `internal/scheduler/local_failure_test.go`（4 条）：404 / 503 / 全冷却 502 都带 reason；成功故障转移的日志行带 `reason` 与 `recovered_by`。
+- 新增 `internal/scheduler/reasoning_test.go`（5 条）：空档位原样透传、OpenAI 方言注入 `reasoning_effort`、Anthropic 方言注入 `thinking.budget_tokens`、`max_tokens` 不够时跳过、端到端上游确实收到档位。
+- 新增 `internal/obs/usage_reason_test.go`（2 条）：无 Key 的本地拒绝在记录顶层保留原因且不污染 `try_failed`；有 Key 的失败仍逐 Key 记录。
+- 新增 `internal/config/key_test_state_test.go`（3 条）：只写 `last_test` 不动密钥与启用状态、provider 级隔离、`PersistKeyEntry` 不因缺 Key 而清空。
+- Hub 新增 1 条：`test-key` 的判定落进 KV 的 `last_test`，其它 Key 与密钥本身不受影响。
+
+---
+
 ## [v20261124-03] - 2026-11-24
 
 ### Fixed

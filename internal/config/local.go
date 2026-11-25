@@ -299,12 +299,24 @@ func (s *LocalSource) PersistKeyEntry(ctx context.Context, updatedKey *types.Key
 			}
 
 			if matched {
-				k.Key = updatedKey.Key
+				// Only overwrite the secret when the caller actually supplied one:
+				// console metadata writes (last_test) carry no Key, and blindly
+				// assigning it would erase the credential from disk.
+				if updatedKey.Key != "" && !IsMaskedSecret(updatedKey.Key) {
+					k.Key = updatedKey.Key
+				}
 				if updatedKey.OAuthMeta != nil {
 					if k.OAuthMeta == nil {
 						k.OAuthMeta = &types.OAuthMeta{}
 					}
 					*k.OAuthMeta = *updatedKey.OAuthMeta
+				}
+				// Console test verdicts ride along: POST /api/admin/test-key persists
+				// the fresh last_test through this path so a page refresh (or a
+				// restart) still shows the pill without an explicit provider save.
+				if updatedKey.LastTest != nil {
+					lt := *updatedKey.LastTest
+					k.LastTest = &lt
 				}
 				prov.APIKeys[i] = k
 				found = true
@@ -322,6 +334,61 @@ func (s *LocalSource) PersistKeyEntry(ctx context.Context, updatedKey *types.Key
 
 	_, err = s.saveConfigLocked(&clonedCfg, true)
 	return err
+}
+
+// PersistKeyTestState stores one console test verdict on the key that produced it.
+//
+// Kept separate from PersistKeyEntry on purpose: this path touches nothing but
+// LastTest, and it resolves the key inside a named provider so equal labels on
+// different providers can never cross-contaminate. Failures are returned to the
+// caller (which logs them) — a probe answer is still an answer even if the
+// verdict could not be written to disk.
+func (s *LocalSource) PersistKeyTestState(providerID, keyID, keyLabel string, lastTest *types.KeyLastTest) error {
+	if lastTest == nil {
+		return errors.New("config: nil last_test")
+	}
+	if providerID == "" || (keyID == "" && keyLabel == "") {
+		return errors.New("config: provider and key are required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentSnap := s.snapshot.Load()
+	if currentSnap == nil || currentSnap.Config == nil {
+		return errors.New("config: no config loaded")
+	}
+
+	raw, err := json.Marshal(currentSnap.Config)
+	if err != nil {
+		return err
+	}
+	var clonedCfg types.ProxyConfig
+	if err := json.Unmarshal(raw, &clonedCfg); err != nil {
+		return err
+	}
+
+	prov := clonedCfg.Providers[providerID]
+	if prov == nil {
+		return fmt.Errorf("config: provider %q not found", providerID)
+	}
+
+	for _, k := range prov.APIKeys {
+		if k == nil {
+			continue
+		}
+		if keyID != "" && k.ID != keyID {
+			continue
+		}
+		if keyID == "" && k.Label != keyLabel {
+			continue
+		}
+		lt := *lastTest
+		k.LastTest = &lt
+		_, err = s.saveConfigLocked(&clonedCfg, true)
+		return err
+	}
+	return errors.New("config: key entry to persist not found in provider")
 }
 
 // MergeVaultConfig merges (or replaces) vault-provided providers and keys into local
@@ -797,6 +864,14 @@ func enforceVaultLock(target, source *types.ProxyConfig) {
 					cp.OAuthMeta = &m
 				}
 				cp.Enabled = submitted.Enabled
+				// LastTest is console metadata, not a credential: the submitted
+				// verdict (POST /api/admin/test-key) is newer than storage, so it
+				// rides through the vault lock and survives the next config save.
+				// An older stored verdict stays when the submission carries none.
+				if submitted.LastTest != nil {
+					lt := *submitted.LastTest
+					cp.LastTest = &lt
+				}
 				kept = append(kept, &cp)
 			}
 			p.APIKeys = kept

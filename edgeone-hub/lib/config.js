@@ -113,6 +113,10 @@ export function sanitizeStoredConfig(config) {
     delete settings.proxy_keys;
     config.settings = settings;
   }
+  // model_catalog_meta is a read-only projection of the catalog KV entry, served on
+  // GET /api/config. The console POSTs back what it got, so drop it here: a stored
+  // copy would go stale the moment the catalog is updated and nobody would notice.
+  delete config.model_catalog_meta;
   return config;
 }
 
@@ -452,6 +456,12 @@ export async function persistProviderKeyHealth(env, mapName, providerId, keyLabe
         match.last_models_count = Number(result.models_count) || 0;
       }
       match.last_checked_at = new Date().toISOString();
+      // The console's per-key test verdict (same shape as the Full node's
+      // KeyEntry.last_test) so the key-row pill survives a refresh without an
+      // explicit provider save.
+      if (result.last_test && typeof result.last_test === 'object') {
+        match.last_test = result.last_test;
+      }
       const saved = await saveConfigWithCAS(config, kv);
       return typeof saved?._version === 'number' ? saved._version : null;
     } catch (err) {

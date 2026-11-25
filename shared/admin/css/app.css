@@ -641,6 +641,35 @@ html, body {
   width: auto;
 }
 
+/* Secondary text link inside a row (e.g.「数据来源」): supporting text, not a
+   control, so it takes the accent color with no button chrome. */
+.text-link {
+  color: var(--khc-primary-500);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+/* Per-candidate 思考档位 select inside a route-editor row: the row's actions are
+   .btn--sm (26px), and docs §6.2 forbids mixing a 32px control with them in the
+   same row — so this select is 26px too. Sizes to its content so the ladder
+   never widens the row on a narrow screen. */
+.m-cand-eff {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.select--compact {
+  width: auto;
+  max-width: 190px;
+  height: 26px;
+  font-size: 11px;
+}
+
 .form-label {
   font-size: 12px;
   font-weight: 500;
@@ -903,6 +932,17 @@ button.row {
   color: var(--khc-danger-text);
 }
 
+/* Per-key test verdict: the reply excerpt can be 40 CJK chars, so the pill
+   gets a capped width and ellipsis (the full reply/error rides in title=). */
+.pill--test {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 18px;
+  vertical-align: middle;
+}
+
 /* Inline Editor */
 .editor {
   padding: 16px 20px;
@@ -973,6 +1013,139 @@ button.row {
 
 .data-table tr:hover td {
   background-color: var(--khc-surface-hover);
+}
+
+/* Recent requests / failure analysis (overview, full role).
+ * Table stays inside .table-wrap for <=768px horizontal scrolling; the expansion
+ * is an in-place .editor inside a full-width row, never a drawer. */
+.reqlog-row {
+  cursor: pointer;
+}
+
+/* Fixed layout so the colspan expansion row can never widen the table past the
+ * card: auto layout sizes it to the error text's max-content (one long JSON line
+ * is enough), while fixed layout caps every column by the widths below. The
+ * 640px min-width keeps the pills readable on phones and scrolls in .table-wrap. */
+.data-table.reqlog-table {
+  table-layout: fixed;
+  min-width: 640px;
+}
+
+.data-table.reqlog-table th:nth-child(1) { width: 104px; }
+.data-table.reqlog-table th:nth-child(2) { width: 160px; }
+.data-table.reqlog-table th:nth-child(3) { width: 180px; }
+.data-table.reqlog-table th:nth-child(4) { width: 96px; }
+.data-table.reqlog-table th:nth-child(5) { width: 76px; }
+.data-table.reqlog-table th:nth-child(6) { width: 72px; }
+/* column 7 (原因) takes the remainder */
+
+.reqlog-row.expanded td {
+  background-color: var(--khc-surface-muted);
+}
+
+.data-table td.reqlog-model {
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.data-table td.reqlog-target {
+  color: var(--khc-text-2);
+}
+
+.reqlog-reason {
+  color: var(--khc-danger-text);
+}
+
+/* Notes: the expansion td is also the row's :last-child, which the table sets to
+ * nowrap (and that selector outranks a bare class), so the reset must carry the
+ * same .data-table td specificity — without it a long upstream error becomes one
+ * unbreakable line and stretches the table. */
+.data-table td.reqlog-expand-td {
+  padding: 0;
+  white-space: normal;
+}
+
+.reqlog-expand-row:hover td {
+  background-color: var(--khc-surface-muted);
+}
+
+.reqlog-expand-td .editor {
+  border-bottom: none;
+}
+
+.reqlog-expand-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.reqlog-try {
+  padding: 8px 0;
+  border-top: 1px solid var(--khc-border-1);
+}
+
+.reqlog-expand-head + .reqlog-try {
+  padding-top: 0;
+  border-top: none;
+}
+
+.reqlog-try-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.reqlog-try-head {
+  color: var(--khc-text-2);
+  font-size: 12px;
+}
+
+.reqlog-errtype {
+  color: var(--khc-text-3);
+  font-size: 11px;
+}
+
+/* Upstream error text can be a long JSON body: 12px mono, weight 400 and
+ * break-word keep it from pushing the card wider than the page. */
+.reqlog-err {
+  margin-top: 4px;
+  font-family: var(--khc-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--khc-text-1);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.reqlog-rid {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--khc-text-3);
+  word-break: break-word;
+}
+
+.reqlog-foot {
+  padding: 10px 20px;
+  font-size: 12px;
+  color: var(--khc-text-2);
+}
+
+/* The 最近一条原文 column is the only wrapping cell in the analysis table. */
+.data-table td.reqlog-err-cell {
+  max-width: 260px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--khc-text-2);
 }
 
 /* Health Bar */

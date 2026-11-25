@@ -182,6 +182,20 @@ if (!existsSync(generatedPresetsPath)) {
   execFileSync('node', [join(projectRoot, 'shared/presets/build-catalog.mjs')], { stdio: 'inherit' });
 }
 
+// The Hub's per-model capability lookup needs the preset->models.dev provider map
+// and the manual overrides, both of which Go embeds. The edge bundle cannot read
+// files, so they are frozen into a JS module. Regenerated here whenever the
+// sources moved: a stale copy would silently answer different ladder/toogle
+// questions on the Hub than on a Full node.
+const hubModelMapPath = join(hubDir, 'lib/generated-model-map.js');
+const modelMapSources = ['provider-map.json', 'overrides.json'].map((f) => join(projectRoot, 'shared/model-catalog', f));
+const modelMapStale = !existsSync(hubModelMapPath) ||
+  modelMapSources.some((src) => existsSync(src) && statSync(src).mtimeMs > statSync(hubModelMapPath).mtimeMs);
+if (modelMapStale) {
+  console.log('   Regenerating edgeone-hub/lib/generated-model-map.js from shared/model-catalog/...');
+  execFileSync('node', [join(projectRoot, 'scripts/model-catalog/build-hub-map.mjs')], { stdio: 'inherit' });
+}
+
 function syncDirectory(srcDir, destDir) {
   mkdirSync(destDir, { recursive: true });
   const entries = readdirSync(srcDir, { withFileTypes: true });
@@ -213,6 +227,14 @@ const apiRoutes = [
   { file: 'api/admin/nodes/[id]/rotate.js', target: '../../../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/nodes/[[default]].js', target: '../../../_hub/api/admin/nodes.js' },
   { file: 'api/admin/verify-key.js', target: '../../_hub/api/admin/verify-key.js' },
+  { file: 'api/admin/test-key.js', target: '../../_hub/api/admin/test-key.js' },
+  // Model catalog admin API (edgeone-hub/api/admin/model-catalog.js).
+  // Base path serves GET meta; /update, /data and /lookup are a second path
+  // segment, so they need their own dynamic entry file — the same split nodes.js
+  // uses for /nodes/:id. The guard below is per *file*, so one entry per handler
+  // module is enough; this second entry is what routes the sub-paths.
+  { file: 'api/admin/model-catalog.js', target: '../../_hub/api/admin/model-catalog.js' },
+  { file: 'api/admin/model-catalog/[action].js', target: '../../../_hub/api/admin/model-catalog.js' },
   { file: 'api/admin/probe-models.js', target: '../../_hub/api/admin/probe-models.js' },
   { file: 'api/vault/manifest.js', target: '../../_hub/api/vault/manifest.js' },
   { file: 'api/vault/fetch.js', target: '../../_hub/api/vault/fetch.js' },

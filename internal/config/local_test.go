@@ -914,7 +914,10 @@ func TestLocalSource_EnforceVaultLock(t *testing.T) {
 				Enabled:          true,
 				AdapterRules:     &types.AdapterRules{AuthPrefix: "X-Key ", StripParams: []string{"bar"}},
 				APIKeys: []*types.KeyEntry{
-					{ID: "vk-1", Label: "renamed-1", Key: "sk-test-tampered-1", Origin: "vault", Enabled: false},
+					{ID: "vk-1", Label: "renamed-1", Key: "sk-test-tampered-1", Origin: "vault", Enabled: false,
+						// Console metadata (no secret): must survive the lock so a
+						// per-key test verdict is not lost on the next save.
+						LastTest: &types.KeyLastTest{OK: true, Status: 200, LatencyMS: 42, ReplyText: "你好"}},
 					{ID: "inj-1", Label: "inj-1", Key: "sk-test-local-inject", Origin: "local", Enabled: true},
 				},
 			},
@@ -953,6 +956,9 @@ func TestLocalSource_EnforceVaultLock(t *testing.T) {
 	}
 	if got.Enabled != false {
 		t.Errorf("key lock: expected Enabled toggle from submission to pass through, got %v", got.Enabled)
+	}
+	if got.LastTest == nil || !got.LastTest.OK || got.LastTest.LatencyMS != 42 || got.LastTest.ReplyText != "你好" {
+		t.Errorf("key lock: expected submitted last_test metadata to survive, got %+v", got.LastTest)
 	}
 }
 

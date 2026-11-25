@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/khc8655/llmproxy2/internal/adapters"
 	"github.com/khc8655/llmproxy2/internal/config"
+	"github.com/khc8655/llmproxy2/internal/modelcatalog"
 	"github.com/khc8655/llmproxy2/internal/obs"
 	"github.com/khc8655/llmproxy2/internal/types"
 	"github.com/khc8655/llmproxy2/internal/upstream"
@@ -59,6 +61,39 @@ type Scheduler struct {
 	sessionSticky      *SessionStickyCache
 	oauthRefresher     OAuthRefresher
 	keepaliveInterval  time.Duration
+	// catalog resolves per-model reasoning capabilities for candidates that pin
+	// an effort. Loaded lazily from the embedded copy on first use.
+	catalog *modelcatalog.Catalog
+}
+
+// SetModelCatalog injects the model capability catalog (the admin server owns
+// the synced one); nil keeps the lazily-loaded embedded copy.
+func (s *Scheduler) SetModelCatalog(c *modelcatalog.Catalog) {
+	s.mu.Lock()
+	s.catalog = c
+	s.mu.Unlock()
+}
+
+// reasoningCatalog returns the catalog, loading the embedded copy on first use so
+// a deployment that never pins an effort never pays for the parse.
+func (s *Scheduler) reasoningCatalog() *modelcatalog.Catalog {
+	s.mu.Lock()
+	c := s.catalog
+	s.mu.Unlock()
+	if c != nil {
+		return c
+	}
+	cat, err := modelcatalog.Bundled()
+	if err != nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.catalog == nil {
+		s.catalog = cat
+	}
+	c = s.catalog
+	s.mu.Unlock()
+	return c
 }
 
 // NewScheduler creates a Scheduler.
@@ -198,6 +233,9 @@ type CandidateKey struct {
 	KeyTag      string // e.g. "minimax:hk-01"
 	Weight      int    // routing weight (default 1)
 	MaxConc     int    // soft concurrency cap per candidate (0 = unlimited)
+	// ReasoningEffort is the operator's per-candidate thinking level ("" = follow
+	// the client). applyCandidateReasoning turns it into the dialect's wire knob.
+	ReasoningEffort string
 }
 
 // DescribeRouteCandidates explains, per configured candidate, why it cannot be
@@ -344,12 +382,13 @@ func (s *Scheduler) orderCandidates(
 			}
 
 			candidates = append(candidates, &CandidateKey{
-				Provider:    p,
-				KeyEntry:    k,
-				TargetModel: targetModel,
-				KeyTag:      cand.Provider + ":" + k.Label,
-				Weight:      cand.Weight,
-				MaxConc:     cand.MaxConc,
+				Provider:        p,
+				KeyEntry:        k,
+				TargetModel:     targetModel,
+				KeyTag:          cand.Provider + ":" + k.Label,
+				Weight:          cand.Weight,
+				MaxConc:         cand.MaxConc,
+				ReasoningEffort: cand.ReasoningEffort,
 			})
 		}
 	}
@@ -396,12 +435,13 @@ func (s *Scheduler) orderCandidates(
 					targetModel = reqModel
 				}
 				candidates = append(candidates, &CandidateKey{
-					Provider:    p,
-					KeyEntry:    k,
-					TargetModel: targetModel,
-					KeyTag:      tag,
-					Weight:      cand.Weight,
-					MaxConc:     cand.MaxConc,
+					Provider:        p,
+					KeyEntry:        k,
+					TargetModel:     targetModel,
+					KeyTag:          tag,
+					Weight:          cand.Weight,
+					MaxConc:         cand.MaxConc,
+					ReasoningEffort: cand.ReasoningEffort,
 				})
 				added[tag] = true
 			}
@@ -680,7 +720,7 @@ func (s *Scheduler) Dispatch(
 	clientStream bool,
 	w http.ResponseWriter,
 	r *http.Request,
-) error {
+) (dispatchErr error) {
 	reqStart := time.Now()
 	hasObs := s.hasObs()
 	var traceID string
@@ -692,12 +732,26 @@ func (s *Scheduler) Dispatch(
 		}
 	}
 
+	// Failure bookkeeping lives here so the deferred one-line app.log writer can
+	// see the final attempt and every key literal used on the way out.
+	var (
+		tries          []types.Try
+		usedSecrets    []string
+		lastStatus     int
+		logErrFallback string // human-readable cause when no try carries the text (e.g. all keys skipped)
+	)
+	defer func() {
+		s.logDispatchOutcome(traceID, reqModel, endpoint, lastStatus, tries,
+			time.Since(reqStart).Milliseconds(), usedSecrets, logErrFallback, dispatchErr)
+	}()
+
 	// Hard total budget: 300s
 	budgetCtx, cancel := context.WithTimeout(ctx, HardBudgetTimeout)
 	defer cancel()
 
 	snap, err := s.configSource.Current(budgetCtx, false)
 	if err != nil {
+		lastStatus = http.StatusServiceUnavailable
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		msg := err.Error()
@@ -711,6 +765,8 @@ func (s *Scheduler) Dispatch(
 				"type":    "service_unavailable",
 			},
 		})
+		tries = append(tries, s.recordLocalFailure(traceID, endpoint, reqModel, http.StatusServiceUnavailable,
+			ReasonConfigUnavailable, msg, clientStream, reqStart, reqHeaders, usedSecrets))
 		return err
 	}
 
@@ -720,14 +776,18 @@ func (s *Scheduler) Dispatch(
 	}
 	route, exists := ResolveRoute(snap.Config, category, reqModel)
 	if !exists || !route.Enabled {
+		lastStatus = http.StatusNotFound
+		msg := fmt.Sprintf("model %q not configured or disabled", reqModel)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{
-				"message": fmt.Sprintf("model %q not configured or disabled", reqModel),
+				"message": msg,
 				"type":    "invalid_request_error",
 			},
 		})
+		tries = append(tries, s.recordLocalFailure(traceID, endpoint, reqModel, http.StatusNotFound,
+			ReasonModelNotFound, msg, clientStream, reqStart, reqHeaders, usedSecrets))
 		return fmt.Errorf("model %s not found", reqModel)
 	}
 
@@ -747,13 +807,39 @@ func (s *Scheduler) Dispatch(
 	if r != nil {
 		if proto := EntryProtocol(r.URL.Path); proto != "" {
 			if ok, notes := RouteServesProtocol(route, snap.Config.Providers, proto); !ok && len(notes) > 0 {
+				msg := protocolMismatchMessage(reqModel, proto, r.URL.Path, notes)
+				lastStatus = http.StatusBadRequest
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"error": map[string]any{
-						"message": protocolMismatchMessage(reqModel, proto, r.URL.Path, notes),
+						"message": msg,
 						"type":    "invalid_request_error",
 					},
+				})
+
+				// Nothing was dialed, but the reason this request never spent a key
+				// still belongs in the trace and in the failure log line.
+				now := time.Now()
+				tries = append(tries, types.Try{
+					Attempt:      1,
+					Model:        reqModel,
+					Status:       http.StatusBadRequest,
+					Reason:       ReasonProtocolMismatch,
+					Error:        compressErrorText(msg, usedSecrets),
+					ErrorSnippet: obs.ScrubStringWithSecrets(msg, usedSecrets...),
+				})
+				s.recordFinalTrace(types.RequestTrace{
+					ID:          traceID,
+					Timestamp:   now.Unix(),
+					Mode:        "agent",
+					Endpoint:    endpoint,
+					ReqModel:    reqModel,
+					Status:      http.StatusBadRequest,
+					Stream:      clientStream,
+					TotalMillis: time.Since(reqStart).Milliseconds(),
+					ReqHeaders:  reqHeaders,
+					Tries:       tries,
 				})
 				return ErrProtocolUnsupported
 			}
@@ -776,6 +862,7 @@ func (s *Scheduler) Dispatch(
 		}()
 	}
 	if len(candidates) == 0 {
+		lastStatus = http.StatusServiceUnavailable
 		msg := fmt.Sprintf("no candidate keys available for model %q", reqModel)
 		if notes := DescribeRouteCandidates(route, snap.Config.Providers); len(notes) > 0 {
 			msg += ": " + strings.Join(notes, "; ")
@@ -788,6 +875,8 @@ func (s *Scheduler) Dispatch(
 				"type":    "service_unavailable",
 			},
 		})
+		tries = append(tries, s.recordLocalFailure(traceID, endpoint, reqModel, http.StatusServiceUnavailable,
+			ReasonNoCandidate, msg, clientStream, reqStart, reqHeaders, usedSecrets))
 		return ErrNoCandidateAvailable
 	}
 
@@ -819,10 +908,7 @@ func (s *Scheduler) Dispatch(
 	durFirstByte := time.Duration(firstByteSec) * time.Second
 	client := s.getClient(firstByteSec)
 
-	var tries []types.Try
 	var attempts []TryAttempt
-	var usedSecrets []string
-	var lastStatus int
 	var lastErrSnippet string
 	// Why candidates were skipped before any upstream attempt. Surfaced when every
 	// candidate is unavailable so the client gets a diagnosable error instead of
@@ -914,6 +1000,7 @@ func (s *Scheduler) Dispatch(
 					lastStatus = http.StatusUnauthorized
 					lastErrSnippet = refErr.Error()
 					cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusUnauthorized, durRateLimit, durServerError, durNetwork, durAuth)
+					reason, errType := ClassifyFailure(http.StatusUnauthorized, []byte(lastErrSnippet), FailureKindHTTP)
 					tries = append(tries, types.Try{
 						Attempt:            i + 1,
 						Provider:           cand.Provider.ID,
@@ -921,7 +1008,9 @@ func (s *Scheduler) Dispatch(
 						Model:              cand.TargetModel,
 						Status:             http.StatusUnauthorized,
 						Millis:             time.Since(tryStart).Milliseconds(),
-						Reason:             "auth_error",
+						Reason:             reason,
+						ErrType:            errType,
+						Error:              compressErrorText(lastErrSnippet, usedSecrets),
 						CooldownAppliedSec: cooldownSec,
 						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					})
@@ -939,6 +1028,11 @@ func (s *Scheduler) Dispatch(
 			)
 			if prepErr != nil {
 				return
+			}
+			// The route editor lets the operator pin a thinking level per
+			// candidate; honour it on the wire instead of only storing it.
+			if cand.ReasoningEffort != "" && !route.NoReasoning {
+				mutatedBody = applyCandidateReasoning(mutatedBody, cand, cand.Provider, s.reasoningCatalog())
 			}
 
 			// Construct URL
@@ -985,6 +1079,8 @@ func (s *Scheduler) Dispatch(
 			if callErr != nil {
 				lastStatus = 504
 				lastErrSnippet = callErr.Error()
+				kind := classifyTransportError(callErr, ctx)
+				reason, errType := ClassifyFailure(504, []byte(lastErrSnippet), kind)
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, 504, durRateLimit, durServerError, durNetwork, durAuth)
 				tries = append(tries, types.Try{
 					Attempt:            i + 1,
@@ -993,7 +1089,9 @@ func (s *Scheduler) Dispatch(
 					Model:              cand.TargetModel,
 					Status:             504,
 					Millis:             tryElapsed,
-					Reason:             "network_error",
+					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(lastErrSnippet, usedSecrets),
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 				})
@@ -1020,14 +1118,8 @@ func (s *Scheduler) Dispatch(
 					}
 				}
 
-				reason := "server_error"
-				if resp.StatusCode == 429 {
-					reason = "rate_limit"
-				} else if resp.StatusCode == 401 || resp.StatusCode == 402 || resp.StatusCode == 403 {
-					reason = "auth_error"
-				} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-					reason = "client_error"
-				}
+				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
+				requestID := ExtractRequestID(resp.Header)
 
 				currAttempt := TryAttempt{
 					Provider:     cand.Provider.ID,
@@ -1045,6 +1137,9 @@ func (s *Scheduler) Dispatch(
 					Status:             resp.StatusCode,
 					Millis:             tryElapsed,
 					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(lastErrSnippet, usedSecrets),
+					RequestID:          requestID,
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
@@ -1129,6 +1224,12 @@ func (s *Scheduler) Dispatch(
 					} else if peekErr != nil {
 						lastErrSnippet = peekErr.Error()
 					}
+					// The upstream header said 200; the body is what failed. Keep the
+					// response status in step with the try (502), or the all-failed
+					// fallthrough would answer the client with 200 + an error body.
+					lastStatus = 502
+					kind := classifyPeekError(peekErr, ctx)
+					reason, errType := ClassifyFailure(502, []byte(lastErrSnippet), kind)
 					cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, 502, durRateLimit, durServerError, durNetwork, durAuth)
 					tries = append(tries, types.Try{
 						Attempt:            i + 1,
@@ -1138,7 +1239,10 @@ func (s *Scheduler) Dispatch(
 						Status:             502,
 						Millis:             tryElapsed,
 						TTFTMillis:         tryTTFT,
-						Reason:             "stream_peek_error",
+						Reason:             reason,
+						ErrType:            errType,
+						Error:              compressErrorText(lastErrSnippet, usedSecrets),
+						RequestID:          ExtractRequestID(resp.Header),
 						CooldownAppliedSec: cooldownSec,
 						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 						RespHeaders:        tryRespHeaders,
@@ -1184,6 +1288,26 @@ func (s *Scheduler) Dispatch(
 					resp.Body.Close()
 					rel()
 					if aggErr != nil {
+						// A 200 stream that cannot be aggregated into JSON is an
+						// unusable body, not a success — record it and fail over.
+						lastStatus = http.StatusBadGateway
+						lastErrSnippet = aggErr.Error()
+						reason, errType := ClassifyFailure(502, []byte(lastErrSnippet), FailureKindBadResponse)
+						tries = append(tries, types.Try{
+							Attempt:      i + 1,
+							Provider:     cand.Provider.ID,
+							KeyID:        cand.KeyEntry.Label,
+							Model:        cand.TargetModel,
+							Status:       http.StatusBadGateway,
+							Millis:       tryElapsed,
+							TTFTMillis:   tryTTFT,
+							Reason:       reason,
+							ErrType:      errType,
+							Error:        compressErrorText(lastErrSnippet, usedSecrets),
+							RequestID:    ExtractRequestID(resp.Header),
+							ErrorSnippet: obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
+							RespHeaders:  tryRespHeaders,
+						})
 						return
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -1458,6 +1582,29 @@ func (s *Scheduler) Dispatch(
 			resp.Body.Close()
 			rel()
 			if readErr != nil {
+				// Truncated body (connection reset mid-body, malformed JSON): the
+				// 200 header alone is not a usable answer. Record it and fail over.
+				lastStatus = http.StatusBadGateway
+				lastErrSnippet = readErr.Error()
+				kind := classifyTransportError(readErr, ctx)
+				if kind != FailureKindClientAbort {
+					kind = FailureKindBadResponse
+				}
+				reason, errType := ClassifyFailure(502, []byte(lastErrSnippet), kind)
+				tries = append(tries, types.Try{
+					Attempt:      i + 1,
+					Provider:     cand.Provider.ID,
+					KeyID:        cand.KeyEntry.Label,
+					Model:        cand.TargetModel,
+					Status:       http.StatusBadGateway,
+					Millis:       tryElapsed,
+					Reason:       reason,
+					ErrType:      errType,
+					Error:        compressErrorText(lastErrSnippet, usedSecrets),
+					RequestID:    ExtractRequestID(resp.Header),
+					ErrorSnippet: obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
+					RespHeaders:  tryRespHeaders,
+				})
 				return
 			}
 
@@ -1465,8 +1612,10 @@ func (s *Scheduler) Dispatch(
 			// headers were out. Read as success it would be returned to the caller as
 			// the answer; it fails as the status it names instead.
 			if errStatus, errSnippet, isErr := errInSuccessBody(respBody); isErr {
+				lastStatus = errStatus
 				lastErrSnippet = errSnippet
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, errStatus, durRateLimit, durServerError, durNetwork, durAuth)
+				reason, errType := ClassifyFailure(errStatus, []byte(errSnippet), FailureKindHTTP)
 				currAttempt := TryAttempt{
 					Provider:     cand.Provider.ID,
 					KeyID:        keyID,
@@ -1481,7 +1630,10 @@ func (s *Scheduler) Dispatch(
 					Model:              cand.TargetModel,
 					Status:             errStatus,
 					Millis:             tryElapsed,
-					Reason:             classifyFailureReason(errStatus),
+					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(errSnippet, usedSecrets),
+					RequestID:          ExtractRequestID(resp.Header),
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(errSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
@@ -1605,7 +1757,7 @@ func (s *Scheduler) Dispatch(
 	if len(tries) > 0 {
 		allAuthFailed := true
 		for _, tr := range tries {
-			if tr.Status != http.StatusUnauthorized && tr.Status != http.StatusForbidden && tr.Reason != "auth_error" {
+			if tr.Status != http.StatusUnauthorized && tr.Status != http.StatusForbidden && tr.Reason != ReasonAuthInvalid {
 				allAuthFailed = false
 				break
 			}
@@ -1622,9 +1774,22 @@ func (s *Scheduler) Dispatch(
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
+	lastStatus = status // keep the failure log line in step with what the client saw
 	reason := lastErrSnippet
 	if reason == "" && len(skips) > 0 {
 		reason = "skipped: " + strings.Join(skips, "; ")
+	}
+	logErrFallback = reason
+	// Every candidate was skipped before dialing (all keys cooling down, RPM
+	// capped, disabled). Without a synthetic Try the trace and the usage ledger
+	// carry tries=0 and no reason, leaving the console's error analysis unable
+	// to explain a 502 that is purely a local admission decision.
+	if len(tries) == 0 {
+		tries = append(tries, types.Try{
+			Status: status,
+			Reason: ReasonNoCandidate,
+			Error:  compressErrorText(reason, usedSecrets),
+		})
 	}
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1697,4 +1862,133 @@ func (s *Scheduler) recordFinalTrace(trace types.RequestTrace) {
 	if sink != nil {
 		sink.RecordRequest(trace)
 	}
+}
+
+// recordLocalFailure records a request the gateway rejected before dialing any
+// upstream: no usable config, model not configured, no candidate key left.
+// These used to exist only in app.log, so the console's recent-requests and
+// error-analysis panels silently omitted them — and "model X is not configured"
+// is exactly the client error an operator needs to see there.
+//
+// The synthetic Try carries the reason but no provider/key, which marks it as a
+// local decision rather than an upstream attempt (per-key health stats ignore it).
+// It is returned so the caller can append it to its own tries slice and keep the
+// deferred app.log line in step with the trace.
+func (s *Scheduler) recordLocalFailure(
+	traceID, endpoint, reqModel string,
+	status int,
+	reason, message string,
+	stream bool,
+	start time.Time,
+	reqHeaders map[string]string,
+	usedSecrets []string,
+) types.Try {
+	msg := message
+	if msg == "" {
+		msg = reason
+	}
+	try := types.Try{
+		Status: status,
+		Reason: reason,
+		Error:  compressErrorText(msg, usedSecrets),
+	}
+	s.recordFinalTrace(types.RequestTrace{
+		ID:          traceID,
+		Timestamp:   time.Now().Unix(),
+		Mode:        "agent",
+		Endpoint:    endpoint,
+		ReqModel:    reqModel,
+		Status:      status,
+		Stream:      stream,
+		TotalMillis: time.Since(start).Milliseconds(),
+		ReqHeaders:  reqHeaders,
+		Tries:       []types.Try{try},
+	})
+	return try
+}
+
+// logDispatchOutcome writes exactly one app.log line when the request ended in
+// failure (non-nil error, or any Try with status >= 400 / == 0). Successful
+// single-attempt requests stay silent so the log is a failure ledger rather
+// than a copy of the traffic. Consecutive same-(provider,key,reason) failures
+// are intentionally not aggregated here — the usage ledger does that.
+func (s *Scheduler) logDispatchOutcome(
+	traceID, reqModel, endpoint string,
+	lastStatus int,
+	tries []types.Try,
+	totalMillis int64,
+	usedSecrets []string,
+	fallbackErr string,
+	dispatchErr error,
+) {
+	failed := dispatchErr != nil
+	for _, tr := range tries {
+		if tr.Status >= 400 || tr.Status == 0 {
+			failed = true
+			break
+		}
+	}
+	if !failed {
+		return
+	}
+
+	// The line describes the LAST FAILURE, not the last attempt: on a successful
+	// failover the final try succeeded, so reading it would print reason=- and
+	// hide the very thing the operator is looking for (why did the first key
+	// fail?). When a later try did succeed, that is appended so the line also
+	// answers "did the client get an answer?".
+	var last types.Try
+	for i := len(tries) - 1; i >= 0; i-- {
+		if tries[i].Status >= 400 || tries[i].Status == 0 {
+			last = tries[i]
+			break
+		}
+	}
+	status := lastStatus
+	if status == 0 && last.Status != 0 {
+		status = last.Status
+	}
+	errText := last.Error
+	if errText == "" {
+		errText = last.ErrorSnippet
+	}
+	if errText == "" {
+		errText = fallbackErr
+	}
+	if errText == "" && dispatchErr != nil {
+		errText = dispatchErr.Error()
+	}
+	errText = obs.ScrubStringWithSecrets(CompressError([]byte(errText), DefaultErrorTextMax), usedSecrets...)
+	if errText == "" {
+		errText = "-"
+	}
+
+	line := fmt.Sprintf(
+		"req=%s model=%s endpoint=%s status=%d reason=%s err_type=%s provider=%s key=%s tries=%d ms=%d err=%s",
+		logField(traceID, 128),
+		logField(reqModel, 128),
+		logField(endpoint, 128),
+		status,
+		logField(last.Reason, maxErrTypeLen),
+		logField(last.ErrType, maxErrTypeLen),
+		logField(last.Provider, 64),
+		logField(last.KeyID, 64),
+		len(tries),
+		totalMillis,
+		errText,
+	)
+	// Fallbacks exhausted (no candidate was ever attempted) carry their reason
+	// only in fallbackErr, so reason/err_type print "-". Name the skips so the
+	// line still explains itself: every key cooling down, RPM-capped, etc.
+	if last.Reason == "" && fallbackErr != "" {
+		line += " note=" + logField(obs.ScrubStringWithSecrets(CompressError([]byte(fallbackErr), DefaultErrorTextMax), usedSecrets...), 512)
+	}
+	// A failure followed by a successful failover: the client got 200, and the
+	// log says so rather than reading like a total failure.
+	if lastStatus >= 200 && lastStatus < 300 && len(tries) > 0 {
+		if final := tries[len(tries)-1]; final.Status >= 200 && final.Status < 300 {
+			line += fmt.Sprintf(" recovered_by=%s/%s", logField(final.Provider, 64), logField(final.KeyID, 64))
+		}
+	}
+	log.Printf("%s", obs.ScrubStringWithSecrets(line, usedSecrets...))
 }

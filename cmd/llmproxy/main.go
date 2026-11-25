@@ -26,6 +26,7 @@ import (
 	"github.com/khc8655/llmproxy2/internal/hubheartbeat"
 	"github.com/khc8655/llmproxy2/internal/hubsync"
 	"github.com/khc8655/llmproxy2/internal/kb"
+	"github.com/khc8655/llmproxy2/internal/modelcatalog"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/obs"
 	"github.com/khc8655/llmproxy2/internal/router"
@@ -38,9 +39,9 @@ var (
 	// Release metadata. scripts/build-release.mjs overrides these via -ldflags;
 	// the literals below are the fallback for plain `go build` and must be kept
 	// in sync with version.json (guarded by npm run verify:release).
-	version    = "v20261124-03"
+	version    = "v20261125-01"
 	commit     = "dev"
-	AppVersion = "2.12.2"
+	AppVersion = "2.13.0"
 
 	// Buffer pool for reusable request byte buffers (zero allocations on hot path)
 	bufferPool = sync.Pool{
@@ -430,6 +431,10 @@ func main() {
 		if *hubURLFlag != "" || *nodeTokenFlag != "" {
 			adminSrv.SetDefaultVault(*hubURLFlag, *nodeTokenFlag)
 		}
+		// Node-local model catalog: starts on the embedded bundle (no I/O, no
+		// decompression until the first capability query) and swaps to the
+		// Hub-pulled cache file when one is present.
+		adminSrv.SetModelCatalogStore(modelcatalog.NewStore(*configDirFlag))
 		adminSrv.RegisterRoutes(mux)
 	}
 

@@ -7,6 +7,7 @@ import {
   resolveKvBinding,
   resolveEnv,
 } from '../lib/config.js';
+import { meta as catalogMeta } from '../lib/model-catalog.js';
 
 export async function handleConfigRequest(request, env, kv) {
   const authErr = checkAdminAuth(request, env);
@@ -17,6 +18,8 @@ export async function handleConfigRequest(request, env, kv) {
 
   if (method === 'GET') {
     const config = await loadConfig(kv);
+    // Meta only: the 1.6 MB catalog body must not ride on every page load.
+    const m = await catalogMeta(kv);
     return new Response(
       JSON.stringify({
         ok: true,
@@ -24,6 +27,9 @@ export async function handleConfigRequest(request, env, kv) {
         // Hub is the authoritative source: the admin console needs the plaintext key
         // to display and edit it. Node-facing projections stay masked (projection.js).
         ...config,
+        // Meta only: the 1.6 MB catalog body must not ride on every page load.
+        // Written last so a stale copy echoed back by an old KV cannot shadow it.
+        model_catalog_meta: { present: m.present, fetched_at: m.fetched_at, model_count: m.model_count },
       }),
       { status: 200, headers: { 'content-type': 'application/json' } }
     );

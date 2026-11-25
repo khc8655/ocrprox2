@@ -7,10 +7,13 @@
  *   node scripts/e2e/hub-local.mjs            # 监听 127.0.0.1:19091
  *
  * 覆盖的路由与 edge-functions/api 一一对应（nodes / probe-models / verify-key /
- * config / node/config / node/heartbeat / vault/manifest / vault/fetch），
- * 另外提供 /admin（Hub 版控制台）、/install.sh（一键安装脚本）与 /healthz。
+ * config / node/config / node/heartbeat / vault/manifest / vault/fetch /
+ * model-catalog），另外提供 /admin（Hub 版控制台）、/install.sh（一键安装脚本）
+ * 与 /healthz。
  *
- * 环境变量：HUB_PORT（默认 19091）、ADMIN_PASSWORD（默认 hub-admin-secret）。
+ * 环境变量：HUB_PORT（默认 19091）、ADMIN_PASSWORD（默认 hub-admin-secret）、
+ * SEED_CATALOG（=1 用 shared/model-catalog/catalog.json 预置目录，或给出别的
+ * 路径；默认不预置，从「尚未更新」开始）。
  * 凭据是一次性的合成值，不碰生产 Hub。
  */
 
@@ -31,6 +34,17 @@ const kv = {
   async delete(k) { this.store.delete(k); },
 };
 
+// Optional: seed the catalog so the settings card / lookup can be exercised
+// without reaching models.dev (this machine often cannot). Nothing is seeded by
+// default — an empty Hub is the more common starting state, and the card must
+// render「尚未更新」there.
+const SEED_CATALOG = process.env.SEED_CATALOG === '1'
+  ? join(projectRoot, 'shared/model-catalog/catalog.json')
+  : (process.env.SEED_CATALOG || '');
+if (SEED_CATALOG && existsSync(SEED_CATALOG)) {
+  kv.store.set('model_catalog', readFileSync(SEED_CATALOG, 'utf8'));
+}
+
 const handlers = {
   nodes: () => import('../../edgeone-hub/api/admin/nodes.js'),
   probe: () => import('../../edgeone-hub/api/admin/probe-models.js'),
@@ -40,12 +54,16 @@ const handlers = {
   heartbeat: () => import('../../edgeone-hub/api/node/heartbeat.js'),
   vaultManifest: () => import('../../edgeone-hub/api/vault/manifest.js'),
   vaultFetch: () => import('../../edgeone-hub/api/vault/fetch.js'),
+  modelCatalog: () => import('../../edgeone-hub/api/admin/model-catalog.js'),
 };
 
 const routes = [
   [/^\/api\/admin\/nodes(?:\/.*)?$/, handlers.nodes],
   [/^\/api\/admin\/probe-models$/, handlers.probe],
   [/^\/api\/admin\/verify-key$/, handlers.verify],
+  // /api/admin/model-catalog + /update + /data + /lookup all land in one handler
+  // (edge-functions/api has base + [action].js entries for the same file).
+  [/^\/api\/admin\/model-catalog(?:\/.*)?$/, handlers.modelCatalog],
   [/^\/api\/config$/, handlers.config],
   [/^\/api\/node\/config$/, handlers.nodeConfig],
   [/^\/api\/node\/heartbeat$/, handlers.heartbeat],

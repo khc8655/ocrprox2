@@ -82,6 +82,7 @@ const settings = { ...config.settings };
 delete settings.proxy_keys;
 config.settings = settings;
 }
+delete config.model_catalog_meta;
 return config;
 }
 export async function loadConfig(kv) {
@@ -353,6 +354,9 @@ if (result.models_count !== undefined) {
 match.last_models_count = Number(result.models_count) || 0;
 }
 match.last_checked_at = new Date().toISOString();
+if (result.last_test && typeof result.last_test === 'object') {
+match.last_test = result.last_test;
+}
 const saved = await saveConfigWithCAS(config, kv);
 return typeof saved?._version === 'number' ? saved._version : null;
 } catch (err) {

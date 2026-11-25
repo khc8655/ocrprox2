@@ -1,0 +1,105 @@
+{
+  "_comment": "我们的预设 ID → models.dev provider id 的完整映射。由 scripts/model-catalog/build-catalog.mjs 依据 shared/presets/*.json 文件名与 models.dev provider id 的比对生成，勿手改；确需例外请改脚本里的 ALIASES / GAP_REASONS。数组按运行时查找顺序排列（取第一个含该模型的 provider）。空数组表示 models.dev 无对应 provider，原因见 _gaps，模型详情请写进 overrides.json。",
+  "schema": 1,
+  "source": "models.dev",
+  "generated_by": "scripts/model-catalog/build-catalog.mjs",
+  "providers": {
+    "agnes": [
+      "agnes"
+    ],
+    "amd": [
+      "amd"
+    ],
+    "anthropic": [
+      "anthropic"
+    ],
+    "bai": [],
+    "baidu-qianfan": [],
+    "bailian-token-plan": [
+      "alibaba"
+    ],
+    "bedrock": [
+      "amazon-bedrock"
+    ],
+    "cline": [],
+    "deepseek": [
+      "deepseek"
+    ],
+    "google": [
+      "google"
+    ],
+    "groq": [
+      "groq"
+    ],
+    "kimi-code": [
+      "kimi-code-plan-global",
+      "moonshotai"
+    ],
+    "kimi-code-cn": [
+      "kimi-code-plan-cn",
+      "moonshotai-cn",
+      "moonshotai"
+    ],
+    "minimax": [
+      "minimax"
+    ],
+    "minimax-cn": [
+      "minimax"
+    ],
+    "moonshot": [
+      "moonshotai"
+    ],
+    "moonshot-cn": [
+      "moonshotai-cn",
+      "moonshotai"
+    ],
+    "nvidia": [
+      "nvidia"
+    ],
+    "ollama": [],
+    "openai": [
+      "openai"
+    ],
+    "opencode": [
+      "opencode"
+    ],
+    "openrouter": [
+      "openrouter"
+    ],
+    "qwen": [
+      "alibaba"
+    ],
+    "sensenova": [
+      "sensenova"
+    ],
+    "siliconflow": [
+      "siliconflow"
+    ],
+    "stepfun": [
+      "stepfun"
+    ],
+    "tencent-cloud": [
+      "tencent-tokenhub",
+      "tencent-token-plan"
+    ],
+    "tokenrhythm": [],
+    "vertex": [],
+    "volcengine": [
+      "volcengine"
+    ],
+    "zai": [
+      "zai"
+    ],
+    "zhipu": [
+      "zhipuai"
+    ]
+  },
+  "_gaps": {
+    "bai": "models.dev 只有 bailing（蚂蚁百灵 Ling/Ring，api.tbox.cn），与 B.AI（api.b.ai）不是同一家，bai 自身不在 235 家 provider 之列。",
+    "baidu-qianfan": "models.dev 没有任何 baidu* provider，千帆 Token Plan 未被收录。",
+    "cline": "models.dev 只有 cline-pass（ClinePass），其模型 ID 带 `cline-pass/` 前缀、与预设 upstream_model 的命名空间不一致，主会话判定为缺口；模型详情走 overrides.json。",
+    "ollama": "models.dev 只有 ollama-cloud（ollama.com 远程服务），而本预设指向本机 127.0.0.1:11434，模型清单取决于用户本地 `ollama list`，云端目录不适用。",
+    "tokenrhythm": "models.dev 无 tokenrhythm，该聚合网关未被收录。",
+    "vertex": "models.dev 的 google-vertex / google-vertex-anthropic 使用 `claude-sonnet-4@20250514` 这类带 @ 日期且无 `google/` 前缀的 ID，与本预设强制 `google/` 前缀的 upstream_model 不一致，主会话判定为缺口；模型详情走 overrides.json。"
+  }
+}

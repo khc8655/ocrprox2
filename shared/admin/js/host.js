@@ -341,6 +341,14 @@
       return res.json();
     },
 
+    // Ledger-backed request history (usage.jsonl), so it survives a restart —
+    // unlike /api/admin/traces, which only sees the in-memory ring. `failed`
+    // narrows to the failed/retried rows server-side.
+    async getRecentRequests(limit = 50, failed = false) {
+      const res = await HOST.request(`/api/admin/recent-requests?limit=${limit}${failed ? '&failed=1' : ''}`);
+      return res.json();
+    },
+
     async clearTraces() {
       const res = await HOST.request('/api/admin/traces', { method: 'DELETE' });
       return res.json();
@@ -376,6 +384,21 @@
 
     async verifyKey(data) {
       const res = await HOST.request('/api/admin/verify-key', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: res.ok, status: res.status };
+      }
+    },
+
+    // Per-key real inference test (one "你好", max_tokens 16). Hub and Full both
+    // expose POST /api/admin/test-key; the server resolves the stored secret by
+    // key_id/key_label, so the browser never resends key material.
+    async testKey(data) {
+      const res = await HOST.request('/api/admin/test-key', {
         method: 'POST',
         body: JSON.stringify(data),
       });
@@ -507,6 +530,58 @@
         return await res.json();
       } catch (_) {
         return { ok: res.ok };
+      }
+    },
+
+    // Per-model capability (context/output limits, reasoning effort ladder,
+    // toggle, token budget). The catalog is a 1.6 MB artifact and never rides on
+    // the config payload: the console asks about exactly one (preset, model)
+    // pair, at the moment an operator fills an upstream model or edits a
+    // candidate. Both hosts answer the same shape; only the transport differs:
+    //   Full -> POST /api/admin/model-catalog/lookup {preset_id, model_id}
+    //           (node-local store: embedded bundle, or the Hub-pulled cache)
+    //   Hub  -> GET  /api/admin/model-catalog/lookup?preset=…&model=…
+    //           (KV catalog + the same provider map / overrides the node ships)
+    // found:false means "not in the catalog" — the caller falls back to its
+    // preset rules and must never read it as "no capability".
+    async modelInfo(presetId, modelId) {
+      const preset = String(presetId || '').trim();
+      const model = String(modelId || '').trim();
+      if (!preset || !model) return { ok: false, found: false, error: 'preset_and_model_required' };
+      const path = hostKind === 'hub'
+        ? `/api/admin/model-catalog/lookup?preset=${encodeURIComponent(preset)}&model=${encodeURIComponent(model)}`
+        : '/api/admin/model-catalog/lookup';
+      const res = hostKind === 'hub'
+        ? await HOST.request(path)
+        : await HOST.request(path, {
+            method: 'POST',
+            body: JSON.stringify({ preset_id: preset, model_id: model }),
+          });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false, found: false, status: res.status };
+      }
+    },
+
+    // Hub only: the model catalog's own meta + explicit pull from models.dev.
+    // The console never refreshes the catalog behind the operator's back — the
+    // settings card is the single place that reaches the internet.
+    async getModelCatalogMeta() {
+      const res = await HOST.request('/api/admin/model-catalog');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false, status: res.status };
+      }
+    },
+
+    async updateModelCatalog() {
+      const res = await HOST.request('/api/admin/model-catalog/update', { method: 'POST' });
+      try {
+        return { status: res.status, ...(await res.json()) };
+      } catch (_) {
+        return { ok: false, status: res.status };
       }
     },
 

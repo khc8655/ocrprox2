@@ -1,0 +1,5 @@
+{
+  "_comment": "手工覆盖层，优先级最高：models.dev 没收录的厂商（见 provider-map.json 的 _gaps），或它标错了的模型（上下文/输出上限、reasoning 支持、effort 档位、family、发布日），都在这里手改。键是 \"<我们的预设 ID>/<模型 ID>\"，值只写要覆盖的字段，未写的字段仍用 catalog.json 的值；note 写清为什么覆盖。构建脚本会校验键里的预设 ID 真实存在、字段名在允许集合内，但不会因为这里出现 models.dev 没有的模型而报错——那正是本文件存在的意义。",
+  "schema": 1,
+  "models": {}
+}

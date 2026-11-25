@@ -59,6 +59,24 @@ type KeyEntry struct {
 	Origin    string     `json:"origin,omitempty"`    // "vault" | "local"
 	AuthType  string     `json:"auth_type,omitempty"` // "api_key" (默认) | "oauth_device"
 	OAuthMeta *OAuthMeta `json:"oauth_meta,omitempty"`
+	// LastTest is the console's most recent per-key inference test verdict
+	// (POST /api/admin/test-key). Persisted with the config so the pill survives
+	// a page reload / restart. Operator-facing metadata only: it must never
+	// carry the secret itself.
+	LastTest *KeyLastTest `json:"last_test,omitempty"`
+}
+
+// KeyLastTest is one console-initiated per-key test result, written by
+// POST /api/admin/test-key and stored on the KeyEntry by the UI ("保存供应商").
+type KeyLastTest struct {
+	OK        bool   `json:"ok"`
+	Status    int    `json:"status"`
+	LatencyMS int64  `json:"latency_ms"`
+	Reason    string `json:"reason,omitempty"`     // normalized failure enum (empty on success)
+	ErrType   string `json:"err_type,omitempty"`   // upstream machine code
+	Error     string `json:"error,omitempty"`      // scrubbed upstream text
+	ReplyText string `json:"reply_text,omitempty"` // extracted reply, <=200 runes
+	At        string `json:"at,omitempty"`         // RFC3339 timestamp of the test
 }
 
 // OAuthMeta MiniMax Code Plan 等 OAuth 2.0 刷新元数据（仅 Full 模式持久化）
@@ -90,6 +108,10 @@ type RouteCandidate struct {
 	Enabled     bool   `json:"enabled"`
 	Weight      int    `json:"weight,omitempty"`          // weighted 策略权重（默认 1）
 	MaxConc     int    `json:"max_concurrency,omitempty"` // 单候选软并发阈值（0 表示不限，超限优先分流到其他空闲候选）
+	// ReasoningEffort 该候选的上游思考档位：空 = 跟随客户端（原样透传客户端参数），
+	// 具体档位名按模型目录（models.dev）给出，仅开关的模型用 "on" / "off"。
+	// 目前仅由控制台写入并持久化，调度器尚未消费（phase 报告 contractNotes 有说明）。
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // KBCandidate 固定高并发通道四分类（chat / embedding / reranker / ocr）兼容候选条目
@@ -392,22 +414,32 @@ type ConfigSource interface {
 }
 
 type Try struct {
-	Attempt            int               `json:"attempt"`
-	Provider           string            `json:"provider"`
-	KeyID              string            `json:"key_id"`
-	Model              string            `json:"model"`
-	Status             int               `json:"status"`
-	Millis             int64             `json:"ms"`
-	TTFTMillis         int64             `json:"ttft_ms,omitempty"`
-	Reason             string            `json:"reason,omitempty"`
-	CooldownAppliedSec int               `json:"cooldown_applied_sec,omitempty"`
-	ErrorSnippet       string            `json:"error_snippet,omitempty"`
-	RespHeaders        map[string]string `json:"resp_headers,omitempty"`
+	Attempt    int    `json:"attempt"`
+	Provider   string `json:"provider"`
+	KeyID      string `json:"key_id"`
+	Model      string `json:"model"`
+	Status     int    `json:"status"`
+	Millis     int64  `json:"ms"`
+	TTFTMillis int64  `json:"ttft_ms,omitempty"`
+	// Reason is the normalized failure reason enum (see
+	// internal/scheduler/failure_reason.go and the contract §5.2 table).
+	Reason             string `json:"reason,omitempty"`
+	ErrType            string `json:"err_type,omitempty"` // upstream machine code, normalized [a-z0-9_]{0,64}
+	Error              string `json:"err,omitempty"`      // upstream's own words, whitespace-collapsed, <=280 chars
+	RequestID          string `json:"rid,omitempty"`      // upstream correlation id, normalized [a-z0-9_]{0,128}
+	CooldownAppliedSec int    `json:"cooldown_applied_sec,omitempty"`
+	// ErrorSnippet keeps the legacy first-1KB upstream body for older UIs;
+	// new consumers should prefer Error.
+	ErrorSnippet string            `json:"error_snippet,omitempty"`
+	RespHeaders  map[string]string `json:"resp_headers,omitempty"`
 }
 
 type RequestTrace struct {
-	ID                 string            `json:"id"`
-	Timestamp          int64             `json:"ts"`
+	ID        string `json:"id"`
+	Timestamp int64  `json:"ts"`
+	// Source separates real client traffic ("client", also the empty default)
+	// from console-initiated probes ("probe").
+	Source             string            `json:"source,omitempty"`
 	Mode               string            `json:"mode"`
 	Endpoint           string            `json:"endpoint"`
 	ReqModel           string            `json:"req_model"`

@@ -5,6 +5,7 @@ package obs
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/khc8655/llmproxy2/internal/types"
 )
@@ -48,6 +50,14 @@ type UsageRecord struct {
 	Status             int          `json:"status"`
 	Tries              int          `json:"tries"`
 	FailedTries        []TryFailure `json:"try_failed,omitempty"`
+	// The final failure's reason, hoisted onto the record itself. try_failed only
+	// carries per-key attempts, so a failure that never reached a key (protocol
+	// mismatch, model not configured, every key cooling down) would otherwise
+	// lose its reason entirely and the console could only print "—".
+	Reason    string `json:"reason,omitempty"`
+	ErrType   string `json:"err_type,omitempty"`
+	Err       string `json:"err,omitempty"`
+	RequestID string `json:"rid,omitempty"`
 }
 
 // TryFailure attributes one failed upstream attempt to the key that produced it,
@@ -56,6 +66,13 @@ type TryFailure struct {
 	Provider string `json:"provider"`
 	KeyID    string `json:"key_id"`
 	Status   int    `json:"status"`
+	// Reason is the normalized failure enum; ErrType the upstream machine code,
+	// Error the scrubbed upstream text (<=280 chars), RequestID the upstream
+	// correlation id. See internal/scheduler/failure_reason.go.
+	Reason    string `json:"reason,omitempty"`
+	ErrType   string `json:"err_type,omitempty"`
+	Error     string `json:"err,omitempty"`
+	RequestID string `json:"rid,omitempty"`
 }
 
 // SeriesPoint is a single bucket point in the interactive timeline series.
@@ -89,7 +106,43 @@ type Heatmap struct {
 }
 
 const (
-	UsageLedgerLimit  = 10 << 20 // 10 MiB rotation threshold for usage.jsonl -> usage.jsonl.1
+	// UsageLedgerLimit is the rotation threshold for usage.jsonl -> usage.jsonl.1.
+	//
+	// Disk bound — why the ledger can never grow without limit:
+	//   - usage.jsonl   <= UsageLedgerLimit. rotateLedger() runs before the first
+	//     record that would push the active file past the limit, and every record
+	//     is itself capped at min(limit/2, MaxUsageRecordBytes) below, so an
+	//     active file that starts empty can never overshoot by a whole record.
+	//   - usage.jsonl.1 <= UsageLedgerLimit. It is always a former active file,
+	//     created by os.Rename(usage.jsonl -> .1), never appended to in place.
+	//   - The rename-failure paths cannot create a third generation: os.Rename is
+	//     the only thing that ever writes .1. If it fails, rotateLedger() reopens
+	//     usage.jsonl with O_TRUNC — that discards the bytes that could not be
+	//     renamed and leaves the previous .1 untouched. If even OpenFile fails,
+	//     ledgerFile becomes nil and the writer stops instead of growing anything.
+	//   => usage.jsonl + usage.jsonl.1 <= 2 * UsageLedgerLimit = 20 MiB.
+	//
+	// A stale .1 left by an older build with a larger limit can exceed the current
+	// limit until the next rotation replaces it; it is never appended to, so it
+	// does not grow any further on its own.
+	//
+	// Full-node log-class files, total cap:
+	//   app.log (<= 5 MiB) + app.old.log (<= 5 MiB)   [internal/obs/applog.go Limit]
+	//   + usage.jsonl (<= 10 MiB) + usage.jsonl.1 (<= 10 MiB)  = 30 MiB.
+	// app.log/app.old.log rotate on the same "rename, else truncate" rule and can
+	// overshoot 5 MiB by at most one log line; the usage pair has no overshoot
+	// because of MaxUsageRecordBytes.
+	UsageLedgerLimit = 10 << 20
+
+	// MaxUsageRecordBytes caps a single usage.jsonl line (excluding the newline).
+	//
+	// Without a cap, client-controlled strings (ReqModel/ServedModel can be up to
+	// the 20 MiB request-body limit) would let one record exceed UsageLedgerLimit
+	// and break the 2 * UsageLedgerLimit bound. Records are trimmed to fit
+	// (FailedTries dropped first, then free-text fields shortened); a record that
+	// still does not fit is skipped, never written oversized.
+	MaxUsageRecordBytes = 256 << 10
+
 	MinValidUsageUnix = int64(1_700_000_000)
 	MaxAllSeriesDays  = 3660
 )
@@ -148,6 +201,10 @@ func NewManager(role types.Role, dataDir string) (*Manager, error) {
 	return m, nil
 }
 
+// rotateLedger renames the active ledger to usage.jsonl.1 and opens a fresh
+// usage.jsonl. os.Rename is the only code path that ever creates or writes .1;
+// when it fails we fall back to truncating usage.jsonl, which keeps the
+// disk bound described at UsageLedgerLimit (never a third file).
 func (m *Manager) rotateLedger() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -196,15 +253,15 @@ func (m *Manager) backgroundWriter() {
 		if m.ledgerFile == nil {
 			return
 		}
-		line, err := json.Marshal(rec)
-		if err != nil {
-			return
-		}
-		recLen := int64(len(line) + 1)
 		limit := m.ledgerLimit.Load()
 		if limit <= 0 {
 			limit = UsageLedgerLimit
 		}
+		line := marshalUsageRecord(rec, ledgerLineCap(limit))
+		if line == nil {
+			return
+		}
+		recLen := int64(len(line) + 1)
 		if m.ledgerSize > 0 && m.ledgerSize+recLen > limit {
 			_ = bw.Flush()
 			m.rotateLedger()
@@ -256,6 +313,78 @@ func (m *Manager) backgroundWriter() {
 	}
 }
 
+// ledgerLineCap is the maximum JSON length (newline excluded) of one ledger
+// record for the given rotation threshold. Keeping every record at <= limit/2
+// is what makes the 2*limit disk bound airtight: a freshly rotated, empty
+// active file can receive at most one record, so it never overshoots.
+func ledgerLineCap(limit int64) int {
+	if limit <= 2 {
+		return 0
+	}
+	maxLen := limit/2 - 1
+	if maxLen > MaxUsageRecordBytes {
+		return MaxUsageRecordBytes
+	}
+	return int(maxLen)
+}
+
+// marshalUsageRecord encodes rec as one JSONL line of at most max bytes
+// (excluding the trailing newline). Oversized records are trimmed: the failure
+// detail is dropped first, then client-controlled free-text fields are
+// shortened. A record that still does not fit returns nil and is skipped — the
+// writer prefers losing one record over breaking the size bound.
+func marshalUsageRecord(rec UsageRecord, maxLen int) []byte {
+	if maxLen <= 0 {
+		return nil
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		return nil
+	}
+	if len(line) <= maxLen {
+		return line
+	}
+
+	// FailedTries is the only unbounded list; drop it before touching the
+	// summary fields so status/tokens/latency still make it to disk.
+	rec.FailedTries = nil
+	if line, err = json.Marshal(rec); err != nil {
+		return nil
+	}
+	if len(line) <= maxLen {
+		return line
+	}
+
+	// Model names and stop reasons come straight from the request body and can
+	// be arbitrarily long; the ledger only needs an identifiable prefix.
+	rec.Mode = truncateUTF8(rec.Mode, 64)
+	rec.Endpoint = truncateUTF8(rec.Endpoint, 128)
+	rec.ReqModel = truncateUTF8(rec.ReqModel, 128)
+	rec.ServedModel = truncateUTF8(rec.ServedModel, 128)
+	rec.Provider = truncateUTF8(rec.Provider, 128)
+	rec.KeyID = truncateUTF8(rec.KeyID, 128)
+	rec.StopReason = truncateUTF8(rec.StopReason, 64)
+	if line, err = json.Marshal(rec); err != nil {
+		return nil
+	}
+	if len(line) <= maxLen {
+		return line
+	}
+	return nil
+}
+
+// truncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune.
+func truncateUTF8(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
 // Flush flushes all pending records to disk and syncs the ledger file.
 func (m *Manager) Flush() error {
 	if m.recordChan == nil || m.closed.Load() {
@@ -277,12 +406,20 @@ func (m *Manager) Flush() error {
 
 // RecordRequest records a request trace and appends to usage ledger.
 // Operates with zero blocking disk I/O on the hot request path.
+//
+// Console probes (trace.Source == "probe") are recorded in the trace ring so
+// the operator sees the test in the request history, but they never reach the
+// usage ledger: a test is not client traffic and must not move request/token
+// counters or per-model usage stats.
 func (m *Manager) RecordRequest(trace types.RequestTrace) {
 	if m == nil {
 		return
 	}
 	if m.traceBuffer != nil {
 		m.traceBuffer.Record(trace)
+	}
+	if trace.Source == "probe" {
+		return
 	}
 
 	rec := UsageRecord{
@@ -318,13 +455,27 @@ func (m *Manager) RecordRequest(trace types.RequestTrace) {
 		if tr.Status >= 200 && tr.Status < 300 {
 			continue
 		}
+		// Hoist the last failure's reason regardless of whether it reached a key:
+		// this is what keeps local rejections explainable in the console.
+		if tr.Reason != "" || tr.ErrType != "" || tr.Error != "" {
+			rec.Reason = tr.Reason
+			rec.ErrType = tr.ErrType
+			rec.Err = tr.Error
+			rec.RequestID = tr.RequestID
+		}
 		if tr.Provider == "" || tr.KeyID == "" {
+			// Not a per-key failure: it belongs to the record-level reason above,
+			// not to key health statistics.
 			continue
 		}
 		rec.FailedTries = append(rec.FailedTries, TryFailure{
-			Provider: tr.Provider,
-			KeyID:    tr.KeyID,
-			Status:   tr.Status,
+			Provider:  tr.Provider,
+			KeyID:     tr.KeyID,
+			Status:    tr.Status,
+			Reason:    tr.Reason,
+			ErrType:   tr.ErrType,
+			Error:     tr.Error,
+			RequestID: tr.RequestID,
 		})
 	}
 
@@ -1226,6 +1377,176 @@ func scanLedgerFile(path string, cutoff int64, fn func(UsageRecord)) {
 			}
 		}
 	}
+}
+
+// RecentRequestsFromLedger returns up to limit of the most recent usage
+// records, oldest first, replayed from the on-disk ledger. It survives process
+// restarts (unlike the in-memory trace ring) and never loads the whole file:
+// it reads backwards from the tail in 64 KiB chunks and stops at limit.
+//
+// Ordering across rotation is preserved: when the active usage.jsonl holds
+// fewer than limit records, the tail of usage.jsonl.1 is prepended. A final
+// line without a trailing newline (process killed mid-write) is discarded.
+//
+// For a manager without a disk ledger (lite role) the in-memory window is used.
+func (m *Manager) RecentRequestsFromLedger(limit int) []UsageRecord {
+	recs, _, _ := m.RecentRequestsReplay(limit, false)
+	return recs
+}
+
+// RecentRequestsReplay is RecentRequestsFromLedger plus the metadata the admin
+// "recent requests" endpoint needs: where the records came from ("ledger" or
+// "memory") and whether fewer than limit matching records were available.
+//
+// onlyFailedOrRetried keeps requests that failed (status >= 400 or 0) or were
+// retried (more than one upstream attempt). The scan keeps walking backwards
+// until it has limit matching records, so a burst of successes does not hide
+// older failures.
+func (m *Manager) RecentRequestsReplay(limit int, onlyFailedOrRetried bool) ([]UsageRecord, string, bool) {
+	if m == nil || limit <= 0 {
+		return nil, "memory", true
+	}
+	// Flush buffered appends first so "recent" includes everything already
+	// recorded, not just what the 500 ms ticker has written.
+	_ = m.Flush()
+
+	if m.ledgerPath == "" {
+		recs := m.memoryTail(limit, onlyFailedOrRetried)
+		return recs, "memory", len(recs) < limit
+	}
+
+	// Best-effort snapshot: a rotation that lands between the two reads can
+	// repeat the boundary generation (never reorder it). Rotations are rare
+	// (every ~10 MiB) and the window is milliseconds wide.
+	recs := readTailRecords(m.ledgerPath, limit, onlyFailedOrRetried)
+	if len(recs) < limit {
+		older := readTailRecords(m.ledgerPath+".1", limit-len(recs), onlyFailedOrRetried)
+		if len(older) > 0 {
+			merged := make([]UsageRecord, 0, len(older)+len(recs))
+			merged = append(merged, older...)
+			merged = append(merged, recs...)
+			recs = merged
+		}
+	}
+	return recs, "ledger", len(recs) < limit
+}
+
+// memoryTail returns the newest limit records of the in-memory window, oldest
+// first. It takes m.mu itself; callers must not hold it.
+func (m *Manager) memoryTail(limit int, onlyFailedOrRetried bool) []UsageRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	capacity := limit
+	if capacity > 256 {
+		capacity = 256
+	}
+	out := make([]UsageRecord, 0, capacity)
+	for i := len(m.memRecords) - 1; i >= 0 && len(out) < limit; i-- {
+		r := m.memRecords[i]
+		if onlyFailedOrRetried && !failedOrRetried(r) {
+			continue
+		}
+		out = append(out, r)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// readTailRecords reads at most limit records from the end of path and returns
+// them oldest first. Scanning is backwards in 64 KiB chunks; the file is never
+// read whole. The leftmost segment of each chunk is carried into the next
+// (earlier) chunk so lines spanning a chunk boundary are reassembled.
+//
+// An unterminated final line — a crash or kill mid-append — is dropped: every
+// record the writer commits ends with '\n', so a tail without one is partial.
+func readTailRecords(path string, limit int, onlyFailedOrRetried bool) []UsageRecord {
+	if limit <= 0 {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return nil
+	}
+
+	const chunkSize = int64(64 << 10)
+	capacity := limit
+	if capacity > 256 {
+		capacity = 256
+	}
+	out := make([]UsageRecord, 0, capacity) // newest first while scanning
+	var carry []byte                        // leftmost, possibly partial, line
+	droppedTail := false
+	pos := fi.Size()
+
+	for pos > 0 && len(out) < limit {
+		n := chunkSize
+		if pos < n {
+			n = pos
+		}
+		pos -= n
+		buf := make([]byte, n)
+		if _, err := f.ReadAt(buf, pos); err != nil {
+			break
+		}
+		if len(carry) > 0 {
+			buf = append(buf, carry...)
+		}
+		if !droppedTail {
+			if buf[len(buf)-1] == '\n' {
+				droppedTail = true
+			} else if idx := bytes.LastIndexByte(buf, '\n'); idx >= 0 {
+				buf = buf[:idx+1] // drop the incomplete final record
+				droppedTail = true
+			} else {
+				// No line boundary yet: the whole span is one unterminated line.
+				carry = buf
+				continue
+			}
+		}
+		lines := bytes.Split(buf, []byte{'\n'})
+		carry = lines[0]
+		for i := len(lines) - 1; i >= 1 && len(out) < limit; i-- {
+			if len(lines[i]) == 0 {
+				continue
+			}
+			var r UsageRecord
+			if err := json.Unmarshal(lines[i], &r); err != nil {
+				continue // skip a corrupt line, keep replaying the rest
+			}
+			if onlyFailedOrRetried && !failedOrRetried(r) {
+				continue
+			}
+			out = append(out, r)
+		}
+	}
+
+	if pos == 0 && droppedTail && len(carry) > 0 && len(out) < limit {
+		var r UsageRecord
+		if err := json.Unmarshal(carry, &r); err == nil {
+			if !onlyFailedOrRetried || failedOrRetried(r) {
+				out = append(out, r)
+			}
+		}
+	}
+
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// failedOrRetried mirrors the trace-ring filter for usage records: a request is
+// worth surfacing when it failed or needed more than one upstream attempt.
+func failedOrRetried(r UsageRecord) bool {
+	return r.Status >= 400 || r.Status == 0 || r.Tries > 1
 }
 
 // Close gracefully flushes pending records and closes the underlying ledger file.

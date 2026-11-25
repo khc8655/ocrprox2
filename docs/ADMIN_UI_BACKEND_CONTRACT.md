@@ -211,6 +211,7 @@
     {
       "id": "tr_01j9x8k2m",
       "ts": 1762566065,
+      "source": "client",
       "mode": "agent",
       "endpoint": "/v1/chat/completions",
       "req_model": "claude-sonnet-4-20250514",
@@ -233,7 +234,10 @@
           "model": "MiniMax-M2.5",
           "status": 429,
           "ms": 310,
-          "reason": "rate_limit",
+          "reason": "rate_limited",
+          "err_type": "rate_limit_exceeded",
+          "err": "Upstream rate limit exceeded: RPM quota reached",
+          "rid": "req_abc123",
           "cooldown_applied_sec": 15,
           "error_snippet": "Upstream rate limit exceeded: RPM quota reached"
         },
@@ -251,6 +255,50 @@
   ]
 }
 ```
+
+**Try 字段说明（v3.11 起）**
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `reason` | string | 归一化失败原因，取值见下表；成功尝试不填 |
+| `err_type` | string | 上游自己的机器码（`error.type` / `error.code` / `type` / `code` / `error.message` 头部 token），小写、仅 `[a-z0-9_]`、最长 64；解析不出为空 |
+| `err` | string | 上游原话：去首尾空白、连续空白压成一个空格、截 280 字符，**必过 `obs.ScrubStringWithSecrets`**（密钥等替换为 `…`） |
+| `rid` | string | 上游请求 ID，按 `x-request-id` → `request-id` → `x-amzn-requestid` → `x-ms-request-id` → `cf-ray` 顺序取首个非空值，同样归一化为 `[a-z0-9_]`、最长 128 |
+| `error_snippet` | string | **向后兼容保留**：上游 body 前 1KB（已脱敏）。新前端请优先读 `err` |
+| `resp_headers` | object | 上游响应头（敏感头已脱敏） |
+
+**`reason` 枚举（封闭集合，仅以下 12 个值）**
+
+| reason | 触发条件 | 运营含义 |
+|---|---|---|
+| `auth_invalid` | 401 / 403；OAuth 刷新失败 | Key 失效或无权调用该模型，换 Key / 修权限 |
+| `quota_exhausted` | 402；或 429 且 body 命中 `insufficient_quota` / `quota` / `balance` / `credit` / `billing` / `余额` / `欠费`（大小写不敏感） | 额度用尽，充值或换账户 |
+| `rate_limited` | 429 且非额度类 | 触发 RPM/突发限流，调低并发或提额 |
+| `model_not_found` | 404 且 body 含 `model` | 上游不存在该模型名，改 `target_model` / 别名 |
+| `context_too_long` | 400 且 body 含 `context_length` / `context length` / `too long` / `max_tokens` / `maximum context` | 上下文超限，裁剪输入 |
+| `upstream_error` | 5xx；200 但 body 自带 `error` 且声明 5xx | 上游故障，等冷却/换供应商 |
+| `timeout` | 首字超时（`ErrFirstByteTimeout`）、总预算 deadline | 上游太慢，调 `agent_first_byte_timeout_sec` |
+| `network` | 拨号/DNS/TLS/SSRF 拦截等传输错误 | 网络/线路问题 |
+| `client_disconnected` | 客户端中途断开（请求 ctx 取消） | 客户端侧行为，不计上游健康 |
+| `bad_response` | 上游 200 但 body 不可用：SSE 坏包/空流/裸错误帧、非流式 body 读取截断、流聚合失败 | 上游协议异常，换 Key 重试 |
+| `protocol_mismatch` | 客户端方言无候选可用（拨号前即拒绝，HTTP 400） | 调错入口或补 `anthropic_base_url` |
+| `no_candidate` | 全部候选在本地被跳过（Key 冷却中 / RPM 上限 / 已禁用），未发出上游请求 | 等冷却或补 Key |
+| `config_unavailable` | 配置尚不可用（未初始化 / 租约过期） | 同步配置或重装节点 |
+| `unknown` | 其它 4xx 或无法归因 | 看 `err` / `err_type` 人工判断 |
+
+**拨号前本地拒绝也进账本**：`model` 未配置（404）、配置不可用（503）、无候选可用（503）都会写一条 `usage.jsonl` 记录并带顶层 `reason` / `err_type` / `err`，因此控制台「最近请求 / 错误分析」不会漏掉这类客户端错误。这类记录没有具体 Key，`try_failed` 为空——原因在记录顶层字段里（`json:reason|err_type|err|rid`）。
+
+**`RequestTrace.source`**：`"client"` 表示真实客户端流量（**空串等价于 client**），`"probe"` 表示控制台自己发起的探测/测试请求。
+
+**落盘**：`usage.jsonl` 的 `try_failed[]`（`TryFailure`）逐条携带失败 Key 的 `provider` / `key_id` / `status` / `reason` / `err_type` / `err` / `rid`；**成功请求只要中途用过故障转移，其失败尝试同样记录**，便于按 (provider, key, reason) 做聚合。
+
+**app.log**：最终失败（返回非 nil error）或存在任意失败尝试时，写恰好一行（已整体脱敏）：
+
+```
+req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0> reason=<最后一个 try 的 reason> err_type=<...> provider=<最后一个 try 的 provider> key=<key_id> tries=<尝试次数> ms=<total_ms> err=<压缩后的错误原文>
+```
+
+成功且无重试的请求不写；同一 (provider, key, reason) 的连续失败不做日志聚合（由 usage 层聚合）。
 
 ---
 
@@ -417,6 +465,68 @@
 ```
 - **`POST /api/admin/test-candidate`** —— 单候选探测，embedding/reranker/ocr 路由的「测试路由」走它（取第一条候选）：`type` 取 `chat|embedding|reranker|ocr`（缺省 `chat`，别名 `category`）。各类型载荷：embedding → `POST {base}/embeddings` `{model, input:"test"}`；reranker → `POST {base}/rerank` `{model, query:"test", documents:["a"]}`；ocr → `chat/completions` 携带 1×1 PNG + "Extract text"、`max_tokens:64`；chat → 与 test-agent-model 相同的最小推理。`model` 缺省时依序从 `kb_models[type]`（本供应商条目）→ 供应商模型别名 → 类型名解析；`key_label` 缺省时取第一把启用 Key。响应 `{ok, success, status, ms, latency_ms, model, text(答案片段：chat 取 message.content，形态不识别时取响应体前 100 字节), error?}`，探测成功同样清冷却。
 - 控制台路由行展示判定胶囊：成功显示「测试 `<latency>ms · <provider> · <key_label>`」（chat 路由取最快通过的候选），失败显示错误摘录。
+- **前端状态（v3.12 起）**：路由行的「测试路由」按钮与其 `_lastTest` 胶囊已移除，前端不再调用本组接口；两个端点保留（不删除，避免破坏契约测试与外部脚本），逐 Key 测试改用 `POST /api/admin/test-key`（见 6.9）。
+
+### 6.9 Key 行「测试」：`POST /api/admin/test-key`（hub + full）
+逐 Key 的**真实推理**探针：用该 Key 的存储密钥向供应商真实端点发一条最小推理（`user: "你好"`、`max_tokens: 16`、`stream: false`），返回判定、失败原因与实际回复。它替代了「用 `GET /models` 证明 Key 可用」——套餐 Key 能列模型但没有推理额度是常见故障。
+
+- **Request**：`{provider: string, key_id?: string, key_label?: string, model?: string}`。`key_id`/`key_label` 二选一定位已存 Key（显式指定的 Key 即使被禁用也允许测试，这正是「要不要重新启用」的判断依据）；都没给则取该供应商第一把启用 Key。
+- **model 解析链**（响应 `model_source`）：`request`（请求显式给出）→ `route`（该供应商作为候选出现的第一个 `agent_models` 路由的 `target_model`；路由名排序、候选按配置顺序、优先启用候选）→ `preset`（预设的第一推荐模型）→ `fallback`（`anthropic-messages` 用 `claude-3-haiku-20240307`，其余 `gpt-4o-mini`）。
+- **协议**：按供应商 `api_type`（缺省按 `protocols`/预设推断）。`openai-completions` → `POST {base_url}/chat/completions`（`Authorization: Bearer`）；`anthropic-messages` → `POST {anthropic_base_url|base_url}/messages`（`x-api-key` + `anthropic-version: 2023-06-01`）。超时 20s，不重试、不走调度器、不计入冷却。**中枢**沿用 verify-key 的 SSRF 规则（内网/本机地址 → `400 unsafe_upstream_url`）。
+- **Response**（恒为这些字段，密钥绝不出现在任何字段里）：
+```json
+{
+  "ok": true, "valid": true, "status": 200, "latency_ms": 812,
+  "provider": "minimax", "key_id": "k_live", "key_label": "hk-pool-01",
+  "model": "MiniMax-M3", "model_source": "route", "api_type": "openai-completions",
+  "reply_text": "你好！有什么可以帮你？", "reason": "", "err_type": "", "error": "", "rid": "req_abc123"
+}
+```
+  - `ok`：端点是否完成判定（上游 2xx/非 2xx 均为 `true`）；参数/供应商/Key 解析失败为 `false` 且 HTTP 4xx/503。
+  - `valid`：上游 2xx 即 `true`（`reply_text` 抽不到文本也给空串），非 2xx/传输失败为 `false`。
+  - 失败时 `reason`/`err_type` 与 Try 完全同源（见 §5.2 的 12 值封闭枚举；full 直接调 `scheduler.ClassifyFailure`，hub 用 `edgeone-hub/lib/failure_reason.js` 同规则实现）；`error` 为上游原话（压缩单行、≤280 字符、已脱敏），`rid` 为上游请求 ID。
+- **trace**：full 侧每次调用写一条 `RequestTrace`（`source:"probe"`、`endpoint:"/admin/test-key"`、`tries` 一条上游尝试），出现在「最近请求轨迹」并标「测试」；`obs.RecordRequest` 对 `source=="probe"` **跳过 usage.jsonl 账本**（测试不计请求量/Token）。hub 无 obs，不写 trace。
+- **`last_test`**：`POST /api/admin/test-key` 返回后由后端**立即落盘**（full 通过 `config.LocalSource.PersistKeyTestState`，只写该 Key 的 `last_test`，不碰密钥/启用状态，provider 级定位因此同名 Key 不会串），无需点「保存供应商」；刷新页面/重启后仍在。前端同时把同一判定写进内存，保证无刷新时胶囊立刻更新。对象内不含密钥。
+
+---
+
+## 六·补 模型目录与按模型能力查询（Hub 存储 + Hub/Full 查询）
+
+「模型目录」是 models.dev 的瘦身投影（约 1.6 MB / 235 个 provider / 8,968 个模型），只保留每个模型的 `limit{context,output}`、`reasoning`、`reasoning_options`（白名单 `type/values/min/max`）、`family`、`release_date`。它是**缓存，不是配置**：不进 `types.ProxyConfig`、不进导出/导入、也不进 `POST /api/node/config` 的投影（整包会让载荷涨约 1.6 MB，超过 EdgeOne 1 MB 请求体上限）。
+
+**存储**：Hub 侧 KV key `model_catalog`，单值即 `shared/model-catalog/catalog.json` 原文（写入上限 4 MB，EdgeOne 单值上限 25 MB）。Full 节点侧 `<CONFIG_DIR>/model-catalog.json`（0600，原子写），缺省用内嵌 `//go:embed catalog.json.gz`。
+
+### 6.10 Hub 目录元信息与更新
+- **`GET /api/admin/model-catalog`**（仅管理员）→ `{ok, present, fetched_at, model_count, bytes}`；无目录 `present:false, fetched_at:'', model_count:0, bytes:0`。
+- **`POST /api/admin/model-catalog/update`**（仅管理员，无请求体）→ 拉 `https://models.dev/api.json`（20s 超时），边缘侧瘦身、校验后写 KV。成功 `{ok:true, fetched_at, model_count, bytes}`；失败 `502 models.dev_unreachable|models.dev_invalid`、`500 catalog_invalid`。**所有失败路径都不触碰 KV**，旧目录保持原样。
+- **`GET /api/admin/model-catalog/data`**（管理员凭据 **或** 有效启用的 Full 节点 Token；lite → 403）→ body 为目录原文（`content-type: application/json`、`cache-control: no-store`），无目录 404 `catalog_not_found`。
+- **`GET /api/config`** 额外返回 `model_catalog_meta: {present, fetched_at, model_count}`（只有 meta）；该字段是只读投影，`sanitizeStoredConfig` 在任何保存路径把它删掉，控制台回存不会落进 KV。
+
+### 6.11 按模型能力查询（Hub + Full，前端统一走 `HOST.modelInfo(presetId, modelId)`）
+两条传输，同一份响应契约：
+- **Full**：`POST /api/admin/model-catalog/lookup`，body `{preset_id, model_id}`（节点本地目录：内嵌或 Hub 同步的 cache）。
+- **Hub**：`GET /api/admin/model-catalog/lookup?preset=…&model=…`（KV 目录 + 与 Go 同源的 provider-map / overrides；控制台自己渲染路由下拉与能力摘要）。
+
+响应字段（两条一致）：
+```json
+{
+  "ok": true, "found": true,
+  "context_tokens": 1048576, "output_tokens": 393216, "reasoning": true,
+  "efforts": ["low", "high", "max"], "toggle": true,
+  "budget": { "min": 1024, "max": 0 }, "family": "deepseek-thinking", "release_date": "2026-08-13",
+  "from_override": false
+}
+```
+- `found:false` = **目录未收录**（不是「无能力」），调用方应回退预设规则。`efforts:null` = 无离散档位——仅开关（`toggle:true`）与 token 预算（`budget`）模型各有自己的字段，绝不伪装成档位。
+- 解析顺序与 Go `internal/modelcatalog` 一致：overrides（逐字段）→ provider-map 映射的 models.dev provider（先所有候选精确匹配，再一轮大小写不敏感匹配）→ 未收录。同族兜底：`reasoning:true` 且完全没有 `reasoning_options` 时，取同 provider + 同 family、`release_date` 不晚于目标（空视为不晚于）的最新兄弟模型的 effort 档位。
+- Full 侧另有 `GET /api/admin/model-catalog`（节点自身目录状态，`source: bundled|cache`）与 `POST /api/admin/model-catalog/sync`（用已存 Vault 配置里的 Hub 地址 + 节点 Token 拉取；调用方不能指定 Hub 地址）。
+
+### 6.12 路由候选的思考档位 `reasoning_effort`
+路由候选对象新增 `reasoning_effort: string`（`types.RouteCandidate`，`omitempty`）：空 = **跟随客户端**（客户端传什么就透什么），具体档位名来自上面的 `efforts`，仅开关模型用 `"on"` / `"off"`。控制台在候选行按该候选 `(provider.preset_id, target_model)` 的真实档位渲染下拉，并把它写进候选 JSON。
+> **状态**：**已生效**（调度器消费）。落到请求体的规则：
+> - **OpenAI 方言**（`api_type: openai-completions` 等）：写 `body.reasoning_effort = <档位>`；若模型目录对该 `(preset_id, target_model)` 有档位列表，先就近映射到模型真实支持的档位（永不降到 `none`），避免上游 400。
+> - **Anthropic 方言**（`api_type: anthropic-messages` 或配了 `anthropic_base_url`）：写 `body.thinking = {type:"enabled", budget_tokens:N}`（档位→预算：minimal 1024 / low 2048 / medium 8192 / high 16384 / xhigh 24576 / max 32768，目录给了预算区间则夹到区间内）。Anthropic 要求 `budget_tokens < max_tokens`，因此**响应上限不够时整段跳过**（body 原样转发），不冒必 400 的险；客户端没给 `max_tokens` 时补 `max_tokens = 预算 + 1024`。
+> - 路由开了 `no_reasoning` 时不注入（与既有的剥字段行为一致）。
 
 ---
 

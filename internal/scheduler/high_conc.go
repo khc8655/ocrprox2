@@ -624,6 +624,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 				if refErr := refresher.EnsureValidToken(budgetCtx, cand.KeyEntry, ""); refErr != nil {
 					lastStatus = http.StatusUnauthorized
 					lastErrSnippet = refErr.Error()
+					reason, errType := ClassifyFailure(http.StatusUnauthorized, []byte(lastErrSnippet), FailureKindHTTP)
 					cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusUnauthorized, durRateLimit, durServerError, durNetwork, durAuth)
 					tries = append(tries, types.Try{
 						Attempt:            len(tries) + 1,
@@ -632,7 +633,9 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 						Model:              cand.TargetModel,
 						Status:             http.StatusUnauthorized,
 						Millis:             time.Since(tryStart).Milliseconds(),
-						Reason:             "auth_error",
+						Reason:             reason,
+						ErrType:            errType,
+						Error:              compressErrorText(lastErrSnippet, usedSecrets),
 						CooldownAppliedSec: cooldownSec,
 						ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					})
@@ -679,6 +682,8 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			if callErr != nil {
 				lastStatus = http.StatusBadGateway
 				lastErrSnippet = callErr.Error()
+				kind := classifyTransportError(callErr, ctx)
+				reason, errType := ClassifyFailure(http.StatusBadGateway, []byte(lastErrSnippet), kind)
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, http.StatusBadGateway, durRateLimit, durServerError, durNetwork, durAuth)
 				tries = append(tries, types.Try{
 					Attempt:            len(tries) + 1,
@@ -687,7 +692,9 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Model:              cand.TargetModel,
 					Status:             http.StatusBadGateway,
 					Millis:             tryElapsed,
-					Reason:             "network_error",
+					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(lastErrSnippet, usedSecrets),
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 				})
@@ -714,7 +721,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					}
 				}
 
-				reason := classifyFailureReason(resp.StatusCode)
+				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
 				currAttempt := TryAttempt{
 					Provider:     cand.Provider.ID,
 					KeyID:        keyID,
@@ -730,6 +737,9 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Status:             resp.StatusCode,
 					Millis:             tryElapsed,
 					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(lastErrSnippet, usedSecrets),
+					RequestID:          ExtractRequestID(resp.Header),
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(lastErrSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
@@ -766,6 +776,7 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 			if errStatus, errSnippet, isErr := errInSuccessBody(respBody); isErr {
 				lastStatus = errStatus
 				lastErrSnippet = errSnippet
+				reason, errType := ClassifyFailure(errStatus, []byte(errSnippet), FailureKindHTTP)
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, errStatus, durRateLimit, durServerError, durNetwork, durAuth)
 				currAttempt := TryAttempt{
 					Provider:     cand.Provider.ID,
@@ -781,7 +792,10 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 					Model:              cand.TargetModel,
 					Status:             errStatus,
 					Millis:             tryElapsed,
-					Reason:             classifyFailureReason(errStatus),
+					Reason:             reason,
+					ErrType:            errType,
+					Error:              compressErrorText(errSnippet, usedSecrets),
+					RequestID:          ExtractRequestID(resp.Header),
 					CooldownAppliedSec: cooldownSec,
 					ErrorSnippet:       obs.ScrubStringWithSecrets(errSnippet, usedSecrets...),
 					RespHeaders:        tryRespHeaders,
@@ -949,19 +963,6 @@ func resolveCooldownDurations(settings types.RuntimeSettings) (durRateLimit, dur
 		durAuth = 0
 	}
 	return
-}
-
-func classifyFailureReason(status int) string {
-	switch {
-	case status == http.StatusTooManyRequests:
-		return "rate_limit"
-	case status == http.StatusUnauthorized || status == http.StatusPaymentRequired || status == http.StatusForbidden:
-		return "auth_error"
-	case status >= 400 && status < 500:
-		return "client_error"
-	default:
-		return "server_error"
-	}
 }
 
 // proxyDefaultUA replaces the inbound client's User-Agent when HideClientName is enabled

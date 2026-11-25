@@ -1,3 +1,17 @@
+export function joinUpstreamUrl(baseUrl, path) {
+if (!baseUrl || typeof baseUrl !== 'string') return '';
+const base = baseUrl.trim().replace(/\/+$/, '');
+let cleanPath = String(path || '').trim().replace(/^\/+/, '');
+cleanPath = cleanPath.replace(/^v1\//, '');
+if (!cleanPath) return base;
+if (base.endsWith('/' + cleanPath)) return base;
+const hasVersion = /\/v\d+[^/]*\//.test(base) ||
+/\/v\d+(\.[^/]+)?(\/.*)?$/.test(base) ||
+base.endsWith('/v1') ||
+base.includes('/v1/') ||
+base.includes('/endpoints/openapi');
+return hasVersion ? `${base}/${cleanPath}` : `${base}/v1/${cleanPath}`;
+}
 export function resolveModelsUrl(baseUrl) {
 if (!baseUrl || typeof baseUrl !== 'string') return '';
 const trimmed = baseUrl.trim().replace(/\/+$/, '');

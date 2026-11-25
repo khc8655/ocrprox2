@@ -2,6 +2,9 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.13: local rejections are now first-class log entries. A request the gateway refuses before dialing any upstream (model not configured -> 404, config unavailable -> 503, no candidate available -> 503, every candidate cooling down or RPM-capped -> 502) writes one usage.jsonl record and one RequestTrace with a synthetic Try carrying reason but no provider/key, so recent-requests and the error analysis no longer omit client-side failures. UsageRecord gains top-level reason / err_type / err / rid (hoisted from the final failed try; try_failed stays per-key only, so keyless rejections never pollute key health stats). The reason enum gains no_candidate and config_unavailable. app.log now describes the LAST FAILURE instead of the last attempt (a successful failover used to print reason=-), appends recovered_by=provider/key when a later attempt succeeded, and appends note= when every candidate was skipped locally. POST /api/admin/test-key now persists its verdict immediately through config.LocalSource.PersistKeyTestState (provider-scoped, last_test only), so the key-row pill survives a refresh without an explicit provider save; PersistKeyEntry additionally never blanks a stored secret when the submitted entry carries none. RouteCandidate.reasoning_effort is no longer write-only: the scheduler now honours it on the wire — OpenAI-dialect providers receive body.reasoning_effort (normalized to the nearest level the model catalog says the model supports), Anthropic-dialect providers receive body.thinking={type:enabled,budget_tokens} only when the response limit leaves room for it (otherwise the body is forwarded untouched rather than risking a 400), and an empty value keeps following the client.",
+    "v3.12: added POST /api/admin/test-key (hub + full) — a per-key real inference probe (provider + optional key_id/key_label/model; one 你好, max_tokens 16, stream false, 20s, no retry/scheduler/cooldown) returning {ok, valid, status, latency_ms, provider, key_id, key_label, model, model_source, api_type, reply_text, reason, err_type, error, rid}. model_source is request|route|preset|fallback. Failure reason/err_type reuse the v3.11 taxonomy (full calls scheduler.ClassifyFailure; the hub uses edgeone-hub/lib/failure_reason.js with identical enum values). Full records a probe RequestTrace (source=probe, endpoint=/admin/test-key) and skips the usage ledger for source==probe. Config KeyEntry gains an optional last_test {ok, status, latency_ms, reason, err_type, error, reply_text, at} written by the console and persisted with the provider save. The model row's 测试路由 button was removed from the UI; /api/admin/test-agent-model and /api/admin/test-candidate stay registered but are no longer called by the console.",
+    "v3.11: every failed upstream attempt now carries a normalized failure reason. Try.reason is a closed enum (auth_invalid | quota_exhausted | rate_limited | model_not_found | context_too_long | upstream_error | timeout | network | client_disconnected | bad_response | protocol_mismatch | unknown) replacing the coarse auth_error / rate_limit / server_error / client_error / network_error / stream_peek_error values; Try gains err_type (upstream machine code, [a-z0-9_], max 64), err (upstream text, whitespace collapsed to one line, max 280 chars, secret-scrubbed) and rid (upstream request id, [a-z0-9_], max 128), while error_snippet stays for older readers. The usage ledger try_failed[] entries (TryFailure) now carry the same reason/err_type/err/rid for every failed key, including the failed tries of a request that later succeeded through failover. RequestTrace gains an optional source field (empty or client = real client traffic, probe = console-initiated test). app.log writes exactly one line per failing request: req, model, endpoint, status, reason, err_type, provider, key, tries, ms, err.",
     "v3.7: multi-client proxy keys removed end to end — access_info no longer returns proxy_keys_count and access_key no longer accepts/echoes proxy_keys; settings.proxy_keys is gone from the config schema, the Hub's default config, and Go RuntimeSettings, and a legacy array in stored config / Hub payloads is ignored (unknown field) and never authenticates. VerifyClientKey now accepts exactly the single settings.client_key (1st-gen alias proxy_api_key still resolves to it); no extra keys are compared. The Hub drops the removed field too: loadConfig strips it from an older KV, saveConfigWithCAS never writes it back, and projectConfigForNode never ships it. Single key slot applies to BOTH roles: a Hub-projected settings.client_key revokes a Lite node's --client-key once the first projection arrives (bootstrap_env's LLMPROXY_CLIENT_KEY is only the pre-projection fallback).",
     "v3.5: added POST /api/node/heartbeat (NODE_TOKEN/Bearer stk_node_*; optional X-Node-Version; bodyless 204; no config/payload/projection; 60s server-side debounce on last_seen with zero KV writes on the debounced path; both lite and full node tokens accepted) plus LLMPROXY_HEARTBEAT_INTERVAL env / --heartbeat-interval (v3.6: startup-only beat by default for BOTH roles; periodic beats require an explicit interval >=60s; 0/off disables everything; install.sh sets 600 on the Lite unit).",
     "v3.4: full-node objects carry admin_password (full role only; plaintext in Hub KV by explicit operator choice — Plan A — so the console password is re-viewable; lite nodes never have the field, and patching full→lite drops it); added nodes_credentials (GET /api/admin/nodes/:id/credentials, read-only re-view of the stored admin password + recoverable client key, Cache-Control: no-store, never rotates the token); admin auth accepts URL query-string credentials (?key/?token/?password) on the full-role admin plane by explicit operator tradeoff — see auth_semantics.query_string_credentials.",
@@ -301,6 +304,44 @@
         "error": "string (optional)"
       }
     },
+    "test_key": {
+      "method": "POST",
+      "path": "/api/admin/test-key",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub",
+        "full"
+      ],
+      "request": {
+        "provider": "string",
+        "key_id": "string (optional: locates a stored key by id; takes precedence over key_label)",
+        "key_label": "string (optional: locates a stored key by label; when neither id nor label is given the first enabled key is used)",
+        "model": "string (optional: explicit upstream model; overrides the route/preset/fallback chain)"
+      },
+      "response": {
+        "ok": "boolean (true when the probe ran and produced a verdict; false on preflight rejection)",
+        "valid": "boolean (upstream 2xx, even when no reply text could be extracted)",
+        "status": "integer (upstream HTTP status; 0 for transport failure)",
+        "latency_ms": "integer",
+        "provider": "string",
+        "key_id": "string",
+        "key_label": "string",
+        "model": "string (model actually sent upstream)",
+        "model_source": "request | route | preset | fallback",
+        "api_type": "openai-completions | anthropic-messages",
+        "reply_text": "string (extracted plain text, <=200 chars; empty when the 200 body has no recognizable text)",
+        "reason": "string (normalized failure reason, closed 12-value enum; empty on success)",
+        "err_type": "string (upstream machine code, [a-z0-9_], max 64; empty when absent)",
+        "error": "string (upstream text, whitespace-collapsed, max 280 chars, secret-scrubbed; never contains the key)",
+        "rid": "string (upstream request id, [a-z0-9_], max 128)"
+      },
+      "errors": {
+        "400": "invalid json / missing_provider / provider not found / key_not_found / no_enabled_key / provider base_url is empty / (hub) unsafe_upstream_url",
+        "401": "admin authentication required",
+        "503": "config unavailable"
+      },
+      "semantics": "Per-key real inference probe (one 你好, max_tokens 16, stream false, 20s, no retry, no scheduler, no cooldown). Full records a probe RequestTrace (source=probe, endpoint=/admin/test-key) and skips the usage ledger for it; the console stores the verdict on api_keys[].last_test and persists it with the provider save. Secrets are resolved server-side and never echoed."
+    },
     "vault_manifest": {
       "method": "GET | POST",
       "path": "/api/vault/manifest",
@@ -341,7 +382,8 @@
                 "target_model": "string",
                 "enabled": true,
                 "weight": "integer",
-                "max_concurrency": "integer"
+                "max_concurrency": "integer",
+                "reasoning_effort": "string (optional; empty/omitted = follow the client. A discrete level from the model catalog's efforts, or \"on\"/\"off\" for toggle-only models. Written by the console; the scheduler does not consume it yet)"
               }
             ]
           }
@@ -580,6 +622,124 @@
       "roles": [
         "full"
       ]
+    },
+    "model_catalog_meta": {
+      "method": "GET",
+      "path": "/api/admin/model-catalog",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "response": {
+        "ok": true,
+        "present": "boolean",
+        "fetched_at": "string (ISO8601 UTC, empty when absent)",
+        "model_count": "integer",
+        "bytes": "integer (stored catalog text size)"
+      },
+      "semantics": "Hub-side catalog metadata. The 1.6 MB body never rides on /api/config: that response carries only model_catalog_meta {present, fetched_at, model_count}, a read-only projection sanitizeStoredConfig strips on every save path."
+    },
+    "model_catalog_update": {
+      "method": "POST",
+      "path": "/api/admin/model-catalog/:action",
+      "action": "update",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "request": "none",
+      "response": {
+        "ok": true,
+        "fetched_at": "string",
+        "model_count": "integer",
+        "bytes": "integer"
+      },
+      "errors": {
+        "401": "admin authentication required",
+        "405": "method_not_allowed",
+        "500": "catalog_invalid (slimmed payload empty, or the stored-text validation rejected it)",
+        "502": "models.dev_unreachable (network failure/timeout/non-2xx) / models.dev_invalid (upstream body is not JSON)"
+      },
+      "semantics": "Explicit operator action only (the console never refreshes in the background). Pulls https://models.dev/api.json with a 20s AbortSignal timeout, slims it on the edge, validates it, then writes KV. Every failure path returns before kv.put, so the previous catalog stays byte-for-byte intact."
+    },
+    "model_catalog_data": {
+      "method": "GET",
+      "path": "/api/admin/model-catalog/:action",
+      "action": "data",
+      "auth": "ADMIN_PASSWORD | NODE_TOKEN",
+      "roles": [
+        "hub"
+      ],
+      "response": "the catalog JSON text exactly as stored (content-type: application/json, cache-control: no-store)",
+      "errors": {
+        "401": "invalid/revoked node token, or missing admin credentials",
+        "403": "lite node token (lite does not consume the catalog: the whole body would blow the 1 MB node-config limit)",
+        "404": "catalog_not_found"
+      },
+      "semantics": "The one catalog action a Full node consumes: it syncs its local cache with the node token it already holds, never the Hub admin password. meta and update stay admin-only."
+    },
+    "model_catalog_lookup": {
+      "method": "GET",
+      "path": "/api/admin/model-catalog/:action",
+      "action": "lookup",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "hub"
+      ],
+      "request": "query params: preset (our preset id), model (upstream model id)",
+      "response": {
+        "ok": true,
+        "found": "boolean (false = not in the catalog, NOT 'no capability')",
+        "context_tokens": "integer (0 = not published)",
+        "output_tokens": "integer (0 = not published)",
+        "reasoning": "boolean",
+        "efforts": "array of levels | null (null = no discrete ladder: toggle/budget models are never faked as one)",
+        "toggle": "boolean",
+        "budget": "{min,max} | null (0 bound = not published)",
+        "family": "string",
+        "release_date": "string",
+        "from_override": "boolean"
+      },
+      "errors": {
+        "400": "preset_and_model_required",
+        "401": "admin authentication required (a full node token is rejected here; nodes use POST .../lookup)",
+        "404": "catalog_not_found"
+      },
+      "semantics": "Hub console's own single-pair query (route-editor 思考档位 dropdown + add-model capability summary). Pure lookup(catalog, providerMap, overrides, preset, model) mirrors internal/modelcatalog exactly: override field-merge -> provider-map candidates (exact ids across all, then one case-insensitive pass) -> not found; reasoning=true with no options falls back to the newest same-family sibling that publishes efforts."
+    },
+    "model_catalog_node_lookup": {
+      "method": "POST",
+      "path": "/api/admin/model-catalog/lookup",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "request": {
+        "preset_id": "string",
+        "model_id": "string"
+      },
+      "response": {
+        "ok": true,
+        "found": "boolean",
+        "preset_id": "string",
+        "model_id": "string",
+        "context_tokens": "integer",
+        "output_tokens": "integer",
+        "reasoning": "boolean",
+        "efforts": "array of levels | null",
+        "supports_toggle": "boolean",
+        "has_budget": "boolean",
+        "budget_min": "integer",
+        "budget_max": "integer",
+        "family": "string",
+        "release_date": "string",
+        "from_override": "boolean"
+      },
+      "errors": {
+        "400": "invalid json / preset_id and model_id are required",
+        "503": "catalog_unavailable (no store attached: lite/test builds)"
+      },
+      "semantics": "Full node's capability probe backed by its local store (embedded bundle or the Hub-pulled cache). Same field semantics as the Hub GET, spelled with supports_toggle/has_budget/budget_min/budget_max instead of toggle/budget."
     }
   },
   "provider_config_semantics": {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/khc8655/llmproxy2/internal/auth"
 	"github.com/khc8655/llmproxy2/internal/config"
+	"github.com/khc8655/llmproxy2/internal/modelcatalog"
 	"github.com/khc8655/llmproxy2/internal/oauth"
 	"github.com/khc8655/llmproxy2/internal/scheduler"
 	"github.com/khc8655/llmproxy2/internal/types"
@@ -45,20 +46,27 @@ type RouteRegistrar interface {
 
 // Server coordinates admin management endpoints.
 type Server struct {
-	authMgr          *auth.Authenticator
-	localSrc         *config.LocalSource
-	obsSink          types.ObservabilitySink
-	scheduler        *scheduler.Scheduler
-	oauthMgr         *oauth.Manager
-	httpClient       *http.Client
-	allowPrivate     bool
-	adminPassword    string
-	buildVersion     string
-	buildSemver      string
-	buildCommit      string
-	updateAPIBase    string
-	defaultVault     *types.VaultClientConfig
-	defaultClientKey string
+	authMgr    *auth.Authenticator
+	localSrc   *config.LocalSource
+	obsSink    types.ObservabilitySink
+	scheduler  *scheduler.Scheduler
+	oauthMgr   *oauth.Manager
+	httpClient *http.Client
+	// httpClientInjected is true when SetHTTPClient injected a caller-owned
+	// client (tests). Probe endpoints then use it verbatim; otherwise they get
+	// their own client with their own timeout budget (see probeClient).
+	httpClientInjected bool
+	allowPrivate       bool
+	adminPassword      string
+	buildVersion       string
+	buildSemver        string
+	buildCommit        string
+	updateAPIBase      string
+	defaultVault       *types.VaultClientConfig
+	defaultClientKey   string
+	// catalogStore backs the node-local model catalog endpoints. nil on nodes
+	// that never set it (all lite nodes, and tests that do not exercise it).
+	catalogStore *modelcatalog.Store
 }
 
 // NewServer creates a new admin Server.
@@ -83,6 +91,7 @@ func NewServer(
 func (s *Server) SetAllowPrivate(allow bool) {
 	s.allowPrivate = allow
 	s.httpClient = upstream.DefaultClient(15*time.Second, allow)
+	s.httpClientInjected = false
 }
 
 func (s *Server) outboundClient(timeout time.Duration) *http.Client {
@@ -182,6 +191,7 @@ func (s *Server) SetBuildInfo(version, semver, commit string) {
 // SetHTTPClient overrides the internal HTTP client (useful for unit testing).
 func (s *Server) SetHTTPClient(client *http.Client) {
 	s.httpClient = client
+	s.httpClientInjected = true
 }
 
 // RegisterRoutes registers admin API and web console routes onto either *router.RouteMux or *http.ServeMux.
@@ -214,12 +224,17 @@ func (s *Server) RegisterRoutes(r any) {
 	register("GET /api/admin/usage", s.handleUsage)
 	register("GET /api/admin/traces", s.handleTraces)
 	register("DELETE /api/admin/traces", s.handleTraces)
+	register("GET /api/admin/recent-requests", s.handleRecentRequests)
 	register("GET /api/admin/cooldowns", s.handleCooldowns)
 	register("DELETE /api/admin/cooldowns", s.handleCooldowns)
 	register("GET /api/lanes", s.handleLanes)
 	register("GET /api/admin/lanes", s.handleLanes)
 	register("POST /api/admin/verify-key", s.handleVerifyKey)
+	register("POST /api/admin/test-key", s.handleTestKey)
 	register("POST /api/admin/probe-models", s.handleProbeModels)
+	register("GET /api/admin/model-catalog", s.handleModelCatalog)
+	register("POST /api/admin/model-catalog/sync", s.handleModelCatalogSync)
+	register("POST /api/admin/model-catalog/lookup", s.handleModelCatalogLookup)
 	register("GET /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/fetch", s.handleVaultFetch)

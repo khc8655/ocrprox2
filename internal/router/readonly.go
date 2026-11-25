@@ -56,6 +56,8 @@ var FullOnlyRoutes = map[string]bool{
 	"/api/admin/traces":                  true,
 	"GET /api/admin/traces":              true,
 	"DELETE /api/admin/traces":           true,
+	"/api/admin/recent-requests":         true,
+	"GET /api/admin/recent-requests":     true,
 	"/api/lanes":                         true,
 	"GET /api/lanes":                     true,
 	"/api/admin/lanes":                   true,
@@ -69,6 +71,8 @@ var FullOnlyRoutes = map[string]bool{
 	"POST /api/admin/probe-models":       true,
 	"/api/admin/verify-key":              true,
 	"POST /api/admin/verify-key":         true,
+	"/api/admin/test-key":                true,
+	"POST /api/admin/test-key":           true,
 	"/api/admin/oauth/start":             true,
 	"POST /api/admin/oauth/start":        true,
 	"/api/admin/oauth/poll":              true,
@@ -115,6 +119,14 @@ var FullOnlyRoutes = map[string]bool{
 	"POST /api/admin/system/upgrade":     true,
 	"/api/admin/restart":                 true,
 	"POST /api/admin/restart":            true,
+
+	// Node-local model catalog (cache data, not configuration).
+	"/api/admin/model-catalog":             true,
+	"GET /api/admin/model-catalog":         true,
+	"/api/admin/model-catalog/sync":        true,
+	"POST /api/admin/model-catalog/sync":   true,
+	"/api/admin/model-catalog/lookup":      true,
+	"POST /api/admin/model-catalog/lookup": true,
 }
 
 // ValidateRegisteredRoutes checks that all given route patterns are explicitly registered

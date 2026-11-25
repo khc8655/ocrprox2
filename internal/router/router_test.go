@@ -55,6 +55,7 @@ func TestReadOnlyGuard_LiteMode(t *testing.T) {
 		{"POST", "/api/admin/test-candidate"},
 		{"POST", "/api/admin/test-agent-model"},
 		{"DELETE", "/api/admin/traces"},
+		{"GET", "/api/admin/recent-requests"},
 		{"GET", "/api/lanes"},
 		{"GET", "/api/admin/lanes"},
 		{"GET", "/admin"},
@@ -69,6 +70,9 @@ func TestReadOnlyGuard_LiteMode(t *testing.T) {
 		{"POST", "/api/admin/client-key"},
 		{"POST", "/api/admin/auth/login"},
 		{"POST", "/api/admin/auth/logout"},
+		{"GET", "/api/admin/model-catalog"},
+		{"POST", "/api/admin/model-catalog/sync"},
+		{"POST", "/api/admin/model-catalog/lookup"},
 	}
 
 	for _, tc := range blocked {
@@ -141,6 +145,7 @@ func TestValidateRegisteredRoutes_Success(t *testing.T) {
 		"POST /api/admin/test-candidate",
 		"POST /api/admin/test-agent-model",
 		"DELETE /api/admin/traces",
+		"GET /api/admin/recent-requests",
 		"GET /api/lanes",
 		"GET /api/admin/lanes",
 		"/api/admin/usage",
@@ -166,6 +171,9 @@ func TestValidateRegisteredRoutes_Success(t *testing.T) {
 		"POST /api/admin/client-key",
 		"POST /api/admin/auth/login",
 		"POST /api/admin/auth/logout",
+		"GET /api/admin/model-catalog",
+		"POST /api/admin/model-catalog/sync",
+		"POST /api/admin/model-catalog/lookup",
 	}
 
 	if err := ValidateRegisteredRoutes(validRoutes); err != nil {

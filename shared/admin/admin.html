@@ -202,33 +202,29 @@
 
         <div class="card">
           <div class="card-header">
-            <h2 class="card-title">最近请求轨迹 (最多 60 条)</h2>
+            <div>
+              <h2 class="card-title">最近请求</h2>
+              <div class="card-sub" id="recentReqSub">来自账本，重启后仍保留；点击任意行展开失败尝试明细</div>
+            </div>
             <div class="fields">
-              <button class="btn btn--sm" id="btnFilterRetried" type="button">仅看重试/异常</button>
-              <button class="btn btn--sm btn--danger" id="btnClearTraces" type="button">清空轨迹</button>
+              <div class="seg" id="recentReqSeg">
+                <button class="seg-btn active" data-failed="0" type="button">全部</button>
+                <button class="seg-btn" data-failed="1" type="button">仅失败与重试</button>
+              </div>
+              <button class="btn btn--sm btn--danger" id="btnClearTraces" type="button" title="只清内存轨迹，账本记录保留">清空</button>
             </div>
           </div>
-          <div class="trace-toolbar">
-            <div class="search-box">
-              <span class="search-ico" id="traceSearchIcon"></span>
-              <input class="input search-input" id="traceSearchInput" placeholder="搜索请求模型、实际模型或供应商">
+          <div id="recentReqList"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">错误分析</h2>
+              <div class="card-sub" id="errorAnalysisSub">基于最近 50 条请求中的失败记录统计</div>
             </div>
-            <select class="select" id="traceModeFilter">
-              <option value="all">全部模式</option>
-              <option value="agent">Agent 路由</option>
-              <option value="kb">KB 流水线</option>
-            </select>
-            <select class="select" id="traceEndpointFilter">
-              <option value="all">全部接口</option>
-              <option value="/v1/chat/completions">/v1/chat/completions</option>
-              <option value="/v1/messages">/v1/messages</option>
-              <option value="/v1/responses">/v1/responses</option>
-              <option value="/v1/ocr">/v1/ocr</option>
-              <option value="/v1/embeddings">/v1/embeddings</option>
-              <option value="/v1/rerank">/v1/rerank</option>
-            </select>
           </div>
-          <div id="tracesList"></div>
+          <div id="errorAnalysisList"></div>
         </div>
       </div>
     </section>
@@ -386,6 +382,10 @@
             <label class="form-label" for="newModelTarget">上游目标模型 ID</label>
             <input class="input input--code" id="newModelTarget" placeholder="留空同对外名">
             <span class="text-xs text-muted">上游真实模型 ID，留空同对外名</span>
+            <!-- Capability summary (context / max output / thinking ladder) for the
+                 typed upstream id. Hub keeps it hidden: the Hub ships templates and
+                 does not run inference, so there is no node engine to describe. -->
+            <div class="text-xs text-muted mt-1 hidden" id="newModelCapability" hidden></div>
           </div>
 
           <div class="form-group mb-3">
@@ -659,10 +659,21 @@
         <div id="concurrencyGuardRows"></div>
       </div>
 
+      <!-- 4. Model Catalog (Hub only: it owns the KV catalog a Full node pulls) -->
+      <div class="card card-pad" id="modelCatalogBox" hidden>
+        <div class="section-bar">
+          <div>
+            <h2 class="card-title"><span class="step-num">4</span>模型目录</h2>
+            <div class="card-sub">来自 models.dev 的模型上下文窗口与思考等级；点按钮才更新，不会自动联网</div>
+          </div>
+        </div>
+        <div id="modelCatalogRows"></div>
+      </div>
+
       <!-- 4. Vault Client Link (Full) -->
       <div class="card card-pad" id="cfgVaultLinkBox" hidden>
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">4</span>Vault 中枢连接设置</h2>
+          <h2 class="card-title"><span class="step-num">5</span>Vault 中枢连接设置</h2>
           <button class="btn btn--sm" id="btnTestVaultLink">测试连接</button>
         </div>
         <div id="vaultLinkRows"></div>
@@ -671,7 +682,7 @@
       <!-- 5. Config Backup & Restore (Hub + Full) -->
       <div class="card card-pad" id="configBackupBox">
         <div class="section-bar">
-          <h2 class="card-title"><span class="step-num">5</span>配置备份与迁移</h2>
+          <h2 class="card-title"><span class="step-num">6</span>配置备份与迁移</h2>
         </div>
         <div id="configBackupRows"></div>
         <details class="headers-details mt-3" id="rawJsonDetails">
@@ -691,7 +702,7 @@
       <div class="card card-pad" id="systemUpdateBox" hidden>
         <div class="section-bar">
           <div>
-            <h2 class="card-title"><span class="step-num">6</span>版本维护与平滑重启</h2>
+            <h2 class="card-title"><span class="step-num">7</span>版本维护与平滑重启</h2>
             <div class="card-sub" id="sysCurrentVersionSub">当前版本: -</div>
           </div>
           <div class="fields">

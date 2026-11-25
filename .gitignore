@@ -62,3 +62,11 @@ live_hub_test_report.md
 
 # 测试机凭据（只在本机）
 scripts/e2e/vm.conf.json
+
+# scripts/e2e 运行时产物（本地编译的二进制、节点的配置与账本、harness pid）
+scripts/e2e/llmproxy
+scripts/e2e/llmproxy-linux-*
+scripts/e2e/state/
+scripts/e2e/*.pid
+scripts/e2e/vm.state.json
+scripts/e2e/shots/

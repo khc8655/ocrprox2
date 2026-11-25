@@ -199,8 +199,12 @@ try {
 // ============================================================================
 logHeader('G3 & G4', '前后端契约守卫与 Profile/Schema 双向对齐 (T1 Contracts)');
 try {
-  runCmd('node', ['--test', 'tests/t1_contracts/verify_contracts.test.mjs']);
-  logSuccess('[G3 & G4 PASS] T1 contracts, route guards, UI limits, and settings schema 100% passed');
+  runCmd('node', [
+    '--test',
+    'tests/t1_contracts/verify_contracts.test.mjs',
+    'scripts/model-catalog/build-catalog.test.mjs',
+  ]);
+  logSuccess('[G3 & G4 PASS] T1 contracts, model catalog, route guards, UI limits, and settings schema 100% passed');
 } catch (err) {
   logFailure('G3 & G4', 'T1 contracts gate failed', err);
 }

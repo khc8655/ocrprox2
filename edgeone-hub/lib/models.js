@@ -3,6 +3,27 @@
  */
 
 /**
+ * Builds an upstream API URL the same way the Go upstream.JoinUpstream does:
+ * keep an existing version segment (/v1, /v1beta/openai, /endpoints/openapi...),
+ * otherwise inject /v1/. Used by the console test probe (chat/completions,
+ * messages) so hub and full send the same request to the same URL shape.
+ */
+export function joinUpstreamUrl(baseUrl, path) {
+  if (!baseUrl || typeof baseUrl !== 'string') return '';
+  const base = baseUrl.trim().replace(/\/+$/, '');
+  let cleanPath = String(path || '').trim().replace(/^\/+/, '');
+  cleanPath = cleanPath.replace(/^v1\//, '');
+  if (!cleanPath) return base;
+  if (base.endsWith('/' + cleanPath)) return base;
+  const hasVersion = /\/v\d+[^/]*\//.test(base) ||
+    /\/v\d+(\.[^/]+)?(\/.*)?$/.test(base) ||
+    base.endsWith('/v1') ||
+    base.includes('/v1/') ||
+    base.includes('/endpoints/openapi');
+  return hasVersion ? `${base}/${cleanPath}` : `${base}/v1/${cleanPath}`;
+}
+
+/**
  * Resolves upstream models endpoint URL given a base URL.
  * Handles OpenAI, Anthropic, Gemini, and vendor-specific base_url shapes.
  */

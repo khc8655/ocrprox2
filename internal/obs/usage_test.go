@@ -2,9 +2,11 @@ package obs
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -365,5 +367,111 @@ func TestUsage_RotationAndTimestampSanity(t *testing.T) {
 	}
 	if len(seriesAll) != 30 {
 		t.Fatalf("expected 30 series buckets despite corrupt Timestamp=0, got %d", len(seriesAll))
+	}
+}
+
+// TestUsage_LedgerRecordsFailureReason proves the ledger keeps the normalized
+// failure reason (not just a status code) and never stores a raw key. The Error
+// value here is what the scheduler writes: CompressError + ScrubStringWithSecrets.
+func TestUsage_LedgerRecordsFailureReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(types.RoleFull, tmpDir)
+	if err != nil {
+		t.Fatalf("NewManager error: %v", err)
+	}
+	defer mgr.Close()
+
+	const secret = "sk-live-abcdef123456"
+	scrubbed := ScrubStringWithSecrets("Incorrect API key provided: "+secret, secret)
+
+	mgr.RecordRequest(types.RequestTrace{
+		ID:          "req-401",
+		Timestamp:   time.Now().Unix(),
+		Mode:        "agent",
+		Endpoint:    "/v1/chat/completions",
+		ReqModel:    "gpt-4o",
+		Status:      401,
+		TotalMillis: 40,
+		Tries: []types.Try{{
+			Attempt:      1,
+			Provider:     "openai",
+			KeyID:        "k1",
+			Model:        "gpt-4o",
+			Status:       401,
+			Millis:       30,
+			Reason:       "auth_invalid",
+			ErrType:      "authentication_error",
+			Error:        scrubbed,
+			RequestID:    "req_abc123",
+			ErrorSnippet: `{"error":{"type":"authentication_error"}}`,
+		}},
+	})
+	// A request that succeeded after failover must still record its failed try.
+	mgr.RecordRequest(types.RequestTrace{
+		ID:          "req-failover",
+		Timestamp:   time.Now().Unix(),
+		Mode:        "agent",
+		Endpoint:    "/v1/chat/completions",
+		ReqModel:    "gpt-4o",
+		ServedModel: "gpt-4o",
+		Status:      200,
+		TotalMillis: 120,
+		Tries: []types.Try{
+			{Attempt: 1, Provider: "openai", KeyID: "k2", Status: 429, Reason: "quota_exhausted", ErrType: "insufficient_quota", Error: "quota exceeded"},
+			{Attempt: 2, Provider: "openai", KeyID: "k1", Status: 200},
+		},
+	})
+
+	if err := mgr.Flush(); err != nil {
+		t.Fatalf("Flush error: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(tmpDir, "usage.jsonl"))
+	if err != nil {
+		t.Fatalf("read usage.jsonl: %v", err)
+	}
+	if bytes.Contains(raw, []byte(secret)) {
+		t.Fatalf("usage.jsonl leaked the API key: %s", raw)
+	}
+
+	var recs []UsageRecord
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	for sc.Scan() {
+		var rec UsageRecord
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			t.Fatalf("invalid ledger line %q: %v", sc.Text(), err)
+		}
+		recs = append(recs, rec)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("expected 2 ledger records, got %d", len(recs))
+	}
+
+	failed := recs[0].FailedTries
+	if len(failed) != 1 {
+		t.Fatalf("expected 1 failed try on the 401 record, got %+v", recs[0])
+	}
+	ft := failed[0]
+	if ft.Reason != "auth_invalid" {
+		t.Errorf("reason = %q, want auth_invalid", ft.Reason)
+	}
+	if ft.ErrType != "authentication_error" {
+		t.Errorf("err_type = %q, want authentication_error", ft.ErrType)
+	}
+	if ft.RequestID != "req_abc123" {
+		t.Errorf("rid = %q, want req_abc123", ft.RequestID)
+	}
+	if !strings.Contains(ft.Error, "Incorrect API key provided") || !strings.Contains(ft.Error, "…") {
+		t.Errorf("err = %q, want scrubbed upstream text", ft.Error)
+	}
+	if strings.Contains(ft.Error, secret) {
+		t.Errorf("err leaked the key: %q", ft.Error)
+	}
+
+	if len(recs[1].FailedTries) != 1 {
+		t.Fatalf("successful failover must record its failed try, got %+v", recs[1].FailedTries)
+	}
+	if got := recs[1].FailedTries[0]; got.Reason != "quota_exhausted" || got.KeyID != "k2" {
+		t.Errorf("failover failed try = %+v, want quota_exhausted on k2", got)
 	}
 }

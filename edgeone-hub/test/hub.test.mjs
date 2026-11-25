@@ -12,18 +12,23 @@ import * as edgeNodeHeartbeat from '../api/node/heartbeat.js';
 import { handleVaultManifestRequest } from '../api/vault/manifest.js';
 import { handleVaultFetchRequest } from '../api/vault/fetch.js';
 import { handleVerifyKey } from '../api/admin/verify-key.js';
+import { handleTestKey } from '../api/admin/test-key.js';
 import { handleProbeModels } from '../api/admin/probe-models.js';
+import { handleModelCatalogRequest } from '../api/admin/model-catalog.js';
 import { CONFIG_KV_KEY, loadConfig, saveConfigWithCAS, resolveKvBinding, resolveEnv, checkAdminAuth } from '../lib/config.js';
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
 import { generateClientKey, NODES_KV_KEY, loadNodes, saveNodes } from '../lib/nodes.js';
 import { projectConfigForNode } from '../lib/projection.js';
 import { PRESET_MAP } from '../lib/generated-presets.js';
+import { MODEL_CATALOG_KV_KEY, loadCatalog, saveCatalog, meta, slimModelsDev } from '../lib/model-catalog.js';
 import * as edgeIndex from '../../edge-functions/index.js';
 import * as edgeHealth from '../../edge-functions/health.js';
 import * as edgeHealthz from '../../edge-functions/healthz.js';
 import * as edgeConfig from '../../edge-functions/api/config.js';
 import * as edgeAdminNodes from '../../edge-functions/api/admin/nodes.js';
 import * as edgeNodeConfig from '../../edge-functions/api/node/config.js';
+import * as edgeModelCatalog from '../../edge-functions/api/admin/model-catalog.js';
+import * as edgeModelCatalogAction from '../../edge-functions/api/admin/model-catalog/[action].js';
 
 class MockKV {
   constructor() {
@@ -721,6 +726,299 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(data.ok, true);
       assert.equal(data.valid, true);
       assert.equal(calledHeaders.authorization, 'Bearer sk-real-deepseek-unmasked-token-999');
+    });
+  });
+
+  describe('6b. Per-Key Inference Test (handleTestKey)', () => {
+    const SECRET = 'sk-hub-test-secret-7c6b5a4d';
+    const providerConfig = (extra = {}) => ({
+      _version: 3,
+      providers: {
+        mockprov: {
+          name: 'Mock Provider',
+          base_url: 'https://api.mock.example.com/v1',
+          anthropic_base_url: 'https://api.mock.example.com/anthropic',
+          preset_id: 'openai',
+          enabled: true,
+          api_keys: [
+            { id: 'k_old', label: 'old', key: 'sk-disabled-old-key-0001', enabled: false },
+            { id: 'k_live', label: 'live', key: SECRET, enabled: true },
+          ],
+          ...(extra.provider || {}),
+        },
+      },
+      agent_models: extra.agent_models || {},
+      settings: {},
+    });
+
+    async function envWithConfig(config) {
+      const kv = new MockKV();
+      await kv.put(CONFIG_KV_KEY, JSON.stringify(config));
+      return { ...TEST_ENV, agent_kv: kv };
+    }
+
+    test('Rejects unauthenticated requests with 401 and non-POST with 405', async () => {
+      const unauthReq = new Request('https://hub.example.com/api/admin/test-key', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'mockprov' }),
+      });
+      const resp = await handleTestKey(unauthReq, TEST_ENV);
+      assert.equal(resp.status, 401);
+
+      const getResp = await handleTestKey(makeAdminReq('GET', '/api/admin/test-key'), TEST_ENV);
+      assert.equal(getResp.status, 405);
+    });
+
+    test('200 chat.completion -> valid true with reply_text, real key, and the fixed 你好 prompt', async () => {
+      const env = await envWithConfig(providerConfig());
+      let calledUrl = '';
+      let calledHeaders = {};
+      let calledBody = null;
+      const mockFetch = async (url, opts) => {
+        calledUrl = url;
+        calledHeaders = opts.headers || {};
+        calledBody = JSON.parse(opts.body);
+        return new Response(
+          JSON.stringify({
+            id: 'chatcmpl_hub_1',
+            choices: [{ message: { role: 'assistant', content: '你好！我是 Hub 测试回复。' } }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'req_hub_42' } }
+        );
+      };
+
+      const req = makeAdminReq('POST', '/api/admin/test-key', {
+        provider: 'mockprov',
+        key_label: 'live',
+      });
+      const resp = await handleTestKey(req, env, mockFetch);
+      assert.equal(resp.status, 200);
+      const raw = await resp.text();
+      const data = JSON.parse(raw);
+
+      assert.equal(data.ok, true);
+      assert.equal(data.valid, true);
+      assert.equal(data.status, 200);
+      assert.equal(data.reply_text, '你好！我是 Hub 测试回复。');
+      assert.equal(data.provider, 'mockprov');
+      assert.equal(data.key_id, 'k_live');
+      assert.equal(data.key_label, 'live');
+      assert.equal(data.api_type, 'openai-completions');
+      assert.equal(data.model, 'gpt-4o-mini');
+      assert.equal(data.model_source, 'fallback');
+      assert.equal(data.rid, 'req_hub_42');
+      assert.equal(data.reason, '');
+      assert.equal(data.err_type, '');
+
+      assert.equal(calledUrl, 'https://api.mock.example.com/v1/chat/completions');
+      assert.equal(calledHeaders.authorization, `Bearer ${SECRET}`);
+      assert.equal(calledBody.model, 'gpt-4o-mini');
+      assert.equal(calledBody.max_tokens, 16);
+      assert.equal(calledBody.stream, false);
+      assert.deepEqual(calledBody.messages, [{ role: 'user', content: '你好' }]);
+      assert.equal(raw.includes(SECRET), false, 'response must never echo the key');
+    });
+
+    test('the verdict is persisted onto the key so a refresh still shows it', async () => {
+      const env = await envWithConfig(providerConfig());
+      const mockFetch = async () =>
+        new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '你好！' } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+
+      const resp = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov', key_label: 'live' }),
+        env,
+        mockFetch
+      );
+      assert.equal(resp.status, 200);
+
+      const stored = JSON.parse(await env.agent_kv.get(CONFIG_KV_KEY));
+      const key = stored.providers.mockprov.api_keys.find((k) => k.label === 'live');
+      assert.ok(key.last_test, 'last_test must be stored on the key');
+      assert.equal(key.last_test.ok, true);
+      assert.equal(key.last_test.status, 200);
+      assert.equal(key.last_test.reply_text, '你好！');
+      assert.ok(key.last_test.at, 'last_test must carry a timestamp');
+      // The other key and the secret itself are untouched.
+      const other = stored.providers.mockprov.api_keys.find((k) => k.label === 'old');
+      assert.equal(other.last_test, undefined);
+      assert.equal(key.key, SECRET);
+    });
+
+    test('401 invalid_api_key -> valid false, reason auth_invalid, err_type invalid_api_key', async () => {
+      const env = await envWithConfig(providerConfig());
+      const mockFetch = async () =>
+        new Response(
+          JSON.stringify({
+            // The upstream echoes the full key on purpose: the response must
+            // still never contain it.
+            error: { type: 'invalid_api_key', message: `Incorrect API key provided: ${SECRET}` },
+          }),
+          { status: 401, headers: { 'content-type': 'application/json' } }
+        );
+
+      const req = makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov' });
+      const resp = await handleTestKey(req, env, mockFetch);
+      assert.equal(resp.status, 200);
+      const raw = await resp.text();
+      const data = JSON.parse(raw);
+
+      assert.equal(data.ok, true);
+      assert.equal(data.valid, false);
+      assert.equal(data.status, 401);
+      assert.equal(data.reason, 'auth_invalid');
+      assert.equal(data.err_type, 'invalid_api_key');
+      assert.ok(data.error.includes('Incorrect API key provided'));
+      assert.equal(raw.includes(SECRET), false, 'response must never echo the key');
+      // Default target: first enabled key.
+      assert.equal(data.key_label, 'live');
+    });
+
+    test('Aborted fetch (20s probe budget) -> valid false, reason timeout', async () => {
+      const env = await envWithConfig(providerConfig());
+      const mockFetch = async () => {
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        throw err;
+      };
+
+      const req = makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov' });
+      const resp = await handleTestKey(req, env, mockFetch);
+      assert.equal(resp.status, 200);
+      const data = await resp.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.valid, false);
+      assert.equal(data.status, 0);
+      assert.equal(data.reason, 'timeout');
+    });
+
+    test('Anthropic protocol: /messages URL, x-api-key + version headers, content[] reply', async () => {
+      const env = await envWithConfig(providerConfig({
+        provider: { api_type: 'anthropic-messages', preset_id: 'anthropic' },
+      }));
+      let calledUrl = '';
+      let calledHeaders = {};
+      const mockFetch = async (url, opts) => {
+        calledUrl = url;
+        calledHeaders = opts.headers || {};
+        return new Response(
+          JSON.stringify({
+            id: 'msg_1',
+            type: 'message',
+            content: [
+              { type: 'text', text: '你好' },
+              { type: 'text', text: '，世界' },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      };
+
+      const req = makeAdminReq('POST', '/api/admin/test-key', {
+        provider: 'mockprov',
+        key_id: 'k_live',
+      });
+      const resp = await handleTestKey(req, env, mockFetch);
+      const data = await resp.json();
+
+      assert.equal(data.valid, true);
+      assert.equal(data.api_type, 'anthropic-messages');
+      assert.equal(data.reply_text, '你好，世界');
+      assert.equal(calledUrl, 'https://api.mock.example.com/anthropic/v1/messages');
+      assert.equal(calledHeaders['x-api-key'], SECRET);
+      assert.equal(calledHeaders['anthropic-version'], '2023-06-01');
+      assert.equal(calledHeaders.authorization, undefined);
+    });
+
+    test('Model chain: request -> route -> preset -> fallback; key_id targets a disabled key', async () => {
+      const env = await envWithConfig(providerConfig({
+        agent_models: {
+          chat: {
+            enabled: true,
+            candidates: [{ provider: 'mockprov', key_label: 'live', target_model: 'vendor-route-model', enabled: true }],
+          },
+        },
+      }));
+      let calledBody = null;
+      const mockFetch = async (url, opts) => {
+        calledBody = JSON.parse(opts.body);
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      };
+
+      const routeResp = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov' }),
+        env,
+        mockFetch
+      );
+      const routeData = await routeResp.json();
+      assert.equal(routeData.model, 'vendor-route-model');
+      assert.equal(routeData.model_source, 'route');
+      assert.equal(calledBody.model, 'vendor-route-model');
+
+      const reqResp = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov', model: 'explicit-model' }),
+        env,
+        mockFetch
+      );
+      const reqData = await reqResp.json();
+      assert.equal(reqData.model, 'explicit-model');
+      assert.equal(reqData.model_source, 'request');
+
+      const disabledResp = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov', key_id: 'k_old' }),
+        env,
+        mockFetch
+      );
+      const disabledData = await disabledResp.json();
+      assert.equal(disabledData.valid, true);
+      assert.equal(disabledData.key_label, 'old');
+      assert.equal(disabledData.key_id, 'k_old');
+    });
+
+    test('Preflight errors: unknown provider and unsafe upstream URL', async () => {
+      const env = await envWithConfig(providerConfig());
+      let fetchCalls = 0;
+      const mockFetch = async () => {
+        fetchCalls++;
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      };
+
+      const noProv = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'nope' }),
+        env,
+        mockFetch
+      );
+      assert.equal(noProv.status, 400);
+      const noProvData = await noProv.json();
+      assert.equal(noProvData.ok, false);
+      assert.equal(noProvData.valid, false);
+      assert.equal(noProvData.error, "provider 'nope' not found");
+
+      const unsafeEnv = await envWithConfig({
+        _version: 1,
+        providers: {
+          mockprov: {
+            base_url: 'http://127.0.0.1:8080/v1',
+            api_keys: [{ id: 'k1', label: 'live', key: SECRET, enabled: true }],
+          },
+        },
+        settings: {},
+      });
+      const unsafe = await handleTestKey(
+        makeAdminReq('POST', '/api/admin/test-key', { provider: 'mockprov' }),
+        unsafeEnv,
+        mockFetch
+      );
+      assert.equal(unsafe.status, 400);
+      const unsafeData = await unsafe.json();
+      assert.equal(unsafeData.error, 'unsafe_upstream_url');
+      assert.equal(fetchCalls, 0, 'preflight rejections must not dial the upstream');
     });
   });
 
@@ -2852,3 +3150,577 @@ describe('14. Legacy proxy_keys is dropped by the Hub (load / save / projection)
   });
 });
 
+
+describe('15. Model catalog storage & admin API', () => {
+  const FIXTURE_PATH = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../scripts/model-catalog/fixtures/models-dev-sample.json'
+  );
+  const sampleRaw = () => JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
+
+  const oldCatalogText = () =>
+    JSON.stringify({
+      schema: 1,
+      source: 'models.dev',
+      fetched_at: '2026-01-01T00:00:00.000Z',
+      model_count: 1,
+      providers: { oldprov: { 'old-model': { limit: { context: 1 } } } },
+    });
+
+  const updateReq = (auth = true) =>
+    new Request('https://hub.example.com/api/admin/model-catalog/update', {
+      method: 'POST',
+      headers: auth ? { authorization: `Bearer ${TEST_ENV.ADMIN_PASSWORD}` } : {},
+    });
+
+  test('unauthenticated POST update returns 401', async () => {
+    const kv = new MockKV();
+    const resp = await handleModelCatalogRequest(updateReq(false), TEST_ENV, kv, async () => {
+      throw new Error('must not fetch without auth');
+    });
+    assert.equal(resp.status, 401);
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), null);
+  });
+
+  test('successful update slims the payload, stores it, and reports model_count', async () => {
+    const kv = new MockKV();
+    const raw = sampleRaw();
+    const mockFetch = async (url, opts) => {
+      assert.equal(url, 'https://models.dev/api.json');
+      assert.ok(opts && opts.signal, 'fetch must carry a timeout signal');
+      return new Response(JSON.stringify(raw), { status: 200 });
+    };
+
+    const resp = await handleModelCatalogRequest(updateReq(), TEST_ENV, kv, mockFetch);
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+    assert.equal(data.ok, true);
+
+    const stored = JSON.parse(await kv.get(MODEL_CATALOG_KV_KEY));
+    assert.equal(stored.schema, 1);
+    assert.equal(stored.source, 'models.dev');
+    assert.match(stored.fetched_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(data.fetched_at, stored.fetched_at);
+    assert.equal(data.model_count, stored.model_count);
+    assert.equal(data.bytes, Buffer.byteLength(await kv.get(MODEL_CATALOG_KV_KEY), 'utf8'));
+
+    // model_count equals what the fixture actually contains
+    let expected = 0;
+    for (const p of Object.values(raw)) expected += Object.keys(p.models || {}).length;
+    assert.equal(stored.model_count, expected);
+
+    // Only the five whitelisted fields survive per model
+    for (const models of Object.values(stored.providers)) {
+      for (const m of Object.values(models)) {
+        for (const k of Object.keys(m)) {
+          assert.ok(
+            ['limit', 'reasoning', 'reasoning_options', 'family', 'release_date'].includes(k),
+            `unexpected key '${k}' in catalog model`
+          );
+        }
+        assert.equal(m.limit && m.limit.input, undefined, 'upstream limit.input must be dropped');
+      }
+    }
+
+    // The dropped upstream fields must be gone
+    const sonnet = stored.providers.anthropic['claude-sonnet-4-5'];
+    assert.equal(sonnet.description, undefined);
+    assert.equal(sonnet.cost, undefined);
+    assert.equal(sonnet.modalities, undefined);
+    assert.equal(sonnet.limit.context, 200000);
+    assert.deepEqual(sonnet.reasoning_options, [{ type: 'budget_tokens', min: 1024 }]);
+    assert.equal(sonnet.reasoning, true);
+
+    // Provider / model ids sorted, provider keys are not our preset ids
+    const providerIds = Object.keys(stored.providers);
+    assert.deepEqual(providerIds, providerIds.slice().sort());
+    const modelIds = Object.keys(stored.providers.anthropic);
+    assert.deepEqual(modelIds, modelIds.slice().sort());
+  });
+
+  test('timeout while fetching returns 502 and leaves the stored catalog untouched', async () => {
+    const kv = new MockKV();
+    const before = oldCatalogText();
+    await kv.put(MODEL_CATALOG_KV_KEY, before);
+
+    const mockFetch = async () => {
+      const err = new Error('The operation was aborted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    };
+
+    const resp = await handleModelCatalogRequest(updateReq(), TEST_ENV, kv, mockFetch);
+    assert.equal(resp.status, 502);
+    const data = await resp.json();
+    assert.equal(data.ok, false);
+    assert.equal(data.error, 'models.dev_unreachable');
+    assert.ok(data.detail, 'failure must carry a detail line');
+
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before, 'a failed update must keep the old catalog');
+    const m = await meta(kv);
+    assert.equal(m.present, true);
+    assert.equal(m.fetched_at, '2026-01-01T00:00:00.000Z');
+  });
+
+  test('non-JSON upstream body returns 502 models.dev_invalid', async () => {
+    const kv = new MockKV();
+    const before = oldCatalogText();
+    await kv.put(MODEL_CATALOG_KV_KEY, before);
+
+    const resp = await handleModelCatalogRequest(
+      updateReq(),
+      TEST_ENV,
+      kv,
+      async () => new Response('<html>not json</html>', { status: 200 })
+    );
+    assert.equal(resp.status, 502);
+    assert.equal((await resp.json()).error, 'models.dev_invalid');
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before);
+  });
+
+  test('upstream HTTP error returns 502 models.dev_unreachable and keeps the old catalog', async () => {
+    const kv = new MockKV();
+    const before = oldCatalogText();
+    await kv.put(MODEL_CATALOG_KV_KEY, before);
+
+    const resp = await handleModelCatalogRequest(
+      updateReq(),
+      TEST_ENV,
+      kv,
+      async () => new Response('{}', { status: 503 })
+    );
+    assert.equal(resp.status, 502);
+    assert.equal((await resp.json()).error, 'models.dev_unreachable');
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before);
+  });
+
+  test('a payload that slims to nothing returns 500 catalog_invalid and keeps the old catalog', async () => {
+    const kv = new MockKV();
+    const before = oldCatalogText();
+    await kv.put(MODEL_CATALOG_KV_KEY, before);
+
+    // Valid JSON, zero models -> slimModelsDev refuses to emit an empty catalog
+    const resp = await handleModelCatalogRequest(
+      updateReq(),
+      TEST_ENV,
+      kv,
+      async () => new Response(JSON.stringify({ provider_a: { models: {} } }), { status: 200 })
+    );
+    assert.equal(resp.status, 500);
+    const data = await resp.json();
+    assert.equal(data.ok, false);
+    assert.equal(data.error, 'catalog_invalid');
+    assert.ok(data.detail);
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before);
+  });
+
+  test('GET meta reports absent then present catalog', async () => {
+    const kv = new MockKV();
+    const emptyResp = await handleModelCatalogRequest(makeAdminReq('GET', '/api/admin/model-catalog'), TEST_ENV, kv);
+    assert.equal(emptyResp.status, 200);
+    const empty = await emptyResp.json();
+    assert.equal(empty.ok, true);
+    assert.equal(empty.present, false);
+    assert.equal(empty.model_count, 0);
+    assert.equal(empty.fetched_at, '');
+    assert.equal(empty.bytes, 0);
+
+    await saveCatalog(kv, oldCatalogText());
+    const present = await (
+      await handleModelCatalogRequest(makeAdminReq('GET', '/api/admin/model-catalog'), TEST_ENV, kv)
+    ).json();
+    assert.equal(present.present, true);
+    assert.equal(present.fetched_at, '2026-01-01T00:00:00.000Z');
+    assert.equal(present.model_count, 1);
+    assert.equal(present.bytes, Buffer.byteLength(oldCatalogText(), 'utf8'));
+  });
+
+  test('GET data returns the stored catalog text verbatim with no-store', async () => {
+    const kv = new MockKV();
+    const text = oldCatalogText();
+    await saveCatalog(kv, text);
+    const resp = await handleModelCatalogRequest(makeAdminReq('GET', '/api/admin/model-catalog/data'), TEST_ENV, kv);
+    assert.equal(resp.status, 200);
+    assert.equal(resp.headers.get('content-type'), 'application/json');
+    assert.equal(resp.headers.get('cache-control'), 'no-store');
+    assert.equal(await resp.text(), text);
+
+    // No catalog -> 404, not an empty 200
+    const emptyKv = new MockKV();
+    const missing = await handleModelCatalogRequest(
+      makeAdminReq('GET', '/api/admin/model-catalog/data'),
+      TEST_ENV,
+      emptyKv
+    );
+    assert.equal(missing.status, 404);
+  });
+
+  test('GET /api/config carries model_catalog_meta but not the catalog body', async () => {
+    const kv = new MockKV();
+    const resp0 = await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv);
+    const data0 = await resp0.json();
+    assert.deepEqual(data0.model_catalog_meta, { present: false, fetched_at: '', model_count: 0 });
+    assert.equal(JSON.stringify(data0).includes('old-model'), false);
+
+    await saveCatalog(kv, oldCatalogText());
+    const data1 = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv)).json();
+    assert.deepEqual(data1.model_catalog_meta, {
+      present: true,
+      fetched_at: '2026-01-01T00:00:00.000Z',
+      model_count: 1,
+    });
+    assert.equal(JSON.stringify(data1).includes('old-model'), false, '/api/config must not inline the catalog');
+    assert.deepEqual(Object.keys(data1.model_catalog_meta), ['present', 'fetched_at', 'model_count']);
+  });
+
+  test('model_catalog_meta is not persisted by a console save', async () => {
+    const kv = new MockKV();
+    const got = await (await handleConfigRequest(makeAdminReq('GET', '/api/config'), TEST_ENV, kv)).json();
+    const resp = await handleConfigRequest(makeAdminReq('POST', '/api/config', got), TEST_ENV, kv);
+    assert.equal(resp.status, 200);
+    const stored = JSON.parse(await kv.get(CONFIG_KV_KEY));
+    assert.equal(stored.model_catalog_meta, undefined);
+  });
+
+  test('saveCatalog rejects invalid payloads without touching the stored catalog', async () => {
+    const kv = new MockKV();
+    const before = oldCatalogText();
+    await kv.put(MODEL_CATALOG_KV_KEY, before);
+
+    const bad = [
+      ['not json', {}],
+      [JSON.stringify({ schema: 2, providers: {} }), {}],
+      [JSON.stringify({ schema: 1 }), {}],
+      [JSON.stringify({ schema: 1, providers: [] }), {}],
+      ['', {}],
+    ];
+    for (const [text] of bad) {
+      await assert.rejects(() => saveCatalog(kv, text), (err) => /[\u4e00-\u9fa5]/.test(err.message));
+      assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before, `rejected payload must not overwrite: ${text}`);
+    }
+
+    // Oversized payload: one model with a huge family string pushes past 4 MB
+    const huge = JSON.stringify({
+      schema: 1,
+      providers: { p: { m: { family: 'x'.repeat(4 * 1024 * 1024 + 10) } } },
+    });
+    await assert.rejects(() => saveCatalog(kv, huge), /超过/);
+    assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), before);
+  });
+
+  test('loadCatalog returns null (warns, does not throw) for a corrupt value', async () => {
+    const kv = new MockKV();
+    await kv.put(MODEL_CATALOG_KV_KEY, '{broken');
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (msg) => warnings.push(msg);
+    try {
+      assert.equal(await loadCatalog(kv), null);
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /model-catalog/);
+    assert.equal((await meta(kv)).present, false);
+  });
+
+  // GET /api/admin/model-catalog/lookup is the Hub console's single-model query
+  // (route-editor reasoning dropdown + add-model summary). It must answer exactly
+  // what the Go node store answers, so both consoles render the same options.
+  describe('GET /model-catalog/lookup — Hub capability query', () => {
+    const lookupReq = (query, auth = 'Bearer test_admin_pwd') =>
+      new Request(`https://hub.example.com/api/admin/model-catalog/lookup${query}`, {
+        headers: auth ? { authorization: auth } : {},
+      });
+
+    const seededKv = async () => {
+      const kv = new MockKV();
+      await kv.put(MODEL_CATALOG_KV_KEY, JSON.stringify(slimModelsDev(sampleRaw(), '2026-01-01T00:00:00.000Z')));
+      return kv;
+    };
+
+    test('effort ladder, toggle, budget and not-found all match the node contract', async () => {
+      const kv = await seededKv();
+
+      const pro = await handleModelCatalogRequest(lookupReq('?preset=deepseek&model=deepseek-v4-pro'), TEST_ENV, kv);
+      assert.equal(pro.status, 200);
+      const p = await pro.json();
+      assert.equal(p.ok, true);
+      assert.equal(p.found, true);
+      assert.equal(p.context_tokens, 1048576);
+      assert.equal(p.output_tokens, 393216);
+      assert.deepEqual(p.efforts, ['low', 'high', 'max']);
+      assert.equal(p.toggle, true);
+      assert.equal(p.budget, null);
+
+      const proUpper = await handleModelCatalogRequest(lookupReq('?preset=deepseek&model=DEEPSEEK-V4-PRO'), TEST_ENV, kv);
+      const pu = await proUpper.json();
+      assert.equal(pu.found, true, 'case-insensitive fallback must resolve too');
+      assert.deepEqual(pu.efforts, ['low', 'high', 'max']);
+
+      // Toggle-only: no ladder, reported through `toggle`, never faked as levels.
+      const glm = await handleModelCatalogRequest(lookupReq('?preset=zhipu&model=glm-4.5'), TEST_ENV, kv);
+      const g = await glm.json();
+      assert.equal(g.found, true);
+      assert.equal(g.efforts, null);
+      assert.equal(g.toggle, true);
+
+      // Budget-only: its own field, and still no fake ladder.
+      const sonnet = await handleModelCatalogRequest(lookupReq('?preset=anthropic&model=claude-sonnet-4-5'), TEST_ENV, kv);
+      const s = await sonnet.json();
+      assert.equal(s.found, true);
+      assert.equal(s.efforts, null);
+      assert.deepEqual(s.budget, { min: 1024, max: 0 });
+
+      // Not in the catalog (documented gap / unknown id): found=false, not an error.
+      for (const q of ['?preset=bai&model=glm-5.3-flash', '?preset=deepseek&model=no-such-model']) {
+        const miss = await handleModelCatalogRequest(lookupReq(q), TEST_ENV, kv);
+        assert.equal(miss.status, 200);
+        const m = await miss.json();
+        assert.equal(m.ok, true);
+        assert.equal(m.found, false);
+        assert.equal(m.efforts, null);
+      }
+    });
+
+    test('auth, missing params and absent catalog are rejected without querying anything', async () => {
+      const kv = await seededKv();
+
+      const unauth = await handleModelCatalogRequest(lookupReq('?preset=deepseek&model=deepseek-v4-pro', null), TEST_ENV, kv);
+      assert.equal(unauth.status, 401);
+
+      const missing = await handleModelCatalogRequest(lookupReq('?preset=deepseek'), TEST_ENV, kv);
+      assert.equal(missing.status, 400);
+      assert.equal((await missing.json()).error, 'preset_and_model_required');
+
+      const empty = await handleModelCatalogRequest(lookupReq('?preset=deepseek&model=deepseek-v4-pro'), TEST_ENV, new MockKV());
+      assert.equal(empty.status, 404);
+      assert.equal((await empty.json()).error, 'catalog_not_found');
+    });
+
+    test('a Full node token is rejected: /lookup stays admin-only like meta and update', async () => {
+      const kv = await seededKv();
+      const issued = await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', { name: 'catalog-lookup-full', role: 'full' }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(issued.status, 200);
+      const { node_token } = await issued.json();
+
+      const resp = await handleModelCatalogRequest(
+        lookupReq('?preset=deepseek&model=deepseek-v4-pro', `Bearer ${node_token}`),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(resp.status, 401);
+      assert.equal((await resp.json()).ok, false);
+    });
+
+    test('the edge entry point serves /lookup too (route entry guard covers the path)', async () => {
+      const kv = await seededKv();
+      const resp = await edgeModelCatalogAction.onRequestGet({
+        request: new Request('https://hub.example.com/api/admin/model-catalog/lookup?preset=openai&model=gpt-5-pro', {
+          headers: { authorization: 'Bearer test_admin_pwd' },
+        }),
+        env: TEST_ENV,
+        agent_kv: kv,
+      });
+      assert.equal(resp.status, 200);
+      const data = await resp.json();
+      assert.equal(data.found, true);
+      assert.deepEqual(data.efforts, ['high']);
+    });
+  });
+
+  // The edge bundle cannot read files, so the provider map / overrides are frozen
+  // into generated-model-map.js. A stale copy would make the Hub answer different
+  // ladder/toggle questions than a Full node using the same catalog — the exact
+  // drift this guard exists to catch.
+  test('generated-model-map.js matches shared/model-catalog/{provider-map,overrides}.json', async () => {
+    const { renderHubMapModule } = await import('../../scripts/model-catalog/build-hub-map.mjs');
+    const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
+    const providerMapDoc = JSON.parse(readFileSync(join(root, 'shared/model-catalog/provider-map.json'), 'utf8'));
+    const overridesDoc = JSON.parse(readFileSync(join(root, 'shared/model-catalog/overrides.json'), 'utf8'));
+    const expected = renderHubMapModule(providerMapDoc, overridesDoc);
+    const actual = readFileSync(join(root, 'edgeone-hub/lib/generated-model-map.js'), 'utf8');
+
+    const wantMap = new Function(`${expected.replace(/^export const /gm, 'const ')}; return { PROVIDER_MAP, OVERRIDES };`)();
+    const gotMap = new Function(`${actual.replace(/^export const /gm, 'const ')}; return { PROVIDER_MAP, OVERRIDES };`)();
+    assert.deepEqual(gotMap, wantMap, 're-run scripts/model-catalog/build-hub-map.mjs');
+  });
+
+  test('edge-functions entries route base /update and /data through onRequest exports', async () => {
+    const kv = new MockKV();
+    const ctx = (request, extra = {}) => ({ request, env: TEST_ENV, agent_kv: kv, ...extra });
+
+    const metaResp = await edgeModelCatalog.onRequestGet(
+      ctx(new Request('https://hub.example.com/api/admin/model-catalog', { headers: { authorization: 'Bearer test_admin_pwd' } }))
+    );
+    assert.equal(metaResp.status, 200);
+    assert.equal((await metaResp.json()).present, false);
+
+    const updateResp = await edgeModelCatalogAction.onRequestPost(
+      ctx(
+        new Request('https://hub.example.com/api/admin/model-catalog/update', {
+          method: 'POST',
+          headers: { authorization: 'Bearer test_admin_pwd' },
+        }),
+        { fetch: async () => new Response(JSON.stringify(sampleRaw()), { status: 200 }) }
+      )
+    );
+    assert.equal(updateResp.status, 200);
+    const updated = await updateResp.json();
+    assert.equal(updated.ok, true);
+    assert.equal(updated.model_count, 96);
+
+    const dataResp = await edgeModelCatalogAction.onRequestGet(
+      ctx(
+        new Request('https://hub.example.com/api/admin/model-catalog/data', {
+          headers: { authorization: 'Bearer test_admin_pwd' },
+        })
+      )
+    );
+    assert.equal(dataResp.status, 200);
+    assert.equal(JSON.parse(await dataResp.text()).schema, 1);
+
+    // unauthenticated update is rejected at the entry too
+    const unauth = await edgeModelCatalogAction.onRequestPost(
+      ctx(new Request('https://hub.example.com/api/admin/model-catalog/update', { method: 'POST' }))
+    );
+    assert.equal(unauth.status, 401);
+  });
+
+  test('slimModelsDev keeps limit.context and reasoning_options and drops description', () => {
+    const catalog = slimModelsDev(sampleRaw(), '2026-01-01T00:00:00.000Z');
+    assert.equal(catalog.schema, 1);
+    assert.equal(catalog.source, 'models.dev');
+    assert.equal(catalog.fetched_at, '2026-01-01T00:00:00.000Z');
+
+    const sonnet = catalog.providers.anthropic['claude-sonnet-4-5'];
+    assert.equal(sonnet.limit.context, 200000);
+    assert.equal(sonnet.limit.output, 64000);
+    assert.equal(sonnet.description, undefined);
+    assert.equal(sonnet.cost, undefined);
+    assert.equal(sonnet.modalities, undefined);
+    assert.equal(sonnet.reasoning, true);
+    assert.deepEqual(sonnet.reasoning_options, [{ type: 'budget_tokens', min: 1024 }]);
+    assert.equal(sonnet.family, 'claude-sonnet');
+    assert.equal(sonnet.release_date, '2025-09-29');
+    assert.deepEqual(Object.keys(sonnet), ['limit', 'reasoning', 'reasoning_options', 'family', 'release_date']);
+
+    // Pure: calling twice with the same args yields identical text
+    assert.equal(JSON.stringify(catalog), JSON.stringify(slimModelsDev(sampleRaw(), '2026-01-01T00:00:00.000Z')));
+  });
+
+  // /data is the one catalog action a Full node consumes, so it accepts the
+  // node token it already holds instead of the Hub admin password (the node
+  // must never be given that password — AGENT_DEPLOY_GUIDE §7). meta and update
+  // stay admin-only: they reach the internet / write KV.
+  describe('GET /data accepts a full node token, everything else stays admin-only', () => {
+    const issue = async (kv, role) => {
+      const resp = await handleNodesRequest(
+        makeAdminReq('POST', '/api/admin/nodes', { name: `catalog-${role}`, role }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(resp.status, 200);
+      return resp.json();
+    };
+    const dataReq = (token) =>
+      new Request('https://hub.example.com/api/admin/model-catalog/data', {
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      });
+
+    test('full node token -> 200 with the catalog text verbatim', async () => {
+      const kv = new MockKV();
+      const text = oldCatalogText();
+      await saveCatalog(kv, text);
+      const full = await issue(kv, 'full');
+
+      const resp = await handleModelCatalogRequest(dataReq(full.node_token), TEST_ENV, kv);
+      assert.equal(resp.status, 200);
+      assert.equal(resp.headers.get('content-type'), 'application/json');
+      assert.equal(resp.headers.get('cache-control'), 'no-store');
+      assert.equal(await resp.text(), text);
+    });
+
+    test('lite node token -> 403 (lite does not consume the catalog)', async () => {
+      const kv = new MockKV();
+      await saveCatalog(kv, oldCatalogText());
+      const lite = await issue(kv, 'lite');
+
+      const resp = await handleModelCatalogRequest(dataReq(lite.node_token), TEST_ENV, kv);
+      assert.equal(resp.status, 403);
+      const body = await resp.text();
+      assert.match(body, /lite/i);
+      assert.equal(body.includes('old-model'), false, 'the 403 body must not leak the catalog');
+    });
+
+    test('revoked full node token -> 401', async () => {
+      const kv = new MockKV();
+      await saveCatalog(kv, oldCatalogText());
+      const full = await issue(kv, 'full');
+      const patch = await handleNodesRequest(
+        makeAdminReq('PATCH', `/api/admin/nodes/${full.node.id}`, { enabled: false }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(patch.status, 200);
+
+      const resp = await handleModelCatalogRequest(dataReq(full.node_token), TEST_ENV, kv);
+      assert.equal(resp.status, 401);
+    });
+
+    test('unknown token -> 401', async () => {
+      const kv = new MockKV();
+      await saveCatalog(kv, oldCatalogText());
+      const resp = await handleModelCatalogRequest(dataReq(`stk_node_${'0'.repeat(48)}`), TEST_ENV, kv);
+      assert.equal(resp.status, 401);
+    });
+
+    test('admin password still returns 200 (existing behaviour unchanged)', async () => {
+      const kv = new MockKV();
+      const text = oldCatalogText();
+      await saveCatalog(kv, text);
+      const resp = await handleModelCatalogRequest(dataReq(TEST_ENV.ADMIN_PASSWORD), TEST_ENV, kv);
+      assert.equal(resp.status, 200);
+      assert.equal(await resp.text(), text);
+    });
+
+    test('no credentials -> 401', async () => {
+      const kv = new MockKV();
+      await saveCatalog(kv, oldCatalogText());
+      const resp = await handleModelCatalogRequest(dataReq(null), TEST_ENV, kv);
+      assert.equal(resp.status, 401);
+    });
+
+    test('meta and update still reject a full node token (auth not widened)', async () => {
+      const kv = new MockKV();
+      const full = await issue(kv, 'full');
+
+      const metaResp = await handleModelCatalogRequest(
+        new Request('https://hub.example.com/api/admin/model-catalog', {
+          headers: { authorization: `Bearer ${full.node_token}` },
+        }),
+        TEST_ENV,
+        kv
+      );
+      assert.equal(metaResp.status, 401);
+
+      const updateResp = await handleModelCatalogRequest(
+        new Request('https://hub.example.com/api/admin/model-catalog/update', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${full.node_token}` },
+        }),
+        TEST_ENV,
+        kv,
+        async () => {
+          throw new Error('node token must not reach models.dev');
+        }
+      );
+      assert.equal(updateResp.status, 401);
+      assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), null);
+    });
+  });
+});

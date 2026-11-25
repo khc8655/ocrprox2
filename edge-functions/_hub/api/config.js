@@ -7,6 +7,7 @@ ConfigValidationError,
 resolveKvBinding,
 resolveEnv,
 } from '../lib/config.js';
+import { meta as catalogMeta } from '../lib/model-catalog.js';
 export async function handleConfigRequest(request, env, kv) {
 const authErr = checkAdminAuth(request, env);
 if (authErr) return authErr;
@@ -14,11 +15,13 @@ const url = new URL(request.url);
 const method = request.method.toUpperCase();
 if (method === 'GET') {
 const config = await loadConfig(kv);
+const m = await catalogMeta(kv);
 return new Response(
 JSON.stringify({
 ok: true,
 _version: config._version || 1,
 ...config,
+model_catalog_meta: { present: m.present, fetched_at: m.fetched_at, model_count: m.model_count },
 }),
 { status: 200, headers: { 'content-type': 'application/json' } }
 );
