@@ -4979,6 +4979,21 @@
         <div class="probe-pills-wrap" id="m_ac_models"></div>
         <div class="fields mt-2"><input class="input input--code flex-1" id="m_ac_target" placeholder="上游模型 ID（可手填）"><button class="btn btn--sm btn--primary" id="m_ac_ok" type="button">追加所选</button></div>
       </div>
+      <div class="card card-pad mt-2" id="m_test">
+        <div class="section-bar">
+          <div>
+            <span class="form-label">测试这个模型</span>
+            <div class="text-xs text-muted">真实发一句「你好」，用下面选中的 Key 请求当前模型，并把上游的实际回复显示出来</div>
+          </div>
+        </div>
+        <div class="input-row">
+          <select class="select" id="m_test_cand" aria-label="测试哪个候选"></select>
+          <select class="select" id="m_test_key" aria-label="用哪个 Key 测试"></select>
+          <button class="btn btn--primary" id="m_test_send" type="button">发送「你好」</button>
+        </div>
+        <div class="m-test-out" id="m_test_out" hidden></div>
+      </div>
+
       <div class="section-bar mt-3"><span class="form-label">Key 选择</span><span class="text-xs text-muted">默认任一=全部启用 Key</span></div>
       <div class="card card-pad" id="m_kw"></div>
       <details class="headers-details mt-3"><summary class="form-label">高级 (候选权重 / 并发上限)</summary><div id="m_ca" class="mt-2"></div></details>
@@ -5113,6 +5128,119 @@
     // The selection is seeded from the candidates as they exist: candidates
     // created by the add-model modal carry concrete key_label bindings, so their
     // pills show checked instead of the lying「任一」highlight.
+    // 测试这个模型: the operator picks which candidate (provider + upstream model)
+    // and which key to spend, then gets the real reply text back. This is the
+    // model-level counterpart of the provider page's per-key test: there the
+    // question is "is this key alive", here it is "does THIS model answer on
+    // THIS key" — the same triple that will serve traffic.
+    const testCandSel = q('#m_test_cand');
+    const testKeySel = q('#m_test_key');
+    const testOut = q('#m_test_out');
+    const testBtn = q('#m_test_send');
+
+    const providerKeys = (pId) => {
+      const prov = state.config?.providers?.[pId] || {};
+      return Array.isArray(prov.api_keys) ? prov.api_keys.filter((k) => k && (k.label || k.id)) : [];
+    };
+
+    const drawTestKeys = () => {
+      if (!testCandSel || !testKeySel) return;
+      const idx = Number(testCandSel.value) || 0;
+      const c = candidates[idx];
+      if (!c || !c.provider) {
+        testKeySel.innerHTML = '';
+        return;
+      }
+      const keys = providerKeys(c.provider);
+      const wanted = String(c.key_label || '');
+      const opts = ['<option value="">任一启用 Key</option>'];
+      for (const k of keys) {
+        const label = String(k.label || k.id);
+        const off = k.enabled === false ? '（已禁用）' : '';
+        const sel = label === wanted ? ' selected' : '';
+        opts.push(`<option value="${eh(label)}"${sel}>${eh(label)}${off}</option>`);
+      }
+      testKeySel.innerHTML = opts.join('');
+      // No explicit binding on the candidate: preselect the first enabled key so
+      // the operator sees exactly which credential the test will spend.
+      if (!wanted) {
+        const firstEnabled = keys.find((k) => k.enabled !== false);
+        if (firstEnabled) testKeySel.value = String(firstEnabled.label || firstEnabled.id);
+      }
+    };
+
+    const drawTestCandidates = () => {
+      if (!testCandSel) return;
+      testCandSel.innerHTML = candidates.length
+        ? candidates.map((c, i) => `<option value="${i}">${eh(`${c.provider} / ${c.target_model || mName}`)}</option>`).join('')
+        : '<option value="0">（还没有候选）</option>';
+      drawTestKeys();
+    };
+    drawTestCandidates();
+    if (testCandSel) testCandSel.addEventListener('change', drawTestKeys);
+
+    if (testBtn) {
+      clk(testBtn, async () => {
+        if (testBtn.disabled) return;
+        const idx = Number(testCandSel?.value) || 0;
+        const c = candidates[idx];
+        if (!c || !c.provider) {
+          if (testOut) {
+            testOut.hidden = false;
+            testOut.className = 'm-test-out m-test-out--err';
+            testOut.textContent = '先在候选池里加一个候选，再测试。';
+          }
+          return;
+        }
+        const keyLabel = String(testKeySel?.value || '');
+        const model = String(c.target_model || mName).trim();
+        const label = testBtn.textContent;
+        testBtn.disabled = true;
+        testBtn.textContent = '请求中…';
+        if (testOut) {
+          testOut.hidden = false;
+          testOut.className = 'm-test-out';
+          testOut.innerHTML = `<div class="gw-test-meta">正在用 ${eh(c.provider)}${keyLabel ? ` / ${eh(keyLabel)}` : ''} 请求 ${eh(model)} …</div>`;
+        }
+        const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        try {
+          const res = await window.HOST.testKey({ provider: c.provider, key_label: keyLabel, model });
+          const ms = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
+          if (!testOut || !testOut.isConnected) return;
+          const ok = Boolean(res && res.valid === true);
+          const meta = [
+            ok ? '可用' : '失败',
+            res && res.status ? `HTTP ${res.status}` : '',
+            `${(res && res.latency_ms) || ms}ms`,
+            `${res && res.provider ? res.provider : c.provider}${res && res.key_label ? ` / ${res.key_label}` : ''}`,
+            `${res && res.model ? res.model : model}`,
+            res && res.model_source ? `(${res.model_source})` : '',
+          ].filter(Boolean).join(' · ');
+          testOut.className = `m-test-out${ok ? ' m-test-out--ok' : ' m-test-out--err'}`;
+          if (ok) {
+            const reply = String((res && res.reply_text) || '').trim();
+            testOut.innerHTML = `<div class="gw-test-meta">${eh(meta)}</div>`
+              + `<pre class="gw-test-reply">${eh(reply || '（上游返回成功，但没有可显示的文本）')}</pre>`;
+          } else {
+            const bits = [meta];
+            if (res && res.reason) bits.push(`reason=${res.reason}`);
+            if (res && res.err_type) bits.push(`err_type=${res.err_type}`);
+            const errText = res && res.error ? scrubUiText(String(res.error)) : '';
+            testOut.innerHTML = `<div class="gw-test-meta">${eh(bits.join(' · '))}</div>`
+              + (errText ? `<div class="gw-test-error">${eh(errText)}</div>` : '');
+          }
+        } catch (err) {
+          if (testOut && testOut.isConnected) {
+            testOut.className = 'm-test-out m-test-out--err';
+            testOut.textContent = `测试异常：${scrubUiText(err && err.message ? err.message : String(err))}`;
+          }
+        } finally {
+          testBtn.disabled = false;
+          testBtn.textContent = label;
+        }
+      });
+    }
+
     const keySel = m._keySel = m._keySel || {};
     for (const c of candidates) {
       if (c && c.provider && c.key_label) {

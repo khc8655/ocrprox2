@@ -1511,6 +1511,20 @@ button.row {
 
 /* 模拟请求：一行输入 + 结果块。结果用等宽字体保留模型回复的换行，
    错误态用红色输入框而不是整块红底，避免在浅色主题下过于刺眼。 */
+/* 测试这个模型: result block under the picker. Reuses the access-page result
+   styles (.gw-test-meta / .gw-test-reply) so both test surfaces read alike. */
+.m-test-out {
+  margin-top: 10px;
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  padding: 10px 12px;
+  background-color: var(--khc-surface-muted);
+}
+
+.m-test-out--err {
+  border-color: var(--khc-danger-1, var(--khc-border-2));
+}
+
 .gw-test-row {
   align-items: stretch;
 }
