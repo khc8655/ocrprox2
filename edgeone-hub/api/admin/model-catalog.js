@@ -22,7 +22,7 @@
  */
 
 import { checkAdminAuth, resolveKvBinding, resolveEnv } from '../../lib/config.js';
-import { loadCatalog, lookup, meta, readCatalogText, saveCatalog, slimModelsDev } from '../../lib/model-catalog.js';
+import { loadCatalog, lookup, lookupByModelID, meta, readCatalogText, saveCatalog, slimModelsDev } from '../../lib/model-catalog.js';
 import { OVERRIDES, PROVIDER_MAP } from '../../lib/generated-model-map.js';
 import { authenticateVaultCaller } from '../../lib/vaultauth.js';
 
@@ -87,7 +87,12 @@ export async function handleModelCatalogRequest(request, env, kv, fetchImpl) {
     if (!preset || !model) {
       return jsonResponse({ ok: false, error: 'preset_and_model_required' }, 400);
     }
-    return jsonResponse({ ok: true, ...lookup(catalog, PROVIDER_MAP, OVERRIDES, preset, model) }, 200);
+    const exact = lookup(catalog, PROVIDER_MAP, OVERRIDES, preset, model);
+    if (exact.found) return jsonResponse({ ok: true, ...exact }, 200);
+    // Same-named fallback: an unbound provider (reseller) still gets the vendor's
+    // canonical numbers, labelled as such by the console.
+    const fallback = lookupByModelID(catalog, model);
+    return jsonResponse({ ok: true, ...(fallback.found ? fallback : exact) }, 200);
   }
 
   // POST /api/admin/model-catalog/update

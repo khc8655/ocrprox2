@@ -3472,15 +3472,23 @@ describe('15. Model catalog storage & admin API', () => {
       assert.equal(s.efforts, null);
       assert.deepEqual(s.budget, { min: 1024, max: 0 });
 
-      // Not in the catalog (documented gap / unknown id): found=false, not an error.
-      for (const q of ['?preset=bai&model=glm-5.3-flash', '?preset=deepseek&model=no-such-model']) {
-        const miss = await handleModelCatalogRequest(lookupReq(q), TEST_ENV, kv);
-        assert.equal(miss.status, 200);
-        const m = await miss.json();
-        assert.equal(m.ok, true);
-        assert.equal(m.found, false);
-        assert.equal(m.efforts, null);
-      }
+      // A documented preset gap (bai) still resolves through the same-named
+      // model fallback: the model id is listed by other providers, so the
+      // console can show the vendor's canonical numbers labelled 按同名模型.
+      const bai = await handleModelCatalogRequest(lookupReq('?preset=bai&model=glm-5.3-flash'), TEST_ENV, kv);
+      const b = await bai.json();
+      assert.equal(b.found, true);
+      assert.equal(b.matched_by, 'model_id');
+      assert.ok(b.listed_by >= 1);
+      assert.ok(b.context_tokens > 0);
+
+      // Genuinely unknown ids still report found=false, never an error.
+      const miss = await handleModelCatalogRequest(lookupReq('?preset=deepseek&model=no-such-model'), TEST_ENV, kv);
+      assert.equal(miss.status, 200);
+      const m = await miss.json();
+      assert.equal(m.ok, true);
+      assert.equal(m.found, false);
+      assert.equal(m.efforts, null);
     });
 
     test('auth, missing params and absent catalog are rejected without querying anything', async () => {

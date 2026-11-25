@@ -1,19 +1,13 @@
 {
-  "version": "v20261125-01",
-  "semver": "2.13.0",
+  "version": "v20261125-02",
+  "semver": "2.13.1",
   "release_date": "2026-11-25",
   "commit": "release",
-  "title": "LLMProxy2 (OCRProxy v2) 2.13.0 — 失败原因可归因：日志、账本、界面三层打通；接入 models.dev 模型目录并按档位真正下发思考参数",
+  "title": "LLMProxy2 (OCRProxy v2) 2.13.1 — 接入信息直接显示模型的上下文/最大输出/思考档位（含中转商同名模型回退）",
   "changelog": [
-    "失败原因归一化：12+2 类封闭枚举（auth_invalid / quota_exhausted / rate_limited / model_not_found / context_too_long / upstream_error / timeout / network / client_disconnected / bad_response / protocol_mismatch / no_candidate / config_unavailable / unknown），每次失败尝试同时落 reason、err_type（上游机器码）、err（脱敏原文）、rid（上游请求 ID）",
-    "拨号前本地拒绝也进账本与轨迹：模型未配置（404）、配置不可用（503）、无候选可用（503）、全部 Key 冷却（502）不再只留在 app.log；UsageRecord 顶层新增 reason / err_type / err / rid，因此「最近请求」的原因列不会再显示 —，而 try_failed 仍只记具体 Key，不污染 Key 健康统计",
-    "app.log 每次失败恰好一行，且描述「最后一次失败」而不是最后一次尝试：故障转移成功时补 recovered_by=provider/key，全部候选被跳过时补 note=；排障不再需要从 usage.jsonl 反查",
-    "usage.jsonl 加硬上限：单条记录封顶 256 KiB（超长自由文本先截断、必要时丢弃），usage.jsonl + .1 ≤ 20 MiB，连同 app.log 全部日志类文件总上界 30 MiB，杜绝无限增长",
-    "新增 GET /api/admin/recent-requests?limit=50&failed=1：从账本尾部反向回放，重启后仍在；控制台「请求日志」页签展示最近 50 条，并按 reason × 供应商聚合「错误分析」",
-    "新增 POST /api/admin/test-key（hub + full）：Key 行「测试」按钮真实发一句「你好」（max_tokens 16，20s），返回回复文本、耗时与失败原因；模型行的「测试路由」已移除",
-    "Key 测试结果后端立即落盘（Full 走 PersistKeyTestState，Hub 走 persistProviderKeyHealth）：刷新页面/重启后胶囊仍在，无需再点「保存供应商」；同时修掉 PersistKeyEntry 在只提交元数据时会把已存密钥清空的隐患",
-    "接入 models.dev 模型目录：Hub 设置页「模型目录」卡片手动更新（不自动联网），瘦身后约 1.6 MB 存 KV；Full 节点内嵌兜底目录 + 容错查询（手动覆盖 > 映射精确 > 大小写不敏感 > 同族最近亲）",
-    "路由候选的「思考档位」真正生效：OpenAI 方言写 reasoning_effort（就近映射到目录里模型支持的档位），Anthropic 方言写 thinking.budget_tokens（预算不足时整段跳过，不冒必然 400 的险）；空值仍跟随客户端",
-    "契约与文档同步至 v3.13；新增 no_candidate / config_unavailable 两个 reason，Hub 与 Full 的枚举保持一致"
+    "接入信息 → 可用模型卡片新增第三行：从模型目录读出「上下文 200K · 最大输出 64K · 思考 …」，按 (预设, target_model) 查询并缓存，别名字模型也能对上",
+    "新增同名模型回退：中转商不绑预设时（如 tokenrhythm 暴露 glm-5.3-flash），精确查询会落空；现在会跨供应商按模型 ID 找，取「多数供应商一致」的规格并标注「按同名模型」。实测 glm-5.3-flash → 上下文 1M · 最大输出 131K · 思考 low / high / max（30 家列出、15 家规格一致）",
+    "目录确实没收录的模型显示「能力目录未收录」并说明原因；空行不占位",
+    "此前目录只在「添加模型」表单里露过一面，操作员复制 Model ID 的页面完全看不到能力信息"
   ]
 }

@@ -216,6 +216,20 @@ func (s *Server) handleModelCatalogLookup(w http.ResponseWriter, r *http.Request
 	cat := s.catalogStore.Current()
 	cap := cat.Capability(presetID, modelID)
 
+	// Resellers expose vendor models under their own provider id (no preset
+	// binding), so the exact (preset, model) lookup misses models the catalog
+	// knows well. Fall back to a model-id match and say so in the response: the
+	// console labels the line "按同名模型" rather than pretending it was exact.
+	matchedBy := ""
+	matchedProviders, listedByProviders := 0, 0
+	if !cap.Found {
+		if alt, modal, total := cat.CapabilityByModelID(modelID); alt.Found {
+			cap = alt
+			matchedBy = "model_id"
+			matchedProviders, listedByProviders = modal, total
+		}
+	}
+
 	// Field names are the console contract: found=false means "not in the
 	// catalog", not "no capability" — the caller falls back to its preset rules.
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -234,5 +248,8 @@ func (s *Server) handleModelCatalogLookup(w http.ResponseWriter, r *http.Request
 		"family":          cap.Family,
 		"release_date":    cap.ReleaseDate,
 		"from_override":   cap.FromOverride,
+		"matched_by":      matchedBy,
+		"modal_providers": matchedProviders,
+		"listed_by":       listedByProviders,
 	})
 }

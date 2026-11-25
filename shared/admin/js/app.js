@@ -1749,11 +1749,66 @@
       const names = modelProviderNames(m);
       const provText = formatProviderNames(names);
       const full = names.length ? names.join(' · ') : '';
+      const cap = modelCatalogTarget(m);
+      // The catalog line is filled asynchronously (one cached lookup per
+      // (preset, target) pair) — this is the page an operator reads model ids
+      // from, so it is also where context/output/reasoning belongs.
+      const capAttrs = cap
+        ? ` data-cap-preset="${eh(cap.preset)}" data-cap-model="${eh(cap.target)}"`
+        : '';
       return `<button class="gw-model-item" type="button" data-copy="model" data-model="${eh(m)}" title="复制 Model ID: ${eh(m)}${full ? `&#10;供应商: ${eh(full)}` : ''}">`
         + `<span class="gw-model-item-id">${eh(m)}</span>`
         + `<span class="gw-model-item-prov" title="${eh(full)}">${eh(provText)}</span>`
+        + (cap ? `<span class="gw-model-item-cap"${capAttrs}></span>` : '')
         + '</button>';
     }).join('');
+    fillGatewayModelCaps(box);
+  }
+
+  // Resolve the (preset, upstream model) the catalog should be asked about: the
+  // first enabled candidate that names a known provider. An exposed model id can
+  // differ from the upstream id (aliases), which is why the card cannot just use
+  // the displayed name.
+  function modelCatalogTarget(modelId) {
+    const cfg = state.config || {};
+    const providers = cfg.providers || {};
+    const candidates = [];
+    const route = (cfg.agent_models || {})[modelId];
+    if (route && Array.isArray(route.candidates)) candidates.push(...route.candidates);
+    const kb = cfg.kb_models || {};
+    if (Array.isArray(kb[modelId])) candidates.push(...kb[modelId]);
+    const ordered = candidates.filter((c) => c && c.enabled !== false).concat(candidates.filter((c) => c && c.enabled === false));
+    for (const c of ordered) {
+      if (!c || !c.provider) continue;
+      const prov = providers[c.provider];
+      if (!prov) continue;
+      const preset = String(prov.preset_id || c.provider || '').trim();
+      const target = String(c.target_model || modelId).trim();
+      if (preset && target) return { preset, target };
+    }
+    return null;
+  }
+
+  function fillGatewayModelCaps(box) {
+    if (!box) return;
+    box.querySelectorAll('.gw-model-item-cap[data-cap-preset]').forEach((el) => {
+      const preset = el.getAttribute('data-cap-preset');
+      const model = el.getAttribute('data-cap-model');
+      fetchModelInfo(preset, model).then((info) => {
+        if (!el.isConnected) return;
+        if (!info || info.ok === false) {
+          // A transient lookup failure must not print a verdict the catalog
+          // never gave; leave the line out and let the next render retry.
+          el.textContent = '';
+          return;
+        }
+        el.textContent = info.found ? capabilitySummary(info) : '能力目录未收录';
+        el.classList.toggle('gw-model-item-cap--unknown', !info.found);
+        el.title = info.found
+          ? capabilitySummary(info)
+          : 'models.dev 未收录该模型（常见于中转商自建别名）。可在 shared/model-catalog/overrides.json 补充上下文/输出/思考档位后重建。';
+      });
+    });
   }
 
   function renderGatewayEndpoints() {
@@ -1925,6 +1980,10 @@
       parts.push(`思考：token 预算${min || max ? ` ${min || '?'}~${max || '不限'}` : ''}`);
     } else if (info.reasoning) parts.push('思考：支持（档位未知）');
     else parts.push('思考：不支持');
+    // The numbers came from same-named entries under other providers (the
+    // operator's reseller has no preset binding): say so instead of implying an
+    // exact match.
+    if (info.matched_by === 'model_id') parts.push('按同名模型');
     return parts.join(' · ');
   }
 

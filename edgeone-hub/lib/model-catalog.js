@@ -304,6 +304,103 @@ function familyEfforts(catalog, providerID, info) {
  *   falls back to its preset rules. efforts:null means no discrete levels
  *   (toggle/budget are reported separately and must never be faked as a ladder).
  */
+// Same-named fallback for resellers that expose vendor models under their own
+// provider id (no preset binding): find the model id under every provider and
+// return the modal specification. Mirrors Catalog.CapabilityByModelID in
+// internal/modelcatalog so a Hub console and a Full node answer alike.
+export function lookupByModelID(catalog, modelID) {
+  const want = typeof modelID === 'string' ? modelID.trim() : '';
+  const out = {
+    found: false,
+    context_tokens: 0,
+    output_tokens: 0,
+    reasoning: false,
+    efforts: null,
+    toggle: false,
+    budget: null,
+    family: '',
+    release_date: '',
+    from_override: false,
+    matched_by: '',
+    modal_providers: 0,
+    listed_by: 0,
+  };
+  if (!want) return out;
+
+  const providers = catalog && typeof catalog === 'object' && catalog.providers && typeof catalog.providers === 'object'
+    ? catalog.providers
+    : {};
+  const buckets = new Map();
+  let total = 0;
+
+  for (const pid of Object.keys(providers).sort()) {
+    const models = providers[pid];
+    if (!models || typeof models !== 'object') continue;
+    const ids = Object.keys(models);
+    const id = ids.find((candidate) => candidate.toLowerCase() === want.toLowerCase());
+    if (!id) continue;
+    const info = models[id];
+    if (!info || typeof info !== 'object') continue;
+    total += 1;
+
+    const efforts = effortValues(Array.isArray(info.reasoning_options) ? info.reasoning_options : []);
+    let toggle = false;
+    let budget = null;
+    for (const o of Array.isArray(info.reasoning_options) ? info.reasoning_options : []) {
+      if (!o) continue;
+      if (o.type === 'toggle') toggle = true;
+      if (o.type === 'budget_tokens') {
+        budget = { min: Number.isFinite(o.min) ? o.min : 0, max: Number.isFinite(o.max) ? o.max : 0 };
+      }
+    }
+    const spec = [
+      Number(info.limit && info.limit.context) || 0,
+      Number(info.limit && info.limit.output) || 0,
+      info.reasoning === true ? 1 : 0,
+      efforts ? efforts.join(',') : '',
+      toggle ? 1 : 0,
+      budget ? `${budget.min}-${budget.max}` : '',
+    ].join('|');
+
+    const entry = buckets.get(spec) || {
+      count: 0,
+      ctx: Number(info.limit && info.limit.context) || 0,
+      out: Number(info.limit && info.limit.output) || 0,
+      effortLen: efforts ? efforts.length : 0,
+      efforts,
+      toggle,
+      budget,
+      info,
+    };
+    entry.count += 1;
+    buckets.set(spec, entry);
+  }
+
+  if (total === 0) return out;
+
+  const ordered = Array.from(buckets.values()).sort((a, b) => {
+    if (a.count !== b.count) return b.count - a.count;
+    if (a.ctx + a.out !== b.ctx + b.out) return (b.ctx + b.out) - (a.ctx + a.out);
+    if (a.effortLen !== b.effortLen) return b.effortLen - a.effortLen;
+    return String(a.efforts || '').localeCompare(String(b.efforts || ''));
+  });
+
+  const best = ordered[0];
+  out.found = true;
+  out.matched_by = 'model_id';
+  out.modal_providers = best.count;
+  out.listed_by = total;
+  out.context_tokens = best.ctx;
+  out.output_tokens = best.out;
+  out.reasoning = best.info.reasoning === true;
+  out.family = typeof best.info.family === 'string' ? best.info.family : '';
+  out.release_date = typeof best.info.release_date === 'string' ? best.info.release_date : '';
+  if (best.efforts) out.efforts = best.efforts.slice();
+  out.toggle = best.toggle;
+  out.budget = best.budget;
+  return out;
+}
+
 export function lookup(catalog, providerMap, overrides, presetID, modelID) {
   const preset = typeof presetID === 'string' ? presetID.trim() : '';
   const model = typeof modelID === 'string' ? modelID.trim() : '';

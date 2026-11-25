@@ -414,3 +414,105 @@ func NearestEffort(want string, levels []string) string {
 	}
 	return want
 }
+
+// CapabilityByModelID answers "what does the catalog know about this model id,
+// whichever provider sells it" — the fallback for resellers and gateways that
+// expose vendor models under their own provider id without a preset binding.
+// An exact (preset, model) lookup misses those, even when the model itself is
+// well known: glm-5.3-flash, for example, is listed by 29 providers but a
+// provider called "tokenrhythm" maps to none of them.
+//
+// Among same-named entries the modal specification wins (context/output plus
+// the reasoning shape), which is the vendor's canonical spec rather than one
+// reseller's cut-down variant. Returns the capability, how many providers
+// published that exact spec, and how many list the model at all.
+func (c *Catalog) CapabilityByModelID(modelID string) (Capability, int, int) {
+	want := strings.TrimSpace(modelID)
+	if c == nil || want == "" {
+		return Capability{}, 0, 0
+	}
+
+	providerIDs := make([]string, 0, len(c.providers))
+	for id := range c.providers {
+		providerIDs = append(providerIDs, id)
+	}
+	sort.Strings(providerIDs)
+
+	type specKey struct {
+		ctx, out   int
+		reasoning  bool
+		efforts    string
+		toggle     bool
+		bmin, bmax int
+	}
+	type bucket struct {
+		count int
+		spec  specKey
+		cap   Capability
+	}
+	buckets := make(map[specKey]*bucket)
+	total := 0
+
+	for _, pid := range providerIDs {
+		pm := c.providers[pid]
+		if pm == nil {
+			continue
+		}
+		info, ok := pm.findFold(want)
+		if !ok {
+			continue
+		}
+		total++
+		spec := specKey{ctx: info.ContextTokens, out: info.OutputTokens, reasoning: info.Reasoning}
+		cap := Capability{ModelInfo: info, Found: true}
+		if vals, hasEffort := effortValues(info.Options); hasEffort {
+			cap.Efforts = append([]string(nil), vals...)
+			spec.efforts = strings.Join(vals, ",")
+		}
+		for _, o := range info.Options {
+			switch o.Type {
+			case "toggle":
+				cap.SupportsToggle = true
+				spec.toggle = true
+			case "budget_tokens":
+				cap.HasBudget = true
+				cap.BudgetMin, cap.BudgetMax = o.Min, o.Max
+				spec.bmin, spec.bmax = o.Min, o.Max
+			}
+		}
+		b := buckets[spec]
+		if b == nil {
+			b = &bucket{spec: spec, cap: cap}
+			buckets[spec] = b
+		}
+		b.count++
+	}
+	if total == 0 {
+		return Capability{}, 0, 0
+	}
+
+	// Deterministic winner: highest count, then the larger context+output, then
+	// the wider effort ladder, then the lexicographically smallest spec — map
+	// iteration order must never decide what the operator sees.
+	ordered := make([]*bucket, 0, len(buckets))
+	for _, b := range buckets {
+		ordered = append(ordered, b)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		a, b := ordered[i], ordered[j]
+		if a.count != b.count {
+			return a.count > b.count
+		}
+		if sa, sb := a.spec.ctx+a.spec.out, b.spec.ctx+b.spec.out; sa != sb {
+			return sa > sb
+		}
+		if la, lb := len(a.spec.efforts), len(b.spec.efforts); la != lb {
+			return la > lb
+		}
+		return a.spec.efforts < b.spec.efforts
+	})
+
+	best := ordered[0]
+	best.cap.Found = true
+	return best.cap, best.count, total
+}

@@ -1488,6 +1488,27 @@ button.row {
   color: var(--khc-text-2);
 }
 
+/* Catalog line (context / max output / reasoning ladder) on the model card an
+   operator copies ids from. Muted and single-line: it informs the choice without
+   competing with the id itself. */
+.gw-model-item-cap {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--khc-text-3);
+}
+
+.gw-model-item-cap--unknown {
+  opacity: 0.75;
+}
+
+/* An unanswered lookup must not reserve a row before it resolves. */
+.gw-model-item-cap:empty {
+  display: none;
+}
+
 .gw-model-empty {
   grid-column: 1 / -1;
   font-size: 12px;
