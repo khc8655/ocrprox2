@@ -1836,10 +1836,123 @@
     const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
     if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
     renderGatewayModels();
+    renderGatewayTestPanel();
     renderGatewayEndpoints();
     loadAccessInfo();
     bindGatewayClientSeg();
     bindGatewayCopyChips();
+  }
+
+  // --- 模拟请求：用主密钥走一遍真实 /v1 链路 --------------------------------
+  // The key-row 「测试」 probes one key through the admin API; this panel answers
+  // the other question — "does my *client* setup actually work end to end" — by
+  // POSTing to this gateway's own /v1 endpoint with the configured client key,
+  // exactly like Cursor or a curl would. No new backend endpoint: the gateway
+  // already is the thing under test.
+  let gwTestProto = 'openai';
+
+  function renderGatewayTestPanel() {
+    const models = Array.isArray(state.gwModels) ? state.gwModels : [];
+    const list = $('gwTestModelList');
+    if (list) list.innerHTML = models.map((m) => `<option value="${eh(m)}"></option>`).join('');
+    const input = $('gwTestModel');
+    if (input && !input.value && models.length) input.value = models[0];
+    document.querySelectorAll('#gwTestProto .seg-btn').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-gw-proto') === gwTestProto);
+      b.onclick = () => {
+        gwTestProto = b.getAttribute('data-gw-proto') || 'openai';
+        renderGatewayTestPanel();
+      };
+    });
+    const btn = $('btnGwTestSend');
+    if (btn) btn.onclick = runGatewayTest;
+  }
+
+  function extractTestReply(data) {
+    if (!data || typeof data !== 'object') return '';
+    // Anthropic: content[] text blocks. OpenAI: choices[0].message.content
+    // (string, or an array of text parts in newer shapes).
+    const collect = (content) => {
+      if (typeof content === 'string') return content.trim();
+      if (Array.isArray(content)) {
+        return content.filter((p) => p && typeof p.text === 'string').map((p) => p.text).join('').trim();
+      }
+      return '';
+    };
+    if (Array.isArray(data.content)) return collect(data.content);
+    const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+    if (choice && choice.message) return collect(choice.message.content);
+    return '';
+  }
+
+  async function runGatewayTest() {
+    const box = $('gwTestResult');
+    const btn = $('btnGwTestSend');
+    if (!box || !btn || btn.disabled) return;
+    const paint = (html, tone) => {
+      box.hidden = false;
+      box.className = `gw-test-result${tone ? ` gw-test-result--${tone}` : ''}`;
+      box.innerHTML = html;
+    };
+    const key = String(state.config?.settings?.client_key || state.config?.settings?.proxy_api_key || '').trim();
+    const model = String($('gwTestModel')?.value || '').trim();
+    const prompt = String($('gwTestPrompt')?.value || '').trim() || '你好';
+    if (!key) {
+      paint('主客户端密钥还没配置：到「系统设置 ①」生成一把再来试。', 'err');
+      return;
+    }
+    if (!model) {
+      paint('先选一个模型 ID（下拉里就是 /v1/models 返回的清单）。', 'err');
+      return;
+    }
+
+    const isAnthropic = gwTestProto === 'anthropic';
+    const path = isAnthropic ? '/v1/messages' : '/v1/chat/completions';
+    const headers = { 'content-type': 'application/json' };
+    if (isAnthropic) {
+      headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+    } else {
+      headers.authorization = `Bearer ${key}`;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '发送中…';
+    const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    try {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          max_tokens: 64,
+          stream: false,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      const ms = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
+      const raw = await res.text();
+      let data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch (_) { data = null; }
+      const meta = `HTTP ${res.status} · ${ms}ms · ${eh(model)} · ${isAnthropic ? 'Anthropic' : 'OpenAI'} 方言`;
+      if (res.ok) {
+        const reply = extractTestReply(data);
+        paint(`<div class="gw-test-meta">${meta}</div>`
+          + `<pre class="gw-test-reply">${eh(reply || '（上游返回成功，但没有可显示的文本）')}</pre>`, 'ok');
+      } else {
+        const message = (data && data.error && (data.error.message || data.error.type))
+          || (data && data.message)
+          || raw.slice(0, 400)
+          || '(空响应)';
+        paint(`<div class="gw-test-meta">${meta}</div>`
+          + `<div class="gw-test-error">${eh(scrubUiText(String(message)))}</div>`, 'err');
+      }
+    } catch (err) {
+      paint(`请求没发出去：${eh(scrubUiText(err && err.message ? err.message : String(err)))}`, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '发送';
+    }
   }
 
   let gwAccessInFlight = false;
@@ -1852,6 +1965,7 @@
         if (Array.isArray(info.models)) state.gwModels = info.models;
         if (Array.isArray(info.endpoints)) state.gwEndpoints = info.endpoints;
         renderGatewayModels();
+        renderGatewayTestPanel();
         renderGatewayEndpoints();
       }
     } catch (_) {

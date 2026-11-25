@@ -593,6 +593,26 @@
       <div class="card card-pad">
         <div class="section-bar">
           <div>
+            <h2 class="card-title">模拟请求</h2>
+            <div class="card-sub">用上面的密钥走一遍真实链路：选模型 → 发一句话 → 看上游的实际回复（与客户端调用完全同一条路）</div>
+          </div>
+          <div class="seg" id="gwTestProto" role="tablist" aria-label="模拟请求协议">
+            <button class="seg-btn active" type="button" data-gw-proto="openai">OpenAI 兼容</button>
+            <button class="seg-btn" type="button" data-gw-proto="anthropic">Claude 系</button>
+          </div>
+        </div>
+        <div class="input-row gw-test-row">
+          <input class="input" id="gwTestModel" list="gwTestModelList" placeholder="模型 ID（可从下拉选）" />
+          <datalist id="gwTestModelList"></datalist>
+          <input class="input" id="gwTestPrompt" value="你好" placeholder="要说的话，默认「你好」" />
+          <button class="btn btn--primary" type="button" id="btnGwTestSend">发送</button>
+        </div>
+        <div class="gw-test-result" id="gwTestResult" hidden></div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="section-bar">
+          <div>
             <h2 class="card-title">可用模型 <span class="pill tabular" id="gwModelCount">0</span></h2>
             <div class="card-sub">与 GET /v1/models 完全一致；点任意卡片复制模型 ID</div>
           </div>
