@@ -3428,6 +3428,26 @@ renderVaultProviderPicks();
 });
 }
 }
+async function bindMissingPresets() {
+const providers = state.config && state.config.providers;
+if (!providers || typeof providers !== 'object') return;
+const bound = [];
+for (const [pId, p] of Object.entries(providers)) {
+if (!p || typeof p !== 'object') continue;
+const cur = String(p.preset_id || '').trim();
+if (cur) continue; // 已绑定，或显式 'custom'
+const meta = matchPresetRules({ id: pId, name: p.name, base_url: p.base_url });
+if (!meta) continue;
+const id = String(meta.preset_id || meta.id || '').trim();
+if (!id) continue;
+p.preset_id = id;
+bound.push(`${pId} → ${id}`);
+}
+if (bound.length === 0) return;
+const ok = await persistConfig(`已自动绑定 ${bound.length} 个供应商的预设：${bound.join('，')}`);
+if (!ok) return; // 冲突等失败：下次加载再试，不阻塞界面
+renderProvidersList();
+}
 async function loadData() {
 try {
 const cfgResp = await window.HOST.getConfig();
@@ -3438,6 +3458,7 @@ if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
 renderProvidersList();
 renderModelsList();
 renderSettingsView();
+await bindMissingPresets();
 }
 if (window.HOST.capabilities.nodeManager) {
 await loadNodesData();

@@ -2776,6 +2776,31 @@
     }
   }
 
+  // 给缺 preset_id 的供应商按规则 A 绑定一次预设并写回配置。
+  // 为什么在控制台做而不是中枢读路径：中枢的每个文件都算一个边缘函数，
+  // 加任何代码都会推高部署脚本体积（线上曾因此全站 545）；而控制台本来就有
+  // 完整的预设库与规则 A 实现，绑定结果仍然是写进中枢 KV 的权威数据。
+  async function bindMissingPresets() {
+    const providers = state.config && state.config.providers;
+    if (!providers || typeof providers !== 'object') return;
+    const bound = [];
+    for (const [pId, p] of Object.entries(providers)) {
+      if (!p || typeof p !== 'object') continue;
+      const cur = String(p.preset_id || '').trim();
+      if (cur) continue; // 已绑定，或显式 'custom'
+      const meta = matchPresetRules({ id: pId, name: p.name, base_url: p.base_url });
+      if (!meta) continue;
+      const id = String(meta.preset_id || meta.id || '').trim();
+      if (!id) continue;
+      p.preset_id = id;
+      bound.push(`${pId} → ${id}`);
+    }
+    if (bound.length === 0) return;
+    const ok = await persistConfig(`已自动绑定 ${bound.length} 个供应商的预设：${bound.join('，')}`);
+    if (!ok) return; // 冲突等失败：下次加载再试，不阻塞界面
+    renderProvidersList();
+  }
+
   async function loadData() {
     try {
       const cfgResp = await window.HOST.getConfig();
@@ -2787,6 +2812,10 @@
         renderProvidersList();
         renderModelsList();
         renderSettingsView();
+        // 预设绑定落盘：中枢（2.14.0 及更早）不会在读取时自动绑定，而绑定是中枢
+        // 权威的元数据 —— 在这里补上并写回一次，之后列表行、Full 的「可更新」判断
+        // 都能拿到 preset_id。只在缺绑定且有匹配时触发，写完就不会再跑。
+        await bindMissingPresets();
       }
 
       if (window.HOST.capabilities.nodeManager) {

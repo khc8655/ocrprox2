@@ -258,20 +258,43 @@ func (s *Server) handleProvidersPresetStatus(w http.ResponseWriter, r *http.Requ
 			CurrentVersion: presetVersionOf(p),
 		}
 		if row.Origin == "vault" {
+			// The hub knows which preset version its rules came from, but only hubs
+			// new enough to carry preset_version in the manifest say so. Older hubs
+			// (or an unreachable one) leave the node able to answer from the preset
+			// library it ships, compiled from the same shared/presets/*.json — fall
+			// back to it rather than reporting "unknown" and hiding the update.
+			latest := ""
+			note := ""
 			switch {
-			case hubErr != nil:
-				row.Note = hubErr.Error()
 			case hubFetched:
-				latest, ok := hubVersions[id]
+				v, ok := hubVersions[id]
 				if !ok {
-					row.Note = "中枢清单未返回此供应商"
-					break
+					note = "中枢清单未返回此供应商"
+				} else if v != "" {
+					latest = v
+				} else {
+					note = "中枢未提供预设版本"
 				}
-				row.LatestVersion = latest
-				if latest == "" {
-					row.Note = "中枢未返回预设版本"
-					break
+			case hubErr != nil:
+				note = hubErr.Error()
+			}
+			// Fall back to the shipped preset library only when the hub ANSWERED but
+			// carried no preset_version (hubs older than v20261126-02). When the hub
+			// is unreachable or errors, claiming "可更新" would be a lie: applying it
+			// needs the hub, so the row keeps has_update=false plus the reason.
+			if hubFetched && latest == "" && row.PresetID != "" && !strings.EqualFold(row.PresetID, "custom") {
+				if e := findPresetEntry(lib, row.PresetID); e != nil && strings.TrimSpace(e.Version) != "" {
+					latest = strings.TrimSpace(e.Version)
+					if note == "" {
+						note = "按本地预设库判断（中枢未提供版本）"
+					} else {
+						note += "（按本地预设库判断）"
+					}
 				}
+			}
+			row.LatestVersion = latest
+			row.Note = note
+			if latest != "" {
 				row.HasUpdate = latest != row.CurrentVersion
 			}
 			rows = append(rows, row)
