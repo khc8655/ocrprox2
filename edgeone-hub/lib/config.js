@@ -2,30 +2,6 @@ import { constantTimeCompare, hashToken } from './crypto.js';
 
 export const CONFIG_KV_KEY = 'llmproxy_config';
 
-// Preset auto-binding is loaded lazily (dynamic import) inside the functions
-// that need it: a static import here would drag presetbind.js -> presets.js ->
-// generated-presets.js (~6 KB) into EVERY route bundle that reaches config.js
-// — including /healthz, which never binds anything. That is exactly how
-// v20261126-02 pushed the deployed bundle past the platform's per-script
-// ceiling and took the whole Hub down with 545s.
-async function bindPresets(config) {
-  const { matchPresetForProvider } = await import('./presetbind.js');
-  const { getPresetMap } = await import('./presets.js');
-  const presetsMap = getPresetMap();
-  const providers = config && config.providers;
-  if (!providers || typeof providers !== 'object') return config;
-  for (const [pId, pData] of Object.entries(providers)) {
-    if (!pData || typeof pData !== 'object') continue;
-    if (typeof pData.preset_id === 'string' && pData.preset_id.trim()) continue;
-    const matched = matchPresetForProvider(
-      { id: pData.id || pId, name: pData.name || '', base_url: pData.base_url || '' },
-      presetsMap
-    );
-    if (matched) pData.preset_id = matched;
-  }
-  return config;
-}
-
 export class CASConflictError extends Error {
   constructor(currentVersion, submittedVersion) {
     super(`Config version conflict: current is ${currentVersion}, submitted is ${submittedVersion}`);
@@ -144,7 +120,6 @@ export function sanitizeStoredConfig(config) {
   return config;
 }
 
-
 /**
  * Load config from KV or return default.
  */
@@ -162,7 +137,7 @@ export async function loadConfig(kv) {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (parsed && typeof parsed._version === 'number') {
-        return bindPresets(sanitizeStoredConfig(parsed));
+        return sanitizeStoredConfig(parsed);
       }
     } catch (_) {}
   }
@@ -216,10 +191,7 @@ export async function saveConfigWithCAS(incomingConfig, kv) {
 
   // Apply Kernel Guard to restore masked secrets, then drop removed settings
   // fields so a POST echoing a legacy GET cannot write them back to KV.
-  // Then fill preset bindings for providers that still carry none: the console
-  // POSTs back whatever GET handed it, and a config written by an older Hub has
-  // no preset_id there, so the save is the moment the binding lands in KV.
-  const sanitized = await bindPresets(sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored)));
+  const sanitized = sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored));
 
   // Bump version
   sanitized._version = currentVer + 1;

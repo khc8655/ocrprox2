@@ -1,22 +1,5 @@
 import { constantTimeCompare, hashToken } from './crypto.js';
 export const CONFIG_KV_KEY = 'llmproxy_config';
-async function bindPresets(config) {
-const { matchPresetForProvider } = await import('./presetbind.js');
-const { getPresetMap } = await import('./presets.js');
-const presetsMap = getPresetMap();
-const providers = config && config.providers;
-if (!providers || typeof providers !== 'object') return config;
-for (const [pId, pData] of Object.entries(providers)) {
-if (!pData || typeof pData !== 'object') continue;
-if (typeof pData.preset_id === 'string' && pData.preset_id.trim()) continue;
-const matched = matchPresetForProvider(
-{ id: pData.id || pId, name: pData.name || '', base_url: pData.base_url || '' },
-presetsMap
-);
-if (matched) pData.preset_id = matched;
-}
-return config;
-}
 export class CASConflictError extends Error {
 constructor(currentVersion, submittedVersion) {
 super(`Config version conflict: current is ${currentVersion}, submitted is ${submittedVersion}`);
@@ -115,7 +98,7 @@ if (raw) {
 try {
 const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
 if (parsed && typeof parsed._version === 'number') {
-return bindPresets(sanitizeStoredConfig(parsed));
+return sanitizeStoredConfig(parsed);
 }
 } catch (_) {}
 }
@@ -155,7 +138,7 @@ throw new ConfigValidationError(
 );
 }
 }
-const sanitized = await bindPresets(sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored)));
+const sanitized = sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored));
 sanitized._version = currentVer + 1;
 const serialized = JSON.stringify(sanitized);
 if (kv) {
