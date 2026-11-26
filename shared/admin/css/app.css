@@ -1,5 +1,11 @@
 /* KHC Admin Design System — LLMProxy2 Console
  * Pure CSS, zero inline style, zero left-border stripes, mobile-first responsive.
+ *
+ * 极简设计语言（docs/UI_DESIGN_SPEC.md §七 组件标准）：
+ *   灰阶 + 一个主色（--khc-primary-500）；卡片去阴影；字号只有三档
+ *   （正文 14px / 控件 13px / 辅助 12px）；区块之间靠 24px 留白分隔；
+ *   全站只有 8 个组件：.btn / .input+.select / .list+.row / .data-table /
+ *   .editor / .dialog / .menu / .dot+.pill。
  */
 
 :root {
@@ -30,30 +36,41 @@
   --khc-danger-bg: #FEF2F2;
   --khc-danger-text: #B91C1C;
 
+  /* 图表专用色相：链路瀑布与图例要区分「网关内部 / 排队 / 建连」三段，
+     它们不是状态语义，所以单独成 token，而不是复用主色或状态色。 */
+  --khc-chart-own-500: #64748B;
+  --khc-chart-queue-500: #8B5CF6;
+  --khc-chart-send-500: #06B6D4;
+
+  /* 主色底上的文字与浮层遮罩。 */
+  --khc-on-primary: #FFFFFF;
+  --khc-scrim: rgba(15, 23, 42, 0.55);
+
   --khc-radius-sm: 4px;
   --khc-radius-md: 6px;
   --khc-radius-lg: 8px;
   --khc-radius-xl: 12px;
 
-  --khc-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  /* Only the floating layers (dialog / menu / toast) keep a shadow: they must
+   * read as detached from the flat page. Cards and rows never do. */
   --khc-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
   --khc-shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14);
 
   --khc-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --khc-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  /* Typography scale. CJK glyphs at 600 render noticeably heavier than Latin and
-   * lose stroke separation at small sizes, so the UI caps emphasis at 500 and uses
-   * size, not weight, for hierarchy. Magpie (the reference design) does the same. */
-  --khc-weight-body: 400;
-  --khc-weight-medium: 500;
-  --khc-weight-strong: 600; /* headings only, never at <=12px */
-  --khc-text-xs: 12px;
-  --khc-text-sm: 13px;
-  --khc-text-md: 14px;
+  /* Typography scale — exactly three sizes (§七 视觉).
+   * CJK glyphs at 600 render noticeably heavier than Latin and lose stroke
+   * separation at small sizes, so emphasis is capped at 500 and hierarchy is
+   * carried by size, not weight. */
+  --khc-text-xs: 12px;   /* 辅助 */
+  --khc-text-sm: 13px;   /* 控件 */
+  --khc-text-md: 14px;   /* 正文 */
 
   --khc-header-h: 48px;
   --khc-ctrl-h: 32px;
+  --khc-ctrl-h-sm: 28px;
+  --khc-block-gap: 24px;
 }
 
 :root[data-theme="dark"] {
@@ -120,7 +137,7 @@ html, body {
   background-color: var(--khc-surface-page);
   color: var(--khc-text-1);
   font-family: var(--khc-font-sans);
-  font-size: 14px;
+  font-size: var(--khc-text-md);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -135,11 +152,8 @@ html, body {
   font-family: var(--khc-font-mono);
 }
 
-.mono {
-  font-family: var(--khc-font-mono);
-}
+/* ---------------------------------------------------------------- Header */
 
-/* Header */
 .app-header {
   position: sticky;
   top: 0;
@@ -171,21 +185,21 @@ html, body {
   height: 24px;
   border-radius: var(--khc-radius-md);
   background: var(--khc-primary-500);
-  color: #FFFFFF;
+  color: var(--khc-on-primary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .brand-name {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--khc-text-md);
+  font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--khc-text-1);
 }
 
 .badge-role {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   padding: 2px 6px;
   border-radius: var(--khc-radius-sm);
@@ -217,7 +231,7 @@ html, body {
   background: transparent;
   color: var(--khc-text-2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   height: 26px;
   padding: 0 12px;
@@ -238,14 +252,11 @@ html, body {
   background-color: var(--khc-surface-card);
   color: var(--khc-text-1);
   font-weight: 500;
-  box-shadow: var(--khc-shadow-sm);
 }
 
-/* Provider A–Z index bar: one compact row of letter pills (全部 + A–Z + #).
- * Chips mirror .seg-btn's metrics (12px/500 text, 26~32px control band) but sit
- * on their own full-width toolbar row so all 26 letters (A–Z) + 全部 + # fit
- * at 1120px; narrow viewports scroll horizontally with the scrollbar hidden
- * (same treatment as .nav-wrap on phones). */
+/* Provider A–Z index bar: one compact row of letter chips (全部 + A–Z + #).
+ * Sits on its own full-width toolbar row so all 26 letters + 全部 + # fit at
+ * 1120px; narrow viewports scroll horizontally with the scrollbar hidden. */
 .alpha-bar {
   display: flex;
   align-items: center;
@@ -269,10 +280,10 @@ html, body {
   background: transparent;
   color: var(--khc-text-2);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
-  height: 28px;
-  min-width: 28px;
+  height: var(--khc-ctrl-h-sm);
+  min-width: var(--khc-ctrl-h-sm);
   padding: 0 8px;
   border-radius: var(--khc-radius-md);
   cursor: pointer;
@@ -297,7 +308,7 @@ html, body {
 }
 
 .alpha-chip-count {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   font-weight: 400;
   line-height: 1;
   color: var(--khc-text-3);
@@ -315,7 +326,7 @@ html, body {
 }
 
 .version-pill {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   padding: 0 8px;
   height: 26px;
@@ -327,34 +338,35 @@ html, body {
   color: var(--khc-text-2);
 }
 
-/* Main Container */
+/* ------------------------------------------------------------ Page layout */
+
 .main-wrap {
   max-width: 1120px;
   margin: 0 auto;
   padding: 20px;
 }
 
-/* View Header */
+/* 页面头：标题 18px/500，副标题最多一行 13px --khc-text-2。 */
 .view-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: var(--khc-block-gap);
   flex-wrap: wrap;
 }
 
 .view-title {
   margin: 0;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--khc-text-1);
   letter-spacing: -0.01em;
 }
 
 .view-sub {
   margin: 2px 0 0 0;
-  font-size: 12px;
+  font-size: var(--khc-text-sm);
   color: var(--khc-text-2);
 }
 
@@ -396,14 +408,15 @@ html, body {
   padding-left: 30px !important;
 }
 
-/* Buttons */
+/* ------------------------------------------------- 组件 1 · 按钮 .btn */
+
 .btn {
   appearance: none;
   border: 1px solid var(--khc-border-1);
   background-color: var(--khc-surface-card);
   color: var(--khc-text-1);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--khc-text-sm);
   font-weight: 500;
   height: var(--khc-ctrl-h);
   padding: 0 12px;
@@ -414,7 +427,7 @@ html, body {
   justify-content: center;
   gap: 6px;
   white-space: nowrap;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .btn:hover:not(:disabled) {
@@ -427,10 +440,11 @@ html, body {
   cursor: not-allowed;
 }
 
+/* 主要：每个区域最多一个。 */
 .btn--primary {
   background-color: var(--khc-primary-500);
   border-color: var(--khc-primary-500);
-  color: #FFFFFF;
+  color: var(--khc-on-primary);
 }
 
 .btn--primary:hover:not(:disabled) {
@@ -438,6 +452,7 @@ html, body {
   border-color: var(--khc-primary-600);
 }
 
+/* 危险：删除 / 吊销 / 轮换等不可逆动作。 */
 .btn--danger {
   color: var(--khc-danger-text);
   border-color: var(--khc-border-1);
@@ -448,17 +463,7 @@ html, body {
   border-color: var(--khc-danger-500);
 }
 
-.btn--sm {
-  height: 26px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.btn--icon {
-  width: var(--khc-ctrl-h);
-  padding: 0;
-}
-
+/* 文字：无边框次级动作。 */
 .btn--ghost {
   background-color: transparent;
   border-color: transparent;
@@ -471,13 +476,27 @@ html, body {
   color: var(--khc-text-1);
 }
 
+/* 行内紧凑：28px / 13px。 */
+.btn--sm {
+  height: var(--khc-ctrl-h-sm);
+  padding: 0 10px;
+  font-size: var(--khc-text-sm);
+}
+
+/* 图标按钮（顶栏纯图标操作）。 */
+.btn--icon {
+  width: var(--khc-ctrl-h);
+  padding: 0;
+}
+
 .btn.active {
   background-color: var(--khc-primary-50);
   border-color: var(--khc-primary-500);
   color: var(--khc-primary-500);
 }
 
-/* Inputs */
+/* ------------------------------ 组件 2 · 输入 / 选择 .input / .select */
+
 .input, .select, .textarea {
   width: 100%;
   height: var(--khc-ctrl-h);
@@ -487,13 +506,27 @@ html, body {
   background-color: var(--khc-surface-card);
   color: var(--khc-text-1);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--khc-text-sm);
   outline: none;
   transition: border-color 0.15s ease;
 }
 
 .input:focus, .select:focus, .textarea:focus {
   border-color: var(--khc-primary-500);
+}
+
+/* 禁用态：整块弱化（底色 + 文字 + 边框一起去饱和），一眼看出「这个现在不生效」——
+   例如没勾选的端点地址、中枢只读的 Key 权重。只读态是「派生值」，禁用态是「不参与」。 */
+.input:disabled, .select:disabled, .textarea:disabled {
+  background-color: var(--khc-surface-muted);
+  border-color: var(--khc-border-1);
+  color: var(--khc-text-3);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.input:disabled::placeholder, .textarea:disabled::placeholder {
+  color: var(--khc-text-3);
 }
 
 /* Read-only inputs read as derived values, not as fields awaiting input. */
@@ -508,7 +541,7 @@ html, body {
 
 .input--code {
   font-family: var(--khc-font-mono);
-  font-size: 12px;
+  font-size: var(--khc-text-sm);
 }
 
 .textarea {
@@ -519,9 +552,27 @@ html, body {
   line-height: 1.45;
 }
 
+/* 校验错误才显示红字（校验失败时给输入框加 aria-invalid="true"）。 */
+.input[aria-invalid="true"], .select[aria-invalid="true"] {
+  border-color: var(--khc-danger-500);
+}
+
+/* 字段说明不常驻：标签旁 ⓘ（title 悬停提示）。 */
+.field-hint {
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-3);
+  cursor: help;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  line-height: 1;
+}
+
+/* 表单栅格：基本字段 ≤4 个、两列网格。 */
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -536,142 +587,14 @@ html, body {
   min-width: 0;
 }
 
-.form-group--span2 {
-  grid-column: span 2;
-}
-
+/* 跨满整行（两列网格里的长字段：Base URL、供应商选择器）。 */
 .form-group--full {
   grid-column: 1 / -1;
 }
 
-/* Unified settings rows: one item per line — title + desc on the left, control on
-   the right; the row's title attribute mirrors desc for hover hints. */
-.setting-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--khc-border-1);
-}
-
-.setting-row:last-child {
-  border-bottom: 0;
-}
-
-/* Node detail overlay (节点详情): read-only rows. A node token is 57 monospace
-   characters, so values must wrap inside the card instead of widening it —
-   especially at 375px, where the control column owns a full line. */
-.node-detail-value {
-  max-width: 360px;
-  overflow-wrap: anywhere;
-  text-align: right;
-  color: var(--khc-text-1);
-  font-size: 12px;
-}
-
-.node-detail-secret {
-  margin-top: 4px;
-  overflow-wrap: anywhere;
-  color: var(--khc-text-1);
-  font-size: 12px;
-}
-
-/* A row gated by role uses the hidden attribute; display:flex above would
-   otherwise win over the UA [hidden] rule. */
-.setting-row[hidden] {
-  display: none;
-}
-
-.setting-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.setting-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--khc-text-1);
-}
-
-.setting-desc {
-  font-size: 12px;
-  color: var(--khc-text-2);
-  margin-top: 2px;
-}
-
-.setting-control {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* Rows holding a free-text value (Base URL / client_key) give the control a
-   real width budget: it claims the slack left by the description, up to 62% of
-   the row. A purely content-sized control resolves to the input's intrinsic
-   width, which clipped values like https://hk.1 after a few characters. The
-   second selector covers rows whose input shares an .input-row with buttons
-   (client_key + 随机生成/保存密钥). */
-.setting-control:has(> .input:not([type="number"])),
-.setting-control:has(> .input-row .input:not([type="number"])) {
-  flex: 1 1 300px;
-  max-width: 62%;
-}
-
-.setting-control > .input-row {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.setting-control .input {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 110px;
-}
-
-/* Numeric/short settings keep a fixed compact width so the control column
-   stays aligned across rows. */
-.setting-control .input[type="number"] {
-  flex: 0 0 110px;
-  width: 110px;
-}
-
-.setting-control .select {
-  width: auto;
-}
-
-/* Secondary text link inside a row (e.g.「数据来源」): supporting text, not a
-   control, so it takes the accent color with no button chrome. */
-.text-link {
-  color: var(--khc-primary-500);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.text-link:hover {
-  text-decoration: underline;
-}
-
-/* Per-candidate 思考档位 select inside a route-editor row: the row's actions are
-   .btn--sm (26px), and docs §6.2 forbids mixing a 32px control with them in the
-   same row — so this select is 26px too. Sizes to its content so the ladder
-   never widens the row on a narrow screen. */
-.m-cand-eff {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.select--compact {
-  width: auto;
-  max-width: 190px;
-  height: 26px;
-  font-size: 11px;
-}
-
+/* 标签在上方（12px --khc-text-2）。 */
 .form-label {
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   color: var(--khc-text-2);
   display: flex;
@@ -709,6 +632,7 @@ input[type="checkbox"] {
   flex-shrink: 0;
 }
 
+/* 底部操作栏：左侧删除（危险），右侧取消 + 保存（主要）。 */
 .form-actions {
   display: flex;
   align-items: center;
@@ -731,14 +655,242 @@ input[type="checkbox"] {
   flex-wrap: wrap;
 }
 
-/* Cards & Lists */
+/* 统一设置行：一行一项，标题 + 说明在左，控件在右。 */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--khc-border-1);
+}
+
+/* 设置行所在的分组：分组之间靠 24px 留白分隔，不再一张张卡片叠。
+   行清单本身是一个「列表容器」：上下各一条 1px 外框，行间一条分隔线。 */
+.setting-rows {
+  border-top: 1px solid var(--khc-border-1);
+  border-bottom: 1px solid var(--khc-border-1);
+}
+
+.setting-rows > .setting-row:last-child {
+  border-bottom: 0;
+}
+
+.setting-row:last-child {
+  border-bottom: 0;
+}
+
+/* A row gated by role uses the hidden attribute; display:flex above would
+   otherwise win over the UA [hidden] rule. */
+.setting-row[hidden] {
+  display: none;
+}
+
+.setting-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-title {
+  font-size: var(--khc-text-md);
+  font-weight: 500;
+  color: var(--khc-text-1);
+}
+
+.setting-desc {
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-2);
+  margin-top: 2px;
+}
+
+.setting-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Rows holding a free-text value (Base URL / client_key) give the control a
+   real width budget: it claims the slack left by the description, up to 62% of
+   the row. A purely content-sized control resolves to the input's intrinsic
+   width, which clipped values like https://hk.1 after a few characters. */
+.setting-control:has(> .input:not([type="number"])),
+.setting-control:has(> .input-row .input:not([type="number"])) {
+  flex: 1 1 300px;
+  max-width: 62%;
+}
+
+.setting-control > .input-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-control .input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 110px;
+}
+
+/* Numeric/short settings keep a fixed compact width so the control column
+   stays aligned across rows. */
+.setting-control .input[type="number"] {
+  flex: 0 0 110px;
+  width: 110px;
+}
+
+.setting-control .select {
+  width: auto;
+}
+
+/* Secondary text link inside a row (e.g.「数据来源」): supporting text, not a
+   control, so it takes the accent color with no button chrome. */
+.text-link {
+  color: var(--khc-primary-500);
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--khc-text-sm);
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+/* 密钥池子表在 .editor 里：底色是 muted，表格需要 1px 外框才读得出「表」。 */
+.editor .table-wrap {
+  background-color: var(--khc-surface-card);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+}
+
+/* 子表行高 40px（组件 4）：行内的 28px 控件（权重输入 / 按钮）+ 上下各 6px
+   内边距刚好 40px；默认的 9px 内边距会把它撑到 46px。 */
+.editor .data-table td {
+  padding: 6px 12px;
+}
+
+/* Per-candidate 思考档位 select inside a route-editor row: the row's actions are
+   .btn--sm (28px), so this select is 28px too and sizes to its content. */
+.m-cand-eff {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 候选子表的等宽列（供应商 / 上游模型 / Key）：长 ID 串同宽对齐，超长省略。
+   1px 分隔线 + 等宽字体，候选多了也一眼能扫。 */
+/* 候选子表里的等宽串（供应商 / 上游模型）：长 ID 串同宽对齐，超长省略。
+   字体与字号沿用 .input--code，这里只补截断。 */
+.editor .data-table td .input--code {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.select--compact {
+  width: auto;
+  max-width: 190px;
+  height: var(--khc-ctrl-h-sm);
+  font-size: var(--khc-text-sm);
+}
+
+.input--compact {
+  height: var(--khc-ctrl-h-sm);
+  padding: 0 8px;
+  font-size: var(--khc-text-sm);
+  width: 72px;
+  min-width: 72px;
+}
+
+/* Inline checkbox label: .form-label is flex + space-between, so a checkbox and its
+ * text were pushed to opposite ends of the row. This class keeps them adjacent. */
+.form-label--check {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------- Cards & list containers */
+
+/* 设置页分组：分组标题 + 行清单，分组之间靠 24px 留白分隔（无卡片外框）。 */
+.block {
+  margin-bottom: var(--khc-block-gap);
+}
+
+.block:last-child {
+  margin-bottom: 0;
+}
+
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--khc-border-1);
+  flex-wrap: wrap;
+}
+
+.block-title {
+  margin: 0;
+  font-size: var(--khc-text-md);
+  font-weight: 500;
+  color: var(--khc-text-1);
+}
+
+/* 分组内的子块（如「路由与限流」下，路由策略行清单之后的并发护栏）：
+   一个小标题隔开两组行，不再有「标题 + 副标题」两层。 */
+.setting-section {
+  margin-top: 24px;
+}
+
+.setting-section-title {
+  margin: 0 0 8px;
+}
+
+/* 子块标题带右侧按钮时复用 .block-head，但不再画分隔线 —— 分隔由行清单自己的
+   border-top 负责，多一条线会和分组的线打架。 */
+.setting-section > .block-head {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+.setting-section > .block-head .setting-section-title {
+  margin: 0;
+}
+
+/* 标题下方的弱化附注（如「版本与升级」下面的当前版本号）。 */
+.setting-section-note {
+  margin: 4px 0 8px;
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-2);
+}
+
+.block-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* 卡片：只有列表容器保留 1px 外框，去掉阴影。 */
 .card {
   background-color: var(--khc-surface-card);
   border: 1px solid var(--khc-border-1);
   border-radius: var(--khc-radius-lg);
-  box-shadow: var(--khc-shadow-sm);
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: var(--khc-block-gap);
 }
 
 .card-pad {
@@ -758,7 +910,7 @@ input[type="checkbox"] {
 
 .card-title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--khc-text-md);
   font-weight: 500;
   color: var(--khc-text-1);
   display: flex;
@@ -766,15 +918,39 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+/* 卡片头左侧的标题 + 说明（说明可无）。 */
+.card-headings {
+  min-width: 0;
+}
+
 .card-sub {
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
+.section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+/* --------------------------------------------- 组件 3 · 列表 .list > .row */
+
+/* 列表容器：行之间只有 1px 分隔线，不加额外背景或阴影。 */
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 行高 ≥ 44px；悬停整行 --khc-surface-hover，展开态同色；行尾 chevron。 */
 .row {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 44px;
   padding: 12px 20px;
   border-bottom: 1px solid var(--khc-border-1);
   cursor: pointer;
@@ -815,41 +991,7 @@ button.row {
   background-color: transparent;
 }
 
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background-color: var(--khc-text-3);
-}
-
-.dot--ok {
-  background-color: var(--khc-success-500);
-}
-
-.dot--warn {
-  background-color: var(--khc-warning-500);
-}
-
-.dot--err {
-  background-color: var(--khc-danger-500);
-}
-
-.ico {
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--khc-text-2);
-}
-
-.ico svg {
-  width: 16px;
-  height: 16px;
-}
-
+/* 名称。 */
 .who {
   flex: 1;
   min-width: 0;
@@ -860,13 +1002,17 @@ button.row {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--khc-text-sm);
   font-weight: 500;
   color: var(--khc-text-1);
 }
 
+/* 一行次要信息（12px 等宽 --khc-text-2）：Base URL / ID / 适配版本等长串用等宽
+   字体，同列各行字符宽度一致，比例字宽对不齐。 */
 .sub {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
+  font-family: var(--khc-font-mono);
+  font-weight: 400;
   color: var(--khc-text-2);
   margin-top: 2px;
   white-space: nowrap;
@@ -874,6 +1020,7 @@ button.row {
   text-overflow: ellipsis;
 }
 
+/* 行尾：至多一个状态、一个计数、一个 chevron。 */
 .fields {
   display: flex;
   align-items: center;
@@ -883,7 +1030,7 @@ button.row {
 }
 
 .caret {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-3);
   transition: transform 0.15s ease;
 }
@@ -892,80 +1039,8 @@ button.row {
   transform: rotate(180deg);
 }
 
-/* Pills */
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: var(--khc-radius-sm);
-  font-size: 11px;
-  font-weight: 500;
-  background-color: var(--khc-surface-muted);
-  color: var(--khc-text-2);
-  border: 1px solid var(--khc-border-1);
-  white-space: nowrap;
-}
+/* -------------------------------------------- 组件 4 · 数据表 .data-table */
 
-.pill--accent {
-  background-color: var(--khc-primary-50);
-  border-color: var(--khc-primary-100);
-  color: var(--khc-primary-500);
-}
-
-.pill--green {
-  background-color: var(--khc-success-bg);
-  border-color: transparent;
-  color: var(--khc-success-text);
-}
-
-.pill--amber {
-  background-color: var(--khc-warning-bg);
-  border-color: transparent;
-  color: var(--khc-warning-text);
-}
-
-.pill--red {
-  background-color: var(--khc-danger-bg);
-  border-color: transparent;
-  color: var(--khc-danger-text);
-}
-
-/* Per-key test verdict: the reply excerpt can be 40 CJK chars, so the pill
-   gets a capped width and ellipsis (the full reply/error rides in title=). */
-.pill--test {
-  display: inline-block;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 18px;
-  vertical-align: middle;
-}
-
-/* Inline Editor */
-.editor {
-  padding: 16px 20px;
-  background-color: var(--khc-surface-muted);
-  border-bottom: 1px solid var(--khc-border-1);
-}
-
-.editor-section {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--khc-border-1);
-}
-
-.section-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-/* Tables */
 .table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -975,21 +1050,23 @@ button.row {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--khc-text-sm);
 }
 
+/* 表头 12px --khc-text-2 无底色。 */
 .data-table th {
   text-align: left;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   color: var(--khc-text-2);
   padding: 9px 12px;
   border-bottom: 1px solid var(--khc-border-1);
-  background-color: var(--khc-surface-muted);
   white-space: nowrap;
 }
 
+/* 行高 40px。 */
 .data-table td {
+  height: 40px;
   padding: 9px 12px;
   border-bottom: 1px solid var(--khc-border-1);
   color: var(--khc-text-1);
@@ -1005,6 +1082,11 @@ button.row {
 .data-table td:last-child {
   padding-right: 20px;
   white-space: nowrap;
+}
+
+/* 操作列右对齐。 */
+.data-table td:last-child {
+  text-align: right;
 }
 
 .data-table tr:last-child td {
@@ -1065,6 +1147,7 @@ button.row {
 .data-table td.reqlog-expand-td {
   padding: 0;
   white-space: normal;
+  text-align: left;
 }
 
 .reqlog-expand-row:hover td {
@@ -1099,17 +1182,17 @@ button.row {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
 }
 
 .reqlog-try-head {
   color: var(--khc-text-2);
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
 }
 
 .reqlog-errtype {
   color: var(--khc-text-3);
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
 }
 
 /* Upstream error text can be a long JSON body: 12px mono, weight 400 and
@@ -1117,7 +1200,7 @@ button.row {
 .reqlog-err {
   margin-top: 4px;
   font-family: var(--khc-font-mono);
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 400;
   line-height: 1.5;
   color: var(--khc-text-1);
@@ -1127,14 +1210,14 @@ button.row {
 
 .reqlog-rid {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-3);
   word-break: break-word;
 }
 
 .reqlog-foot {
   padding: 10px 20px;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
@@ -1144,23 +1227,417 @@ button.row {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
-/* Health Bar */
+/* ------------------------------------- 组件 5 · 行内编辑器 .editor */
 
+/* 唯一的增删改查模式（宪法规定不用抽屉）：点行展开编辑。 */
+.editor {
+  padding: 16px 20px;
+  background-color: var(--khc-surface-muted);
+  border-bottom: 1px solid var(--khc-border-1);
+}
 
+.editor-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--khc-border-1);
+}
 
+/* 高级折叠：<details> 带 chevron。 */
+.headers-details {
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  background-color: var(--khc-surface-card);
+  padding: 8px 12px;
+}
 
+.headers-details summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
 
+/* Explicit chevron: .form-label turns the summary into display:flex, which drops
+ * the native disclosure triangle — without this the fold is invisible. Rotates
+ * 180° (points up) while the details element is open. */
+.headers-details summary::after {
+  content: "⌄";
+  margin-left: auto;
+  color: var(--khc-text-3);
+  font-size: var(--khc-text-xs);
+  transition: transform 0.15s ease;
+}
 
-/* KPI Grid — 4 columns desktop, 2 columns mobile */
+.headers-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.headers-pre {
+  margin: 8px 0 0 0;
+  padding: 10px;
+  border-radius: var(--khc-radius-sm);
+  background-color: var(--khc-surface-muted);
+  overflow-x: auto;
+  font-size: var(--khc-text-xs);
+}
+
+.textarea--json {
+  min-height: 84px;
+  font-family: var(--khc-font-mono);
+  font-size: var(--khc-text-xs);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.snippet-box {
+  background-color: var(--khc-surface-muted);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  padding: 10px 12px;
+}
+
+.snippet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* --------------------------------------------- 组件 6 · 弹框 .dialog */
+
+/* 只用于 (a) 删除/吊销/轮换等确认 (b) 只显示一次的密钥、密码、安装命令
+   (c) 登录。遮罩点击与 Esc 关闭；不嵌套。 */
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background-color: var(--khc-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  /* Tall content (the node install panel) must stay reachable on short
+     viewports: centering alone would clip the card's top with no way to
+     scroll to it. */
+  overflow-y: auto;
+}
+
+.dialog-body {
+  width: 100%;
+  max-width: 480px;
+  background-color: var(--khc-surface-card);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-xl);
+  box-shadow: var(--khc-shadow-lg);
+  padding: 20px;
+  /* flexbox centers and would let the body overflow the clip region above;
+     margin:auto keeps it centered while allowing the overlay to scroll to it. */
+  margin: auto;
+  flex-shrink: 0;
+}
+
+/* 宽变体（--wide 640px）：安装命令面板等需要整行表单的场景。 */
+.dialog-body--wide {
+  max-width: 640px;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--khc-text-1);
+}
+
+.dialog-sub {
+  margin: 4px 0 0 0;
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-2);
+}
+
+/* 右上角 ✕ 图标按钮。 */
+.dialog-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--khc-text-3);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--khc-radius-sm);
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: var(--khc-text-md);
+  line-height: 1;
+}
+
+.dialog-close:hover {
+  background-color: var(--khc-surface-hover);
+  color: var(--khc-text-1);
+}
+
+/* 底部按钮右对齐。 */
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--khc-border-1);
+}
+
+/* 确认文案：正文 14px，换行保留。 */
+.dialog-text {
+  margin: 0;
+  font-size: var(--khc-text-md);
+  color: var(--khc-text-1);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 登录遮罩：独立外观（不属于 .dialog 组件），样式名与业务弹框分开。 */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background-color: var(--khc-scrim);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.login-overlay > .login-card {
+  margin: auto;
+  flex-shrink: 0;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background-color: var(--khc-surface-card);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-xl);
+  box-shadow: var(--khc-shadow-lg);
+  padding: 24px;
+}
+
+.login-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.login-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--khc-radius-md);
+  background-color: var(--khc-danger-bg);
+  color: var(--khc-danger-text);
+  font-size: var(--khc-text-xs);
+}
+
+/* ---------------------------------------------- 组件 7 · 菜单 .menu */
+
+/* 行内次要操作超过 2 个时收进「⋯」。浮层位置由类名控制，无内联样式。
+ *
+ * 浮层用 CSS Anchor Positioning 脱离表格的 .table-wrap 滚动容器：表格里的
+ * 「⋯」浮层若留在 .table-wrap 内会被 overflow-x:auto 裁掉。.menu 建立
+ * anchor-scope（每个菜单一个作用域，多个菜单互不串味），.menu-btn 命名
+ * 锚点，.menu-pop 用 position-anchor 贴到锚点下方 —— 全程零内联样式。 */
+.menu {
+  position: relative;
+  display: inline-flex;
+  anchor-scope: --khc-menu;
+}
+
+.menu-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--khc-text-2);
+  cursor: pointer;
+  width: var(--khc-ctrl-h-sm);
+  height: var(--khc-ctrl-h-sm);
+  border-radius: var(--khc-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: var(--khc-text-md);
+  line-height: 1;
+  padding: 0;
+  anchor-name: --khc-menu;
+}
+
+.menu-btn:hover {
+  background-color: var(--khc-surface-hover);
+  color: var(--khc-text-1);
+}
+
+.menu-pop {
+  position: fixed;
+  position-anchor: --khc-menu;
+  top: anchor(bottom);
+  left: anchor(left);
+  z-index: 60;
+  margin-top: 4px;
+  min-width: 140px;
+  padding: 4px;
+  background-color: var(--khc-surface-card);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  box-shadow: var(--khc-shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--khc-text-1);
+  font-family: inherit;
+  font-size: var(--khc-text-sm);
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--khc-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  display: block;
+  width: 100%;
+}
+
+.menu-item:hover {
+  background-color: var(--khc-surface-hover);
+}
+
+.menu-item--danger {
+  color: var(--khc-danger-text);
+}
+
+.menu-item--danger:hover {
+  background-color: var(--khc-danger-bg);
+}
+
+/* ------------------------- 组件 8 · 状态与提示：.dot / .pill / Toast */
+
+/* 状态 = .dot + 一个词。 */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--khc-text-3);
+}
+
+.dot--ok {
+  background-color: var(--khc-success-500);
+}
+
+.dot--warn {
+  background-color: var(--khc-warning-500);
+}
+
+.dot--err {
+  background-color: var(--khc-danger-500);
+}
+
+/* .pill 只用于中性计数 / 标签。 */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--khc-radius-sm);
+  font-size: var(--khc-text-xs);
+  font-weight: 400;
+  background-color: var(--khc-surface-muted);
+  color: var(--khc-text-2);
+  border: 1px solid var(--khc-border-1);
+  white-space: nowrap;
+}
+
+.pill--accent {
+  background-color: var(--khc-primary-50);
+  border-color: var(--khc-primary-100);
+  color: var(--khc-primary-500);
+}
+
+.pill--green {
+  background-color: var(--khc-success-bg);
+  border-color: transparent;
+  color: var(--khc-success-text);
+}
+
+.pill--amber {
+  background-color: var(--khc-warning-bg);
+  border-color: transparent;
+  color: var(--khc-warning-text);
+}
+
+.pill--red {
+  background-color: var(--khc-danger-bg);
+  border-color: transparent;
+  color: var(--khc-danger-text);
+}
+
+/* Toast 保持现状。 */
+.toast-box {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 340px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: var(--khc-surface-card);
+  border: 1px solid var(--khc-border-1);
+  border-radius: var(--khc-radius-md);
+  box-shadow: var(--khc-shadow-md);
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-1);
+}
+
+/* ------------------------------------------------------------ Overview UI */
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: var(--khc-block-gap);
 }
 
 .kpi-card {
@@ -1168,48 +1645,36 @@ button.row {
   border: 1px solid var(--khc-border-1);
   border-radius: var(--khc-radius-lg);
   padding: 14px 16px;
-  box-shadow: var(--khc-shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .kpi-label {
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   font-weight: 500;
   color: var(--khc-text-2);
 }
 
 .kpi-value {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--khc-text-1);
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 
 .kpi-sub {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-3);
 }
-
-/* Charts & Heatmap */
-
-
-
-
-
-
-
-
-
 
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
@@ -1232,59 +1697,50 @@ button.row {
 .legend-swatch--write { background-color: var(--khc-warning-500); }
 .legend-swatch--out { background-color: var(--khc-primary-100); }
 .legend-swatch--fail { background-color: var(--khc-danger-500); }
-.legend-swatch--own { background-color: #64748B; }
-.legend-swatch--queued { background-color: #8B5CF6; }
-.legend-swatch--sent { background-color: #06B6D4; }
+.legend-swatch--own { background-color: var(--khc-chart-own-500); }
+.legend-swatch--queued { background-color: var(--khc-chart-queue-500); }
+.legend-swatch--sent { background-color: var(--khc-chart-send-500); }
 .legend-swatch--ttft { background-color: var(--khc-warning-500); }
 .legend-swatch--flow { background-color: var(--khc-primary-500); }
 .legend-swatch--retried { background-color: var(--khc-danger-500); }
+
+/* 趋势图（纯 SVG，无外部图表库）。类名由 usage.js 写到 SVG 元素上。 */
+.chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-axis {
+  stroke: var(--khc-border-1);
+  stroke-width: 1;
+}
+
+.chart-gridline {
+  stroke: var(--khc-border-1);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+/* 轴标签 12px（禁止 11px），等宽字体让刻度同列对齐。 */
+.chart-label {
+  font-size: var(--khc-text-xs);
+  fill: var(--khc-text-3);
+  font-family: var(--khc-font-mono);
+}
+
+.chart-rect--in { fill: var(--khc-primary-500); }
+.chart-rect--cache { fill: var(--khc-success-500); }
+.chart-rect--write { fill: var(--khc-warning-500); }
+.chart-rect--out { fill: var(--khc-primary-100); }
+.chart-rect--req { fill: var(--khc-primary-500); }
+.chart-rect--fail { fill: var(--khc-danger-500); }
 
 .chart-empty {
   padding: 20px 12px;
   text-align: center;
   color: var(--khc-text-3);
-  font-size: 12px;
-}
-
-
-
-
-
-
-
-
-
-
-.heat-l1 {
-  fill: #DBEAFE;
-}
-
-.heat-l2 {
-  fill: #93C5FD;
-}
-
-.heat-l3 {
-  fill: #3B82F6;
-}
-
-.heat-l4 {
-  fill: #1664FF;
-}
-
-:root[data-theme="dark"] .heat-l1 {
-  fill: #1E3A8A;
-}
-
-:root[data-theme="dark"] .heat-l2 {
-  fill: #1D4ED8;
-}
-
-:root[data-theme="dark"] .heat-l3 {
-  fill: #3B82F6;
-}
-
-:root[data-theme="dark"] .heat-l4 {
-  fill: #60A5FA;
+  font-size: var(--khc-text-xs);
 }
 
 /* Probe Pills */
@@ -1297,7 +1753,7 @@ button.row {
 
 .probe-pill {
   font-family: var(--khc-font-mono);
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   padding: 4px 8px;
   border-radius: var(--khc-radius-sm);
   border: 1px solid var(--khc-border-1);
@@ -1372,68 +1828,31 @@ button.row {
   overflow-y: auto;
 }
 
-/* Details & Code Snippets */
-.headers-details {
-  border: 1px solid var(--khc-border-1);
-  border-radius: var(--khc-radius-md);
-  background-color: var(--khc-surface-card);
-  padding: 8px 12px;
-}
-
-.headers-details summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-  font-weight: 500;
-}
-
-/* Explicit chevron: .form-label turns the summary into display:flex, which drops
- * the native disclosure triangle — without this the fold is invisible. Rotates
- * 180° (points up) while the details element is open. */
-.headers-details summary::after {
-  content: "⌄";
-  margin-left: auto;
-  color: var(--khc-text-3);
-  font-size: 12px;
-  transition: transform 0.15s ease;
-}
-
-.headers-details[open] summary::after {
-  transform: rotate(180deg);
-}
-
-.headers-pre {
-  margin: 8px 0 0 0;
-  padding: 10px;
-  border-radius: var(--khc-radius-sm);
-  background-color: var(--khc-surface-muted);
-  overflow-x: auto;
-  font-size: 11px;
-}
-
-.snippet-box {
-  background-color: var(--khc-surface-muted);
-  border: 1px solid var(--khc-border-1);
-  border-radius: var(--khc-radius-md);
-  padding: 10px 12px;
-}
-
-.snippet-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
 /* Click-to-copy chips (gateway access): .btn look reused verbatim; only the
  * value needs truncation so a long key never widens the row. */
 .copy-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.copy-chip {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.copy-chip-label {
+  flex-shrink: 0;
+}
+
+.copy-chip-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--khc-font-mono);
+  font-size: var(--khc-text-xs);
+  color: var(--khc-text-2);
 }
 
 /* 接入信息 view: model cards carry two lines — the copyable id, then the
@@ -1475,7 +1894,7 @@ button.row {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--khc-font-mono);
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-1);
 }
 
@@ -1484,19 +1903,19 @@ button.row {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
 /* Catalog line (context / max output / reasoning ladder) on the model card an
-   operator copies ids from. Muted and single-line: it informs the choice without
-   competing with the id itself. */
+ * operator copies ids from. Muted and single-line: it informs the choice without
+ * competing with the id itself. */
 .gw-model-item-cap {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-3);
 }
 
@@ -1509,8 +1928,6 @@ button.row {
   display: none;
 }
 
-/* 模拟请求：一行输入 + 结果块。结果用等宽字体保留模型回复的换行，
-   错误态用红色输入框而不是整块红底，避免在浅色主题下过于刺眼。 */
 /* 测试这个模型: result block under the picker. Reuses the access-page result
    styles (.gw-test-meta / .gw-test-reply) so both test surfaces read alike. */
 .m-test-out {
@@ -1522,7 +1939,12 @@ button.row {
 }
 
 .m-test-out--err {
-  border-color: var(--khc-danger-1, var(--khc-border-2));
+  border-color: var(--khc-danger-500);
+}
+
+/* 成功态：与失败态对称的一条语义色边框（状态 = .dot + 一个词的同一套语义）。 */
+.m-test-out--ok {
+  border-color: var(--khc-success-500);
 }
 
 .gw-test-row {
@@ -1541,12 +1963,8 @@ button.row {
   background-color: var(--khc-surface-muted);
 }
 
-.gw-test-result--err {
-  border-color: var(--khc-danger-1, var(--khc-border-2));
-}
-
 .gw-test-meta {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
   margin-bottom: 6px;
   font-family: var(--khc-font-mono);
@@ -1557,13 +1975,13 @@ button.row {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--khc-font-mono);
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   line-height: 1.6;
   color: var(--khc-text-1);
 }
 
 .gw-test-error {
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   line-height: 1.6;
   color: var(--khc-text-1);
   word-break: break-word;
@@ -1571,34 +1989,20 @@ button.row {
 
 .gw-model-empty {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
 .access-note {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   line-height: 1.6;
   color: var(--khc-text-2);
 }
 
-.copy-chip {
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.copy-chip-label {
-  flex-shrink: 0;
-}
-
-.copy-chip-value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--khc-font-mono);
-  font-size: 11px;
-  color: var(--khc-text-2);
+/* 缺密钥时才出现的告警说明（同一套 token，不用彩色硬编码）。 */
+.access-note--warn {
+  color: var(--khc-warning-text);
 }
 
 /* Waterfall */
@@ -1610,17 +2014,6 @@ button.row {
   background-color: var(--khc-surface-card);
   border: 1px solid var(--khc-border-1);
   border-radius: var(--khc-radius-md);
-}
-
-.wf-item {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.wf-label {
-  color: var(--khc-text-2);
 }
 
 .try-row {
@@ -1643,9 +2036,9 @@ button.row {
   background-color: var(--khc-surface-muted);
 }
 
-.wf-seg--own { fill: #64748B; }
-.wf-seg--queued { fill: #8B5CF6; }
-.wf-seg--sent { fill: #06B6D4; }
+.wf-seg--own { fill: var(--khc-chart-own-500); }
+.wf-seg--queued { fill: var(--khc-chart-queue-500); }
+.wf-seg--sent { fill: var(--khc-chart-send-500); }
 .wf-seg--ttft { fill: var(--khc-warning-500); }
 .wf-seg--flow { fill: var(--khc-primary-500); }
 .wf-seg--retried { fill: var(--khc-danger-500); }
@@ -1664,13 +2057,13 @@ button.row {
 }
 
 .metric-box-label {
-  font-size: 11px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
 }
 
 .metric-box-val {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--khc-text-md);
+  font-weight: 500;
   color: var(--khc-text-1);
   margin-top: 2px;
 }
@@ -1690,32 +2083,6 @@ button.row {
   gap: 6px;
 }
 
-.trace-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--khc-border-1);
-  background-color: var(--khc-surface-muted);
-}
-
-.trace-toolbar .search-box {
-  flex: 1 1 200px;
-}
-
-.trace-toolbar .select {
-  width: auto;
-  min-width: 120px;
-}
-
-.input--compact {
-  height: 26px;
-  padding: 0 8px;
-  font-size: 11px;
-  min-width: 68px;
-}
-
 .update-box {
   padding: 12px 14px;
   border-radius: var(--khc-radius-md);
@@ -1726,24 +2093,9 @@ button.row {
 .update-notes {
   margin: 8px 0 0 18px;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   color: var(--khc-text-2);
   line-height: 1.55;
-}
-
-/* Settings Numbered Badge */
-.step-num {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background-color: var(--khc-primary-50);
-  color: var(--khc-primary-500);
-  font-size: 11px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 /* Privacy Mask */
@@ -1752,101 +2104,7 @@ button.row {
   user-select: none;
 }
 
-/* Login Overlay */
-.login-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background-color: rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  /* Tall content (the node install panel) must stay reachable on short
-     viewports: centering alone would clip the card's top with no way to
-     scroll to it. */
-  overflow-y: auto;
-}
-
-.login-overlay > .login-card {
-  /* flexbox centers and would let the card overflow the clip region above;
-     margin:auto keeps it centered while allowing the overlay to scroll to it. */
-  margin: auto;
-  flex-shrink: 0;
-}
-
-.login-card {
-  width: 100%;
-  max-width: 380px;
-  background-color: var(--khc-surface-card);
-  border: 1px solid var(--khc-border-1);
-  border-radius: var(--khc-radius-xl);
-  box-shadow: var(--khc-shadow-lg);
-  padding: 24px;
-}
-
-/* Wider variant for the node install-command overlay: the deploy panel holds a
-   form grid plus a command textarea, 380px would wrap everything awkwardly. */
-.login-card--wide {
-  max-width: 680px;
-}
-
-.login-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.login-error {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: var(--khc-radius-md);
-  background-color: var(--khc-danger-bg);
-  color: var(--khc-danger-text);
-  font-size: 12px;
-}
-
-/* Toast */
-.toast-box {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 120;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 340px;
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background-color: var(--khc-surface-card);
-  border: 1px solid var(--khc-border-1);
-  border-radius: var(--khc-radius-md);
-  box-shadow: var(--khc-shadow-md);
-  font-size: 12px;
-  color: var(--khc-text-1);
-}
-
-/* Check / Radio Chip Group (Search Capabilities & Selection) */
-
-
-
-
-.textarea--json {
-  min-height: 84px;
-  font-family: var(--khc-font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  resize: vertical;
-}
-
-/* Status Notice Strip & Code Snippet (Extension Services / MCP Access) */
+/* Status Notice Strip */
 .notice-strip {
   display: flex;
   align-items: center;
@@ -1857,14 +2115,8 @@ button.row {
   border: 1px solid var(--khc-border-1);
   background-color: var(--khc-surface-muted);
   color: var(--khc-text-2);
-  font-size: 12px;
+  font-size: var(--khc-text-xs);
   line-height: 1.45;
-}
-
-.notice-strip--ok {
-  background-color: var(--khc-success-bg);
-  border-color: transparent;
-  color: var(--khc-success-text);
 }
 
 .notice-strip--warn {
@@ -1873,12 +2125,55 @@ button.row {
   color: var(--khc-warning-text);
 }
 
+/* ≤12px 不得用 600 字重（spec §7.0）：提示条里的 <b>/<strong> 降到 500。 */
+.notice-strip b,
+.notice-strip strong {
+  font-weight: 500;
+}
 
+/* Node detail overlay (节点详情): read-only rows. A node token is 57 monospace
+   characters, so values must wrap inside the dialog instead of widening it —
+   especially at 375px, where the control column owns a full line. */
+.node-detail-value {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+  text-align: right;
+  color: var(--khc-text-1);
+  font-size: var(--khc-text-xs);
+}
+
+.node-detail-secret {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--khc-text-1);
+  font-size: var(--khc-text-xs);
+}
+
+/* Initial-letter avatar (replaces vendor brand logos).
+ * Neutral by design: the previous per-name colour hash implied a status meaning it
+ * did not have. Uses surface/text tokens so both themes follow automatically. */
+.avatar-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--khc-surface-muted);
+  color: var(--khc-text-2);
+  border: 1px solid var(--khc-border-1);
+  font-size: var(--khc-text-xs);
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+.key-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* Utilities */
 .flex-1 { flex: 1; min-width: 0; }
-.flex-end { display: flex; justify-content: flex-end; align-items: flex-end; }
-.gap-2 { gap: 8px; }
 .mt-1 { margin-top: 4px; }
 .mt-2 { margin-top: 8px; }
 .mt-3 { margin-top: 12px; }
@@ -1886,8 +2181,9 @@ button.row {
 .mb-1 { margin-bottom: 4px; }
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
-.text-sm { font-size: 12px; }
-.text-xs { font-size: 11px; }
+.ml-2 { margin-left: 8px; }
+.text-sm { font-size: var(--khc-text-sm); }
+.text-xs { font-size: var(--khc-text-xs); }
 .text-muted { color: var(--khc-text-2); }
 .text-danger { color: var(--khc-danger-text); }
 .text-ok { color: var(--khc-success-text); }
@@ -1945,10 +2241,6 @@ button.row {
     gap: 10px;
   }
 
-  .form-group--span2 {
-    grid-column: span 1;
-  }
-
   .setting-row {
     flex-wrap: wrap;
     gap: 8px 16px;
@@ -1994,6 +2286,10 @@ button.row {
     padding: 12px 14px;
   }
 
+  .dialog-body {
+    padding: 16px;
+  }
+
   .toast-box {
     left: 12px;
     right: 12px;
@@ -2002,35 +2298,22 @@ button.row {
   }
 }
 
-/* Initial-letter avatar (replaces vendor brand logos).
- * Neutral by design: the previous per-name colour hash implied a status meaning it
- * did not have. Uses surface/text tokens so both themes follow automatically. */
-.avatar-initial {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--khc-surface-muted);
-  color: var(--khc-text-2);
-  border: 1px solid var(--khc-border-1);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  user-select: none;
+/* 模型路由编辑器：路由组参数块（≥2 个候选才出现）与候选行操作。 */
+.m-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--khc-border-1);
 }
 
-/* Inline checkbox label: .form-label is flex + space-between, so a checkbox and its
- * text were pushed to opposite ends of the row. This class keeps them adjacent. */
-.form-label--check {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  cursor: pointer;
+.m-cand-ops {
+  justify-content: flex-end;
 }
-.key-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
+/* 行内的「移除」：平时是红字无框，悬停才出红底 —— 不再一行一个红框按钮。 */
+.btn--ghost.btn--danger {
+  color: var(--khc-danger-text);
+}
+
+.btn--ghost.btn--danger:hover:not(:disabled) {
+  background-color: var(--khc-danger-bg);
+  color: var(--khc-danger-text);
+}

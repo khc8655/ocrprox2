@@ -7,7 +7,16 @@
   const $ = (id) => document.getElementById(id);
   const ce = (t) => document.createElement(t);
   const clk = (el, fn) => el && el.addEventListener('click', fn);
-  const fg = (lbl, ctrl, id = '', cls = '') => `<div class="form-group${cls ? ' ' + cls : ''}"${id ? ` id="${id}"` : ''}><label class="form-label">${lbl}</label>${ctrl}</div>`;
+  // 表单字段组：标签在上方（12px --khc-text-2），可选 ⓘ 悬停说明。
+  // hint 会渲染成标签旁的 ⓘ 按钮（title 悬停提示）——字段说明不常驻占位。
+  // --- 组件 2 · 字段说明不常驻：标签旁的 ⓘ 悬停提示 ---
+  // 输入框/下拉框的说明文字默认进 placeholder；只有放不下的补充说明才用 ⓘ
+  // 挂在标签右侧（title 悬停提示），校验错误才显示红字。
+  const fieldHint = (text) => (text
+    ? `<button class="field-hint" type="button" title="${escapeHtml(text)}" aria-label="字段说明">ⓘ</button>`
+    : '');
+
+  const fg = (lbl, ctrl, id = '', cls = '', hint = '') => `<div class="form-group${cls ? ' ' + cls : ''}"${id ? ` id="${id}"` : ''}><label class="form-label">${lbl}${fieldHint(hint)}</label>${ctrl}</div>`;
   const state = {
     config: null,
     nodes: [],
@@ -28,6 +37,20 @@
     activeEditorKey: null,
     providerQuery: '',
     providerFilter: 'all',
+    // 「新增 X」在列表顶部插入一个空白编辑器（create 模式），与普通编辑互斥：
+    // 用 activeEditorKey 的哨兵值表示（普通编辑是 p_<id> / m_<name>）。
+    creatingProvider: false,
+    creatingModel: false,
+    // 「新增节点」= 列表顶部插入空白编辑器（create 模式），与普通展开态互斥。
+    creatingNode: false,
+    // 签发成功 / 重新获取后，列表顶部切换成「安装」视图的节点 id。
+    nodeInstallFor: null,
+    // 节点凭据（明文只留内存）：nodeId -> { node_token, client_key, admin_password }。
+    nodeSecrets: {},
+    // 「新增供应商」create 编辑器的草稿标记：操作者手动改过 ID / 预设 / 协议后，
+    // 自动生成与自动匹配就不再覆盖他的手填值。
+    newProvIdTouched: false,
+    newProvPresetTouched: false,
     searchQuery: '',
     modelQuery: '',
     currentPeriod: 'today',
@@ -39,7 +62,6 @@
     probedModelsByProvider: {},
     vaultManifest: null,
     addProvVaultPick: '',
-    addModelProbed: null,
     // Model catalog meta: the settings card fetches it once per page load; the
     // config snapshot's copy goes stale the moment an update lands.
     modelCatalogMetaLoaded: false,
@@ -89,6 +111,29 @@
       state.config._version = res._version;
       const verEl = $('configVersionDisplay');
       if (verEl) verEl.textContent = `v${res._version}`;
+      return res._version;
+    }
+    return null;
+  }
+
+  // 刷新本页持有的配置版本号（不重绘任何视图）。
+  //
+  // 为什么需要它：Full 节点的「测试这个模型」/「测试 Key」会走
+  // POST /api/admin/test-key，服务端把这次结论落盘到配置里
+  // （PersistKeyTestState → saveConfigLocked），配置版本 +1。
+  // 但 test-key 的响应里没有 _version，前端的 state.config._version
+  // 就此落后一版 —— 紧接着的保存带着旧版本提交，被 CAS 判为冲突（409），
+  // 用户的改动被整条丢弃。这是本页自己的请求造成的，不是「别人改了」，
+  // 所以必须在测试后把版本号追平，否则「先测一下再保存」必丢。
+  //
+  // 只读版本号、不覆盖 state.config：整份配置由 GET /api/config 回读会
+  // 把用户正在编辑的字段冲掉（编辑器里未保存的草稿就没了）。
+  async function refreshConfigVersion() {
+    if (!state.config || typeof window.HOST.getConfig !== 'function') return null;
+    try {
+      return syncVersionFromRes(await window.HOST.getConfig());
+    } catch (_) {
+      return null;
     }
   }
 
@@ -145,25 +190,6 @@
       }
     }
     return { target: bestTarget, sec: bestSec };
-  }
-
-  function refreshDatalists() {
-    const provDl = $('datalistProviders');
-    if (provDl) {
-      const pIds = Object.keys(state.config?.providers || {}).sort();
-      provDl.innerHTML = pIds.map((id) => `<option value="${eh(id)}"></option>`).join('');
-    }
-  }
-
-  function renumberSettingsSections() {
-    const sec = $('viewSettings');
-    if (!sec) return;
-    let num = 1;
-    sec.querySelectorAll('.card').forEach((card) => {
-      if (card.hidden || card.classList.contains('hidden')) return;
-      const badge = card.querySelector('.step-num');
-      if (badge) badge.textContent = String(num++);
-    });
   }
 
   function stopOAuthPolling() {
@@ -423,23 +449,6 @@
     return lt;
   }
 
-  // The in-row verdict pill. Success: 可用 · {latency}ms · {reply first 40};
-  // failure spells out the reason and upstream code instead of just the
-  // provider name — that was the operator complaint this replaces.
-  function keyLastTestPill(lt) {
-    if (!lt || typeof lt !== 'object') return '';
-    if (lt.ok) {
-      const reply = String(lt.reply_text || '').trim().slice(0, 40);
-      const title = `${String(lt.reply_text || '').trim() || '上游返回 200（未抽到文本）'}${lt.at ? ` · ${lt.at}` : ''}`;
-      return `<span class="pill pill--green pill--test" title="${eh(title)}">可用 · ${Number(lt.latency_ms) || 0}ms${reply ? ` · ${eh(reply)}` : ''}</span>`;
-    }
-    const status = Number(lt.status) || 0;
-    const reason = String(lt.reason || 'unknown');
-    const errType = String(lt.err_type || '');
-    const title = `${lt.error || '上游无响应'}${lt.at ? ` · ${lt.at}` : ''}`;
-    return `<span class="pill pill--red pill--test" title="${eh(title)}">测试失败 · ${status} ${eh(reason)}${errType ? ` · ${eh(errType)}` : ''}</span>`;
-  }
-
   // Live health for provider card counters. last_ok wins while the page is open
   // (校验 / 批量探活 set it); once the config round-trips, only last_test is
   // persisted, so the verdict falls back to that.
@@ -475,6 +484,158 @@
       .replace(/'/g, '&#39;');
   }
 
+  // --- 组件 6 · 弹框 .dialog（docs/UI_DESIGN_SPEC.md §七） ---
+  // 只用于 (a) 删除 / 吊销 / 轮换等确认 (b) 只显示一次的密钥、密码、安装命令
+  // (c) 登录。统一 openDialog() / closeDialog()：Esc 与遮罩点击关闭，不嵌套。
+  // 每个弹框可注册自己的关闭动作（有副作用的弹框必须注册：恢复焦点、
+  // 取消进行中的批量拉取等），未注册的走默认关闭。
+  const dialogClosers = {};
+
+  function openDialog(target, opts = {}) {
+    const dlg = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!dlg) return null;
+    dlg.hidden = false;
+    dlg.classList.remove('hidden');
+    const focusEl = (opts.focus && document.getElementById(opts.focus)) || dlg.querySelector('.dialog-close');
+    if (focusEl && typeof focusEl.focus === 'function') focusEl.focus();
+    return dlg;
+  }
+
+  function closeDialog(target) {
+    const dlg = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!dlg) return;
+    dlg.hidden = true;
+    dlg.classList.add('hidden');
+  }
+
+  // 注册弹框的关闭动作（有副作用的弹框必须注册：恢复焦点、取消进行中的
+  // 批量拉取等），未注册的走默认关闭。
+  function registerDialog(id, closer) {
+    dialogClosers[id] = closer;
+  }
+
+  function closeDialogById(id) {
+    const closer = dialogClosers[id];
+    if (typeof closer === 'function') {
+      closer();
+      return;
+    }
+    closeDialog(id);
+  }
+
+  // 统一确认弹框：所有删除 / 吊销 / 轮换 / 覆盖类二次确认都走这里，行为等价于
+  // 原来的 window.confirm()，但外观是 .dialog 组件。返回 Promise<boolean>。
+  let confirmDialogSettle = null;
+
+  function confirmDialog(opts = {}) {
+    const {
+      title = '确认操作',
+      message = '',
+      confirmText = '确定',
+      cancelText = '取消',
+      danger = true,
+    } = opts;
+    const dlg = $('confirmDialog');
+    // 兜底：万一确认框被移除，退回浏览器原生确认，绝不静默放行。
+    if (!dlg) return Promise.resolve(window.confirm(message));
+    const titleEl = $('confirmDialogTitle');
+    const textEl = $('confirmDialogText');
+    const okBtn = $('btnConfirmDialogOk');
+    const cancelBtn = $('btnConfirmDialogCancel');
+    if (titleEl) titleEl.textContent = title;
+    if (textEl) textEl.textContent = message;
+    if (okBtn) {
+      okBtn.textContent = confirmText;
+      okBtn.classList.toggle('btn--danger', danger);
+      okBtn.classList.toggle('btn--primary', !danger);
+    }
+    if (cancelBtn) cancelBtn.textContent = cancelText;
+    openDialog(dlg);
+    return new Promise((resolve) => { confirmDialogSettle = resolve; });
+  }
+
+  function settleConfirmDialog(result) {
+    const settle = confirmDialogSettle;
+    confirmDialogSettle = null;
+    closeDialog('confirmDialog');
+    if (settle) settle(result);
+  }
+
+  // --- 组件 7 · 菜单 .menu ---
+  // 行内次要操作超过 2 个时收进「⋯」。浮层位置由类名控制（.menu-pop /
+  // .menu-pop--left），无内联样式；点击菜单外部或按 Esc 关闭。
+  const openMenus = [];
+
+  // 菜单浮层会随列表重绘（innerHTML 重建）一起被从 DOM 上摘除。这种「死元素」
+  // 若留在 openMenus 里，Esc 会先命中它并提前 return —— 弹框就关不掉，必须再按
+  // 一次。所以每次读 openMenus 之前先剔除「已脱离 DOM / 已隐藏」的条目。
+  function pruneOpenMenus() {
+    for (let i = openMenus.length - 1; i >= 0; i--) {
+      const p = openMenus[i];
+      if (!p || !p.isConnected || p.hidden) openMenus.splice(i, 1);
+    }
+    return openMenus;
+  }
+
+  function closeMenuPop(pop) {
+    if (!pop) return;
+    pop.hidden = true;
+    pop.classList.add('hidden');
+    const idx = openMenus.indexOf(pop);
+    if (idx >= 0) openMenus.splice(idx, 1);
+  }
+
+  function closeAllMenus() {
+    pruneOpenMenus();
+    openMenus.slice().forEach(closeMenuPop);
+  }
+
+  function toggleMenuPop(pop) {
+    const wasOpen = !pop.hidden;
+    closeAllMenus();
+    if (wasOpen) return;
+    pop.hidden = false;
+    pop.classList.remove('hidden');
+    if (!openMenus.includes(pop)) openMenus.push(pop);
+  }
+
+  // items: [{ label, title?, danger?, onClick }]; opts.align = 'left' 让浮层左对齐展开。
+  function buildMenu(items, opts = {}) {
+    const wrap = ce('span');
+    wrap.className = 'menu';
+    const btn = ce('button');
+    btn.type = 'button';
+    btn.className = 'menu-btn';
+    btn.textContent = '⋯';
+    btn.title = opts.label || '更多操作';
+    btn.setAttribute('aria-label', opts.label || '更多操作');
+    btn.setAttribute('aria-haspopup', 'true');
+    const pop = ce('span');
+    pop.className = `menu-pop${opts.align === 'left' ? ' menu-pop--left' : ''}`;
+    pop.hidden = true;
+    pop.classList.add('hidden');
+    for (const item of items || []) {
+      if (!item) continue;
+      const mi = ce('button');
+      mi.type = 'button';
+      mi.className = `menu-item${item.danger ? ' menu-item--danger' : ''}${item.cls ? ' ' + item.cls : ''}`;
+      mi.textContent = item.label;
+      if (item.title) mi.title = item.title;
+      clk(mi, () => {
+        closeMenuPop(pop);
+        if (typeof item.onClick === 'function') item.onClick();
+      });
+      pop.appendChild(mi);
+    }
+    clk(btn, (ev) => {
+      ev.stopPropagation();
+      toggleMenuPop(pop);
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(pop);
+    return wrap;
+  }
+
   // Number inputs must not change value on wheel: a stray scroll over a focused
   // field silently rewrote weights / TTLs. Delegated because the inputs are both
   // static and re-rendered. blur() (not preventDefault) keeps page scrolling
@@ -499,6 +660,34 @@
     setIcon('traceSearchIcon', 'search');
   }
 
+  // --- 弹框基础设施：确认框接线 + 遮罩点击 + 菜单外部点击 ---
+  function setupDialogs() {
+    const confirmDlg = $('confirmDialog');
+    if (confirmDlg) {
+      clk($('btnConfirmDialogOk'), () => settleConfirmDialog(true));
+      clk($('btnConfirmDialogCancel'), () => settleConfirmDialog(false));
+      clk($('btnConfirmDialogClose'), () => settleConfirmDialog(false));
+      // 遮罩点击 = 取消（与 Esc 一致）。
+      confirmDlg.addEventListener('click', (ev) => {
+        if (ev.target === confirmDlg) settleConfirmDialog(false);
+      });
+    }
+    // 业务弹框的遮罩点击关闭：统一走 closeDialogById，让注册过的关闭动作
+    // （恢复焦点、取消批量拉取等）照常执行。
+    document.querySelectorAll('.dialog').forEach((dlg) => {
+      if (dlg.id === 'confirmDialog') return;
+      dlg.addEventListener('click', (ev) => {
+        if (ev.target === dlg) closeDialogById(dlg.id);
+      });
+    });
+    // 点菜单外部关闭「⋯」浮层。
+    document.addEventListener('click', (ev) => {
+      if (!pruneOpenMenus().length) return;
+      const inMenu = ev.target instanceof Element && ev.target.closest('.menu');
+      if (!inMenu) closeAllMenus();
+    });
+  }
+
   // --- Initializer ---
   async function init() {
     setupStaticIcons();
@@ -508,11 +697,15 @@
     setupTheme();
     setupPrivacyMask();
     setupKeyboardShortcuts();
+    setupDialogs();
     setupNavigation();
     setupCreationForms();
     setupToolbars();
-    setupConfigBackup();
+    // 设置行的 HTML 由 mountSettingRows() 运行时挂载，备份/导入的按钮就住在
+    // 那些行里 —— 必须先挂载再绑定，否则 clk() 会拿到 null 而静默跳过
+    // （这正是「导出 JSON」「选择文件导入」点了没反应的历史根因）。
     mountSettingRows();
+    setupConfigBackup();
     // Only fetch data when a credential is already present. An unauthenticated
     // page load must not issue /api/* requests: every one of those is a 401 and
     // would otherwise burn the anti-bruteforce budget (5 hits = 10 min lockout).
@@ -643,23 +836,26 @@
     const navActivity = $('navActivity');
     const topVersionBox = $('topVersionBox');
     const cfgVaultLinkBox = $('cfgVaultLinkBox');
-    const hubOverviewBox = $('hubOverviewBox');
     const fullOverviewBox = $('fullOverviewBox');
     const btnClearAllCooldowns = $('btnClearAllCooldowns');
     const btnImportFromTemplate = $('btnImportFromTemplate');
+    const btnHubBatchVerifyAll = $('btnHubBatchVerifyAll');
 
     if (navModels) navModels.hidden = false;
     if (navNodes) navNodes.hidden = !caps.nodeManager;
     // 接入信息 only describes a gateway this console can answer for: the Hub is
     // a config plane with no data plane of its own.
     if (navAccess) navAccess.hidden = isHub;
-    if (navActivity) navActivity.hidden = false;
+    // Hub 没有独立概览页：导航只剩「节点 / 供应商 / 模型路由 / 设置」，
+    // 登录后默认进「节点」；活跃节点信息由节点列表本身承担。
+    if (navActivity) navActivity.hidden = isHub;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
     if (cfgVaultLinkBox) cfgVaultLinkBox.hidden = !caps.vaultClient;
-    if (hubOverviewBox) hubOverviewBox.hidden = !isHub;
     if (fullOverviewBox) fullOverviewBox.hidden = isHub;
     if (btnClearAllCooldowns) btnClearAllCooldowns.hidden = !caps.kbModels;
     if (btnImportFromTemplate) btnImportFromTemplate.hidden = !caps.vaultClient;
+    // Hub 端「一键探活全部 Key」：逐把探活，不消耗推理额度。
+    if (btnHubBatchVerifyAll) btnHubBatchVerifyAll.hidden = !isHub;
     const guardBox = $('concurrencyGuardBox');
     if (guardBox) guardBox.hidden = false;
     const sysBox = $('systemUpdateBox');
@@ -681,25 +877,13 @@
         ? '仅下发给 lite 节点；full 节点可选导入'
         : '管理当前网关对外暴露的模型路由与多密钥粘性/轮询策略。';
     }
-    const rpTitle = $('routingPolicyTitle');
-    const rpSub = $('routingPolicySub');
-    if (rpTitle) {
-      rpTitle.textContent = isHub ? '下发模板默认值与冷却策略' : '全局路由与异常冷却策略';
+    // 「并发护栏」在 Hub 上只是下发默认值，Lite 节点会忽略 —— 一句话说清，不再铺标题 + 副标题。
+    const cgTitle = $('concurrencyGuardTitle');
+    if (cgTitle) {
+      cgTitle.textContent = isHub ? '并发护栏（Lite 节点自动忽略）' : '并发护栏';
     }
-    if (rpSub) {
-      rpSub.textContent = isHub
-        ? '作为节点拉取配置时的默认路由与异常冷却策略，节点可在本地覆盖'
-        : '控制当前网关默认路由策略、首字超时及上游异常自动冷却时长';
-    }
-    const cgSub = $('concurrencyGuardSub');
-    if (cgSub) {
-      cgSub.textContent = isHub
-        ? '仅对 Full 节点下发生效 · Lite 节点自动忽略'
-        : '限制 OCR 大图并发预读与固定通道全局并发上限';
-    }
-    renumberSettingsSections();
-
-    state.activeTab = 'activity';
+    // Hub 登录后默认进「节点」（导航已无「概览」页）；Full 仍是「概览」。
+    state.activeTab = isHub ? 'nodes' : 'activity';
     switchTab(state.activeTab);
   }
 
@@ -756,28 +940,38 @@
   function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        const pForm = $('addProviderForm');
-        const mForm = $('addModelForm');
-        const nForm = $('issueNodeForm');
+        // 「⋯」菜单先于弹框关闭：菜单是最内层的浮层。但只有真正还挂在 DOM 上、
+        // 且可见的菜单才算「开着」—— 列表重绘会摘除旧浮层，死条目不能吞掉本该
+        // 关闭弹框的这一次 Esc。
+        if (pruneOpenMenus().length) {
+          closeAllMenus();
+          return;
+        }
+        // 确认框：Esc = 取消，不执行任何动作。
+        const confirmDlg = $('confirmDialog');
+        if (confirmDlg && !confirmDlg.hidden) {
+          settleConfirmDialog(false);
+          return;
+        }
         let closedSomething = false;
-        if (pForm && !pForm.hidden) { pForm.hidden = true; pForm.classList.add('hidden'); closedSomething = true; }
-        if (mForm && !mForm.hidden) { mForm.hidden = true; mForm.classList.add('hidden'); closedSomething = true; }
-        if (nForm && !nForm.hidden) { nForm.hidden = true; nForm.classList.add('hidden'); closedSomething = true; }
+        // 「新增」编辑器（列表顶部的空白 .editor）：Esc 直接丢弃 —— 必须重绘它
+        // 所属的列表，否则空白的 create 编辑器还留在 DOM 里（state 标志清了
+        // 但视图没跟上）。create 编辑器可能属于当前页签之外的页签（切走过），
+        // 所以按「归属页签」找，不按 state.activeTab 找。
+        const createTab = anyCreateEditorTab();
+        if (createTab) {
+          closeCreateEditor(createTab);
+          closedSomething = true;
+        }
         const installOverlay = $('nodeInstallOverlay');
         if (installOverlay && !installOverlay.hidden) { closeNodeInstallOverlay(); closedSomething = true; }
-        const credOverlay = $('nodeCredOverlay');
-        if (credOverlay && !credOverlay.hidden) { closeNodeCredOverlay(); closedSomething = true; }
-        const detailOverlay = $('nodeDetailOverlay');
-        if (detailOverlay && !detailOverlay.hidden) { closeNodeDetailOverlay(); closedSomething = true; }
         const tplImportOverlay = $('templateImportOverlay');
         if (tplImportOverlay && !tplImportOverlay.hidden) { closeTemplateImportOverlay(); closedSomething = true; }
         if (state.activeEditorKey) {
           state.activeEditorKey = null;
+          state.nodeInstallFor = null;
           closedSomething = true;
-          if (state.activeTab === 'providers') renderProvidersList();
-          else if (state.activeTab === 'models') renderModelsList();
-          else if (state.activeTab === 'nodes') renderNodesList();
-          else if (state.activeTab === 'activity') renderRecentRequests();
+          renderTabList(state.activeTab);
         }
         if (closedSomething) toast('已取消操作并关闭弹层', 'info');
       } else if (e.key === '/') {
@@ -902,17 +1096,14 @@
       });
     }
 
+    // 「添加节点」= 在列表顶部插入一个空白编辑器（create 模式）。
     const btnIssueNode = $('btnIssueNode');
     if (btnIssueNode) {
       clk(btnIssueNode, () => {
-        toggle('issueNodeForm');
-        mountIssueScopeLists();
+        state.creatingNode = !state.creatingNode;
+        state.activeEditorKey = null;
+        renderNodesList();
       });
-    }
-
-    const btnDoIssue = $('btnDoIssue');
-    if (btnDoIssue) {
-      clk(btnDoIssue, handleIssueNode);
     }
 
     const btnCloseNodeInstall = $('btnCloseNodeInstall');
@@ -922,37 +1113,10 @@
 
     // Esc already closes editors globally; also close the install overlay so the
     // keyboard story stays "Esc cancels whatever is open". Clicking the dimmed
-    // backdrop does the same.
-    const nodeInstallOverlay = $('nodeInstallOverlay');
-    if (nodeInstallOverlay) {
-      nodeInstallOverlay.addEventListener('click', (ev) => {
-        if (ev.target === nodeInstallOverlay) closeNodeInstallOverlay();
-      });
-    }
-
-    const btnCloseNodeCred = $('btnCloseNodeCred');
-    if (btnCloseNodeCred) {
-      clk(btnCloseNodeCred, closeNodeCredOverlay);
-    }
-    const nodeCredOverlay = $('nodeCredOverlay');
-    if (nodeCredOverlay) {
-      nodeCredOverlay.addEventListener('click', (ev) => {
-        if (ev.target === nodeCredOverlay) closeNodeCredOverlay();
-      });
-    }
-
-    const btnCloseNodeDetail = $('btnCloseNodeDetail');
-    if (btnCloseNodeDetail) clk(btnCloseNodeDetail, closeNodeDetailOverlay);
-    const btnCloseNodeDetailFoot = $('btnCloseNodeDetailFoot');
-    if (btnCloseNodeDetailFoot) clk(btnCloseNodeDetailFoot, closeNodeDetailOverlay);
-    const nodeDetailOverlay = $('nodeDetailOverlay');
-    if (nodeDetailOverlay) {
-      nodeDetailOverlay.addEventListener('click', (ev) => {
-        if (ev.target === nodeDetailOverlay) closeNodeDetailOverlay();
-      });
-    }
-    clk($('btnNodeDetailRotate'), handleNodeDetailRotate);
-    clk($('btnNodeDetailToggle'), handleNodeDetailToggle);
+    // backdrop does the same — the generic .dialog backdrop handler in
+    // setupDialogs() routes it through closeDialogById(), which calls the
+    // registered closer below.
+    registerDialog('nodeInstallOverlay', closeNodeInstallOverlay);
 
     clk($('btnImportFromTemplate'), async () => {
       // Force a reload: the cached manifest is a snapshot, and template routes newly
@@ -961,13 +1125,9 @@
       openTemplateImportOverlay();
     });
     clk($('btnCloseTemplateImport'), closeTemplateImportOverlay);
+    clk($('btnCloseTemplateImportFoot'), closeTemplateImportOverlay);
     clk($('btnConfirmImportRoutes'), handleConfirmImportRoutes);
-    const templateImportOverlay = $('templateImportOverlay');
-    if (templateImportOverlay) {
-      templateImportOverlay.addEventListener('click', (ev) => {
-        if (ev.target === templateImportOverlay) closeTemplateImportOverlay();
-      });
-    }
+    registerDialog('templateImportOverlay', closeTemplateImportOverlay);
     // Template import「缺依赖」action: re-pull the missing key labels of a provider
     // that already exists locally (a missing provider is pulled by the import
     // button itself). One delegated listener on the static list element survives
@@ -1048,7 +1208,12 @@
         // The endpoint only empties the in-memory trace ring; the usage ledger
         // behind「最近请求」/「错误分析」is untouched, so the wording must not
         // promise more than it does.
-        if (!confirm('确定清空内存中的请求轨迹吗？账本记录（最近请求与错误分析）会保留。')) return;
+        const ok = await confirmDialog({
+          title: '清空内存请求轨迹',
+          message: '确定清空内存中的请求轨迹吗？账本记录（最近请求与错误分析）会保留。',
+          confirmText: '清空',
+        });
+        if (!ok) return;
         try {
           const res = await window.HOST.clearTraces();
           if (res && res.ok) {
@@ -1159,6 +1324,11 @@
   }
 
   // Robust cURL Command Parser (M3)
+  // 长选项：值可以跟在后面（--header 'k: v'）、紧贴（--header'k: v'）或用 =（--header=k: v）。
+  // 顺序敏感：--data-raw 必须排在 --data 前面，否则 --data 会先匹配上。
+  const CURL_LONG_OPTS = ['--header', '--data-raw', '--data', '--json', '--url'];
+  // 带参数的开关：值是下一个词，解析时必须跳过它（否则 POST 会被当成 URL）。
+  const CURL_OPTS_WITH_VALUE = ['-X', '--request', '--proxy', '--user-agent', '-A', '-e', '--referer', '-o', '--output'];
   function parseCurl(text) {
     let s = String(text || '').trim();
     const head = /^curl(?:\.exe)?(?=\s)/i.exec(s);
@@ -1197,8 +1367,27 @@
     for (let i = 0; i < words.length; i++) {
       const x = words[i];
       let opt = x, val = null;
-      if (/^-[Hd]/.test(x)) { opt = x.slice(0, 2); val = x.slice(2); }
-      else if (/^(-H|--header|-d|--data|--data-raw|--json|--url)$/.test(x)) val = words[++i] ?? '';
+      // 「-H 'k: v'」（分离写法）与「-H'k: v'」（连写）都要认。
+      // 分离写法里 x 恰好是 "-H"，slice(2) 取到空串 —— 若不判断值是否为空，
+      // 下一段文本（整条 header）会被当成 header 值，URL 则被漏掉。
+      if (/^-[Hd]/.test(x)) {
+        opt = x.slice(0, 2);
+        val = x.length > 2 ? x.slice(2) : (words[++i] ?? '');
+      }
+      // 长选项同样有三种写法：「--header 'k: v'」/「--header'k: v'」/「--header=k: v」。
+      else if (CURL_LONG_OPTS.some((o) => x === o || x.startsWith(o))) {
+        // 长名先匹配：--data-raw 必须排在 --data 前面。
+        opt = CURL_LONG_OPTS.find((o) => x === o || x.startsWith(o));
+        if (x === opt) val = words[++i] ?? '';
+        else if (x.startsWith(opt + '=')) val = x.slice(opt.length + 1);
+        else val = x.slice(opt.length);
+      }
+      // 带参数的开关（-X POST / --request POST …）：值是下一个词，必须跳过，
+      // 否则 POST 之类的方法名会被当成 URL。
+      else if (CURL_OPTS_WITH_VALUE.some((o) => x === o)) {
+        i++;
+        continue;
+      }
       else if (x.startsWith('-')) continue;
       else { if (!url) url = x; continue; }
 
@@ -1290,30 +1479,7 @@
     return `适配 ${meta.id} · v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}`;
   }
 
-  // 已适配 = the provider actually runs an adapter script (plan D): a preset with
-  // an adapter file (meta carries its version), hub-pulled rules (rule_hash), or
-  // inline adapter_rules. A preset_id that only names a protocol (e.g. anthropic,
-  // which has no adapter file) or an empty binding does NOT count — those are
-  // 自定义（无适配文件）.
-  function providerHasAdapter(p) {
-    if (p.adapter_rules && Object.keys(p.adapter_rules).length > 0) return true;
-    if (p.rule_hash) return true;
-    const pid = String(p?.preset_id || '').trim();
-    if (!pid) return false;
-    return Boolean(presetVersionText(presetMetaForProvider(p, pid)));
-  }
-
-  // Adapter badge on provider cards (full + hub alike): a bound preset with an
-  // adapter file shows its version, anything else is visibly「自定义（无适配文件）」
-  // so operators can tell adapted providers apart at a glance (pairs with the
-  // 已适配 filter, which uses the same providerHasAdapter judgement).
-  function presetVersionPillHtml(p) {
-    const pid = String(p?.preset_id || '').trim();
-    const text = pid ? presetVersionText(presetMetaForProvider(p, pid)) : '';
-    if (!text) return '<span class="pill" title="无适配文件">自定义（无适配文件）</span>';
-    return `<span class="pill tabular" title="适配文件版本">${eh(text)}</span>`;
-  }
-
+  // 适配信息只出现在供应商编辑器的「高级」区（列表行不再堆标签）。
 
   function setupToolbars() {
     const provSearch = $('providerSearchInput');
@@ -1347,10 +1513,12 @@
       });
     }
 
-    clk($('btnHubRefreshOverview'), loadData);
+    // 节点页的「刷新」：重拉节点 + 中枢概览。
+    clk($('btnHubRefreshOverview'), async () => {
+      await loadNodesData();
+      renderHubOverview();
+    });
     clk($('btnHubBatchVerifyAll'), verifyAllHubKeys);
-    clk($('btnGoProvidersFromHub'), () => switchTab('providers'));
-    clk($('btnGoNodesFromHub'), () => switchTab('nodes'));
   }
 
   function setupConfigBackup() {
@@ -1430,7 +1598,12 @@
       if (!rawArea) return;
       try {
         const parsed = JSON.parse(rawArea.value);
-        if (!confirm('确认直接应用这段 JSON 配置吗？保存时会自动保留未修改的脱敏密钥。')) return;
+        const ok = await confirmDialog({
+          title: '应用原始 JSON 配置',
+          message: '确认直接应用这段 JSON 配置吗？保存时会自动保留未修改的脱敏密钥。',
+          confirmText: '应用',
+        });
+        if (!ok) return;
         if (state.config?._version !== undefined && parsed._version === undefined) {
           parsed._version = state.config._version;
         }
@@ -1468,7 +1641,12 @@
               ${notes ? `<div class="update-notes">${notes}</div>` : ''}
             `;
             clk($('btnDoSystemUpgrade'), async () => {
-              if (!confirm(`确定下载并升级到 ${data.latest_version} 并自动重启服务吗？`)) return;
+              const ok = await confirmDialog({
+                title: '在线平滑升级',
+                message: `确定下载并升级到 ${data.latest_version} 并自动重启服务吗？`,
+                confirmText: '开始升级',
+              });
+              if (!ok) return;
               const uBtn = $('btnDoSystemUpgrade');
               const uBox = $('systemUpdateResult');
               if (uBtn) uBtn.disabled = true;
@@ -1530,7 +1708,12 @@
     });
 
     clk($('btnRestartService'), async () => {
-      if (!confirm('确定向服务发送平滑重启信号 (SIGTERM) 吗？(systemd 托管下约 2-3 秒自动恢复)')) return;
+      const ok = await confirmDialog({
+        title: '平滑重启服务',
+        message: '确定向服务发送平滑重启信号 (SIGTERM) 吗？(systemd 托管下约 2-3 秒自动恢复)',
+        confirmText: '重启',
+      });
+      if (!ok) return;
       try {
         const res = await window.HOST.restartService();
         toast(res?.message || '已触发平滑重启', 'ok');
@@ -1540,21 +1723,25 @@
     });
   }
 
-  // --- Add Provider: source select (custom vs vault on-demand) ---
+  // --- Add Provider: source switch (custom vs vault on-demand) ---
   // Vault mode locks the hub-managed fields (the hub is authoritative) and only
   // lists manifest providers that are not configured locally yet. The hub console
-  // itself hosts the vault, so the on-demand option only exists on Full nodes.
+  // itself hosts the vault, so the on-demand source only exists on Full nodes.
   function applyNewProvSourceMode() {
-    const vaultOption = $('newProvSource')?.querySelector('option[value="vault"]');
-    if (isHubMode() && vaultOption) vaultOption.hidden = true;
     const vaultMode = ($('newProvSource')?.value || 'custom') === 'vault';
+    const srcToggle = $('btnProvSourceToggle');
+    if (srcToggle) {
+      // Hub hosts the vault itself: no「中枢托管」source on the hub console.
+      srcToggle.hidden = isHubMode();
+      srcToggle.textContent = vaultMode ? '改用自定义供应商' : '改用中枢托管供应商';
+    }
     const setDisabled = (id, dis) => {
       const el = $(id);
       if (el) el.disabled = dis;
     };
-    setDisabled('newProvId', vaultMode);
     setDisabled('newProvName', vaultMode);
     setDisabled('newProvBaseUrl', vaultMode);
+    setDisabled('newProvApiKey', vaultMode);
     setDisabled('newProvApiType', vaultMode);
     toggle('newProvVaultGroup', vaultMode);
     toggle('newProvKeyAliasGroup', !vaultMode);
@@ -1569,12 +1756,6 @@
     } else {
       state.addProvVaultPick = '';
       applyPresetAutoMatch();
-    }
-    const hintEl = $('newProvSourceHint');
-    if (hintEl) {
-      hintEl.textContent = vaultMode
-        ? '选中后整体拉取该供应商的适配规则与全部 Key，名称 / URL 以中枢为准'
-        : '手动填写端点信息；输入名称或 ID 会自动匹配预设适配规则';
     }
   }
 
@@ -1593,10 +1774,10 @@
       // Three distinct empty states: manifest not loaded / loaded but hub hosts nothing /
       // loaded and every hub provider already exists locally.
       empty.textContent = !state.vaultManifest
-        ? '中枢清单未加载（请在系统设置配置 Vault 连接并点击「测试连接」）'
+        ? '中枢清单未加载（请在系统设置配置 Vault 连接）'
         : Object.keys(manifestProvs).length === 0
           ? '中枢清单为空：中枢暂未托管任何可拉取的供应商'
-          : '中枢清单中的供应商均已配置在本地，无需重复添加';
+          : '中枢清单中的供应商均已配置在本地';
       box.appendChild(empty);
       return;
     }
@@ -1609,14 +1790,11 @@
       clk(pill, () => {
         state.addProvVaultPick = pId;
         box.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
-        const idEl = $('newProvId');
         const nameEl = $('newProvName');
-        const baseEl = $('newProvBaseUrl');
-        if (idEl) idEl.value = pId;
         if (nameEl) nameEl.value = meta.name || pId;
-        if (baseEl) baseEl.value = meta.base_url || '';
-        if (hintEl) {
-          hintEl.textContent = `中枢 ${keyCount} 个 Key · 适配规则${meta.preset_id ? ` · 预设 ${meta.preset_id}` : ''}`;
+        const hintEl2 = $('newProvVaultHint');
+        if (hintEl2) {
+          hintEl2.textContent = `中枢 ${keyCount} 个 Key · 适配规则${meta.preset_id ? ` · 预设 ${meta.preset_id}` : ''}`;
         }
       });
       box.appendChild(pill);
@@ -1637,29 +1815,29 @@
     return null;
   }
 
+  // 预设匹配：按操作者在下拉里显式选的预设，或按输入的名称 / ID 自动匹配。
+  // 只填 Base URL（还空着时）、预设下拉与供应商 ID；协议选择器不动 ——
+  // 「自动识别」是默认口径，保存时才定（见 detectProviderProtocol）。
   function applyPresetAutoMatch() {
     if (($('newProvSource')?.value || 'custom') !== 'custom') return;
     const hintEl = $('newProvPresetHint');
-    const meta = matchPresetMeta($('newProvName')?.value) || matchPresetMeta($('newProvId')?.value);
+    const presetSel = $('newProvPreset');
+    const explicit = state.newProvPresetTouched ? (presetSel?.value || '').trim() : '';
+    const meta = (explicit && PRESETS_META[explicit])
+      || matchPresetMeta($('newProvName')?.value)
+      || matchPresetMeta($('newProvId')?.value);
     if (hintEl) {
-      // Surface the adapter revision right here: picking a brand must tell the
-      // operator which built-in adaptation is about to be applied.
       const rev = meta && meta.version ? `（适配 v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}）` : '';
       hintEl.textContent = meta ? `已按预设 ${meta.label}${rev} 自动填充` : '';
       hintEl.hidden = !meta;
       hintEl.classList.toggle('hidden', !meta);
     }
     if (!meta) return;
-    const apiSel = $('newProvApiType');
-    const apiType = normalizeApiType(meta.api_type);
-    if (apiSel && [...apiSel.options].some((o) => o.value === apiType)) apiSel.value = apiType;
+    if (presetSel && presetSel.value !== meta.id) presetSel.value = meta.id;
     const baseEl = $('newProvBaseUrl');
     if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
-    // Typing the brand name is enough: the ID is a machine handle nobody wants
-    // to invent twice, so derive it from the matched preset while it is still
-    // empty. It stays editable for anyone who wants a custom handle.
     const idEl = $('newProvId');
-    if (idEl && !idEl.value.trim()) idEl.value = meta.preset_id || meta.id;
+    if (idEl && !state.newProvIdTouched && !idEl.value.trim()) idEl.value = meta.preset_id || meta.id;
   }
 
   // --- 4b. 接入信息 view (its own tab) --------------------------------------
@@ -1696,6 +1874,18 @@
     }
     const seg = $('gwClientSeg');
     if (seg) seg.querySelectorAll('[data-gw-client]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-gw-client') === gatewayClientKind()));
+  }
+
+  // 密钥状态与协议提示共用一行说明（字段说明不常驻，只在缺密钥时才占一行）。
+  function paintAccessKeyState(clientKey) {
+    const el = $('gwAccessKeyState');
+    if (!el) return;
+    if (!clientKey) {
+      el.textContent = '尚未配置客户端密钥：去「系统设置 · 接入」生成一把，否则所有请求都会被 401';
+      el.hidden = false;
+      return;
+    }
+    el.hidden = true;
   }
 
   // Model → the providers its route candidates point at, resolved to display
@@ -1828,11 +2018,7 @@
     const clientKey = settings.client_key || settings.proxy_api_key || '';
     paintGatewayClientValues();
     if ($('chipKeyValue')) $('chipKeyValue').textContent = clientKey || '未配置';
-    if ($('accessKeyState')) {
-      $('accessKeyState').textContent = clientKey
-        ? '密钥在「系统设置 ①」里修改或随机生成'
-        : '尚未配置客户端密钥：去「系统设置 ①」生成一把，否则所有请求都会被 401';
-    }
+    paintAccessKeyState(clientKey);
     const keyChipBtn = $('gwCopyChips')?.querySelector('[data-copy="key"]');
     if (keyChipBtn) keyChipBtn.title = clientKey ? '复制主客户端密钥' : '主密钥未配置';
     renderGatewayModels();
@@ -1898,7 +2084,7 @@
     const model = String($('gwTestModel')?.value || '').trim();
     const prompt = String($('gwTestPrompt')?.value || '').trim() || '你好';
     if (!key) {
-      paint('主客户端密钥还没配置：到「系统设置 ①」生成一把再来试。', 'err');
+      paint('主客户端密钥还没配置：到「系统设置 · 接入」生成一把再来试。', 'err');
       return;
     }
     if (!model) {
@@ -2034,10 +2220,6 @@
     }
   }
 
-  // Closes the provider combobox panel of the add-model modal. Assigned by
-  // setupProvCombo once the static panel markup exists; the noop
-  // default keeps the modal-cancel closures safe before that.
-  let closeProvPanel = () => {};
 
   // --- Per-model capability (model catalog) ---
   // One (preset, model) query via window.HOST.modelInfo — the node answers from
@@ -2101,60 +2283,140 @@
     return parts.join(' · ');
   }
 
-  let capSeq = 0;
 
-  // Add-model modal: one debounced query per typed/picked upstream id. Full only
-  // — the Hub ships templates and has no engine to describe, so the container
-  // stays hidden there instead of lingering as an empty box.
-  function updateNewModelCapability() {
-    const box = $('newModelCapability');
-    if (!box) return;
-    if (window.HOST.kind === 'hub') {
-      box.hidden = true;
-      box.classList.add('hidden');
-      box.textContent = '';
-      return;
-    }
-    const pId = ($('newModelProvider')?.value || '').trim();
-    const target = ($('newModelTarget')?.value || '').trim();
-    const seq = ++capSeq;
-    if (!pId || !target) {
-      box.hidden = true;
-      box.classList.add('hidden');
-      box.textContent = '';
-      return;
-    }
-    fetchModelInfo(presetIdForProvider(pId), target).then((info) => {
-      // A slower earlier query must not overwrite the newest answer.
-      if (seq !== capSeq) return;
-      box.textContent = capabilitySummary(info);
-      box.hidden = false;
-      box.classList.remove('hidden');
+  function setupCreationForms() {
+    // 「新增 X」不再用居中弹框：在列表顶部插入一个空白编辑器（create 模式），
+    // 与编辑共用同一个构建函数。再次点击同一个按钮 = 收起。
+    clk($('btnAddProvider'), async () => {
+      if (state.creatingProvider) {
+        closeCreateEditor('providers');
+        return;
+      }
+      closeOtherCreateEditors('providers');
+      state.creatingProvider = true;
+      state.activeEditorKey = null;
+      state.newProvIdTouched = false;
+      state.newProvPresetTouched = false;
+      renderProvidersList();
+      // Force a reload so hub-side key/template changes since page load are visible.
+      await loadVaultManifest({ force: true });
+      if (($('newProvSource')?.value || '') === 'vault') renderVaultProviderPicks();
+    });
+
+    clk($('btnAddModel'), () => {
+      if (state.creatingModel) {
+        closeCreateEditor('models');
+        return;
+      }
+      closeOtherCreateEditors('models');
+      state.creatingModel = true;
+      state.activeEditorKey = null;
+      renderModelsList();
     });
   }
 
-  function setupCreationForms() {
-    const pForm = $('addProviderForm');
-    const mForm = $('addModelForm');
+  // 「新增供应商」的空白编辑器 —— 与编辑共用一套字段语义的 create 模式。
+  // 结构（组件 5 · .editor）：顶部文字链接（cURL 解析 / 来源切换）
+  // → 基本字段（名称 / Base URL / API Key，两列网格）
+  // → 「高级」折叠（ID / 协议 / 预设 / Key 标签 / RPM / UA / 配额 / 适配规则）
+  // → 底部 .form-actions--split：左无删除（还没建），右「取消」+「保存供应商」。
+  function buildProviderCreateEditor() {
+    const wrap = ce('div');
+    const apiTypeSel = `<select class="select" id="newProvApiType">
+                <option value="auto">自动识别（推荐）</option>
+                <option value="openai-completions">OpenAI 兼容 (/v1/chat/completions)</option>
+                <option value="anthropic-messages">Anthropic 原生 (/v1/messages)</option>
+                <option value="gemini">Gemini 兼容</option>
+                <option value="ocr">原生 OCR 接口 (/v1/ocr)</option>
+              </select>`;
+    wrap.innerHTML = `
+      <div class="section-bar">
+        <span class="form-label">新增供应商</span>
+        <div class="fields">
+          <button type="button" class="text-link" id="btnToggleCurlPaste">从 cURL 解析</button>
+          <button type="button" class="text-link" id="btnProvSourceToggle" hidden>改用中枢托管供应商</button>
+          <button type="button" class="dialog-close" id="btnXProv" aria-label="关闭新增供应商">✕</button>
+        </div>
+        <input type="hidden" id="newProvSource" value="custom">
+      </div>
+      <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
+        <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 命令，自动解析出 Base URL 与密钥"></textarea>
+      </div>
+      <div class="form-grid">
+        ${fg('名称', `<input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">`)}
+        ${fg('Base URL', `<input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">`)}
+        ${fg('API Key', `<textarea class="textarea input--code privacy-mask" id="newProvApiKey" placeholder="sk-...&#10;sk-...（可多行 / 逗号分隔多把）"></textarea>`, 'newProvApiKeyGroup', 'form-group--full')}
+      </div>
+      <div class="form-group hidden mb-3" id="newProvVaultGroup" hidden>
+        <label class="form-label">选择中枢托管供应商（仅列出本地缺失的）</label>
+        <div class="probe-pills-wrap" id="newProvVaultPick"></div>
+        <span class="text-xs text-muted" id="newProvVaultHint"></span>
+      </div>
+      <details class="headers-details mt-3">
+        <summary class="form-label">高级（供应商 ID / 协议 / 预设 / 限流）</summary>
+        <div class="form-grid mt-2">
+          ${fg('供应商 ID', `<input class="input input--code" id="newProvId" placeholder="由名称自动生成">`)}
+          ${fg('上游协议', `<div class="input-row">${apiTypeSel}<button class="btn" id="btnDetectProvider" type="button">探测协议</button></div>`)}
+          ${fg('预设', `<select class="select" id="newProvPreset"></select><span class="text-xs text-muted hidden" id="newProvPresetHint" hidden></span>`)}
+          ${fg('Key 标签前缀', `<input class="input" id="newProvKeyAlias" placeholder="pool-01（留空自动递增）">`, 'newProvKeyAliasGroup')}
+          ${fg('RPM 上限', `<input class="input tabular" id="newProvRpm" type="number" placeholder="0 = 不限">`)}
+          ${fg('每日重置时间', `<input class="input" id="newProvReset" placeholder="00:00+08:00">`)}
+          ${fg('客户端 UA', `<label class="form-label form-label--check"><input type="checkbox" id="newProvHideUa"><span>隐藏客户端 User-Agent</span></label>`)}
+          ${fg('声明式适配规则 (JSON)', `<textarea class="textarea textarea--json" id="newProvRules" placeholder='{}'></textarea>`, '', 'form-group--full')}
+        </div>
+      </details>
+      <div class="form-actions form-actions--split">
+        <div class="form-actions-group"></div>
+        <div class="form-actions-group">
+          <button class="btn" id="btnCancelAddProvider" type="button">取消</button>
+          <button class="btn btn--primary" id="btnConfirmAddProvider" type="button">保存供应商</button>
+        </div>
+      </div>
+    `;
+    // 接线由调用方在元素挂进 DOM 之后做（wireProviderCreateEditor）——
+    // applyNewProvSourceMode() 也在那里调：它用全局 $() 找控件，元素没接上时找不到。
+    return wrap;
+  }
 
-
-    clk($('btnAddProvider'), async () => {
-      toggle(pForm);
-      if (pForm && !pForm.hidden) {
+  // --- 供应商「新增」编辑器（create 模式）的行为 ---
+  // 元素在 create 模式下是动态生成的，接线必须发生在插入 DOM 之后。
+  function wireProviderCreateEditor() {
+    // 供应商来源：自定义 ↔ 中枢托管（Hub 端没有中枢托管这一路）。
+    const srcToggle = $('btnProvSourceToggle');
+    if (srcToggle) {
+      clk(srcToggle, () => {
+        const srcEl = $('newProvSource');
+        if (!srcEl) return;
+        srcEl.value = (srcEl.value || 'custom') === 'vault' ? 'custom' : 'vault';
         applyNewProvSourceMode();
-        // Force a reload so hub-side key/template changes since page load are visible.
-        await loadVaultManifest({ force: true });
-        if (($('newProvSource')?.value || '') === 'vault') renderVaultProviderPicks();
+        if (srcEl.value === 'vault') renderVaultProviderPicks();
+      });
+    }
+    // 初始态按当前角色收敛（Hub 隐藏「中枢托管」）。
+    applyNewProvSourceMode();
+    populatePresetDropdown($('newProvPreset'));
+
+    $('newProvName')?.addEventListener('input', () => {
+      applyPresetAutoMatch();
+      // 供应商 ID 由名称自动生成：只在操作者没手动改过 ID 时跟随。
+      const idEl = $('newProvId');
+      if (idEl && !state.newProvIdTouched) {
+        const meta = matchPresetMeta($('newProvName')?.value);
+        // 名称框输入时把能生成的 ID 先填进「高级」里的 ID 框，让想改的人有东西可改；
+        // 纯中文名生成不出来就留空，保存时由 autoProviderId() 兜底。
+        idEl.value = (meta && (meta.preset_id || meta.id)) || providerIdFromName($('newProvName')?.value);
       }
     });
-    clk($('btnCancelAddProvider'), () => toggle(pForm, false));
+    $('newProvId')?.addEventListener('input', () => {
+      state.newProvIdTouched = true;
+      applyPresetAutoMatch();
+    });
+    $('newProvPreset')?.addEventListener('change', () => {
+      state.newProvPresetTouched = true;
+      applyPresetAutoMatch();
+    });
 
-    const srcSel = $('newProvSource');
-    if (srcSel) srcSel.addEventListener('change', applyNewProvSourceMode);
-    $('newProvName')?.addEventListener('input', applyPresetAutoMatch);
-    $('newProvId')?.addEventListener('input', applyPresetAutoMatch);
-
-    // cURL Paste Toggle & Input (M3)
+    // cURL 粘贴：解析出 Base URL / 密钥 / 协议。
     const btnToggleCurl = $('btnToggleCurlPaste');
     const curlWrap = $('curlPasteWrap');
     const curlInput = $('curlPasteInput');
@@ -2181,7 +2443,7 @@
       });
     }
 
-    // Auto-detect protocols button in Add Provider (M1)
+    // 探测协议（高级区）：自动识别失败时的手动兜底。
     const btnDetect = $('btnDetectProvider');
     if (btnDetect) {
       clk(btnDetect, async () => {
@@ -2219,6 +2481,13 @@
       });
     }
 
+    const cancelCreate = () => {
+      state.creatingProvider = false;
+      renderProvidersList();
+    };
+    clk($('btnCancelAddProvider'), cancelCreate);
+    clk($('btnXProv'), cancelCreate);
+
     clk($('btnConfirmAddProvider'), async () => {
       const sourceVal = $('newProvSource')?.value || 'custom';
 
@@ -2239,7 +2508,7 @@
           const res = await window.HOST.fetchVaultCredentials(pickId);
           if (res && res.ok) {
             state.activeEditorKey = `p_${pickId}`;
-            toggle(pForm, false);
+            state.creatingProvider = false;
             await loadData();
             toast(`已拉取中枢供应商 ${pickId}`, 'ok');
           } else {
@@ -2256,19 +2525,30 @@
       let id = ($('newProvId')?.value || '').trim();
       const name = ($('newProvName')?.value || '').trim() || id;
       const baseUrl = ($('newProvBaseUrl')?.value || '').trim();
-      const apiType = normalizeApiType($('newProvApiType')?.value);
       const keyAlias = ($('newProvKeyAlias')?.value || '').trim() || 'k1';
       const apiKey = ($('newProvApiKey')?.value || '').trim();
       const matchedMeta = matchPresetMeta(name) || matchPresetMeta(id);
       const resolvedPresetId = matchedMeta
         ? (matchedMeta.preset_id || matchedMeta.id)
         : (PRESETS_META[id]?.preset_id || '');
-      // Last-resort handle: the ID field is auto-filled by the preset match, but
-      // a custom provider named purely in Chinese still needs an ASCII id.
-      if (!id) id = resolvedPresetId || name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+      // 供应商 ID 自动生成：手填的「高级」ID 优先，其次预设，最后由名称生成
+      // （纯中文名会退到随机短 ID）。ID 框收在「高级」里，默认看不到，
+      // 所以绝不能因为没填而拦住保存。手填的撞上现有供应商时照旧提示去改，
+      // 不自动改名 —— 撞上往往是想编辑已有供应商，擅自改名只会多出一个。
+      const existing = (state.config && state.config.providers) || {};
+      if (!id) id = resolvedPresetId || autoProviderId(name);
+      if (existing[id]) return toast(`供应商 ID「${id}」已存在，请在「高级」里换一个`, 'warn');
 
-      if (!id) return toast('请输入供应商标识 ID', 'warn');
+      if (!name) return toast('请输入供应商名称', 'warn');
       if (!baseUrl) return toast('请输入 Base URL', 'warn');
+      if (!apiKey) return toast('请输入 API Key', 'warn');
+
+      // 协议默认自动识别：只在操作者没有手动选过时探测。
+      const protoSel = $('newProvApiType');
+      const protoRaw = (protoSel?.value || 'auto');
+      const apiType = protoRaw === 'auto'
+        ? await detectProviderProtocol(baseUrl, apiKey)
+        : normalizeApiType(protoRaw);
 
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.providers = state.config.providers || {};
@@ -2290,415 +2570,85 @@
       if (matchedMeta?.anthropic_base_url) {
         newProv.anthropic_base_url = matchedMeta.anthropic_base_url;
       }
+      // 「高级」里的可选字段：留空就不写进配置（与旧行为一致）。
+      const rpm = Number(($('newProvRpm')?.value || '').trim());
+      if (rpm > 0) newProv.rpm_per_key = rpm;
+      if ($('newProvHideUa')?.checked) newProv.hide_client_name = true;
+      const resetAt = ($('newProvReset')?.value || '').trim();
+      if (resetAt) newProv.quota_reset_at = resetAt;
+      const rawRules = ($('newProvRules')?.value || '').trim();
+      if (rawRules) {
+        try {
+          newProv.adapter_rules = JSON.parse(rawRules);
+        } catch (err) {
+          return toast(`adapter_rules JSON 格式有误: ${err.message}`, 'err');
+        }
+      }
       state.config.providers[id] = newProv;
       state.activeEditorKey = `p_${id}`;
-      toggle(pForm, false);
+      state.creatingProvider = false;
+      state.newProvIdTouched = false;
       await persistConfig('供应商创建成功');
     });
-
-    // Both creation forms are centered overlays now (same dimmed-backdrop pattern
-    // as the login screen): a click on the backdrop itself cancels, and each has an
-    // explicit 关闭 button in its header next to the Esc key.
-    if (pForm) {
-      pForm.addEventListener('click', (ev) => {
-        if (ev.target === pForm) toggle(pForm, false);
-      });
-    }
-    clk($('btnXProv'), () => toggle(pForm, false));
-
-    const cancelAddModel = () => {
-      toggle(mForm, false);
-      closeProvPanel();
-      resetProbe();
-    };
-    if (mForm) {
-      mForm.addEventListener('click', (ev) => {
-        if (ev.target === mForm) cancelAddModel();
-      });
-    }
-    clk($('btnXModel'), cancelAddModel);
-
-    setupProvCombo();
-
-    clk($('btnAddModel'), () => {
-      toggle(mForm);
-      if (mForm && !mForm.hidden) {
-        // Fresh form on every open: a model name left over from the previous
-        // session would otherwise be confirmed into the new route untouched.
-        resetProbe();
-        closeProvPanel();
-        const provInput = $('newModelProvider');
-        if (provInput) provInput.value = '';
-        const nameInput = $('newModelName');
-        if (nameInput) {
-          nameInput.value = '';
-          nameInput.readOnly = true;
-        }
-        renderKeyPills();
-      }
-    });
-    // 对外模型名 defaults to the upstream model ID: read-only until the operator
-    // explicitly opts into a custom name (only multi-candidate routes need one).
-    clk($('btnCustomModelName'), () => {
-      const nameInput = $('newModelName');
-      if (!nameInput) return;
-      nameInput.readOnly = false;
-      nameInput.focus();
-    });
-    // Keep the read-only name in sync with the upstream target while the operator
-    // has not opted into a custom name: what the client calls it is what it is.
-    $('newModelTarget')?.addEventListener('input', () => {
-      const targetVal = ($('newModelTarget')?.value || '').trim();
-      const nameInput = $('newModelName');
-      if (nameInput && nameInput.readOnly) nameInput.value = targetVal;
-      // A pill may only look picked while it IS the current target: erasing or
-      // rewriting the field by hand must clear the highlight, otherwise the
-      // confirm step would silently bind the stale pill's model id.
-      document.querySelectorAll('#npbPills .probe-pill--managed').forEach((b) => {
-        if ((b.textContent || '').trim() !== targetVal) b.classList.remove('probe-pill--managed');
-      });
-      updateNewModelCapability();
-    });
-    clk($('btnCancelAddModel'), cancelAddModel);
-
-    // Switching the provider invalidates the previous probe results, the picked
-    // keys (they belong to the old provider's key pool), the picked upstream
-    // target (it belongs to the old provider's model list) and any custom
-    // 对外模型名 typed for the old provider — resetProbe covers all.
-    $('newModelProvider')?.addEventListener('change', () => {
-      resetProbe({ resetName: true });
-      renderKeyPills();
-      updateNewModelCapability();
-    });
-
-    // Probe the upstream model list through the gateway (works for both full and
-    // hub hosts: the backend resolves an unmasked key from the stored provider).
-    const probeBtn = $('btnProbeModel');
-    // Failure/empty probes keep a persistent inline note inside the probe result
-    // box (#npbPills): the toast alone auto-dismisses, and resetProbe() then
-    // leaves the form looking untouched — the operator would never see why
-    // nothing appeared. Cleared by the next probe, provider switch or close.
-    const showProbeFail = (msg) => {
-      const list = $('npbPills');
-      if (list) list.innerHTML = `<span class="text-xs text-muted">${eh(msg)}</span>`;
-      toggle('npbBox', true);
-    };
-    clk(probeBtn, async () => {
-      const prov = ($('newModelProvider')?.value || '').trim();
-      if (!prov) return toast('请先选择供应商', 'warn');
-      const p = state.config?.providers?.[prov] || {};
-      toast(`探测 ${prov}...`, 'info');
-      probeBtn.disabled = true;
-      try {
-        const res = await window.HOST.probeModels({
-          provider: prov,
-          base_url: p.base_url || '',
-          api_type: normalizeApiType(p.api_type),
-        });
-        const models = Array.isArray(res?.models) ? res.models : [];
-        if (models.length > 0) {
-          resetProbe();
-          state.addModelProbed = models;
-          // Shared with the route editor's「+ 添加候选」popup.
-          state.probedModelsByProvider[prov] = models;
-          renderProbePills();
-          toast(`探测成功: ${models.length} 个模型`, 'ok');
-        } else {
-          // A failed/empty probe invalidates the previous result too: leave no
-          // unmarked stale pills from an earlier probe behind.
-          resetProbe();
-          const msg = res?.error ? `未探测到模型: ${scrubUiText(res.error)}` : '未探测到可用模型，可手填上游目标模型 ID';
-          showProbeFail(msg);
-          toast(msg, 'warn');
-        }
-      } catch (e) {
-        resetProbe();
-        const msg = `探测异常: ${scrubUiText(e.message)}`;
-        showProbeFail(msg);
-        toast(msg, 'err');
-      } finally {
-        probeBtn.disabled = false;
-      }
-    });
-
-    clk($('btnConfirmAddModel'), async () => {
-      // 对外模型名 is optional now: fall back to the upstream target model ID,
-      // then to the probed model picked in the pill list.
-      const nameVal = ($('newModelName')?.value || '').trim();
-      const targetVal = ($('newModelTarget')?.value || '').trim();
-      const pickedPill = document.querySelector('#npbPills .probe-pill--managed');
-      const mName = nameVal || targetVal || (pickedPill?.textContent || '').trim();
-      const prov = ($('newModelProvider')?.value || '').trim();
-      const target = targetVal || mName;
-      const pickedLabels = [...document.querySelectorAll('#nmKeys .probe-pill--managed')]
-        .map((b) => b.dataset.key)
-        .filter(Boolean);
-
-      if (!mName) return toast('请先选择或填写模型', 'warn');
-
-      state.config = state.config || { providers: {}, agent_models: {} };
-      state.config.agent_models = state.config.agent_models || {};
-
-      if (state.config.agent_models[mName]) {
-        state.activeEditorKey = `m_${mName}`;
-        toggle(mForm, false);
-        renderModelsList();
-        return toast('路由已存在', 'info');
-      }
-
-      if (!prov) return toast('请选择供应商', 'warn');
-      // 手动输入 may hold any free-text id: fail on a missing provider before the
-      // key check, otherwise the misleading「请至少勾选一把 Key」hides the real cause.
-      if (!state.config?.providers?.[prov]) return toast(`供应商 ${prov} 不存在，请先在供应商页创建`, 'warn');
-      // Key picking is mandatory: every checked key becomes one candidate, and none
-      // is pre-checked (the pool must be an explicit operator choice).
-      if (pickedLabels.length === 0) return toast('请至少勾选一把 Key', 'warn');
-
-      const provKeys = state.config?.providers?.[prov]?.api_keys || [];
-      const candidates = pickedLabels
-        // Disabled keys are not pillable and not bindable: the scheduler drops
-        // them when expanding candidates, so a binding would never route.
-        .filter((lbl) => provKeys.some((k) => k && k.enabled !== false && (k.label || k.id) === lbl))
-        .map((lbl) => ({ provider: prov, key_label: lbl, target_model: target, enabled: true, weight: 1 }));
-      if (candidates.length === 0) return toast('勾选的 Key 已不存在或已禁用', 'warn');
-
-      state.config.agent_models[mName] = { routing_strategy: 'sticky_failover', active_key: '', enabled: true, candidates };
-      state.activeEditorKey = `m_${mName}`;
-      toggle(mForm, false);
-      resetProbe();
-      await persistConfig('路由添加成功');
-    });
   }
 
-  // --- Provider combobox (searchable dropdown for「首选供应商」) ---
-  // Replaces the bare <select>: an input plus the floating #npPanel (.np-panel,
-  // absolutely positioned under the input by CSS inside the .np-combo wrapper)
-  // whose rows show the provider name plus a small Base URL line and a pinned top
-  // search filter. Rows reuse .row/.who/.name from the provider list; the panel
-  // itself is a .card. Only existing providers are listed (a route cannot be
-  // created against a provider that does not exist yet). Keyboard semantics mirror
-  // a native select: ArrowDown/ArrowUp walk the options, Esc closes the panel first
-  // and only then lets the global handler close the modal.
-  function setupProvCombo() {
-    const input = $('newModelProvider');
-    const panel = $('npPanel');
-    if (!input || !panel) return;
 
-    const showPanel = () => {
-      syncProvOptions();
-      toggle(panel, true);
-      $('npSearch')?.focus();
-    };
-    closeProvPanel = () => toggle(panel, false);
 
-    input.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
-    // Clicking an already-focused input fires no focus event; without this an
-    // Esc-closed panel could never be reopened without blurring the input first.
-    input.addEventListener('click', () => { if (panel.hidden) showPanel(); });
-    // A pointerdown outside the combo (input + floating panel) dismisses the panel.
-    // The panel is never closed from an input event: the operator is typing in
-    // #npSearch when they click a row, and any close keyed to that input would
-    // fire before the row's click lands. Rows are inside .np-combo, so this
-    // handler leaves them alone.
-    document.addEventListener('pointerdown', (e) => {
-      if (panel.hidden) return;
-      const combo = input.closest('.np-combo');
-      if (combo && !combo.contains(e.target)) closeProvPanel();
-    });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !panel.hidden) {
-        e.stopPropagation();
-        closeProvPanel();
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (panel.hidden) showPanel();
-        panel.querySelector('button.row')?.focus();
-      }
-    });
-
-    $('npSearch')?.addEventListener('input', () => syncProvOptions());
-
-    // Esc / arrows anywhere inside the panel (search box included, events bubble):
-    // close it, or walk the option rows.
-    panel.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !panel.hidden) {
-        e.stopPropagation();
-        closeProvPanel();
-        return;
-      }
-      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-      const rows = [...panel.querySelectorAll('button.row')];
-      if (rows.length === 0) return;
-      e.preventDefault();
-      const idx = rows.indexOf(document.activeElement);
-      (e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
-    });
+  // 某个页签的列表重绘：state 与 DOM 必须同步 —— state 标志清了但 DOM 没清
+  // = 僵尸编辑器（Esc 判 state 关不掉，页头按钮文案停在「收起」）。
+  function renderTabList(tab) {
+    if (tab === 'providers') renderProvidersList();
+    else if (tab === 'models') renderModelsList();
+    else if (tab === 'nodes') renderNodesList();
+    else if (tab === 'activity') renderRecentRequests();
   }
 
-  function syncProvOptions() {
-    const box = $('npOptions');
-    if (!box) return;
-    const f = String($('npSearch')?.value || '').trim().toLowerCase();
-    const provs = state.config?.providers || {};
-    const ids = Object.keys(provs).sort().filter((pId) => {
-      if (!f) return true;
-      const p = provs[pId] || {};
-      return `${pId} ${p.name || ''} ${p.base_url || ''}`.toLowerCase().includes(f);
-    });
-    box.innerHTML = '';
-    if (ids.length === 0) {
-      box.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商（请先在供应商页添加）</div>';
-      return;
+  // create 编辑器（列表顶部的空白 .editor）归哪个页签管：state 标志 → 页签。
+  // Esc 要按「归属页签」重绘列表，不能按当前页签 —— create 编辑器可以属于
+  // 当前页签之外的页签（切走再切回它还在，页头按钮仍是「收起」）。
+  const CREATE_EDITOR_FLAGS = { providers: 'creatingProvider', models: 'creatingModel', nodes: 'creatingNode' };
+
+  function anyCreateEditorTab() {
+    for (const tab of Object.keys(CREATE_EDITOR_FLAGS)) {
+      if (state[CREATE_EDITOR_FLAGS[tab]]) return tab;
     }
-    ids.forEach((pId) => {
-      const p = provs[pId] || {};
-      const rowBtn = ce('button');
-      rowBtn.className = 'row';
-      rowBtn.setAttribute('role', 'option');
-      rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
-      // mousedown is prevented so focus never leaves #npSearch mid-click: the click
-      // lands on the row instead of being consumed by a focus transfer (this is a
-      // focus guard, not a close-guard — no input listener closes the panel).
-      rowBtn.addEventListener('mousedown', (e) => e.preventDefault());
-      clk(rowBtn, () => pickProv(pId));
-      box.appendChild(rowBtn);
-    });
+    return null;
   }
 
-  // Commit the picked provider: fill the combobox input, close the panel, move
-  // focus to the next field and refresh everything that depends on the provider
-  // (probe results + key pills). Setting .value programmatically fires no change
-  // event, so the reset that the change handler does for typed input must happen
-  // here too — including the custom 对外模型名, which belongs to the old provider.
-  function pickProv(pId) {
-    const input = $('newModelProvider');
-    if (input) input.value = pId;
-    closeProvPanel();
-    resetProbe({ resetName: true });
-    renderKeyPills();
-    updateNewModelCapability();
-    $('newModelTarget')?.focus();
+  // 关掉 create 编辑器：state 清零后必须重绘它所属的列表，否则 DOM 上留下僵尸。
+  function closeCreateEditor(tab) {
+    const t = tab || anyCreateEditorTab();
+    if (!t) return false;
+    const flag = CREATE_EDITOR_FLAGS[t];
+    if (!flag || !state[flag]) return false;
+    state[flag] = false;
+    renderTabList(t);
+    return true;
   }
 
-  // --- Add-model form: key picking + upstream model probe ---
-  // Clears everything the previous probe session produced, including「上游目标模型
-  // ID」: a target picked (or typed) against one provider must never survive a
-  // provider switch — confirm would otherwise persist the old provider's model id
-  // into the new provider's candidates as a silent broken route.
-  // opts.resetName also wipes an operator-typed 对外模型名 and folds it back to
-  // read-only: a provider switch is a fresh route, so the previous provider's
-  // custom name must not become the new provider's target_model through the
-  // `targetVal || mName` fallback. A probe re-run on the same provider keeps it.
-  function resetProbe(opts = {}) {
-    state.addModelProbed = null;
-    const filterEl = $('npbFilter');
-    if (filterEl) filterEl.value = '';
-    toggle('npbBox', false);
-    const pills = $('npbPills');
-    if (pills) pills.innerHTML = '';
-    const targetEl = $('newModelTarget');
-    if (targetEl) targetEl.value = '';
-    // The capability line describes the cleared target, so it goes with it.
-    capSeq++;
-    const capBox = $('newModelCapability');
-    if (capBox) {
-      capBox.hidden = true;
-      capBox.classList.add('hidden');
-      capBox.textContent = '';
-    }
-    const nameEl = $('newModelName');
-    if (nameEl && (nameEl.readOnly || opts.resetName)) {
-      nameEl.value = '';
-      if (opts.resetName) nameEl.readOnly = true;
-    }
-  }
-
-  // Key capsules for the selected provider. None is pre-checked on purpose: the
-  // candidate pool of the new route must be an explicit operator choice. Disabled
-  // keys are not listed — the scheduler drops disabled keys when expanding
-  // candidates, so binding one would create a route that silently never routes.
-  // Selection state lives in the DOM (.probe-pill--managed), re-read at confirm time.
-  function renderKeyPills() {
-    const box = $('nmKeys');
-    if (!box) return;
-    box.innerHTML = '';
-    const provId = ($('newModelProvider')?.value || '').trim();
-    const allKeys = state.config?.providers?.[provId]?.api_keys || [];
-    const keys = allKeys.filter((k) => k && k.enabled !== false);
-    if (!provId || keys.length === 0) {
-      box.innerHTML = `<span class="text-xs text-muted">${!provId ? '请先选择供应商' : '该供应商没有已启用的 Key'}</span>`;
-      toggle('nmKeysVaultHint', false);
-      return;
-    }
-    // Capsules show the key label only: the vault/local distinction is a single
-    // line above the pill group (#nmKeysVaultHint), not a badge repeated per pill.
-    // Not on the hub console itself: there every key is hub-issued, so the
-    //「删除会本地移除、可重新拉取」wording would be wrong.
-    const prov = state.config?.providers?.[provId] || {};
-    const hasVaultKey = !isHubMode() && (prov.origin === 'vault' || keys.some((k) => k?.origin === 'vault'));
-    toggle('nmKeysVaultHint', hasVaultKey);
-    keys.forEach((k, idx) => {
-      const label = k?.label || k?.id || `key-${idx}`;
-      const pill = ce('button');
-      pill.type = 'button';
-      pill.dataset.key = label;
-      pill.className = 'probe-pill';
-      pill.textContent = label;
-      clk(pill, () => pill.classList.toggle('probe-pill--managed'));
-      box.appendChild(pill);
-    });
-  }
-
-  // Probe result capsules: click fills「上游目标模型 ID」and highlights the pill
-  // (single selection — clicking another pill just moves the highlight).
-  // #npbFilter is static DOM and its input listener is bound once, so draw must
-  // re-read state.addModelProbed on every call: closing over one probe's array
-  // made the filter re-render the previous provider's list after a re-probe.
-  function renderProbePills() {
-    const list = $('npbPills');
-    if (!list) return;
-    const models = Array.isArray(state.addModelProbed) ? state.addModelProbed : [];
-    if (models.length === 0) {
-      toggle('npbBox', false);
-      list.innerHTML = '';
-      return;
-    }
-    toggle('npbBox', true);
-    const targetInput = $('newModelTarget');
-    const draw = (rawFilter) => {
-      const live = state.addModelProbed || [];
-      list.innerHTML = '';
-      const f = String(rawFilter || '').trim().toLowerCase();
-      const visible = (f ? live.filter((m) => String(m).toLowerCase().includes(f)) : live).slice(0, 200);
-      const curTarget = (targetInput?.value || '').trim();
-      visible.forEach((modelName) => {
-        const pill = ce('button');
-        pill.type = 'button';
-        pill.className = `probe-pill${curTarget === modelName ? ' probe-pill--managed' : ''}`;
-        pill.textContent = modelName;
-        clk(pill, () => {
-          if (targetInput) {
-            targetInput.value = modelName;
-            // Reuse the same sync path as typing (read-only name mirrors it).
-            targetInput.dispatchEvent(new Event('input'));
-          }
-          list.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
-        });
-        list.appendChild(pill);
-      });
-    };
-    draw('');
-    const filterEl = $('npbFilter');
-    if (filterEl && !filterEl.dataset.bound) {
-      filterEl.dataset.bound = '1';
-      filterEl.addEventListener('input', (e) => draw(e.target.value));
+  // 开新的 create 编辑器前，先关掉别处还开着的（同一时刻只有一个编辑器）。
+  function closeOtherCreateEditors(keepTab) {
+    for (const tab of Object.keys(CREATE_EDITOR_FLAGS)) {
+      if (tab !== keepTab) closeCreateEditor(tab);
     }
   }
 
   function switchTab(tab) {
     stopOAuthPolling();
+    // create 编辑器（列表顶部的空白 .editor）跟着它所属的页签走：切走再切回
+    // 它还在、草稿也还在、页头按钮仍是「收起」—— state 与 DOM 一致，Esc 也能关。
+    // 所以这里**不**清 creatingProvider / creatingModel / creatingNode。
+    // 「点行展开」的编辑器随页签切换关闭（展开态的草稿不跨页签保留）——
+    // 但 state 清了，DOM 上那一行也得摘掉，否则留下僵尸编辑器。
+    const leaving = state.activeTab;
+    const hadExpanded = Boolean(state.activeEditorKey || state.nodeInstallFor);
     state.activeTab = tab;
     state.activeEditorKey = null;
+    state.nodeInstallFor = null;
+    // state 清了，DOM 就必须跟上（否则又留下僵尸编辑器）。
+    // leaving !== tab：切页签，孤儿在「离开的那个页签」里；
+    // leaving === tab：点当前页签的导航，孤儿就在这个页签里。
+    if (hadExpanded && leaving) renderTabList(leaving);
 
     document.querySelectorAll('.seg-btn').forEach((b) => {
       if (b.getAttribute('data-tab') === tab) {
@@ -2722,11 +2672,14 @@
     }
 
     if (tab === 'activity') {
-      if (window.HOST.kind === 'hub') {
-        renderHubOverview();
-      } else if (window.HOST.capabilities.usageAndTraces) {
+      if (window.HOST.capabilities.usageAndTraces) {
         loadActivityData();
       }
+    }
+
+    if (tab === 'nodes') {
+      // 节点页自己就是 Hub 的落地页：进来就拉一次最新节点。
+      loadNodesData();
     }
 
     if (tab === 'access') {
@@ -2737,8 +2690,7 @@
     if (tab === 'providers' && !isHubMode() && window.HOST.capabilities.vaultClient) {
       loadVaultManifest().then((manifest) => {
         const srcSel = $('newProvSource');
-        const pForm = $('addProviderForm');
-        if (manifest && srcSel && srcSel.value === 'vault' && pForm && !pForm.hidden) {
+        if (manifest && srcSel && srcSel.value === 'vault' && state.creatingProvider) {
           renderVaultProviderPicks();
         }
       });
@@ -2753,7 +2705,6 @@
         const verEl = $('configVersionDisplay');
         if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
 
-        refreshDatalists();
         renderProvidersList();
         renderModelsList();
         renderSettingsView();
@@ -2761,7 +2712,6 @@
 
       if (window.HOST.capabilities.nodeManager) {
         await loadNodesData();
-        mountIssueScopeLists();
       }
 
       if (!isHubMode() && !state.extraPresetsLoaded && window.HOST.getPresetsExtra) {
@@ -2790,7 +2740,7 @@
         }).catch(() => {});
       }
 
-      if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+      if (window.HOST.kind === 'hub' && state.activeTab === 'nodes') {
         renderHubOverview();
       } else if (window.HOST.capabilities.usageAndTraces && state.activeTab === 'activity') {
         await loadActivityData();
@@ -2806,7 +2756,7 @@
       if (res && res.ok) {
         state.nodes = res.nodes || [];
         renderNodesList();
-        if (window.HOST.kind === 'hub' && state.activeTab === 'activity') {
+        if (window.HOST.kind === 'hub' && state.activeTab === 'nodes') {
           renderHubOverview();
         }
       }
@@ -2816,12 +2766,12 @@
   }
 
 
+  // 中枢概览（节点页底部折叠区）：下发规模 KPI + 全部节点的模型使用分布。
+  // 「活跃 VM 节点」信息不再单独成表 —— 节点列表本身承担（状态点 + 最近同步时间）。
   function renderHubOverview() {
     const kpiGrid = $('hubKpiGrid');
-    const nodeBody = $('hubNodeStatsBody');
     const usageBody = $('hubModelUsageBody');
-    const summarySub = $('hubHealthSummarySub');
-    if (!kpiGrid || !nodeBody || !usageBody) return;
+    if (!kpiGrid || !usageBody) return;
 
     const cfg = state.config || {};
     const providers = cfg.providers || {};
@@ -2893,61 +2843,12 @@
     ];
 
     kpiGrid.innerHTML = kpis.map((item) => `
-      <div class="kpi-card">
-        <span class="kpi-label">${eh(item.label)}</span>
-        <span class="kpi-value">${eh(item.value)}</span>
-        <span class="kpi-sub">${eh(item.sub)}</span>
+      <div class="metric-box">
+        <div class="metric-box-label">${eh(item.label)}</div>
+        <div class="metric-box-val tabular">${eh(item.value)}</div>
+        <div class="text-xs text-muted">${eh(item.sub)}</div>
       </div>
     `).join('');
-
-    if (summarySub) {
-      summarySub.textContent = `共 ${nodes.length} 个节点，${onlineCount} 个在线（15 分钟内同步过）`;
-    }
-
-    // --- Active VM table ---
-    const sortedNodes = nodes.slice().sort((a, b) => {
-      const ta = a.last_seen ? new Date(a.last_seen).getTime() : 0;
-      const tb = b.last_seen ? new Date(b.last_seen).getTime() : 0;
-      return tb - ta;
-    });
-
-    if (sortedNodes.length === 0) {
-      nodeBody.innerHTML = '<tr><td colspan="7" class="text-muted">暂无接入节点，点击右上角「管理节点」签发</td></tr>';
-    } else {
-      nodeBody.innerHTML = '';
-      for (const n of sortedNodes) {
-        const lastMs = n.last_seen ? new Date(n.last_seen).getTime() : 0;
-        const online = n.enabled !== false && lastMs && (nowMs - lastMs) <= ONLINE_MS;
-        const statusHtml = n.enabled === false
-          ? '<span class="pill pill--red">已停用</span>'
-          : online
-            ? '<span class="pill pill--green">在线</span>'
-            : '<span class="pill pill--amber">离线</span>';
-
-        // “未上报” here always meant USAGE (which models the node actually served),
-        // not the delivered template — reading it as “config didn't land” was a
-        // real support case in the lite E2E. Name it for what it is.
-        const usageModels = n.usage && n.usage.models ? Object.keys(n.usage.models) : [];
-        const modelText = usageModels.length
-          ? usageModels.slice(0, 3).map((m) => eh(m)).join(', ') + (usageModels.length > 3 ? ` +${usageModels.length - 3}` : '')
-          : '<span class="text-muted">用量未上报</span>';
-
-        const binBadge = n.last_binary_version
-          ? ` <span class="pill tabular">${eh(n.last_binary_version)}</span>`
-          : '';
-        const tr = ce('tr');
-        tr.innerHTML = `
-          <td><strong>${eh(n.name || n.id)}</strong></td>
-          <td><span class="pill pill--accent">${eh(n.role || 'full')}</span>${binBadge}</td>
-          <td>${statusHtml}</td>
-          <td class="text-sm">${modelText}</td>
-          <td class="tabular">配置 #${n.last_config_version || 1} · ${n.sync_count || 0} 次</td>
-          <td class="tabular">${eh(lastMs ? formatTime(lastMs / 1000) : '从未同步')}</td>
-          <td class="tabular">${eh(n.last_ip || '未上报')}</td>
-        `;
-        nodeBody.appendChild(tr);
-      }
-    }
 
     // --- Model usage distribution ---
     const usageRows = [...modelUsage.entries()].sort((a, b) => b[1].requests - a[1].requests);
@@ -2971,16 +2872,15 @@
     }
   }
 
+  // Hub 端「一键探活全部 Key」：逐把跑探活（不消耗推理额度）。
   async function verifyAllHubKeys() {
     if (state.batchVerifying) return;
     const providers = state.config?.providers || {};
     const pIds = Object.keys(providers).sort();
     if (pIds.length === 0) return toast('暂无供应商可探活', 'warn');
-
     const btn = $('btnHubBatchVerifyAll');
     state.batchVerifying = true;
     if (btn) btn.disabled = true;
-
     let total = 0;
     let ok = 0;
     try {
@@ -2991,25 +2891,8 @@
         for (let i = 0; i < keys.length; i++) {
           const k = keys[i];
           total++;
-          const lbl = k.label || k.id || `key-${i}`;
-          try {
-            const r = await window.HOST.verifyKey({
-              provider: pId,
-              api_key: k.key,
-              key: k.key,
-              key_label: lbl,
-              base_url: p.base_url || '',
-              api_type: normalizeApiType(p.api_type),
-            });
-            syncVersionFromRes(r);
-            k.last_ok = !!(r && (r.ok || r.valid));
-            k.last_status = r?.status || (k.last_ok ? 200 : 0);
-            k.last_latency_ms = r?.latency_ms ?? r?.ms ?? 0;
-            k.last_checked_at = new Date().toISOString();
-            if (k.last_ok) ok++;
-          } catch (_) {
-            k.last_ok = false;
-          }
+          await verifyOneKey(pId, p, k, k.label || k.id || `key-${i}`, true);
+          if (k.last_ok) ok++;
         }
         renderHubOverview();
       }
@@ -3191,13 +3074,28 @@
   }
 
   // --- View: Providers (M1~M6, U2, U4) ---
+  // 列表行（组件 3 · .list > .row）：一行只允许 名称 / 一行次要信息 / 一个状态 /
+  // 至多一个计数。适配版本、归属、正常数等次要标签整体挪进编辑器（点开行即见），
+  // 列表不再堆 pill。
   function renderProvidersList() {
     const container = $('providersList');
     if (!container) return;
-    // Every config mutation ends in this render, so this is the one place the
-    // index bar needs to re-sync with state.config.providers.
+    // 列表即将重建（innerHTML 替换）：挂在旧 DOM 上的菜单浮层会变成死元素，
+    // 先关掉，别让它们留在 openMenus 里干扰 Esc。
+    closeAllMenus();
     mountProviderAlphaBar();
+    // create 编辑器的草稿必须在 innerHTML 替换**之前**抓 —— 旧 DOM 一被清空，
+    // 控件就找不到了，抓到的永远是空值（列表因保存 / 探活重绘时草稿被冲掉）。
+    const createDraft = state.creatingProvider ? captureProviderCreateDraft() : null;
     container.innerHTML = '';
+
+    // 页面头的「新增供应商」按钮与 create 编辑器互斥：编辑器开着时它变成
+    // 「收起」（普通按钮），避免同一屏出现两个主按钮。
+    const addBtn = $('btnAddProvider');
+    if (addBtn) {
+      addBtn.classList.toggle('btn--primary', !state.creatingProvider);
+      addBtn.textContent = state.creatingProvider ? '收起' : '新增供应商';
+    }
 
     const providers = (state.config && state.config.providers) || {};
     const q = state.providerQuery || '';
@@ -3205,25 +3103,56 @@
 
     const pKeys = Object.keys(providers).sort().filter((pId) => {
       const p = providers[pId] || {};
-      const keys = p.api_keys || [];
       if (q) {
         const hay = `${pId} ${p.name || ''} ${p.base_url || ''} ${p.preset_id || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      // Alphabetical bucket: the only filter that earns its slot. Status pills on
-      // the card already say enabled/healthy; the only question an operator has
-      // is "where in the list is <brand>", and A–Z answers it directly. Bucketing
-      // goes through providerBucketOf() so the chip counts and this filter can
-      // never disagree.
+      // A–Z 筛选与 providerBucketOf() 共用一个分桶规则，计数与过滤永不打架。
       if (f !== 'all' && providerBucketOf(p, pId) !== f) return false;
       return true;
     });
 
+    // 「新增供应商」= 在列表顶部插入一个空白编辑器（create 模式）。
+    // 列表为空时也要有它 —— 否则空状态里点「新增供应商」什么都不会发生。
+    if (state.creatingProvider) {
+      // 列表可能因为别的原因重绘（保存 / 探活后都会重绘）：把已填的草稿带过去。
+      const draft = createDraft;
+      const createEditor = ce('div');
+      createEditor.className = 'editor';
+      createEditor.id = 'providerCreateEditor';
+      const wrap = buildProviderCreateEditor();
+      createEditor.appendChild(wrap);
+      container.appendChild(createEditor);
+      // 先挂进 DOM 再接线：wireProviderCreateEditor() 用全局 $() 找控件。
+      wireProviderCreateEditor();
+      restoreProviderCreateDraft(draft);
+    }
+
     if (pKeys.length === 0) {
-      const emptyRow = ce('div');
-      emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = q || f !== 'all' ? '没有符合筛选条件的供应商' : '暂无已配置供应商，请点击上方「添加供应商」';
-      container.appendChild(emptyRow);
+      const filtered = Boolean(q) || f !== 'all';
+      const empty = ce('div');
+      empty.className = 'card-pad';
+      const msg = ce('p');
+      msg.className = 'text-muted';
+      msg.textContent = filtered
+        ? '没有符合筛选条件的供应商'
+        : '还没有供应商：填一个上游 API 地址与密钥，网关就能转发';
+      empty.appendChild(msg);
+      if (!filtered && !state.creatingProvider) {
+        const btn = ce('button');
+        btn.type = 'button';
+        btn.className = 'btn btn--primary mt-3';
+        btn.textContent = '新增供应商';
+        clk(btn, () => {
+          closeOtherCreateEditors('providers');
+          state.creatingProvider = true;
+          state.activeEditorKey = null;
+          state.newProvIdTouched = false;
+          renderProvidersList();
+        });
+        empty.appendChild(btn);
+      }
+      container.appendChild(empty);
       return;
     }
 
@@ -3236,9 +3165,6 @@
       // back to the per-key test verdict instead of showing "0 正常".
       const okCount = keys.filter((k) => keyHealthFlag(k) === true).length;
       const failCount = keys.filter((k) => keyHealthFlag(k) === false).length;
-      const isLocal = p.origin === 'local';
-      const isExpanded = state.activeEditorKey === `p_${pId}`;
-      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
 
       // Check live lanes concurrency for this provider
       let busyCount = 0;
@@ -3252,43 +3178,38 @@
         }
       }
 
+      const isExpanded = state.activeEditorKey === `p_${pId}`;
+      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
+
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
+      // 状态 = .dot + 一个词：综合「启用 / Key 健康 / 运行中」。
+      const st = providerStatusWord(p, keyCount, okCount, failCount, busyCount, waitCount);
       const dot = ce('span');
-      const dotCls = p.enabled === false || keyCount === 0 || (failCount > 0 && okCount === 0)
-        ? 'dot--err'
-        : okCount > 0
-          ? 'dot--ok'
-          : 'dot--warn';
-      dot.className = `dot ${dotCls}`;
+      dot.className = `dot ${st.dot}`;
 
       const who = ce('div');
       who.className = 'who';
-      // Adapter version wins whenever we can resolve it — including vault-pulled
-      // providers, whose preset_id arrives in the hub manifest and resolves against
-      // the local preset catalog. The rule_hash fingerprint is only the fallback for
-      // vault rules we cannot map to a shipped adapter file.
-      const isVaultCard = !isHubMode() && p.origin === 'vault';
-      const adaptedPill = presetVersionPillHtml(p);
-      const versionPill = adaptedPill
-        ? adaptedPill
-        : (isVaultCard && p.rule_hash
-          ? `<span class="pill tabular" title="中枢规则指纹 (rule_hash 前 8 位；未匹配到内置适配文件)">指纹 ${eh(String(p.rule_hash).slice(0, 8))}</span>`
-          : '');
+      // 一行次要信息：供应商 ID（与名称不同时）+ Base URL（等宽，长串同列对齐）。
+      const subBits = [];
+      if (p.name && p.name !== pId) subBits.push(pId);
+      subBits.push(p.base_url || '未配置 Base URL');
       who.innerHTML = `
         <div class="name">
           ${brandIcon}
           <span>${eh(p.name || pId)}</span>
-          ${(p.name && p.name !== pId) ? `<span class="pill">${eh(pId)}</span>` : ''}
-          ${versionPill}
-          ${isHubMode() ? '' : (isLocal ? '<span class="pill pill--amber">本地私有</span>' : '<span class="pill pill--green">共享</span>')}
-          ${okCount > 0 ? `<span class="pill pill--green">${okCount}/${keyCount} 正常</span>` : ''}
-          ${failCount > 0 ? `<span class="pill pill--red">${failCount} 异常</span>` : ''}
-          ${busyCount > 0 ? `<span class="pill pill--accent">运行中: ${busyCount}${waitCount ? ` (排队:${waitCount})` : ''}</span>` : ''}
         </div>
-        <div class="sub">${eh(p.base_url || '未配置 Base URL')}</div>
+        <div class="sub">${eh(subBits.join(' · '))}</div>
       `;
+
+      const status = ce('span');
+      status.className = 'fields';
+      status.appendChild(dot);
+      const statusWord = ce('span');
+      statusWord.className = 'text-xs text-muted';
+      statusWord.textContent = st.word;
+      status.appendChild(statusWord);
 
       const fields = ce('div');
       fields.className = 'fields';
@@ -3297,30 +3218,131 @@
         <span class="caret">▾</span>
       `;
 
-      row.appendChild(dot);
+      row.appendChild(status);
       row.appendChild(who);
       row.appendChild(fields);
 
       clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `p_${pId}`;
+        // 点行展开编辑时收起 create 编辑器（同一时刻只有一个编辑器）。
+        state.creatingProvider = false;
         renderProvidersList();
       });
+
 
       container.appendChild(row);
 
       if (isExpanded) {
         const editor = ce('div');
         editor.className = 'editor';
-        editor.appendChild(buildProviderEditor(pId, p));
+        const wrap = buildProviderEditor(pId, p);
+        editor.appendChild(wrap);
         container.appendChild(editor);
+        wireProviderEditor(pId, p, wrap);
       }
     }
   }
 
+  // 供应商状态：一个词 + 一个点。综合「停用 / 无 Key / Key 健康 / 运行中」，
+  // 列表行只允许一个状态，所以运行中的并发数并进这个词里。
+  function providerStatusWord(p, keyCount, okCount, failCount, busyCount, waitCount) {
+    if (p.enabled === false) return { word: '停用', dot: 'dot--warn' };
+    if (!keyCount) return { word: '无 Key', dot: 'dot--err' };
+    if (failCount > 0 && okCount === 0) return { word: '异常', dot: 'dot--err' };
+    if (busyCount > 0) return { word: `运行中 ${busyCount}${waitCount ? ` (排队 ${waitCount})` : ''}`, dot: failCount > 0 ? 'dot--warn' : 'dot--ok' };
+    if (failCount > 0) return { word: '部分异常', dot: 'dot--warn' };
+    if (okCount > 0) return { word: '正常', dot: 'dot--ok' };
+    return { word: '未测', dot: 'dot--warn' };
+  }
+
+  // 供应商 ID 由名称自动生成（保存后不可再改，所以先在「高级」里生成好）。
+  // 名称里有 ASCII 片段才用得上（「DeepSeek 官方」→ deepseek）；
+  // 纯中文名没有 ASCII 片段，返回空串，由 autoProviderId() 兜底。
+  function providerIdFromName(name) {
+    return String(name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64);
+  }
+
+  // ID 只是内部标识，不需要可读。纯中文名（如「验收供应商」）或者生成的 ID
+  // 已被占用时，退到一个不与现有供应商冲突的随机短 ID，而不是拦住保存 ——
+  // ID 框收在「高级」里，操作者默认根本看不到它。
+  function autoProviderId(name) {
+    const providers = (state.config && state.config.providers) || {};
+    const fromName = providerIdFromName(name);
+    if (fromName && !providers[fromName]) return fromName;
+    for (let i = 0; i < 50; i++) {
+      const id = `p-${generateRandomAlphaNum(6).toLowerCase()}`;
+      if (!providers[id]) return id;
+    }
+    return `p-${generateRandomAlphaNum(12).toLowerCase()}`;
+  }
+
+  // 预设下拉：运行时从 PRESETS_META 渲染（HTML 里不硬编码 <option>）。
+  function populatePresetDropdown(sel) {
+    if (!sel) return;
+    sel.innerHTML = '';
+    const none = ce('option');
+    none.value = '';
+    none.textContent = '（不绑定预设）';
+    sel.appendChild(none);
+    for (const meta of Object.values(PRESETS_META)) {
+      const opt = ce('option');
+      opt.value = meta.id;
+      opt.textContent = meta.label;
+      sel.appendChild(opt);
+    }
+  }
+
+  // 协议默认自动识别：探测上游支持的第一种协议；探测不通就回落到 OpenAI 兼容
+  // （与旧行为一致，不会因为自动识别失败而建不出供应商）。
+  async function detectProviderProtocol(baseUrl, apiKey) {
+    try {
+      const res = isHubMode() ? null : await window.HOST.detectProvider({ base_url: baseUrl, api_key: apiKey });
+      if (res && res.ok) {
+        const protos = Array.isArray(res.protocols) ? res.protocols : (res.protocol ? [res.protocol] : []);
+        const first = protos[0] || '';
+        const mapped = first === 'openai' ? 'openai-completions'
+          : first === 'anthropic' ? 'anthropic-messages'
+            : first;
+        if (['openai-completions', 'anthropic-messages', 'gemini', 'ocr'].includes(mapped)) return mapped;
+      }
+    } catch (_) {}
+    return 'openai-completions';
+  }
+
+  // create 编辑器的草稿：列表可能因为别的原因重绘（保存 / 探活后都会重绘），
+  // 把已填的值带过去，别让操作者刚敲的字被冲掉。
+  const PROVIDER_CREATE_FIELDS = 'newProvName newProvBaseUrl newProvApiKey newProvId newProvApiType newProvPreset newProvKeyAlias newProvRpm newProvReset newProvRules newProvSource'.split(' ');
+
+  function captureProviderCreateDraft() {
+    const draft = {};
+    for (const id of PROVIDER_CREATE_FIELDS) {
+      const el = $(id);
+      if (el) draft[id] = el.value;
+    }
+    return draft;
+  }
+
+  function restoreProviderCreateDraft(draft) {
+    if (!draft) return;
+    for (const id of PROVIDER_CREATE_FIELDS) {
+      const el = $(id);
+      if (el && typeof draft[id] === 'string') el.value = draft[id];
+    }
+    applyNewProvSourceMode();
+    applyPresetAutoMatch();
+  }
+
+  // 供应商编辑器（组件 5 · .editor）：结构固定为
+  // 基本字段（≤4，两列网格）→ Key 子表 → 「高级」折叠 → 底部 .form-actions--split。
+  // 只负责出结构，所有事件在 wireProviderEditor() 里接。
   function buildProviderEditor(pId, p) {
     const wrap = ce('div');
-    const q = makeScopedQuery(wrap);
     const keys = p.api_keys || [];
     const isVaultProv = !isHubMode() && p.origin === 'vault';
     const curApiType = normalizeApiType(p.api_type);
@@ -3336,10 +3358,6 @@
     const adapterText = p.adapter_rules && Object.keys(p.adapter_rules).length > 0
       ? JSON.stringify(p.adapter_rules, null, 2)
       : '';
-    // Adapter-file version/date note under the preset binding input; rendered for
-    // vault providers too (the input itself is locked, the note stays read-only).
-    // Same precedence as the card badge: resolved adapter file → version, hub
-    // rules we cannot map to a shipped file → 指纹, otherwise 自定义（无适配文件）.
     const versionText = presetVersionText(presetMetaForProvider(p, String(p?.preset_id || '').trim()))
       || (p.rule_hash ? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}` : '自定义（无适配文件）');
     const presetVersionHint = `<span class="text-xs text-muted mt-1">${eh(versionText)}</span>`;
@@ -3348,19 +3366,200 @@
     // Two independent toggles. Each one names an upstream endpoint the gateway
     // will route to; having both enabled is the common case for vendors that
     // ship OpenAI and Anthropic front doors off the same account. "默认" pulls
-    // the URL from the preset; "自定义" lets the operator override it (a
-    // proxy, a regional endpoint, a different plan).
-    const baseIsCustom = Boolean(p.base_url && presetMetaForProvider(p, p.preset_id)?.base_url && p.base_url !== presetMetaForProvider(p, p.preset_id).base_url);
-    const antIsCustom = Boolean(p.anthropic_base_url && presetMetaForProvider(p, p.preset_id)?.anthropic_base_url && p.anthropic_base_url !== presetMetaForProvider(p, p.preset_id).anthropic_base_url);
-    const openaiEnabled = Boolean(p.base_url) || curApiType === 'openai-completions' || curApiType === 'gemini';
-    const anthropicEnabled = Boolean(p.anthropic_base_url) || curApiType === 'anthropic-messages';
+    // the URL from the preset; "自定义" lets the operator override it.
     const meta = presetMetaForProvider(p, p.preset_id);
     const baseDefault = meta?.base_url || '';
     const antDefault = meta?.anthropic_base_url || '';
+    const openaiEnabled = Boolean(p.base_url) || curApiType === 'openai-completions' || curApiType === 'gemini';
+    const anthropicEnabled = Boolean(p.anthropic_base_url) || curApiType === 'anthropic-messages';
     const openaiRow = `<label class="form-label form-label--check"><input type="checkbox" id="ed_p_openai_on_${pId}" ${openaiEnabled ? 'checked' : ''}${lockAttr}><span>OpenAI 兼容端点（/v1/chat/completions）</span></label>`
-      + `<div class="input-row mt-1"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || baseDefault)}" placeholder="${eh(baseDefault || 'https://api.example.com/v1')}" ${openaiEnabled ? '' : 'disabled'}${lockAttr}><button class="btn btn--sm" id="btn_base_default_${pId}" type="button" title="重置为预设默认" ${baseDefault ? '' : 'disabled'}>默认</button><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>自动探测</button></div>`;
+      + `<div class="input-row mt-1"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || baseDefault)}" placeholder="${eh(baseDefault || 'https://api.example.com/v1')}" ${openaiEnabled ? '' : 'disabled'}${lockAttr}><button class="btn btn--sm" id="btn_base_default_${pId}" type="button" title="重置为预设默认" ${baseDefault ? '' : 'disabled'}>默认</button><button class="btn" id="btn_detect_ed_${pId}" type="button" ${isHubMode() || isVaultProv ? 'hidden' : ''}>探测协议</button></div>`;
     const anthropicRow = `<label class="form-label form-label--check"><input type="checkbox" id="ed_p_ant_on_${pId}" ${anthropicEnabled ? 'checked' : ''}${lockAttr}><span>Anthropic Messages 端点（/v1/messages）</span></label>`
       + `<div class="input-row mt-1"><input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || antDefault)}" placeholder="${eh(antDefault || 'https://api.example.com/anthropic')}" ${anthropicEnabled ? '' : 'disabled'}${lockAttr}><button class="btn btn--sm" id="btn_ant_default_${pId}" type="button" title="重置为预设默认" ${antDefault ? '' : 'disabled'}>默认</button></div>`;
+
+    const vaultNotice = isVaultProv
+      ? `<div class="notice-strip mb-3"><span>中枢托管供应商：名称、URL、协议与适配规则由中枢统一管理（只读）。如需修改请在中枢操作后点击「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-3"><span>中枢规则已更新：本地适配规则与中枢清单不一致，请点击「重新拉取」同步。</span></div>' : ''}`
+      : '';
+    // 中枢托管供应商：Key 只能从中枢补拉；本地自建供应商：表格下方一行输入。
+    const vaultKeyPickHtml = isVaultProv
+      ? `<div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
+      : `<div class="input-row mt-2"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div>`;
+    const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div><div class="form-actions-group"><button class="btn" id="btn_cancel_prov_${pId}" type="button">取消</button>${isVaultProv ? '' : `<button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存</button>`}</div></div>`;
+
+    // Preset binding is read-only: the gateway resolves it against the shipped
+    // preset library, so letting the operator type a different id here would
+    // drift from the adapter file that actually runs. Show it as a badge.
+    const presetReadOnly = `<span class="pill">${eh(p.preset_id || '（未绑定预设）')}</span>${presetVersionHint}`;
+
+    wrap.innerHTML = `<div class="form-grid">${[
+      fg('名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
+      fg('整体 RPM 上限', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`, '', '', '所有 Key 共享的每分钟请求上限；0 = 不限'),
+      `<div class="form-group form-group--full"><label class="form-label">请求地址（可同时启用两种，客户端按入口调用）</label><div class="mt-1">${openaiRow}</div><div class="mt-2">${anthropicRow}</div></div>`,
+    ].join('')}</div><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key</th><th>状态</th><th>权重</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div>${vaultKeyPickHtml}<details class="headers-details mt-3"><summary class="form-label">高级（供应商 ID / 预设 / 客户端 UA / 配额重置 / 适配规则）</summary><div class="form-grid mt-2">${[
+      fg('供应商 ID（保存后不可改）', `<input class="input input--code" value="${eh(pId)}" readonly>`),
+      fg('预设', presetReadOnly),
+      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
+      fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`, '', '', '按此时刻重置每日配额统计（UTC+8）'),
+      fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`, '', '', '声明式适配规则 JSON；中枢托管的由中枢统一维护（只读）'),
+    ].join('')}</div></details>${vaultNotice}${editorActionsHtml}`;
+
+    const tbody = wrap.querySelector(`#p_keys_tbody_${pId}`);
+    if (tbody) {
+      if (!tbody.dataset.revealWired) {
+        tbody.dataset.revealWired = '1';
+        tbody.addEventListener('click', (ev) => {
+          const btn = ev.target instanceof Element ? ev.target.closest('.btn_reveal_key') : null;
+          if (!btn) return;
+          ev.stopPropagation();
+          const code = byIdIn(tbody, btn.dataset.target);
+          if (!code) return;
+          const masked = code.dataset.masked === '1';
+          if (masked) {
+            code.textContent = code.dataset.full || code.textContent;
+            code.dataset.masked = '0';
+            btn.textContent = '隐藏';
+          } else {
+            code.textContent = code.dataset.mask || code.textContent;
+            code.dataset.masked = '1';
+            btn.textContent = '显示';
+          }
+        });
+      }
+      keys.forEach((k, idx) => tbody.appendChild(buildProviderKeyRow(pId, p, k, idx)));
+    }
+    return wrap;
+  }
+
+  // Key 行（组件 4 · .data-table）：启用 / 标签 / Key / 状态 / 操作。
+  // 状态 = .dot + 一个词；「校验 / 解除冷却 / 删除」收进「⋯」菜单。
+  function buildProviderKeyRow(pId, p, k, idx) {
+    const tr = ce('tr');
+    const keyLabel = k.label || k.id || `key-${idx}`;
+    const cdInfo = findKeyCooldown(pId, k, idx);
+    const cooldownSec = cdInfo.sec;
+    const cdTarget = cdInfo.target;
+    const vaultKey = !isHubMode() && (p.origin === 'vault' || k.origin === 'vault');
+
+    const st = keyStatusView(k, cooldownSec);
+    const statusHtml = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
+
+    tr.innerHTML = `
+      <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
+      <td><div class="fields"><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}${isHubMode() ? '' : `<span class="text-xs text-muted">${vaultKey ? '中枢只读' : '本地'}</span>`}</div></td>
+      <td>${renderKeyCell(k, vaultKey, idx)}</td>
+      <td>${statusHtml}</td>
+      <td><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重：数值越大分到的请求越多" ${vaultKey ? 'disabled' : ''}></td>
+      <td>
+        <div class="fields">
+          <button class="btn btn--sm btn--ghost btn_test_k" data-idx="${idx}" type="button" title="用这把 Key 真发一句「你好」">测试</button>
+          <span class="key-menu-slot"></span>
+        </div>
+      </td>
+    `;
+    tr.dataset.keyIdx = String(idx);
+    tr.dataset.cdSec = String(cooldownSec);
+    tr.dataset.cdTarget = cdTarget || '';
+    return tr;
+  }
+
+  // Key 状态：.dot + 一个词 + title 里的完整说明。
+  function keyStatusView(k, cooldownSec) {
+    if (cooldownSec > 0) {
+      return { dot: 'dot--warn', word: `冷却 ${formatCooldown(cooldownSec)}`, title: `冷却 ${formatCooldown(cooldownSec)}` };
+    }
+    const lt = k.last_test;
+    if (lt && typeof lt === 'object') {
+      if (lt.ok) {
+        return { dot: 'dot--ok', word: `可用 · ${Number(lt.latency_ms) || 0}ms`, title: `${String(lt.reply_text || '').trim() || '上游返回 200（未抽到文本）'}${lt.at ? ` · ${lt.at}` : ''}` };
+      }
+      const status = Number(lt.status) || 0;
+      const reason = String(lt.reason || 'unknown');
+      const errType = String(lt.err_type || '');
+      return { dot: 'dot--err', word: `失败 · ${status} ${reason}`, title: `${lt.error || '上游无响应'}${errType ? ` · ${errType}` : ''}${lt.at ? ` · ${lt.at}` : ''}` };
+    }
+    if (k.last_ok === true) return { dot: 'dot--ok', word: `正常 · ${k.last_latency_ms || 0}ms`, title: '正常' };
+    if (k.last_ok === false) return { dot: 'dot--err', word: `异常${k.last_status ? ` · ${k.last_status}` : ''}`, title: k.last_status ? `探活失败：${k.last_status}` : '探活失败' };
+    return { dot: 'dot--warn', word: '就绪', title: '未测试' };
+  }
+
+  // 单把 Key 的真实推理测试：服务端按 key_id / key_label 解析已存的密钥，
+  // 浏览器不传密钥本体。结论落在 key 对象上（由「保存」持久化）。
+  async function testKeyOnce(pId, k, keyLabel) {
+    const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
+    const routeModel = firstRouteTargetModel(pId);
+    if (routeModel) payload.model = routeModel;
+    try {
+      const res = await window.HOST.testKey(payload);
+      // test-key 会把结论落盘（Full 节点配置版本 +1），本页持有的版本号就此
+      // 落后一版。立刻追平，否则紧接着的保存必被 CAS 判为冲突、改动被丢弃。
+      await refreshConfigVersion();
+      return applyKeyLastTest(k, res);
+    } catch (err) {
+      k.last_ok = false;
+      return { ok: false, error: scrubUiText(err.message) };
+    }
+  }
+
+  async function testOneKey(pId, k, keyLabel, btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '测试中…';
+    }
+    toast(`正在测试 Key [${keyLabel}]（真实推理）...`, 'info');
+    const lt = await testKeyOnce(pId, k, keyLabel);
+    toast(
+      lt.ok
+        ? `Key [${keyLabel}] 可用 · ${lt.latency_ms}ms`
+        : `Key [${keyLabel}] 测试失败: ${lt.status || 0} ${lt.reason || 'unknown'}${lt.err_type ? ` · ${lt.err_type}` : ''}`,
+      lt.ok ? 'ok' : 'err'
+    );
+    renderProvidersList();
+    if (window.HOST.kind === 'hub') renderHubOverview();
+  }
+
+  // 单把 Key 的探活（校验）：不消耗推理额度，只确认凭据是否有效。
+  // quiet=true 用于批量探活：逐把跑时不必每次重绘整张列表。
+  async function verifyOneKey(pId, p, k, keyLabel, quiet) {
+    if (!quiet) toast(`正在校验 Key [${keyLabel}]...`, 'info');
+    try {
+      const res = await window.HOST.verifyKey({
+        provider: pId,
+        api_key: k.key,
+        key: k.key,
+        key_label: keyLabel,
+        base_url: p.base_url || '',
+        api_type: normalizeApiType(p.api_type),
+      });
+      syncVersionFromRes(res);
+      const ok = res && (res.valid === true || (res.ok && res.valid !== false && res.latency_ms !== undefined));
+      const lat = res?.latency_ms ?? res?.ms ?? 0;
+      k.last_ok = Boolean(ok);
+      k.last_latency_ms = lat;
+      k.last_status = ok ? (res.status || 200) : (res?.status || 0);
+      if (!quiet) {
+        toast(ok ? `Key [${keyLabel}] 校验成功: 延迟 ${lat}ms` : `Key [${keyLabel}] 校验失败: ${res?.error || '无效凭据'}`, ok ? 'ok' : 'err');
+      }
+    } catch (e) {
+      k.last_ok = false;
+      if (!quiet) toast(`校验异常: ${e.message}`, 'err');
+    }
+    if (quiet) return;
+    renderProvidersList();
+    if (window.HOST.kind === 'hub') renderHubOverview();
+  }
+
+  // 供应商编辑器的事件接线（buildProviderEditor 只出结构）。
+  function wireProviderEditor(pId, p, wrap) {
+    const q = makeScopedQuery(wrap);
+    const keys = p.api_keys || [];
+    const isVaultProv = !isHubMode() && p.origin === 'vault';
+    const meta = presetMetaForProvider(p, p.preset_id);
+    const baseDefault = meta?.base_url || '';
+    const antDefault = meta?.anthropic_base_url || '';
+    // 中枢清单里该供应商的条目（「从中枢添加」按 Key 补拉时用来列缺失标签）。
+    // buildProviderEditor 里也有同名局部变量，但那是另一个作用域 —— 这里必须
+    // 自己取一次，否则「从中枢添加」在 Full 端会抛 ReferenceError。
+    const manifestProv = isVaultProv ? vaultManifestProviders()[pId] || null : null;
 
     const syncDraftFields = () => {
       if (q(`#ed_p_name_${pId}`)) p.name = q(`#ed_p_name_${pId}`).value.trim();
@@ -3372,10 +3571,6 @@
       else if (!openaiOn) delete p.base_url;
       if (anthOn && q(`#ed_p_ant_${pId}`)) p.anthropic_base_url = q(`#ed_p_ant_${pId}`).value.trim();
       else if (!anthOn) delete p.anthropic_base_url;
-      if (q(`#ed_p_preset_${pId}`)) p.preset_id = q(`#ed_p_preset_${pId}`).value.trim();
-      // api_type drives the gateway's primary dispatch. Anthropic-only providers
-      // route /v1/messages; everything else routes /v1/chat/completions.
-      p.api_type = anthOn && !openaiOn ? 'anthropic-messages' : (anthOn && p.api_type === 'anthropic-messages' ? 'anthropic-messages' : 'openai-completions');
       if (q(`#ed_p_hide_ua_${pId}`)) {
         if (q(`#ed_p_hide_ua_${pId}`).checked) p.hide_client_name = true;
         else delete p.hide_client_name;
@@ -3388,224 +3583,93 @@
       }
     };
 
-    const vaultNotice = isVaultProv
-      ? `<div class="notice-strip mb-3"><span>中枢托管供应商：名称、URL、协议与适配规则由中枢统一管理（只读）。如需修改请在中枢控制台操作后点击「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-3"><span>中枢规则已更新：本地适配规则与中枢清单不一致，请点击「重新拉取」同步最新规则与 Key。</span></div>' : ''}`
-      : '';
-    const vaultKeyPickHtml = isVaultProv
-      ? `<div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（仅列出本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
-      : `<div class="form-grid mt-3" id="add_key_form_${pId}"><div class="form-group"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"></div><div class="form-group"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"></div><div class="form-group flex-end"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div></div>`;
-    const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除此供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div>${isVaultProv ? '' : `<div class="form-actions-group"><button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存供应商配置</button></div>`}</div>`;
-
-    // Preset binding is read-only: the gateway resolves it against the shipped
-    // preset library, so letting the operator type a different id here would
-    // drift from the adapter file that actually runs. Show it as a badge.
-    const presetReadOnly = `<span class="pill">${eh(p.preset_id || '（未绑定预设）')}</span>${presetVersionHint}`;
-
-    wrap.innerHTML = `<div class="form-grid">${[
-      fg('供应商标识 / 名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
-      `<div class="form-group"><label class="form-label">请求地址（可同时启用两种，客户端按入口调用）</label><div class="mt-1">${openaiRow}</div><div class="mt-2">${anthropicRow}</div></div>`,
-      fg('该供应商整体 RPM 上限', `<input class="input" id="ed_p_rpm_${pId}" type="number" value="${p.rpm_per_key || ''}" placeholder="0 = 不限"${lockAttr}>`),
-      fg('预设', presetReadOnly),
-      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-    ].join('')}</div><details class="headers-details mt-3"><summary class="form-label">高级 (配额重置 / 适配规则)</summary><div class="form-grid mt-2">${[
-      fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`),
-      fg('声明式适配规则 (adapter_rules JSON，中枢托管时只读)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`),
-    ].join('')}</div></details>${vaultNotice}<div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」，验证推理额度而不只是能列模型">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key 密文</th><th>权重</th>${isHubMode() ? '' : '<th>归属</th>'}<th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div></div>${vaultKeyPickHtml}${editorActionsHtml}`;
-
+    // --- Key 表格的行内操作 ---
     const tbody = q(`#p_keys_tbody_${pId}`);
-    if (tbody && !tbody.dataset.revealWired) {
-      tbody.dataset.revealWired = '1';
-      tbody.addEventListener('click', (ev) => {
-        const btn = ev.target instanceof Element ? ev.target.closest('.btn_reveal_key') : null;
-        if (!btn) return;
-        ev.stopPropagation();
-        const code = byIdIn(tbody, btn.dataset.target);
-        if (!code) return;
-        const masked = code.dataset.masked === '1';
-        if (masked) {
-          code.textContent = code.dataset.full || code.textContent;
-          code.dataset.masked = '0';
-          btn.textContent = '隐藏';
-        } else {
-          code.textContent = code.dataset.mask || code.textContent;
-          code.dataset.masked = '1';
-          btn.textContent = '显示';
+    if (tbody) {
+      tbody.querySelectorAll('tr').forEach((tr) => {
+        const idx = Number(tr.dataset.keyIdx);
+        const k = keys[idx];
+        if (!k) return;
+        const keyLabel = k.label || k.id || `key-${idx}`;
+
+        tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
+          k.weight = Math.max(1, Number(e.target.value) || 1);
+        });
+
+        tr.querySelector('.k_enable_cb')?.addEventListener('change', async (e) => {
+          if (!e.target.checked) {
+            const refs = routesUsingKey(pId, keyLabel);
+            if (refs.length > 0) {
+              const ok = await confirmDialog({
+                title: '禁用正在被引用的 Key',
+                message: `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n禁用后这些路由将没有可用 Key，请求可能返回 503。仍要禁用？`,
+                confirmText: '仍要禁用',
+              });
+              if (!ok) {
+                e.target.checked = true;
+                return;
+              }
+            }
+          }
+          k.enabled = e.target.checked;
+        });
+
+        clk(tr.querySelector('.btn_test_k'), (e) => testOneKey(pId, k, keyLabel, e.currentTarget));
+
+        // 「⋯」菜单：校验 / 显示 / 解除冷却 / 删除。测试留在行内（常用）。
+        const menuSlot = tr.querySelector('.key-menu-slot');
+        if (menuSlot) {
+          const items = [
+            {
+              label: '校验（探活）',
+              cls: 'btn_verify_k',
+              title: '只探活，不消耗推理额度',
+              onClick: () => verifyOneKey(pId, p, k, keyLabel),
+            },
+            {
+              label: '解除冷却',
+              cls: 'btn_clear_k_cd',
+              title: '立即解除此 Key 的冷却',
+              // 解除冷却是破坏性操作（规范 §6.3.2）：菜单项要带 .menu-item--danger。
+              danger: true,
+              onClick: () => clearSingleCooldown(tr.dataset.cdTarget),
+            },
+          ];
+          const deleteThisKey = async () => {
+            const refs = routesUsingKey(pId, keyLabel);
+            if (refs.length > 0) {
+              const ok = await confirmDialog({
+                title: '删除正在被引用的 Key',
+                message: `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n删除后这些路由将没有可用 Key，请求可能返回 503。仍要删除？`,
+                confirmText: '仍要删除',
+              });
+              if (!ok) return;
+            }
+            syncDraftFields();
+            p.api_keys.splice(idx, 1);
+            if (isVaultProv || (!isHubMode() && k.origin === 'vault')) {
+              // Vault provider has no「保存」button: the deletion must land
+              // immediately. The hub copy is untouched —「从中枢添加」or a
+              // full refetch restores the key locally.
+              await persistConfig(`本地已删除 Key [${keyLabel}]（中枢不受影响，可经「从中枢添加」或「重新拉取」恢复）`);
+            } else {
+              renderProvidersList();
+            }
+          };
+          items.push({ label: '删除此 Key', cls: 'btn_del_k', danger: true, onClick: deleteThisKey });
+          menuSlot.appendChild(buildMenu(items, { label: `Key ${keyLabel} 的更多操作` }));
         }
       });
     }
-    keys.forEach((k, idx) => {
-      const tr = ce('tr');
-      const keyLabel = k.label || k.id || `key-${idx}`;
-      const cdInfo = findKeyCooldown(pId, k, idx);
-      const cooldownSec = cdInfo.sec;
-      const cdTarget = cdInfo.target;
-      // The most recent per-key real-inference test outranks the legacy
-      // last_ok/last_status pill: it is the verdict the operator asked for, with
-      // the failure reason and the actual reply. A live cooldown stays visible.
-      let statusHtml = cooldownSec > 0
-        ? `<button class="btn btn--sm btn--danger btn_clear_k_cd tabular" type="button" title="点击解除此 Key 冷却">冷却 ${formatCooldown(cooldownSec)} · 解除</button>`
-        : '';
-      const lastTestPill = keyLastTestPill(k.last_test);
-      if (lastTestPill) {
-        statusHtml = `${statusHtml}${statusHtml ? ' ' : ''}${lastTestPill}`;
-      } else if (cooldownSec <= 0) {
-        if (k.last_ok === true) {
-          statusHtml = `<span class="pill pill--green tabular">正常 ${k.last_latency_ms || 0}ms</span>`;
-        } else if (k.last_ok === false) {
-          statusHtml = `<span class="pill pill--red">异常${k.last_status ? ` (${k.last_status})` : ''}</span>`;
-        } else {
-          statusHtml = '<span class="pill pill--green">就绪</span>';
-        }
-      }
-
-      const vaultKey = !isHubMode() && (isVaultProv || k.origin === 'vault');
-      tr.innerHTML = `
-        <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
-        <td><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}</td>
-        <td>${renderKeyCell(k, vaultKey, idx)}</td>
-        <td><div class="input-row"><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重" ${vaultKey ? 'disabled' : ''}></div></td>
-        ${isHubMode() ? '' : `<td><span class="pill">${vaultKey ? '中枢只读' : '本地'}</span></td>`}
-        <td>${statusHtml}</td>
-        <td>
-          <div class="fields">
-            <button class="btn btn--sm btn_test_k" data-idx="${idx}" type="button" title="用这把 Key 真发一句「你好」，验证推理额度而不只是能列模型">测试</button>
-            <button class="btn btn--sm btn_verify_k" data-idx="${idx}" type="button">校验</button>
-            <button class="btn btn--sm btn--danger btn_del_k" data-idx="${idx}" type="button">删除</button>
-          </div>
-        </td>
-      `;
-
-      tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
-        k.weight = Math.max(1, Number(e.target.value) || 1);
-      });
-      // Key-row RPM input removed (plan C): rpm_per_key is provider-wide and is
-      // edited at the top of this editor; an existing api_keys[].max_rpm from an
-      // older config keeps its key-level meaning but is no longer editable here.
-      tr.querySelector('.btn_clear_k_cd')?.addEventListener('click', () => {
-        clearSingleCooldown(cdTarget);
-      });
-
-      tr.querySelector('.k_enable_cb').addEventListener('change', (e) => {
-        if (!e.target.checked) {
-          const refs = routesUsingKey(pId, keyLabel);
-          if (refs.length > 0) {
-            const ok = window.confirm(
-              `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n禁用后这些路由将没有可用 Key，请求可能返回 503。仍要禁用？`
-            );
-            if (!ok) {
-              e.target.checked = true;
-              return;
-            }
-          }
-        }
-        k.enabled = e.target.checked;
-      });
-
-      // Per-key real inference test. The server resolves the stored secret from
-      // key_id/key_label, so nothing secret crosses the wire in this call. The
-      // verdict lands on the key object (persisted by「保存供应商」) and shows in
-      // the status cell immediately.
-      clk(tr.querySelector('.btn_test_k'), async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        btn.textContent = '测试中…';
-        const routeModel = firstRouteTargetModel(pId);
-        const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
-        if (routeModel) payload.model = routeModel;
-        toast(`正在测试 Key [${keyLabel}]（真实推理）...`, 'info');
-        try {
-          const res = await window.HOST.testKey(payload);
-          const lt = applyKeyLastTest(k, res);
-          toast(
-            lt.ok
-              ? `Key [${keyLabel}] 可用 · ${lt.latency_ms}ms`
-              : `Key [${keyLabel}] 测试失败: ${lt.status || 0} ${lt.reason || 'unknown'}${lt.err_type ? ` · ${lt.err_type}` : ''}`,
-            lt.ok ? 'ok' : 'err'
-          );
-          renderProvidersList();
-          if (window.HOST.kind === 'hub') renderHubOverview();
-        } catch (err) {
-          btn.disabled = false;
-          btn.textContent = '测试';
-          toast(`测试异常: ${scrubUiText(err.message)}`, 'err');
-        }
-      });
-
-      clk(tr.querySelector('.btn_verify_k'), async () => {
-        syncDraftFields();
-        const baseUrl = p.base_url || '';
-        toast(`正在校验 Key [${keyLabel}]...`, 'info');
-        try {
-          const res = await window.HOST.verifyKey({
-            provider: pId,
-            api_key: k.key,
-            key: k.key,
-            key_label: keyLabel,
-            base_url: baseUrl,
-            api_type: normalizeApiType(p.api_type),
-          });
-          syncVersionFromRes(res);
-          if (res && (res.valid === true || (res.ok && res.valid !== false && res.latency_ms !== undefined))) {
-            const lat = res.latency_ms ?? res.ms ?? 0;
-            k.last_ok = true;
-            k.last_latency_ms = lat;
-            k.last_status = res.status || 200;
-            toast(`Key [${keyLabel}] 校验成功: 延迟 ${lat}ms`, 'ok');
-          } else {
-            k.last_ok = false;
-            k.last_status = res?.status || 0;
-            toast(`Key [${keyLabel}] 校验失败: ${res?.error || '无效凭据'}`, 'err');
-          }
-          renderProvidersList();
-          if (window.HOST.kind === 'hub') renderHubOverview();
-        } catch (e) {
-          toast(`校验异常: ${e.message}`, 'err');
-        }
-      });
-
-      const delKeyBtn = tr.querySelector('.btn_del_k');
-      if (delKeyBtn) {
-        clk(delKeyBtn, async () => {
-          const refs = routesUsingKey(pId, keyLabel);
-          if (refs.length > 0) {
-            const ok = window.confirm(
-              `Key [${keyLabel}] 正被以下路由引用：\n${refs.join('\n')}\n\n删除后这些路由将没有可用 Key，请求可能返回 503。仍要删除？`
-            );
-            if (!ok) return;
-          }
-          syncDraftFields();
-          p.api_keys.splice(idx, 1);
-          if (isVaultProv || vaultKey) {
-            // Vault provider has no「保存供应商配置」button: the deletion must
-            // land immediately. The hub copy is untouched —「从中枢添加」or a
-            // full refetch restores the key locally.
-            await persistConfig(`本地已删除 Key [${keyLabel}]（中枢不受影响，可经「从中枢添加」或「重新拉取」恢复）`);
-          } else {
-            renderProvidersList();
-          }
-        });
-      }
-
-      tbody.appendChild(tr);
-    });
 
     // Batch test: every key gets the same real inference probe, one at a time,
     // so the verdict reflects inference quota — not just "can list models".
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
-      const routeModel = firstRouteTargetModel(pId);
       toast(`正在逐把测试 ${keys.length} 把 Key（真实推理）...`, 'info');
       let succ = 0;
       for (let i = 0; i < keys.length; i++) {
         const k = keys[i];
-        const keyLabel = k.label || k.id || `key-${i}`;
-        try {
-          const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
-          if (routeModel) payload.model = routeModel;
-          const r = await window.HOST.testKey(payload);
-          if (applyKeyLastTest(k, r).ok) succ++;
-        } catch (_) {
-          k.last_ok = false;
-        }
+        if ((await testKeyOnce(pId, k, k.label || k.id || `key-${i}`)).ok) succ++;
       }
       toast(`逐把测试完成: ${succ}/${keys.length} 把 Key 可用`, succ === keys.length ? 'ok' : 'warn');
       renderProvidersList();
@@ -3613,7 +3677,7 @@
 
     // OAuth Device Flow (MiniMax only, non-vault provider)
     const oauthBtn = q(`#btn_oauth_start_${pId}`);
-    if (oauthBtn && showOAuth) {
+    if (oauthBtn) {
       clk(oauthBtn, async () => {
         stopOAuthPolling();
         toast('正在发起 OAuth 设备登录请求...', 'info');
@@ -3711,20 +3775,20 @@
         pickBox.innerHTML = '';
         pickedLabels.clear();
         hideActions();
-        if (!manifestProv) {
+        const emptyMsg = (text) => {
           const empty = ce('span');
           empty.className = 'text-xs text-muted';
-          empty.textContent = '中枢清单未加载，无法补拉（请稍后重试或检查 Vault 连接）';
+          empty.textContent = text;
           pickBox.appendChild(empty);
+        };
+        if (!manifestProv) {
+          emptyMsg('中枢清单未加载，无法补拉（请稍后重试或检查 Vault 连接）');
           return;
         }
         const localLabels = new Set(keys.map((k) => k.label || k.id).filter(Boolean));
         const missing = (Array.isArray(manifestProv.keys) ? manifestProv.keys : []).filter((lbl) => !localLabels.has(lbl));
         if (missing.length === 0) {
-          const empty = ce('span');
-          empty.className = 'text-xs text-muted';
-          empty.textContent = '中枢清单中没有本地缺失的 Key 标签';
-          pickBox.appendChild(empty);
+          emptyMsg('中枢清单中没有本地缺失的 Key 标签');
           return;
         }
         for (const lbl of missing) {
@@ -3862,18 +3926,34 @@
         (p.api_keys || []).forEach((k) => { if (k) k.origin = 'vault'; });
       }
 
-      await persistConfig('供应商保存成功');
+      // 冲突重试时把「这个供应商的新值」贴回服务端最新配置（见 persistConfig）。
+      await persistConfig('供应商保存成功', { scope: 'providers', key: pId, value: p });
+    });
+
+    clk(q(`#btn_cancel_prov_${pId}`), () => {
+      state.activeEditorKey = null;
+      renderProvidersList();
     });
 
     clk(q(`#btn_del_prov_${pId}`), async () => {
-      if (!confirm(`确定删除供应商 ${pId} 吗？`)) return;
+      const ok = await confirmDialog({
+        title: '删除供应商',
+        message: `确定删除供应商 ${pId} 吗？`,
+        confirmText: '删除',
+      });
+      if (!ok) return;
       delete state.config.providers[pId];
       delete state.probedModelsByProvider[pId];
       state.activeEditorKey = null;
-      await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
+      const saved = await persistConfig(isVaultProv ? `供应商 ${pId} 已从本地删除（中枢不受影响，可重新按需拉取）` : '供应商已删除');
+      if (!saved) {
+        // 没存上（中枢「空模板」守卫 / 版本冲突）→ 回读服务端配置：供应商还在，
+        // 编辑器也留在原地，操作者看得见「没删掉」并能继续改。
+        await loadData();
+        state.activeEditorKey = `p_${pId}`;
+        renderProvidersList();
+      }
     });
-
-    return wrap;
   }
 
   // --- Hub Node Scope: checkbox groups (issue form + node editor) ---
@@ -3931,43 +4011,54 @@
   }
 
   function currentScopeSelection(listEl, masterEl) {
-    // Preserve uncommitted operator picks across re-mounts: loadData fires on login,
-    // config import, and conflict rollbacks — none of them may reset an open issue
-    // form back to「全量」. First mount (no checkboxes rendered yet) defaults to ['*'].
+    // Preserve uncommitted operator picks across re-mounts: the list re-renders on
+    // login, config import and conflict rollbacks — none of them may reset an open
+    // issue form back to「全量」. First mount (no checkboxes rendered yet) defaults
+    // to ['*'].
     if (!listEl || !listEl.querySelector('input[type="checkbox"]')) return ['*'];
     if (masterEl?.checked) return ['*'];
     return collectScopeSelection(listEl);
   }
 
+  // 「新增节点」编辑器的权限范围勾选组（列表顶部的 create 编辑器里）。
+  // 草稿存在 nodeCreateDraft 里，重绘不丢操作者刚勾的内容。
   function mountIssueScopeLists() {
     if (!isHubMode()) return;
     const opts = templateScopeOptions();
-    mountScopeControls(
-      $('issueNodeProvAll'),
-      $('issueNodeProvs'),
-      opts.providers,
-      currentScopeSelection($('issueNodeProvs'), $('issueNodeProvAll'))
-    );
-    mountScopeControls(
-      $('issueNodeModelAll'),
-      $('issueNodeModels'),
-      opts.models,
-      currentScopeSelection($('issueNodeModels'), $('issueNodeModelAll'))
-    );
+    const provAll = $('issueNodeProvAll');
+    const provList = $('issueNodeProvs');
+    const modelAll = $('issueNodeModelAll');
+    const modelList = $('issueNodeModels');
+    if (!provAll || !provList || !modelAll || !modelList) return;
+    const provSel = currentScopeSelection(provList, provAll);
+    const modelSel = currentScopeSelection(modelList, modelAll);
+    mountScopeControls(provAll, provList, opts.providers, provSel);
+    mountScopeControls(modelAll, modelList, opts.models, modelSel);
+    const saveDraft = () => {
+      nodeCreateDraft.providers = provAll.checked ? ['*'] : collectScopeSelection(provList);
+      nodeCreateDraft.models = modelAll.checked ? ['*'] : collectScopeSelection(modelList);
+    };
+    provAll.onchange = () => { saveDraft(); provList.hidden = provAll.checked; };
+    modelAll.onchange = () => { saveDraft(); modelList.hidden = modelAll.checked; };
+    provList.addEventListener('change', saveDraft);
+    modelList.addEventListener('change', saveDraft);
   }
 
   // --- View: Nodes (Hub mode) ---
   // In-memory only (never sessionStorage/localStorage): the plaintext NODE_TOKEN
-  // of the most recent issuance/rotation, so the install overlay can be re-opened
+  // of the most recent issuance/rotation, so the install view can be re-opened
   // within the same session without forcing another rotation. A page refresh
-  // forgets it, and re-opening the overlay then falls back to rotate-and-show.
+  // forgets it, and re-opening the install view then falls back to rotate-and-show.
   const nodeTokenMem = new Map();
   // Full-node ADMIN_PASSWORDs now live in the Hub KV and ride back on the node
-  // list payload (node.admin_password), so the install overlay reads the stored
+  // list payload (node.admin_password), so the install view reads the stored
   // value. This session map is only the legacy fallback for a hub old enough to
   // not store passwords: it keeps a generated value stable within the session so
-  // re-opening the overlay does not silently mint a different password.
+  // re-opening the install view does not silently mint a different password.
   const nodeAdminPassMem = new Map();
+  // 「新增节点」编辑器草稿：列表可能因为别的原因重绘（保存 / 轮换后都会重绘），
+  // 把已填的值带过去，别让操作者刚敲的字被冲掉。
+  const nodeCreateDraft = { name: '', role: 'full', leaseTtl: '', graceTtl: '', providers: ['*'], models: ['*'] };
   let nodeInstallReturnEl = null;
 
   function getStableNodeAdminPass(nodeId, role) {
@@ -3980,6 +4071,9 @@
     return pass;
   }
 
+  // --- Node install view (once-only credentials) ---
+  // The install command carries the node token, so it is shown in a .dialog —
+  // component 6 explicitly allows it for "只显示一次" material.
   function openNodeInstallOverlay(nodeId, material, opts = {}) {
     const overlay = $('nodeInstallOverlay');
     if (!overlay) return;
@@ -3989,7 +4083,7 @@
     const subEl = $('nodeInstallSub');
     const rotNotice = $('nodeInstallRotateNotice');
     const staleHint = $('nodeInstallStaleHint');
-    if (titleEl) titleEl.textContent = `一键安装 — ${node?.name || nodeId}`;
+    if (titleEl) titleEl.textContent = `一次性安装命令 — ${node?.name || nodeId}`;
     if (subEl) subEl.textContent = '在目标服务器上以 root 执行以下命令完成安装；安装成功后本列表将显示为在线';
     if (rotNotice) rotNotice.hidden = !opts.rotated;
     // A cache-hit open (same tab, no rotation) may still hold a token another
@@ -4008,116 +4102,25 @@
       adminPass:
         node?.admin_password || material.admin_password || material.node?.admin_password || getStableNodeAdminPass(nodeId, role),
     });
-    overlay.hidden = false;
-    overlay.classList.remove('hidden');
     // Move focus into the overlay so Esc / the close button are reachable
     // without tabbing through the page behind it, and remember where to
     // return focus on close.
     nodeInstallReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const closeBtn = $('btnCloseNodeInstall');
-    if (closeBtn) closeBtn.focus();
+    openDialog(overlay, { focus: 'btnCloseNodeInstall' });
   }
 
   function closeNodeInstallOverlay() {
     const overlay = $('nodeInstallOverlay');
     if (!overlay) return;
-    overlay.hidden = true;
-    overlay.classList.add('hidden');
+    closeDialog(overlay);
     const back = nodeInstallReturnEl;
     nodeInstallReturnEl = null;
     if (back && document.contains(back)) back.focus();
   }
 
-  // --- Node credentials overlay (re-view the stored admin password) ---
+  // --- Node credentials (read-only GET: viewing must never rotate the token) ---
   const CRED_PASS_MASK = '●●●●●●●●●●●●';
-  let nodeCredReturnEl = null;
-
-  async function handleNodeCredClick(nodeId) {
-    try {
-      // Read-only GET: the credentials endpoint never rotates the token.
-      const res = await window.HOST.request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/credentials`);
-      const data = await res.json();
-      if (res.ok && data && data.ok) {
-        openNodeCredOverlay(nodeId, data);
-      } else {
-        toast((data && data.error) || '获取节点密码失败', 'err');
-      }
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  }
-
-  function openNodeCredOverlay(nodeId, data) {
-    const overlay = $('nodeCredOverlay');
-    if (!overlay) return;
-    const node = (state.nodes || []).find((n) => n.id === nodeId);
-    const titleEl = $('nodeCredTitle');
-    const subEl = $('nodeCredSub');
-    if (titleEl) titleEl.textContent = `后台密码 — ${node?.name || nodeId}`;
-    if (subEl) subEl.textContent = 'Full 节点管理控制台 (/admin) 的登录密码，明文保存在 Hub，可随时回看';
-    const body = $('nodeCredBody');
-    if (body) {
-      if (!data || data.role !== 'full') {
-        body.innerHTML = '<div class="notice-strip mb-2"><span>lite 节点无后台密码（Lite 部署没有管理控制台）。</span></div>';
-      } else if (!data.admin_password) {
-        body.innerHTML = `<div class="notice-strip notice-strip--warn mb-2"><span>${eh(
-          data.admin_password_note || '该节点未存有后台密码；重新获取安装命令（将轮换 Token）时会生成新密码并保存。'
-        )}</span></div>`;
-      } else {
-        const ck = String(data.client_key || '');
-        const passStrip = `<div class="notice-strip notice-strip--warn mb-2">
-          <span>后台登录密码: <strong class="tabular" data-cred-pass>${CRED_PASS_MASK}</strong></span>
-          <button class="btn btn--sm" data-cred-reveal type="button">显示</button>
-          <button class="btn btn--sm" data-cred-copy type="button">复制密码</button>
-        </div>`;
-        const ckStrip = ck
-          ? `<div class="notice-strip mb-2"><span>客户端 API Key: <strong class="tabular">${eh(ck)}</strong></span><button class="btn btn--sm" data-cred-copy-ck type="button">复制 API Key</button></div>`
-          : `<div class="notice-strip mb-2"><span>${eh(data.client_key_note || 'Hub 未存有该节点的客户端密钥。')}</span></div>`;
-        body.innerHTML = passStrip + ckStrip;
-
-        // Masked by default; the reveal toggle swaps text content only (no style
-        // writes, per the zero-inline-style gate).
-        const passEl = body.querySelector('[data-cred-pass]');
-        const revealBtn = body.querySelector('[data-cred-reveal]');
-        let revealed = false;
-        if (revealBtn && passEl) {
-          clk(revealBtn, () => {
-            revealed = !revealed;
-            passEl.textContent = revealed ? data.admin_password : CRED_PASS_MASK;
-            revealBtn.textContent = revealed ? '隐藏' : '显示';
-          });
-        }
-        const copyBtn = body.querySelector('[data-cred-copy]');
-        if (copyBtn) clk(copyBtn, () => copyToClipboard(data.admin_password, '后台登录密码已复制'));
-        const ckBtn = body.querySelector('[data-cred-copy-ck]');
-        if (ckBtn) clk(ckBtn, () => copyToClipboard(ck, '客户端 API Key 已复制'));
-      }
-    }
-    overlay.hidden = false;
-    overlay.classList.remove('hidden');
-    nodeCredReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const closeBtn = $('btnCloseNodeCred');
-    if (closeBtn) closeBtn.focus();
-  }
-
-  function closeNodeCredOverlay() {
-    const overlay = $('nodeCredOverlay');
-    if (!overlay) return;
-    overlay.hidden = true;
-    overlay.classList.add('hidden');
-    const back = nodeCredReturnEl;
-    nodeCredReturnEl = null;
-    if (back && document.contains(back)) back.focus();
-  }
-
-  // --- Node detail overlay (identity + credentials + runtime state) ---
-  // The detail view is read-only on open: it only GETs the credentials endpoint,
-  // so looking at a node never rotates its token. Rotation and revoke/restore are
-  // explicit footer actions, each behind its own confirmation.
-  const NODE_DETAIL_MASK = '●●●●●●●●●●●●';
-  const NODE_DETAIL_SECRET_LABELS = { token: '节点 Token', client_key: '客户端密钥', admin_password: '后台登录密码' };
-  let nodeDetailReturnEl = null;
-  let nodeDetailNodeId = null;
+  const NODE_DETAIL_SECRET_LABELS = { node_token: '节点 Token', client_key: '客户端密钥', admin_password: '后台登录密码' };
 
   function formatDateTime(val) {
     if (!val) return '';
@@ -4139,337 +4142,174 @@
 
   // A credential row: masked by default, eye toggle reveals in place, copy button
   // works on the stored plaintext regardless of the mask state.
-  function nodeDetailSecretRow(title, desc, key, value, emptyNote) {
-    const shown = value
-      ? `<div class="tabular node-detail-secret" data-detail-secret="${key}">${NODE_DETAIL_MASK}</div>`
-      : `<div class="node-detail-secret text-muted">${eh(emptyNote || '未保存')}</div>`;
-    const buttons = value
-      ? `<button class="btn btn--sm" type="button" data-detail-eye="${key}" aria-label="显示${eh(title)}" aria-pressed="false">${window.uiIcon ? window.uiIcon('eye') : ''}<span data-detail-eye-label>显示</span></button>`
-        + `<button class="btn btn--sm" type="button" data-detail-copy="${key}">复制</button>`
-      : '';
-    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div>${shown}</div><div class="setting-control">${buttons}</div></div>`;
+  function nodeDetailSecretRow(title, desc, key, credKey, emptyNote) {
+    const shown = `<div class="tabular node-detail-secret" data-detail-secret="${key}" data-detail-empty="${eh(emptyNote || '未保存')}">${CRED_PASS_MASK}</div>`;
+    return `<div class="setting-row" title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div>${shown}</div><div class="setting-control"><button class="btn btn--sm" type="button" data-detail-eye="${key}" aria-label="显示${eh(title)}" aria-pressed="false">${window.uiIcon ? window.uiIcon('eye') : ''}<span data-detail-eye-label>显示</span></button><button class="btn btn--sm" type="button" data-detail-copy="${key}">复制</button></div></div>`;
   }
 
-  async function handleNodeDetailClick(nodeId) {
-    try {
-      // Read-only GET: like 密码, viewing 详情 must never rotate the token.
-      const res = await window.HOST.request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/credentials`);
-      const data = await res.json();
-      if (res.ok && data && data.ok) {
-        openNodeDetailOverlay(nodeId, data);
-      } else {
-        toast((data && data.error) || '获取节点详情失败', 'err');
-      }
-    } catch (e) {
-      toast(e.message, 'err');
+  async function fetchNodeCredentials(nodeId) {
+    const res = await window.HOST.request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/credentials`);
+    const data = await res.json();
+    if (!(res.ok && data && data.ok)) {
+      toast((data && data.error) || '获取节点凭据失败', 'err');
+      return null;
     }
+    return data;
   }
 
-  function openNodeDetailOverlay(nodeId, data) {
-    const overlay = $('nodeDetailOverlay');
-    if (!overlay) return;
-    nodeDetailNodeId = nodeId;
-    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
-    const role = node.role === 'full' || data.role === 'full' ? 'full' : 'lite';
-    const secrets = {
-      token: String(data.node_token || ''),
+  // 节点详情里的凭据：读一次 credentials 接口，缓存到 state（明文只留内存）。
+  async function loadNodeSecrets(nodeId) {
+    const data = await fetchNodeCredentials(nodeId);
+    if (!data) return null;
+    state.nodeSecrets[nodeId] = {
+      node_token: String(data.node_token || ''),
       client_key: String(data.client_key || ''),
-      admin_password: role === 'full' ? String(data.admin_password || '') : '',
+      admin_password: data.role === 'full' ? String(data.admin_password || '') : '',
+      notes: {
+        node_token: data.node_token_note || '',
+        client_key: data.client_key_note || '',
+        admin_password: data.admin_password_note || '',
+      },
     };
-
-    const titleEl = $('nodeDetailTitle');
-    if (titleEl) titleEl.textContent = `节点详情 — ${node.name || nodeId}`;
-    const subEl = $('nodeDetailSub');
-    if (subEl) subEl.textContent = '节点凭据与运行状态；Token / 密钥默认遮住，点「显示」展开';
-
-    const body = $('nodeDetailBody');
-    if (body) {
-      const providers = Array.isArray(node.scope?.providers) ? node.scope.providers : ['*'];
-      const models = Array.isArray(node.scope?.models) ? node.scope.models : ['*'];
-      const heartbeat = node.last_seen ? formatDateTime(node.last_seen) : '尚未上报心跳';
-      const ttlHint = `租约 ${Number(node.lease_ttl) || 86400}s / 宽限 ${Number(node.grace_ttl) || 3600}s 后判离线`;
-      const rows = [
-        nodeDetailRow('节点 ID', 'Hub KV 中的主键，安装命令与鉴权都用它', `<span class="tabular node-detail-value">${eh(node.id || nodeId)}</span>`),
-        nodeDetailRow('名称', '运营者备注名，仅显示用', `<span class="node-detail-value">${eh(node.name || '（未命名）')}</span>`),
-        nodeDetailRow('角色', 'full 含管理控制台；lite 为极简代理', `<span class="pill pill--accent">${eh(role)}</span>`),
-        nodeDetailRow('创建时间', '节点签发时间', `<span class="tabular node-detail-value">${eh(formatDateTime(node.created_at) || '—')}</span>`),
-        nodeDetailSecretRow(
-          '节点 Token',
-          'NODE_TOKEN：节点侧 LLMPROXY_NODE_TOKEN / 安装命令 --node-token',
-          'token',
-          secrets.token,
-          data.node_token_note || '未保存明文（旧版本节点，轮换后可回看）'
-        ),
-        nodeDetailSecretRow(
-          '客户端密钥',
-          'client_key：节点侧 LLMPROXY_CLIENT_KEY，由 Hub 全局设置下发',
-          'client_key',
-          secrets.client_key,
-          data.client_key_note || 'Hub 未配置主客户端密钥'
-        ),
-        nodeDetailSecretRow(
-          '后台密码',
-          'Full 节点管理控制台 (/admin) 的登录密码',
-          'admin_password',
-          secrets.admin_password,
-          role === 'full' ? (data.admin_password_note || '该节点未存有后台密码') : 'lite 无控制台密码'
-        ),
-        nodeDetailRow('最后心跳', ttlHint, `<span class="tabular node-detail-value">${eh(heartbeat)}</span>`),
-        nodeDetailRow('配置版本', '节点最近一次拉取生效的配置版本号', `<span class="tabular node-detail-value">${node.last_config_version ? `#${eh(String(node.last_config_version))}` : '—'}</span>`),
-        nodeDetailRow('同步次数', `其中 304 命中 ${Number(node.hit_304_count) || 0} 次`, `<span class="tabular node-detail-value">${Number(node.sync_count) || 0} 次</span>`),
-        nodeDetailRow('最近 IP', '节点最近一次同步 / 心跳的来源地址', `<span class="tabular node-detail-value">${eh(node.last_ip || '—')}</span>`),
-        nodeDetailRow('供应商范围', '节点可访问的上游供应商白名单', `<span class="node-detail-value">${eh(nodeScopeText(providers, '供应商'))}</span>`),
-        nodeDetailRow('模型范围', '节点可路由的模型白名单', `<span class="node-detail-value">${eh(nodeScopeText(models, '模型'))}</span>`),
-      ];
-      body.innerHTML = rows.join('');
-
-      // Masked by default; the toggle swaps text/icon only (zero inline style).
-      body.querySelectorAll('[data-detail-eye]').forEach((btn) => {
-        clk(btn, () => {
-          const key = btn.getAttribute('data-detail-eye');
-          const valEl = body.querySelector(`[data-detail-secret="${key}"]`);
-          const revealed = btn.getAttribute('aria-pressed') === 'true';
-          if (valEl) valEl.textContent = revealed ? NODE_DETAIL_MASK : secrets[key];
-          btn.setAttribute('aria-pressed', revealed ? 'false' : 'true');
-          btn.setAttribute('aria-label', `${revealed ? '显示' : '隐藏'}${NODE_DETAIL_SECRET_LABELS[key] || ''}`);
-          if (window.uiIcon) {
-            btn.innerHTML = `${window.uiIcon(revealed ? 'eye' : 'eyeOff')}<span data-detail-eye-label>${revealed ? '显示' : '隐藏'}</span>`;
-          } else {
-            btn.textContent = revealed ? '显示' : '隐藏';
-          }
-        });
-      });
-      body.querySelectorAll('[data-detail-copy]').forEach((btn) => {
-        clk(btn, () => {
-          const key = btn.getAttribute('data-detail-copy');
-          copyToClipboard(secrets[key], `${NODE_DETAIL_SECRET_LABELS[key] || '凭据'} 已复制`);
-        });
-      });
-    }
-
-    // Footer state follows the node: an active node offers 吊销 (danger), a
-    // revoked one offers 恢复 (normal).
-    const toggleBtn = $('btnNodeDetailToggle');
-    if (toggleBtn) {
-      const revoked = node.enabled === false;
-      toggleBtn.textContent = revoked ? '恢复节点' : '吊销节点';
-      toggleBtn.classList.toggle('btn--danger', !revoked);
-    }
-
-    // Only capture the opener on a fresh open: rotate / revoke re-renders this
-    // overlay in place, and focus must return to the list's 详情 button.
-    if (overlay.hidden) {
-      nodeDetailReturnEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    overlay.hidden = false;
-    overlay.classList.remove('hidden');
-    const closeBtn = $('btnCloseNodeDetail');
-    if (closeBtn) closeBtn.focus();
+    return state.nodeSecrets[nodeId];
   }
 
-  function closeNodeDetailOverlay() {
-    const overlay = $('nodeDetailOverlay');
-    if (!overlay) return;
-    overlay.hidden = true;
-    overlay.classList.add('hidden');
-    nodeDetailNodeId = null;
-    const back = nodeDetailReturnEl;
-    nodeDetailReturnEl = null;
-    if (back && document.contains(back)) back.focus();
+  // --- Node rows & editors ---
+  // 一行只允许：名称 + 一行次要信息（12px 等宽）+ 一个状态（.dot + 一个词）+ 一个计数。
+  function nodeStatusWord(node) {
+    const snap = getNodeSyncSnapshotStatus(node);
+    const ONLINE_MS = 15 * 60 * 1000;
+    const online = node.enabled !== false && Boolean(snap.syncMs) && (Date.now() - snap.syncMs) <= ONLINE_MS;
+    if (node.enabled === false) return { word: '已吊销', dot: 'dot--err' };
+    if (online) return { word: '在线', dot: 'dot--ok' };
+    if (snap.syncMs) return { word: snap.key === 'grace' ? '宽限期内' : '离线', dot: 'dot--warn' };
+    return { word: '未安装', dot: 'dot--warn' };
   }
 
-  async function handleNodeDetailRotate() {
-    const nodeId = nodeDetailNodeId;
-    if (!nodeId) return;
-    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
-    if (!confirm(`轮换 ${node.name || nodeId} 的 Token？\n旧 Token 立即失效，节点在更新 NODE_TOKEN 并重新同步前会一直鉴权失败。`)) {
-      return;
-    }
-    try {
-      const res = await window.HOST.rotateNode(nodeId);
-      if (!res || !res.ok || !res.node_token) {
-        toast((res && res.error) || '轮换 Token 失败', 'err');
-        return;
-      }
-      // The install overlay caches the latest deploy material; this rotation is
-      // exactly that, so the cache must not keep serving the dead token.
-      nodeTokenMem.set(nodeId, res);
-      await loadNodesData();
-      await handleNodeDetailClick(nodeId);
-      toast('Token 已轮换', 'ok');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  }
-
-  async function handleNodeDetailToggle() {
-    const nodeId = nodeDetailNodeId;
-    if (!nodeId) return;
-    const node = (state.nodes || []).find((n) => n.id === nodeId) || {};
-    const enable = node.enabled === false;
-    const ask = enable
-      ? `恢复 ${node.name || nodeId}？恢复后节点在下一次心跳 / 同步时重新校验 Token 并继续工作。`
-      : `吊销 ${node.name || nodeId}？吊销后该节点立即无法同步配置，节点侧会在鉴权失败后停服。`;
-    if (!confirm(ask)) return;
-    try {
-      const res = await window.HOST.patchNode(nodeId, { enabled: enable });
-      if (!res || !res.ok) {
-        toast((res && res.error) || (enable ? '恢复节点失败' : '吊销节点失败'), 'err');
-        return;
-      }
-      await loadNodesData();
-      await handleNodeDetailClick(nodeId);
-      toast(enable ? '节点已恢复' : '节点已吊销', 'ok');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  }
-
-  async function handleNodeInstallClick(nodeId) {
-    const cached = nodeTokenMem.get(nodeId);
-    if (cached && cached.node_token) {
-      openNodeInstallOverlay(nodeId, cached, { rotated: false, fromCache: true });
-      return;
-    }
-    // No in-memory token (page was refreshed): the hub only stores the SHA-256
-    // digest, so the only spec-compliant way back to a plaintext install command
-    // is rotating the token. Confirm before invalidating the old credential.
-    const node = (state.nodes || []).find((n) => n.id === nodeId);
-    if (!confirm(`安装命令包含节点 Token，出于安全仅在签发时显示一次。\n现在重新获取将轮换 ${node?.name || nodeId} 的 Token（旧 Token 立即失效），继续吗？`)) {
-      return;
-    }
-    try {
-      const res = await window.HOST.getNodeInstallCommand(nodeId);
-      if (res && res.ok && res.node_token) {
-        nodeTokenMem.set(nodeId, res);
-        openNodeInstallOverlay(nodeId, res, { rotated: true });
-        await loadNodesData();
-      } else {
-        toast((res && res.error) || '获取安装命令失败', 'err');
-      }
-    } catch (e) {
-      toast(e.message, 'err');
-    }
+  // 节点行次要信息：角色 · 最近同步 · 最近 IP（等宽 12px，长串同列对齐）。
+  function nodeSubText(node) {
+    const parts = [node.role === 'lite' ? 'Lite' : 'Full'];
+    const lastMs = node.last_seen ? new Date(node.last_seen).getTime() : 0;
+    parts.push(lastMs ? `同步 ${formatTime(lastMs / 1000)}` : '从未同步');
+    if (node.last_ip) parts.push(node.last_ip);
+    return parts.join(' · ');
   }
 
   function renderNodesList() {
     const container = $('nodesList');
     if (!container) return;
+    // 列表即将重建（innerHTML 替换）：挂在旧 DOM 上的菜单浮层会变成死元素，
+    // 先关掉，别让它们留在 openMenus 里干扰 Esc。
+    closeAllMenus();
     container.innerHTML = '';
 
+    // 页头「添加节点」按钮与编辑器互斥：编辑器开着时它变成「收起」（普通按钮），
+    // 避免同一屏出现两个主按钮（单区域单主 CTA）。
+    const btnAddNode = $('btnIssueNode');
+    if (btnAddNode) {
+      const editorOpen = state.creatingNode || Boolean(state.activeEditorKey);
+      btnAddNode.classList.toggle('btn--primary', !editorOpen);
+      btnAddNode.textContent = state.creatingNode ? '收起' : '添加节点';
+    }
+
     const nodes = state.nodes || [];
+
+    // 「新增节点」= 在列表顶部插入一个空白编辑器（create 模式），
+    // 与编辑共用同一个构建函数（buildNodeEditor）。
+    if (state.creatingNode) {
+      const createEditor = ce('div');
+      createEditor.className = 'editor';
+      createEditor.id = 'nodeCreateEditor';
+      container.appendChild(createEditor);
+      const built = buildNodeEditor(null, { create: true });
+      createEditor.appendChild(built);
+      // 先挂进 DOM 再接线：wireNodeEditor 用作用域查询找控件。
+      wireNodeEditor(null, null, built);
+    }
+
     if (nodes.length === 0) {
-      const emptyRow = ce('div');
-      emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = '暂无中转节点，点击上方「添加节点」创建';
-      container.appendChild(emptyRow);
+      const empty = ce('div');
+      empty.className = 'card-pad';
+      const msg = ce('p');
+      msg.className = 'text-muted';
+      msg.textContent = '还没有节点：签发一个节点，它就能从中枢拉取供应商与模型路由';
+      empty.appendChild(msg);
+      if (!state.creatingNode) {
+        const btn = ce('button');
+        btn.type = 'button';
+        // 空状态里的引导按钮用次要样式：这一屏的主按钮是页头的「添加节点」，
+        // 两个实心蓝按钮会抢同一个视线。
+        btn.className = 'btn mt-3';
+        btn.textContent = '添加节点';
+        clk(btn, () => {
+          state.creatingNode = true;
+          state.activeEditorKey = null;
+          renderNodesList();
+        });
+        empty.appendChild(btn);
+      }
+      container.appendChild(empty);
       return;
     }
 
-    const table = ce('table');
-    table.className = 'data-table';
-    const thead = ce('thead');
-    thead.innerHTML = '<tr><th>名称</th><th>IP</th><th>状态</th><th>操作</th></tr>';
-    table.appendChild(thead);
-    const tbody = ce('tbody');
-
     for (const node of nodes) {
-      const tr = ce('tr');
-
-      const nameTd = ce('td');
       const isExpanded = state.activeEditorKey === `node_${node.id}`;
-      nameTd.innerHTML = `<strong>${eh(node.name || node.id)}</strong> <span class="pill pill--accent">${eh(node.role || 'full')}</span>${node.last_binary_version ? ` <span class="pill tabular">${eh(node.last_binary_version)}</span>` : ''}`;
+      const row = ce('div');
+      row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const ipTd = ce('td');
-      ipTd.className = 'tabular';
-      // A node that never reported an IP (local/direct install: no proxy header,
-      // no EdgeOne eo.clientIp) gets a word, not a dash — "—" reads like "the
-      // column is unimplemented" rather than "nothing reported yet".
-      ipTd.textContent = node.last_ip || '未上报';
+      const st = nodeStatusWord(node);
+      const dot = ce('span');
+      dot.className = `dot ${st.dot}`;
 
-      const snap = getNodeSyncSnapshotStatus(node);
-      // Two separate clocks by design: the table's "online" follows the hub
-      // overview's liveness bar (15 min since last sync), while the lease state
-      // (synced/grace/expired) keeps the lifetime semantics.
-      const ONLINE_MS = 15 * 60 * 1000;
-      const online = node.enabled !== false && Boolean(snap.syncMs) && (Date.now() - snap.syncMs) <= ONLINE_MS;
-      let statusPill;
-      if (node.enabled === false) statusPill = `<span class="pill ${snap.pillCls}">${eh(snap.label)}</span>`;
-      else if (online) statusPill = '<span class="pill pill--green">在线</span>';
-      else if (snap.syncMs) statusPill = `<span class="pill pill--amber">${snap.key === 'grace' ? '宽限期内' : '离线'}</span>`;
-      else statusPill = '<span class="pill">未安装</span>';
-      // Two different clocks, two different words. `last_seen` is the heartbeat
-      // (600s), while the config version is what the node actually pulled — the
-      // old single “最后同步” label made operators think a config change had
-      // already landed when only a heartbeat had.
-      const statusTd = ce('td');
-      const hbText = snap.syncMs ? `心跳 ${formatTime(snap.syncMs / 1000)}` : '尚未安装';
-      const cfgText = node.last_config_version ? `配置 #${node.last_config_version}` : '';
-      statusTd.innerHTML = `${statusPill}<div class="text-sm text-muted">${eh(hbText)}${cfgText ? ` · ${eh(cfgText)}` : ''}</div>`;
+      const who = ce('div');
+      who.className = 'who';
+      who.innerHTML = `
+        <div class="name"><span>${eh(node.name || node.id)}</span></div>
+        <div class="sub">${eh(nodeSubText(node))}</div>
+      `;
 
-      const actionTd = ce('td');
-      const installBtn = ce('button');
-      installBtn.className = 'btn btn--sm';
-      installBtn.type = 'button';
-      installBtn.textContent = '安装';
-      const editBtn = ce('button');
-      editBtn.className = 'btn btn--sm';
-      editBtn.type = 'button';
-      editBtn.textContent = isExpanded ? '收起' : '编辑';
-      const credBtn = ce('button');
-      credBtn.className = 'btn btn--sm';
-      credBtn.type = 'button';
-      credBtn.textContent = '密码';
-      const detailBtn = ce('button');
-      detailBtn.className = 'btn btn--sm';
-      detailBtn.type = 'button';
-      detailBtn.textContent = '详情';
-      actionTd.appendChild(installBtn);
-      actionTd.appendChild(document.createTextNode(' '));
-      actionTd.appendChild(editBtn);
-      actionTd.appendChild(document.createTextNode(' '));
-      // A lite node has no console at all, so offering 密码 only to answer
-      // 「lite 节点无后台密码」 wastes a click. The button is full-only; the
-      // endpoint still explains itself if hit directly. 详情 is for every node:
-      // it carries the token, client key, heartbeat and scope in one place.
-      if (node.role !== 'lite') {
-        actionTd.appendChild(credBtn);
-        actionTd.appendChild(document.createTextNode(' '));
-      }
-      actionTd.appendChild(detailBtn);
+      const status = ce('span');
+      status.className = 'fields';
+      status.appendChild(dot);
+      const statusWord = ce('span');
+      statusWord.className = 'text-xs text-muted';
+      statusWord.textContent = st.word;
+      status.appendChild(statusWord);
 
-      clk(installBtn, () => handleNodeInstallClick(node.id));
-      clk(credBtn, () => handleNodeCredClick(node.id));
-      clk(detailBtn, () => handleNodeDetailClick(node.id));
-      clk(editBtn, () => {
+      const fields = ce('div');
+      fields.className = 'fields';
+      const syncPill = ce('span');
+      syncPill.className = 'pill tabular';
+      syncPill.textContent = `${Number(node.sync_count || 0)} 次同步`;
+      fields.appendChild(syncPill);
+      const caret = ce('span');
+      caret.className = 'caret';
+      caret.textContent = '▾';
+      fields.appendChild(caret);
+
+      row.appendChild(status);
+      row.appendChild(who);
+      row.appendChild(fields);
+
+      clk(row, (ev) => {
+        if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `node_${node.id}`;
+        // 点行展开编辑时收起 create 编辑器（同一时刻只有一个编辑器）。
+        state.creatingNode = false;
         renderNodesList();
       });
 
-      tr.appendChild(nameTd);
-      tr.appendChild(ipTd);
-      tr.appendChild(statusTd);
-      tr.appendChild(actionTd);
-      tbody.appendChild(tr);
+      container.appendChild(row);
 
       if (isExpanded) {
-        const editorTr = ce('tr');
-        const editorTd = ce('td');
-        editorTd.colSpan = 4;
         const editor = ce('div');
         editor.className = 'editor';
-        editor.appendChild(buildNodeEditor(node));
-        editorTd.appendChild(editor);
-        editorTr.appendChild(editorTd);
-        tbody.appendChild(editorTr);
+        const built = buildNodeEditor(node);
+        editor.appendChild(built);
+        container.appendChild(editor);
+        wireNodeEditor(node, null, built);
       }
     }
-
-    table.appendChild(tbody);
-    const wrap = ce('div');
-    wrap.className = 'table-wrap';
-    wrap.appendChild(table);
-    container.appendChild(wrap);
   }
 
   // Node list auto-refresh: the promised UX is "install succeeds → the row turns
@@ -4481,10 +4321,11 @@
     state.nodesTimer = setInterval(async () => {
       if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
       if (state.activeTab !== 'nodes') return;
-      // Skip while the install overlay is open: re-rendering under it is fine,
+      // Skip while the install dialog is open: re-rendering under it is fine,
       // but a failed refresh behind the modal silently resets the editor state.
       if (!$('nodeInstallOverlay')?.hidden) return;
       if (state.activeEditorKey && state.activeEditorKey.startsWith('node_')) return;
+      if (state.creatingNode) return;
       try {
         const res = await window.HOST.getNodes();
         if (res && res.ok) {
@@ -4565,6 +4406,8 @@
     return `curl -fsSL ${scriptUrl} | sudo bash -s -- ${flags.join(' ')}`;
   }
 
+  // 安装命令面板：一条推荐命令 + 复制按钮；Docker / 单行直跑收进「其它安装方式」；
+  // 端口、脚本源、下载源、监听范围、内网上游收进「安装选项」。
   function mountNodeCommandPanel(container, payload) {
     if (!container) return;
     const role = payload.role === 'full' ? 'full' : 'lite';
@@ -4591,13 +4434,8 @@
 
     container.innerHTML = `<div class="snippet-box">
       <div class="snippet-header">
-        <span class="form-label">节点快速部署与客户端接入指引</span>
+        <span class="form-label">推荐安装命令（一键安装 · systemd）</span>
         <div class="fields">
-          <div class="seg" data-cmd-seg>
-            <button class="seg-btn active" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
-            <button class="seg-btn" data-cmd-mode="docker" type="button">Docker 部署</button>
-            <button class="seg-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
-          </div>
           <button class="btn btn--sm" data-cmd-copy type="button">复制命令</button>
         </div>
       </div>
@@ -4609,53 +4447,68 @@
         <span>客户端接入信息 — <strong class="tabular" data-client-base-hint></strong> · API Key: <strong class="tabular">${eh(clientKey || '请先在系统设置配置主客户端密钥')}</strong></span>
         ${clientKey ? '<button class="btn btn--sm" data-copy-client-key type="button">复制 API Key</button>' : ''}
       </div>
-      <div class="form-grid mb-2" data-cmd-opts>
-        <div class="form-group">
-          <label class="form-label">监听端口</label>
-          <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
-        </div>
-        <div class="form-group" data-cmd-source-wrap>
-          <label class="form-label">安装脚本源</label>
-          <select class="select" data-cmd-source>
-            <option value="hub">Hub 同域 /install.sh (推荐)</option>
-            <option value="ghfast">ghfast.top 加速</option>
-            <option value="ghraw">GitHub Raw 直连</option>
-          </select>
-        </div>
-        <div class="form-group" data-cmd-mirror-wrap>
-          <label class="form-label">二进制下载源</label>
-          <select class="select" data-cmd-mirror>
-            <option value="auto">GitHub 直连 + 国内自动回退</option>
-            <option value="ghfast">优先走 ghfast.top 镜像</option>
-          </select>
-        </div>
-        <div class="form-group" data-cmd-yes-wrap>
-          <label class="form-label">交互方式</label>
-          <label class="form-label form-label--check">
-            <input type="checkbox" data-cmd-yes checked>
-            <span>无人值守 (-y)，取消可交互确认</span>
-          </label>
-        </div>
-        <div class="form-group" data-cmd-bind-wrap>
-          <label class="form-label">监听范围</label>
-          <select class="select" data-cmd-bind>
-            <option value="local">仅本机 127.0.0.1（需 ssh -L / 反代）</option>
-            <option value="public">对外 0.0.0.0（需自行做鉴权与防火墙）</option>
-          </select>
-        </div>
-        <div class="form-group" data-cmd-private-wrap>
-          <label class="form-label">内网上游</label>
-          <label class="form-label form-label--check">
-            <input type="checkbox" data-cmd-private>
-            <span>允许内网 / 本机上上游地址</span>
-          </label>
-        </div>
-      </div>
       <textarea class="textarea input--code" data-cmd-output readonly rows="3"></textarea>
+      <details class="headers-details mt-2">
+        <summary class="form-label">其它安装方式</summary>
+        <div class="mt-2">
+          <div class="seg" data-cmd-seg>
+            <button class="seg-btn active" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
+            <button class="seg-btn" data-cmd-mode="docker" type="button">Docker 部署</button>
+            <button class="seg-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
+          </div>
+          <textarea class="textarea input--code mt-2" data-cmd-alt readonly rows="2" hidden></textarea>
+        </div>
+      </details>
+      <details class="headers-details mt-2">
+        <summary class="form-label">安装选项</summary>
+        <div class="form-grid mt-2" data-cmd-opts>
+          <div class="form-group">
+            <label class="form-label">监听端口</label>
+            <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
+          </div>
+          <div class="form-group" data-cmd-source-wrap>
+            <label class="form-label">安装脚本源</label>
+            <select class="select" data-cmd-source>
+              <option value="hub">Hub 同域 /install.sh (推荐)</option>
+              <option value="ghfast">ghfast.top 加速</option>
+              <option value="ghraw">GitHub Raw 直连</option>
+            </select>
+          </div>
+          <div class="form-group" data-cmd-mirror-wrap>
+            <label class="form-label">二进制下载源</label>
+            <select class="select" data-cmd-mirror>
+              <option value="auto">GitHub 直连 + 国内自动回退</option>
+              <option value="ghfast">优先走 ghfast.top 镜像</option>
+            </select>
+          </div>
+          <div class="form-group" data-cmd-yes-wrap>
+            <label class="form-label">交互方式</label>
+            <label class="form-label form-label--check">
+              <input type="checkbox" data-cmd-yes checked>
+              <span>无人值守 (-y)，取消可交互确认</span>
+            </label>
+          </div>
+          <div class="form-group" data-cmd-bind-wrap>
+            <label class="form-label">监听范围</label>
+            <select class="select" data-cmd-bind>
+              <option value="local">仅本机 127.0.0.1（需 ssh -L / 反代）</option>
+              <option value="public">对外 0.0.0.0（需自行做鉴权与防火墙）</option>
+            </select>
+          </div>
+          <div class="form-group" data-cmd-private-wrap>
+            <label class="form-label">内网上游</label>
+            <label class="form-label form-label--check">
+              <input type="checkbox" data-cmd-private>
+              <span>允许内网 / 本机上上游地址</span>
+            </label>
+          </div>
+        </div>
+      </details>
     </div>`;
 
     const q = (sel) => container.querySelector(sel);
     const outEl = q('[data-cmd-output]');
+    const altEl = q('[data-cmd-alt]');
     const portEl = q('[data-cmd-port]');
     const srcWrap = q('[data-cmd-source-wrap]');
     const mirrorWrap = q('[data-cmd-mirror-wrap]');
@@ -4666,6 +4519,16 @@
     const yesEl = q('[data-cmd-yes]');
     const bindEl = q('[data-cmd-bind]');
     const privEl = q('[data-cmd-private]');
+
+    const build = (mode) => buildNodeShellCommands({
+      ...panelState,
+      mode,
+      role,
+      hubUrl,
+      nodeToken: payload.nodeToken,
+      clientKey,
+      bootstrapEnv: payload.bootstrapEnv,
+    });
 
     const refresh = () => {
       const isInstall = panelState.mode === 'install';
@@ -4681,15 +4544,11 @@
           ? `API Base URL: http://<VM_IP>:${port}/v1`
           : `API Base URL: http://127.0.0.1:${port}/v1（仅本机可达：ssh -L ${port}:127.0.0.1:${port} 或反代）`;
       }
-      if (outEl) {
-        outEl.value = buildNodeShellCommands({
-          ...panelState,
-          role,
-          hubUrl,
-          nodeToken: payload.nodeToken,
-          clientKey,
-          bootstrapEnv: payload.bootstrapEnv,
-        });
+      if (outEl) outEl.value = build('install');
+      if (altEl) {
+        // 「其它安装方式」里选中的方式；选了 systemd 就回到推荐命令本身。
+        altEl.value = build(panelState.mode);
+        altEl.hidden = panelState.mode === 'install';
       }
     };
 
@@ -4717,51 +4576,205 @@
     refresh();
   }
 
-  function buildNodeEditor(node) {
+  // --- Node editor (组件 5 · .editor) ---
+  // 一个构建函数管完整个节点：新增（create）与编辑（edit）共用同一套字段 / id /
+  // 保存逻辑，只有两处差别：新增时字段留空、无「删除」按钮。
+  // 结构固定：基本字段（节点名称）→「高级」折叠（角色 / 租约 / 宽限 / 权限范围）
+  //          → 底部 .form-actions--split：左删除（确认），右「取消」+「保存」。
+  function buildNodeEditor(node, opts = {}) {
+    const isCreate = Boolean(opts.create);
     const wrap = ce('div');
-    const isEnabled = node.enabled;
-    const id = node.id;
-    const q = makeScopedQuery(wrap);
+    const id = node?.id || '';
+    const role = isCreate ? (nodeCreateDraft.role || 'full') : (node.role || 'full');
+    const leaseTtl = isCreate ? nodeCreateDraft.leaseTtl : (node.lease_ttl || 86400);
+    const graceTtl = isCreate ? nodeCreateDraft.graceTtl : (node.grace_ttl || 3600);
+    const nameVal = isCreate ? (nodeCreateDraft.name || '') : (node.name || '');
+
+    // 「安装」视图：签发成功 / 重新获取后，同一个编辑器切换成安装指引。
+    const installFor = !isCreate && state.nodeInstallFor === id ? id : '';
+
+    // create 模式用 issueNode* id（签发表单的旧 id，保持功能清单可追溯）；
+    // edit 模式用 ed_node_*_{id}。
+    const nameId = isCreate ? 'issueNodeName' : `ed_node_name_${id}`;
+    const roleId = isCreate ? 'issueNodeRole' : `ed_node_role_${id}`;
+    const ttlId = isCreate ? 'issueNodeTTL' : `ed_node_ttl_${id}`;
+    const graceId = isCreate ? 'issueNodeGraceTTL' : `ed_node_grace_${id}`;
+    const provAllId = isCreate ? 'issueNodeProvAll' : `ed_node_prov_all_${id}`;
+    const provListId = isCreate ? 'issueNodeProvs' : `ed_node_provs_${id}`;
+    const modelAllId = isCreate ? 'issueNodeModelAll' : `ed_node_model_all_${id}`;
+    const modelListId = isCreate ? 'issueNodeModels' : `ed_node_models_${id}`;
+    const cancelBtnId = isCreate ? 'btn_cancel_node_create' : `btn_cancel_node_${id}`;
+    // create 模式的提交按钮沿用签发表单的旧 id（#btnDoIssue），保持功能清单可追溯。
+    const saveBtnId = isCreate ? 'btnDoIssue' : `btn_save_node_${id}`;
 
     wrap.innerHTML = `<div class="form-grid">${[
-      fg('节点名称', `<input class="input" id="ed_node_name_${id}" value="${eh(node.name)}">`),
-      fg('节点角色', `<select class="select" id="ed_node_role_${id}"><option value="full" ${node.role === 'full' ? 'selected' : ''}>Full (全功能代理网关)</option><option value="lite" ${node.role === 'lite' ? 'selected' : ''}>Lite (轻量本地代理)</option></select>`),
-      fg('租约时长 (秒 lease_ttl)', `<input class="input tabular" id="ed_node_ttl_${id}" type="number" value="${node.lease_ttl || 86400}">`),
-      fg('断网宽限期 (秒 grace_ttl)', `<input class="input tabular" id="ed_node_grace_${id}" type="number" value="${node.grace_ttl || 3600}">`),
-      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_prov_all_${id}"><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="ed_node_provs_${id}"></div></div>`,
-      `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_node_model_all_${id}"><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="ed_node_models_${id}"></div></div>`,
-    ].join('')}</div><div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_node_${id}" type="button">删除节点</button><button class="btn ${isEnabled ? 'btn--danger' : ''}" id="btn_toggle_node_${id}" type="button">${isEnabled ? '吊销/停用' : '恢复启用'}</button><button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button></div><div class="form-actions-group"><button class="btn btn--primary" id="btn_save_node_${id}" type="button">保存节点</button></div></div><div class="editor-section" id="node_token_display_box_${id}" hidden><div class="form-grid form-grid--2">${[
-      fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
-      fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
-    ].join('')}</div><div class="mt-3" id="node_cmd_panel_${id}"></div></div>`;
+      fg('节点名称', `<input class="input" id="${nameId}" value="${eh(nameVal)}" placeholder="例如 hk-edge-01">`),
+    ].join('')}</div>
+    ${installFor ? `<div class="editor-section" id="node_install_view_${id}"></div>` : ''}
+    ${isCreate ? '' : nodeDetailSectionHtml(node)}
+    <details class="headers-details mt-3">
+      <summary class="form-label">高级（角色 / 租约 / 宽限期 / 权限范围）</summary>
+      <div class="form-grid mt-2">${[
+        fg('节点角色', `<select class="select" id="${roleId}"><option value="full" ${role === 'full' ? 'selected' : ''}>Full (全功能代理网关)</option><option value="lite" ${role === 'lite' ? 'selected' : ''}>Lite (轻量本地代理)</option></select>`),
+        fg('租约时长 (秒 lease_ttl)', `<input class="input tabular" id="${ttlId}" type="number" value="${eh(String(leaseTtl))}" placeholder="86400">`, '', '', '节点配置的租约时长；超过此时长未同步即判离线'),
+        fg('断网宽限期 (秒 grace_ttl)', `<input class="input tabular" id="${graceId}" type="number" value="${eh(String(graceTtl))}" placeholder="3600">`, '', '', '租约过期后的宽限时长；宽限期内节点仍可继续工作'),
+        `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="${provAllId}"><span>允许全部 LLM 供应商 (* 全量)</span></label><div class="mt-1" id="${provListId}"></div></div>`,
+        `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="${modelAllId}"><span>允许全部 LLM 模型 (* 全量)</span></label><div class="mt-1" id="${modelListId}"></div></div>`,
+      ].join('')}</div>
+    </details>
+    <div class="form-actions form-actions--split">
+      <div class="form-actions-group" id="node_left_actions_${id}">
+        ${isCreate ? '' : `<button class="btn btn--danger" id="btn_toggle_node_${id}" type="button">${node.enabled === false ? '恢复节点' : '吊销节点'}</button>`}
+      </div>
+      <div class="form-actions-group">
+        <button class="btn" id="${cancelBtnId}" type="button">取消</button>
+        ${isCreate ? '' : `<button class="btn" id="btn_rotate_node_${id}" type="button">轮换 Token</button>`}
+        ${isCreate ? '' : `<button class="btn" id="btn_reinstall_node_${id}" type="button">重新获取安装命令</button>`}
+        <button class="btn btn--primary" id="${saveBtnId}" type="button">${isCreate ? '添加节点' : '保存节点'}</button>
+      </div>
+    </div>`;
+    return wrap;
+  }
 
+  // 节点详情（组件 5 · 行内展开）：基本信息 + Token / 后台密码查看复制 + 模型使用。
+  // 原来这块是 #nodeDetailOverlay 弹框；现在跟着节点行就地展开。
+  function nodeDetailSectionHtml(node) {
+    const id = node.id;
+    const role = node.role === 'full' ? 'full' : 'lite';
+    const heartbeat = node.last_seen ? formatDateTime(node.last_seen) : '尚未上报心跳';
+    const ttlHint = `租约 ${Number(node.lease_ttl) || 86400}s / 宽限 ${Number(node.grace_ttl) || 3600}s 后判离线`;
+    const providers = Array.isArray(node.scope?.providers) ? node.scope.providers : ['*'];
+    const models = Array.isArray(node.scope?.models) ? node.scope.models : ['*'];
+    const rows = [
+      nodeDetailRow('节点 ID', 'Hub KV 中的主键，安装命令与鉴权都用它', `<span class="tabular node-detail-value">${eh(node.id)}</span>`),
+      nodeDetailRow('角色', 'full 含管理控制台；lite 为极简代理', `<span class="text-xs">${eh(role === 'full' ? 'Full' : 'Lite')}</span>`),
+      nodeDetailRow('创建时间', '节点签发时间', `<span class="tabular node-detail-value">${eh(formatDateTime(node.created_at) || '—')}</span>`),
+      nodeDetailRow('最后心跳', ttlHint, `<span class="tabular node-detail-value">${eh(heartbeat)}</span>`),
+      nodeDetailRow('配置版本', '节点最近一次拉取生效的配置版本号', `<span class="tabular node-detail-value">${node.last_config_version ? `#${eh(String(node.last_config_version))}` : '—'}</span>`),
+      nodeDetailRow('同步次数', `其中 304 命中 ${Number(node.hit_304_count) || 0} 次`, `<span class="tabular node-detail-value">${Number(node.sync_count || 0)} 次</span>`),
+      nodeDetailRow('最近 IP', '节点最近一次同步 / 心跳的来源地址', `<span class="tabular node-detail-value">${eh(node.last_ip || '—')}</span>`),
+      nodeDetailRow('供应商范围', '节点可访问的上游供应商白名单', `<span class="node-detail-value">${eh(nodeScopeText(providers, '供应商'))}</span>`),
+      nodeDetailRow('模型范围', '节点可路由的模型白名单', `<span class="node-detail-value">${eh(nodeScopeText(models, '模型'))}</span>`),
+    ];
+    // 秘密行：Token / 客户端密钥 / 后台密码（Full 才有后台密码）。
+    const secretRows = [
+      nodeDetailSecretRow('节点 Token', 'NODE_TOKEN：节点侧 LLMPROXY_NODE_TOKEN / 安装命令 --node-token', 'node_token', 'node_token', '未保存明文（旧版本节点，轮换后可回看）'),
+      nodeDetailSecretRow('客户端密钥', 'client_key：节点侧 LLMPROXY_CLIENT_KEY，由 Hub 全局设置下发', 'client_key', 'client_key', 'Hub 未配置主客户端密钥'),
+      nodeDetailSecretRow('后台密码', 'Full 节点管理控制台 (/admin) 的登录密码', 'admin_password', 'admin_password', role === 'full' ? '该节点未存有后台密码' : 'lite 无控制台密码'),
+    ];
+    return `<div class="editor-section">
+      <div class="section-bar"><span class="form-label">节点详情</span></div>
+      <div id="node_detail_rows_${id}">${rows.join('')}</div>
+      <div id="node_detail_secrets_${id}">${secretRows.join('')}</div>
+      <div class="section-bar mt-3"><span class="form-label">模型使用（节点上报）</span></div>
+      <div id="node_model_usage_${id}"></div>
+    </div>`;
+  }
+
+  // 节点编辑器的接线（buildNodeEditor 只出结构）。
+  function wireNodeEditor(node, _unused, wrap) {
+    const isCreate = !node;
+    const id = node?.id || '';
+    const q = makeScopedQuery(wrap);
+
+    // 权限范围勾选组：新增用「issueNode*」那套 id（create 模式专属），
+    // 编辑用「ed_node_*_{id}」。两套控件的挂载点不同，但取值逻辑一致。
     const tmplOpts = templateScopeOptions();
-    // Scope entries that no longer match the current template options (providers/models
-    // deleted on the hub since the node was scoped) have no checkbox to render. Preserve
-    // them on save: dropping them silently would narrow the node's scope without the
-    // operator seeing or choosing it.
-    const staleScope = (scopeArr, options) =>
-      [...new Set((Array.isArray(scopeArr) ? scopeArr : []).filter((v) => v !== '*' && !options.includes(v)))];
-    const staleProviders = staleScope(node.scope?.providers, tmplOpts.providers);
-    const staleModels = staleScope(node.scope?.models, tmplOpts.models);
-    mountScopeControls(q(`#ed_node_prov_all_${id}`), q(`#ed_node_provs_${id}`), tmplOpts.providers, node.scope?.providers);
-    mountScopeControls(q(`#ed_node_model_all_${id}`), q(`#ed_node_models_${id}`), tmplOpts.models, node.scope?.models);
+    const staleProviders = isCreate ? [] : staleScopeEntries(node.scope?.providers, tmplOpts.providers);
+    const staleModels = isCreate ? [] : staleScopeEntries(node.scope?.models, tmplOpts.models);
 
-    clk(q(`#btn_save_node_${id}`), async () => {
-      const name = q(`#ed_node_name_${id}`).value.trim();
-      const role = q(`#ed_node_role_${id}`)?.value || node.role;
-      const leaseTtl = Number(q(`#ed_node_ttl_${id}`).value) || 86400;
-      const graceTtl = Number(q(`#ed_node_grace_${id}`)?.value) || 3600;
+    const nameId = isCreate ? 'issueNodeName' : `ed_node_name_${id}`;
+    const roleId = isCreate ? 'issueNodeRole' : `ed_node_role_${id}`;
+    const ttlId = isCreate ? 'issueNodeTTL' : `ed_node_ttl_${id}`;
+    const graceId = isCreate ? 'issueNodeGraceTTL' : `ed_node_grace_${id}`;
+    const provAllId = isCreate ? 'issueNodeProvAll' : `ed_node_prov_all_${id}`;
+    const provListId = isCreate ? 'issueNodeProvs' : `ed_node_provs_${id}`;
+    const modelAllId = isCreate ? 'issueNodeModelAll' : `ed_node_model_all_${id}`;
+    const modelListId = isCreate ? 'issueNodeModels' : `ed_node_models_${id}`;
+    const cancelBtnId = isCreate ? 'btn_cancel_node_create' : `btn_cancel_node_${id}`;
+    const saveBtnId = isCreate ? 'btnDoIssue' : `btn_save_node_${id}`;
 
-      const scope = {
-        providers: q(`#ed_node_prov_all_${id}`)?.checked
-          ? ['*']
-          : [...new Set([...staleProviders, ...collectScopeSelection(q(`#ed_node_provs_${id}`))])],
-        models: q(`#ed_node_model_all_${id}`)?.checked
-          ? ['*']
-          : [...new Set([...staleModels, ...collectScopeSelection(q(`#ed_node_models_${id}`))])],
+    mountScopeControls(q(`#${provAllId}`), q(`#${provListId}`), tmplOpts.providers,
+      isCreate ? nodeCreateDraft.providers : node.scope?.providers);
+    mountScopeControls(q(`#${modelAllId}`), q(`#${modelListId}`), tmplOpts.models,
+      isCreate ? nodeCreateDraft.models : node.scope?.models);
+
+    if (isCreate) {
+      // create 模式的草稿：列表重绘（保存 / 探活后都会重绘）不能把操作者刚敲的字冲掉。
+      const capture = () => {
+        nodeCreateDraft.name = q(`#${nameId}`)?.value || '';
+        nodeCreateDraft.role = q(`#${roleId}`)?.value || 'full';
+        nodeCreateDraft.leaseTtl = q(`#${ttlId}`)?.value || '';
+        nodeCreateDraft.graceTtl = q(`#${graceId}`)?.value || '';
+        nodeCreateDraft.providers = q(`#${provAllId}`)?.checked ? ['*'] : collectScopeSelection(q(`#${provListId}`));
+        nodeCreateDraft.models = q(`#${modelAllId}`)?.checked ? ['*'] : collectScopeSelection(q(`#${modelListId}`));
       };
+      [nameId, ttlId, graceId].forEach((fid) => q(`#${fid}`)?.addEventListener('input', capture));
+      [roleId].forEach((fid) => q(`#${fid}`)?.addEventListener('change', capture));
+      [provAllId, modelAllId].forEach((fid) => q(`#${fid}`)?.addEventListener('change', capture));
+      [provListId, modelListId].forEach((fid) => q(`#${fid}`)?.addEventListener('change', capture));
+    } else {
+      wireNodeDetailSection(node, wrap);
+      wireNodeInstallSection(node, wrap);
+    }
 
+    clk(q(`#${cancelBtnId}`), () => {
+      state.creatingNode = false;
+      state.activeEditorKey = null;
+      state.nodeInstallFor = null;
+      renderNodesList();
+    });
+
+    clk(q(`#${saveBtnId}`), async () => {
+      const nameEl = q(`#${nameId}`);
+      const name = (nameEl?.value || '').trim();
+      if (!name) return toast('请输入节点名称', 'warn');
+
+      if (isCreate) {
+        const role = q(`#${roleId}`)?.value || 'full';
+        // 空值回落服务端默认（86400 / 3600 / *）：Number('') === 0 是 falsy。
+        const leaseTtl = Number(q(`#${ttlId}`)?.value) || 86400;
+        const graceTtl = Number(q(`#${graceId}`)?.value) || 3600;
+        const scope = {
+          providers: q(`#${provAllId}`)?.checked ? ['*'] : collectScopeSelection(q(`#${provListId}`)),
+          models: q(`#${modelAllId}`)?.checked ? ['*'] : collectScopeSelection(q(`#${modelListId}`)),
+        };
+        try {
+          const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
+          if (!res || !res.ok) return toast((res && res.error) || '添加失败', 'err');
+          toast('节点已添加，请在安装视图里完成部署', 'ok');
+          state.creatingNode = false;
+          nodeCreateDraft.name = '';
+          nodeCreateDraft.role = 'full';
+          nodeCreateDraft.leaseTtl = '';
+          nodeCreateDraft.graceTtl = '';
+          nodeCreateDraft.providers = ['*'];
+          nodeCreateDraft.models = ['*'];
+          if (res.node_token) nodeTokenMem.set(res.node?.id, res);
+          await loadNodesData();
+          // 保存后同一个编辑器切换为「安装」视图（安装视图在行内展开的编辑器里）。
+          if (res.node?.id) {
+            state.activeEditorKey = `node_${res.node.id}`;
+            state.nodeInstallFor = res.node.id;
+            renderNodesList();
+          }
+        } catch (e) {
+          toast(scrubUiText(e.message), 'err');
+        }
+        return;
+      }
+
+      const role = q(`#${roleId}`)?.value || node.role;
+      const leaseTtl = Number(q(`#${ttlId}`)?.value) || 86400;
+      const graceTtl = Number(q(`#${graceId}`)?.value) || 3600;
+      const scope = {
+        providers: q(`#${provAllId}`)?.checked
+          ? ['*']
+          : [...new Set([...staleProviders, ...collectScopeSelection(q(`#${provListId}`))])],
+        models: q(`#${modelAllId}`)?.checked
+          ? ['*']
+          : [...new Set([...staleModels, ...collectScopeSelection(q(`#${modelListId}`))])],
+      };
       try {
         const res = await window.HOST.patchNode(id, { name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
         if (res && res.ok) { toast('节点配置更新成功', 'ok'); await loadNodesData(); }
@@ -4769,110 +4782,287 @@
       } catch (e) { toast(scrubUiText(e.message), 'err'); }
     });
 
+    if (isCreate) return;
+
+    // 吊销 / 恢复：危险操作走 confirmDialog。
     clk(q(`#btn_toggle_node_${id}`), async () => {
+      const enable = node.enabled === false;
+      const ask = enable
+        ? `恢复 ${node.name || id}？恢复后节点在下一次心跳 / 同步时重新校验 Token 并继续工作。`
+        : `吊销 ${node.name || id}？吊销后该节点立即无法同步配置，节点侧会在鉴权失败后停服。`;
+      const ok = await confirmDialog({
+        title: enable ? '恢复节点' : '吊销节点',
+        message: ask,
+        confirmText: enable ? '恢复' : '吊销',
+      });
+      if (!ok) return;
       try {
-        const res = await window.HOST.patchNode(id, { enabled: !isEnabled });
-        if (res && res.ok) { toast(isEnabled ? '节点已吊销' : '节点已恢复', 'ok'); await loadNodesData(); }
+        const res = await window.HOST.patchNode(id, { enabled: enable });
+        if (res && res.ok) {
+          toast(enable ? '节点已恢复' : '节点已吊销', 'ok');
+          await loadNodesData();
+        } else {
+          toast((res && res.error) || (enable ? '恢复节点失败' : '吊销节点失败'), 'err');
+        }
       } catch (e) { toast(e.message, 'err'); }
     });
 
+    // 轮换 Token：旧 Token 立即失效，确认后轮换；结果以一次性命令展示在弹框里。
     clk(q(`#btn_rotate_node_${id}`), async () => {
-      if (!confirm('轮换 Token 会使旧 Token 立即失效，确定继续吗？')) return;
+      const ok = await confirmDialog({
+        title: '轮换节点 Token',
+        message: `轮换 ${node.name || id} 的 Token？\n旧 Token 立即失效，节点在更新 NODE_TOKEN 并重新同步前会一直鉴权失败。`,
+        confirmText: '轮换',
+      });
+      if (!ok) return;
       try {
         const res = await window.HOST.rotateNode(id);
-        if (res && res.ok) {
-          // The Hub reuses the stored admin password across rotations (see
-          // reissueNodeToken), so say so instead of implying a fresh one.
-          toast(res.admin_password ? 'Token 轮换成功，后台密码保持不变' : 'Token 轮换成功！', 'ok');
-          if (res.node_token) nodeTokenMem.set(id, res);
-          q(`#node_token_display_box_${id}`).hidden = false;
-          q(`#node_new_token_val_${id}`).value = res.node_token;
-          q(`#node_new_env_val_${id}`).value = res.bootstrap_env;
-          mountNodeCommandPanel(q(`#node_cmd_panel_${id}`), {
-            role: q(`#ed_node_role_${id}`)?.value || node.role || 'lite',
-            hubUrl: window.location.origin,
-            nodeToken: res.node_token,
-            clientKey: res.client_key,
-            bootstrapEnv: res.bootstrap_env,
-            adminPass: res.admin_password,
-          });
+        if (!res || !res.ok || !res.node_token) {
+          toast((res && res.error) || '轮换 Token 失败', 'err');
+          return;
         }
-      } catch (e) { toast(e.message, 'err'); }
+        nodeTokenMem.set(id, res);
+        // 轮换后的一次性命令：用 .dialog 展示（组件 6 允许「只显示一次」的材料）。
+        openNodeInstallOverlay(id, res, { rotated: true });
+        await loadNodesData();
+        toast('Token 已轮换', 'ok');
+      } catch (e) {
+        toast(e.message, 'err');
+      }
     });
 
-    clk(q(`#btn_copy_node_tok_${id}`), () => copyToClipboard(q(`#node_new_token_val_${id}`)?.value, 'NODE_TOKEN 已复制'));
-    clk(q(`#btn_copy_node_env_${id}`), () => copyToClipboard(q(`#node_new_env_val_${id}`)?.value, '环境变量已复制'));
-
-    clk(q(`#btn_del_node_${id}`), async () => {
-      if (!confirm(`确认永久删除节点 ${node.name} 吗？`)) return;
+    // 重新获取安装命令：Hub 只存 Token 摘要，重新获取 = 轮换一次。
+    clk(q(`#btn_reinstall_node_${id}`), async () => {
+      const cached = nodeTokenMem.get(id);
+      if (cached && cached.node_token) {
+        openNodeInstallOverlay(id, cached, { rotated: false, fromCache: true });
+        return;
+      }
+      const ok = await confirmDialog({
+        title: '重新获取安装命令',
+        message: `安装命令包含节点 Token，出于安全仅在签发时显示一次。\n现在重新获取将轮换 ${node.name || id} 的 Token（旧 Token 立即失效），继续吗？`,
+        confirmText: '重新获取',
+      });
+      if (!ok) return;
       try {
-        const res = await window.HOST.deleteNode(id);
-        if (res && res.ok) {
-          toast('节点已删除', 'ok');
-          state.activeEditorKey = null;
-          // Drop the in-memory token and admin password: the node is gone, and
-          // its plaintext credential must not outlive it in this tab's memory.
-          nodeTokenMem.delete(id);
-          nodeAdminPassMem.delete(id);
+        const res = await window.HOST.getNodeInstallCommand(id);
+        if (res && res.ok && res.node_token) {
+          nodeTokenMem.set(id, res);
+          openNodeInstallOverlay(id, res, { rotated: true });
           await loadNodesData();
+        } else {
+          toast((res && res.error) || '获取安装命令失败', 'err');
         }
-      } catch (e) { toast(e.message, 'err'); }
+      } catch (e) {
+        toast(e.message, 'err');
+      }
     });
 
-    return wrap;
+    // 删除节点放在「⋯」菜单里（行内次要操作不超过 2 个）。
+    const moreItems = [{
+      label: '删除节点',
+      danger: true,
+      cls: `btn_del_node_${id}`,
+      onClick: async () => {
+        const ok = await confirmDialog({
+          title: '删除节点',
+          message: `确认永久删除节点 ${node.name} 吗？`,
+          confirmText: '删除',
+        });
+        if (!ok) return;
+        try {
+          const res = await window.HOST.deleteNode(id);
+          if (res && res.ok) {
+            toast('节点已删除', 'ok');
+            state.activeEditorKey = null;
+            // Drop the in-memory token and admin password: the node is gone, and
+            // its plaintext credential must not outlive it in this tab's memory.
+            nodeTokenMem.delete(id);
+            nodeAdminPassMem.delete(id);
+            delete state.nodeSecrets[id];
+            await loadNodesData();
+          }
+        } catch (e) { toast(e.message, 'err'); }
+      },
+    }];
+    const actionHost = q(`#node_left_actions_${id}`);
+    if (actionHost) {
+      actionHost.appendChild(buildMenu(moreItems, { label: `${node.name || id} 的更多操作` }));
+    }
   }
 
-  async function handleIssueNode() {
-    const name = $('issueNodeName').value.trim();
-    const role = $('issueNodeRole').value;
-    // Collapsed advanced fields fall back to the server-side defaults (86400 /
-    // 3600 / *): an empty input gives Number('') === 0, and 0 (like NaN) is
-    // falsy, so the || default chain below handles both.
-    const leaseTtl = Number($('issueNodeTTL').value) || 86400;
-    const graceTtl = Number($('issueNodeGraceTTL')?.value) || 3600;
+  // 节点详情接线：凭据查看/复制 + 模型使用表。
+  // 「安装」视图接线：签发成功后，同一个编辑器里出现推荐命令 + 复制按钮 +
+  // 后台密码（只此一次）。命令面板的其它选项在 mountNodeCommandPanel 里。
+  function wireNodeInstallSection(node, wrap) {
+    const id = node.id;
+    const q = makeScopedQuery(wrap);
+    const host = q(`#node_install_view_${id}`);
+    if (!host) return;
+    const material = nodeTokenMem.get(id);
+    if (!material || !material.node_token) {
+      host.innerHTML = '<div class="notice-strip"><span>安装命令只在签发或轮换时显示一次（Hub 只保存 Token 摘要）。点下方「重新获取安装命令」可再次获取（会轮换 Token）。</span></div>';
+      return;
+    }
+    // 一次性材料：新 NODE_TOKEN 与启动环境变量（各自带复制按钮）。
+    host.innerHTML = `<div class="form-grid form-grid--2">${[
+      fg('新 NODE_TOKEN (仅显示一次)', `<div class="input-row"><input class="input input--code" readonly id="node_new_token_val_${id}" value="${eh(String(material.node_token || ''))}"><button class="btn" id="btn_copy_node_tok_${id}" type="button">复制</button></div>`),
+      fg('启动环境变量', `<div class="input-row"><input class="input input--code" readonly id="node_new_env_val_${id}" value="${eh(String(material.bootstrap_env || ''))}"><button class="btn" id="btn_copy_node_env_${id}" type="button">复制</button></div>`),
+    ].join('')}</div>`;
+    clk(q(`#btn_copy_node_tok_${id}`), () => copyToClipboard(material.node_token, 'NODE_TOKEN 已复制'));
+    clk(q(`#btn_copy_node_env_${id}`), () => copyToClipboard(material.bootstrap_env, '环境变量已复制'));
+    const cmdHost = ce('div');
+    cmdHost.className = 'mt-3';
+    host.appendChild(cmdHost);
+    mountNodeCommandPanel(cmdHost, {
+      role: (material.node && material.node.role) || node.role || 'lite',
+      hubUrl: window.location.origin,
+      nodeToken: material.node_token,
+      clientKey: material.client_key,
+      bootstrapEnv: material.bootstrap_env,
+      adminPass: node.admin_password || material.admin_password || getStableNodeAdminPass(id, node.role),
+    });
+  }
 
-    if (!name) return toast('请输入节点名称', 'warn');
+  function wireNodeDetailSection(node, wrap) {
+    const id = node.id;
+    const q = makeScopedQuery(wrap);
 
-    // Master「全量 (*)」checked = ['*']; unchecked = explicit checkbox picks
-    // (empty = [], i.e. nothing allowed).
-    const scope = {
-      providers: $('issueNodeProvAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeProvs')),
-      models: $('issueNodeModelAll')?.checked ? ['*'] : collectScopeSelection($('issueNodeModels')),
+    renderNodeModelUsage(node, q(`#node_model_usage_${id}`));
+
+    const secretsBox = q(`#node_detail_secrets_${id}`);
+    if (!secretsBox) return;
+
+    // 凭据只在展开时读一次（只读接口，绝不轮换 Token）。
+    // 注意：applySecrets 只更新显示状态，绝不重复挂事件 —— 否则每次重绘都会
+    // 多绑一次 click，「复制」会被立即触发。
+    const applySecrets = (secrets) => {
+      const notes = (secrets && secrets.notes) || {};
+      secretsBox.querySelectorAll('[data-detail-secret]').forEach((el) => {
+        const key = el.getAttribute('data-detail-secret');
+        const val = secrets ? String(secrets[key] || '') : '';
+        if (!val) {
+          el.textContent = notes[key] || el.getAttribute('data-detail-empty') || '未保存';
+          const eye = secretsBox.querySelector(`[data-detail-eye="${key}"]`);
+          const copy = secretsBox.querySelector(`[data-detail-copy="${key}"]`);
+          if (eye) eye.hidden = true;
+          if (copy) copy.hidden = true;
+          return;
+        }
+        const eye = secretsBox.querySelector(`[data-detail-eye="${key}"]`);
+        const copy = secretsBox.querySelector(`[data-detail-copy="${key}"]`);
+        if (eye) eye.hidden = false;
+        if (copy) copy.hidden = false;
+        el.textContent = CRED_PASS_MASK;
+      });
     };
 
-    try {
-      const res = await window.HOST.issueNode({ name, role, lease_ttl: leaseTtl, grace_ttl: graceTtl, scope });
-      if (res && res.ok) {
-        toast('节点已添加，请在一键安装弹窗中获取部署命令', 'ok');
-        // Collapse the form back to the one-field add experience; the advanced
-        // <details> keeps its own open state per browser, so reset it too.
-        toggle('issueNodeForm', false);
-        const adv = $('issueNodeForm').querySelector('details');
-        if (adv) adv.open = false;
-        $('issueNodeName').value = '';
-        if (res.node_token) nodeTokenMem.set(res.node?.id, res);
-        await loadNodesData();
-        if (res.node?.id && res.node_token) {
-          openNodeInstallOverlay(res.node.id, res, { rotated: false });
+    // 事件只挂一次。
+    secretsBox.querySelectorAll('[data-detail-eye]').forEach((btn) => {
+      clk(btn, () => {
+        const key = btn.getAttribute('data-detail-eye');
+        const valEl = secretsBox.querySelector(`[data-detail-secret="${key}"]`);
+        const revealed = btn.getAttribute('aria-pressed') === 'true';
+        const secrets = state.nodeSecrets[id];
+        const val = secrets ? String(secrets[key] || '') : '';
+        if (!val) return toast('该凭据暂不可回看', 'warn');
+        if (valEl) valEl.textContent = revealed ? CRED_PASS_MASK : val;
+        btn.setAttribute('aria-pressed', revealed ? 'false' : 'true');
+        btn.setAttribute('aria-label', `${revealed ? '显示' : '隐藏'}${NODE_DETAIL_SECRET_LABELS[key] || ''}`);
+        if (window.uiIcon) {
+          btn.innerHTML = `${window.uiIcon(revealed ? 'eye' : 'eyeOff')}<span data-detail-eye-label>${revealed ? '显示' : '隐藏'}</span>`;
+        } else {
+          btn.textContent = revealed ? '显示' : '隐藏';
         }
-      } else {
-        toast(res.error || '添加失败', 'err');
-      }
-    } catch (e) {
-      toast(e.message, 'err');
+      });
+    });
+    secretsBox.querySelectorAll('[data-detail-copy]').forEach((btn) => {
+      clk(btn, () => {
+        const key = btn.getAttribute('data-detail-copy');
+        const secrets = state.nodeSecrets[id];
+        const val = secrets ? String(secrets[key] || '') : '';
+        if (!val) return toast('该凭据暂不可回看', 'warn');
+        copyToClipboard(val, `${NODE_DETAIL_SECRET_LABELS[key] || '凭据'} 已复制`);
+      });
+    });
+
+    const cached = state.nodeSecrets[id];
+    applySecrets(cached || null);
+    if (!cached) {
+      loadNodeSecrets(id).then((secrets) => {
+        if (secrets && state.activeEditorKey === `node_${id}`) applySecrets(secrets);
+      }).catch(() => {});
     }
+  }
+
+  // 节点上报的模型使用（按节点显示）。数据来自 node.usage.model_stats / node.usage.models。
+  function renderNodeModelUsage(node, container) {
+    if (!container) return;
+    const u = node.usage && typeof node.usage === 'object' ? node.usage : null;
+    const statsMap = u && u.model_stats && typeof u.model_stats === 'object' ? u.model_stats : null;
+    const modelsMap = u && u.models && typeof u.models === 'object' ? u.models : null;
+    const rows = [];
+    if (statsMap) {
+      for (const [model, st] of Object.entries(statsMap)) {
+        if (!st || typeof st !== 'object') continue;
+        const calls = Number(st.calls ?? st.requests) || 0;
+        if (calls <= 0) continue;
+        rows.push({
+          model,
+          calls,
+          success: Number(st.successes ?? st.success) || 0,
+          failed: Number(st.failed) || 0,
+          inTok: Number(st.in_tokens ?? st.input_tokens) || 0,
+          outTok: Number(st.out_tokens ?? st.output_tokens) || 0,
+        });
+      }
+    } else if (modelsMap) {
+      for (const [model, count] of Object.entries(modelsMap)) {
+        const c = Number(count) || 0;
+        if (c <= 0) continue;
+        rows.push({ model, calls: c, success: 0, failed: 0, inTok: 0, outTok: 0 });
+      }
+    }
+    if (rows.length === 0) {
+      container.innerHTML = '<div class="text-muted text-xs">暂无上报：节点在下一次配置同步时会上报它实际用到的模型。</div>';
+      return;
+    }
+    rows.sort((a, b) => b.calls - a.calls);
+    container.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>模型</th><th>调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th></tr></thead>
+      <tbody>${rows.map((r) => `
+        <tr>
+          <td>${eh(r.model)}</td>
+          <td class="tabular">${r.calls}</td>
+          <td class="tabular">${statsMap ? `${r.success} / ${r.failed}` : '-'}</td>
+          <td class="tabular">${statsMap ? `${r.inTok} / ${r.outTok}` : '-'}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  // Scope entries that no longer match the current template options (providers/models
+  // deleted on the hub since the node was scoped) have no checkbox to render. Preserve
+  // them on save: dropping them silently would narrow the node's scope without the
+  // operator seeing or choosing it.
+  function staleScopeEntries(scopeArr, options) {
+    return [...new Set((Array.isArray(scopeArr) ? scopeArr : []).filter((v) => v !== '*' && !options.includes(v)))];
   }
 
   // --- View: Unified Model Routing (U1, U5, M16) ---
   function renderModelsList() {
     const container = $('modelsList');
     if (!container) return;
+    // 列表即将重建（innerHTML 替换）：挂在旧 DOM 上的菜单浮层会变成死元素，
+    // 先关掉，别让它们留在 openMenus 里干扰 Esc。
+    closeAllMenus();
     container.innerHTML = '';
 
+    // 页面头的「新增模型路由」按钮与 create 编辑器互斥：编辑器开着时它变成
+    // 「收起」（普通按钮），避免同一屏出现两个主按钮。
     const btnAddModel = $('btnAddModel');
     if (btnAddModel) {
-      btnAddModel.hidden = false;
-      btnAddModel.classList.remove('hidden');
+      btnAddModel.classList.toggle('btn--primary', !state.creatingModel);
+      btnAddModel.textContent = state.creatingModel ? '收起' : '新增模型路由';
     }
 
     const models = state.config?.agent_models || {};
@@ -4891,58 +5081,91 @@
       return `${mName} ${cands}`.toLowerCase().includes(q);
     });
 
+    // 「新增模型路由」= 在列表顶部插入一个空白编辑器（create 模式），
+    // 与编辑共用同一个构建函数（buildModelEditor）。
+    if (state.creatingModel) {
+      const createEditor = ce('div');
+      createEditor.className = 'editor';
+      createEditor.id = 'modelCreateEditor';
+      container.appendChild(createEditor);
+      // 先挂进 DOM 再接线：wireModelEditor() 用作用域查询找控件，
+      // 元素没接上时点击处理器就绑不上。
+      const built = buildModelEditor('', null, { create: true });
+      createEditor.appendChild(built.wrap);
+      wireModelEditor('', null, built);
+    }
+
     if (orderedKeys.length === 0) {
-      const emptyRow = ce('div');
-      emptyRow.className = 'row row--static text-muted';
-      emptyRow.textContent = q ? '没有匹配的模型路由' : '暂无已配置模型路由，请点击右上角「新增模型路由」';
-      container.appendChild(emptyRow);
+      const filtered = Boolean(q);
+      const empty = ce('div');
+      empty.className = 'card-pad';
+      const msg = ce('p');
+      msg.className = 'text-muted';
+      msg.textContent = filtered
+        ? '没有匹配的模型路由'
+        : '还没有模型路由：加一个对外模型名，挑好供应商与上游模型，网关就能对外提供它';
+      empty.appendChild(msg);
+      if (!filtered && !state.creatingModel) {
+        const btn = ce('button');
+        btn.type = 'button';
+        btn.className = 'btn btn--primary mt-3';
+        btn.textContent = '新增模型路由';
+        clk(btn, () => {
+          closeOtherCreateEditors('models');
+          state.creatingModel = true;
+          state.activeEditorKey = null;
+          renderModelsList();
+        });
+        empty.appendChild(btn);
+      }
+      container.appendChild(empty);
       return;
     }
 
-    const stratLabels = STRATEGY_LABELS;
-
     for (const mName of orderedKeys) {
       const m = models[mName];
-      const cCount = (m.candidates || []).length;
+      const cands = m.candidates || [];
+      const cCount = cands.length;
       const isExpanded = state.activeEditorKey === `m_${mName}`;
-      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(mName) : '';
-      const strat = m.routing_strategy || 'sticky_failover';
 
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      const dot = ce('span');
-      dot.className = `dot ${m.enabled && cCount > 0 ? 'dot--ok' : 'dot--err'}`;
-
+      // 一行只放有用的信息：模型名 + 它走哪些供应商。不放状态点、不放首字母头像 ——
+      // 路由本身没有「健康」可言（健康在 Key 上），首字母也不携带任何信息。
       const who = ce('div');
       who.className = 'who';
-      const subDesc = `首选 Key: ${m.active_key || '自动多路粘性'} · 候选池: ${cCount} 个`;
-      // The route row is informational only: per-key testing moved to the key
-      // table (供应商 → Key 行「测试」), where the verdict can name the key and
-      // the failure reason instead of "which of N candidates answered".
+      const provs = [...new Set(cands.map((c) => c.provider).filter(Boolean))];
+      const subDesc = cCount === 0
+        ? '还没有候选：点开加一个'
+        : cCount === 1
+          ? `${cands[0].provider || ''} · ${cands[0].target_model || mName}`
+          : provs.join(' · ');
       who.innerHTML = `
-        <div class="name">
-          ${brandIcon}
-          <span>${eh(mName)}</span>
-          <span class="pill pill--accent">${eh(stratLabels[strat] || strat)}</span>
-        </div>
+        <div class="name"><span>${eh(mName)}</span></div>
         <div class="sub">${eh(subDesc)}</div>
       `;
 
+      // 右侧：候选数；有 2 个以上候选（= 路由组）时带上策略名；停用时标「停用」。
       const fields = ce('div');
       fields.className = 'fields';
+      const meta = [];
+      if (m.enabled === false) meta.push('停用');
+      if (cCount >= 2) meta.push(STRATEGY_LABELS[m.routing_strategy || 'sticky_failover'] || m.routing_strategy);
+      meta.push(`${cCount} 候选`);
       fields.innerHTML = `
-        <span class="pill">${cCount} 候选</span>
+        <span class="text-xs text-muted">${eh(meta.join(' · '))}</span>
         <span class="caret">▾</span>
       `;
 
-      row.appendChild(dot);
       row.appendChild(who);
       row.appendChild(fields);
 
       clk(row, (ev) => {
         if (ev.target.closest('button') || ev.target.closest('input')) return;
         state.activeEditorKey = isExpanded ? null : `m_${mName}`;
+        // 点行展开编辑时收起 create 编辑器（同一时刻只有一个编辑器）。
+        state.creatingModel = false;
         renderModelsList();
       });
 
@@ -4951,100 +5174,483 @@
       if (isExpanded) {
         const editor = ce('div');
         editor.className = 'editor';
-        editor.appendChild(buildModelEditor(mName, m));
+        const built = buildModelEditor(mName, m);
+        editor.appendChild(built.wrap);
         container.appendChild(editor);
+        wireModelEditor(mName, m, built);
       }
     }
   }
 
-  function buildModelEditor(mName, m) {
+  // 模型路由编辑器（组件 5 · .editor）：一个构建函数管完整个模型。
+  // 新增（create）与编辑（edit）共用同一套字段、id 与保存逻辑，只有两处差别：
+  //   · 新增时字段留空、无「删除」按钮；
+  //   · 新增时「对外模型名」可留空（默认取第一个候选的上游模型 ID）。
+  // 结构固定：基本字段（对外模型名 + 路由策略，两列网格）
+  //          → 候选子表（供应商 · 上游模型 · Key · 思考档位 · 状态 · 排序/移除）
+  //          → 「测试这个模型」
+  //          → 「高级」折叠（指定 Key / 剥离思考 / 非流式 / Key 回退 / 权重 / 并发上限）
+  //          → 底部 .form-actions--split：左删除（确认），右「取消」+「保存」。
+  //
+  // 模型名可能含点号 / 空格（历史 bug：把它塞进 CSS 选择器就会炸）——
+  // 这里所有 id 都是静态的，模型名只作为普通文本出现，从不进选择器。
+  function buildModelEditor(mName, m, opts = {}) {
+    const isCreate = Boolean(opts.create);
     const wrap = ce('div');
-    const q = makeScopedQuery(wrap);
-    m.candidates = m.candidates || [];
-    const candidates = m.candidates;
-    let stratVal = m.routing_strategy || 'sticky_failover';
+    // 编辑时直接改现有路由对象；新增时先在草稿对象上改，保存时再落到 config。
+    const draft = isCreate
+      ? { enabled: true, routing_strategy: 'sticky_failover', active_key: '', candidates: [] }
+      : m;
+    draft.candidates = draft.candidates || [];
+    const stratVal = draft.routing_strategy || 'sticky_failover';
 
-    // Only one route editor is open at a time (state.activeEditorKey), so every
-    // element id below is static. Strategy pills are magpie-style flat tiles; the
-    // live value rides in stratVal — save reads it, no hidden input needed.
-    const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
+    // 策略胶囊：平铺一行，值存在 data-strat 上，保存时读被选中的那个。
+    const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" type="button" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
 
+    // 结构：对外模型名 → 候选表 → 路由组参数（≥2 个候选才出现）→ 测试 → 高级 → 底栏。
+    // 一个对外模型名挂多个候选（不同供应商 / 同一供应商不同 Key）= 路由组；
+    // 只有一个候选时没有「怎么分流」可选，策略区藏起来。
     wrap.innerHTML = `
-      <div class="form-group"><label class="form-label">对外模型名</label><input class="input input--code" id="ed_m_name" value="${eh(mName)}"><span class="text-xs text-muted">这就是一个路由：Agent 客户端用这个名字调用</span></div>
-      <div class="section-bar mt-3"><span class="form-label">候选池（该路由可用的 供应商×Key 组合）</span><button class="btn btn--sm" id="btn_add_cand" type="button">+ 添加候选</button></div>
-      <div class="text-xs text-muted mb-2">按策略从这里挑一个来发请求；排第一的是首选</div>
-      <div class="card" id="m_cl"></div>
-      <div class="card mt-2 card-pad hidden" id="m_ac" hidden>
-        <div class="fields"><input class="input input--code flex-1" id="m_ac_prov" list="datalistProviders" placeholder="选择供应商"></div>
-        <div class="probe-pills-wrap" id="m_ac_models"></div>
-        <div class="fields mt-2"><input class="input input--code flex-1" id="m_ac_target" placeholder="上游模型 ID（可手填）"><button class="btn btn--sm btn--primary" id="m_ac_ok" type="button">追加所选</button></div>
+      ${fg('对外模型名', `<input class="input input--code" id="ed_m_name" value="${eh(isCreate ? '' : mName)}" placeholder="留空则用第一个候选的上游模型 ID">`, '', '', '客户端调用时填的 model 名；新增和编辑都能改')}
+      <div class="section-bar mt-4">
+        <span class="form-label">候选</span>
+        <button class="btn btn--sm" id="btn_add_cand" type="button">＋ 添加候选</button>
       </div>
-      <div class="card card-pad mt-2" id="m_test">
-        <div class="section-bar">
-          <div>
-            <span class="form-label">测试这个模型</span>
-            <div class="text-xs text-muted">真实发一句「你好」，用下面选中的 Key 请求当前模型，并把上游的实际回复显示出来</div>
+      <div class="table-wrap"><table class="data-table m-cand-table">
+        <thead><tr><th>供应商</th><th>上游模型</th><th>Key</th><th>思考档位</th><th></th></tr></thead>
+        <tbody id="m_cand_body"></tbody>
+      </table></div>
+      <div class="mt-3 hidden" id="m_add_cand_box" hidden></div>
+      <div class="m-group mt-4" id="m_group_box" hidden>
+        <div class="section-bar"><span class="form-label">路由组：多个候选之间怎么分流</span></div>
+        <div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div>
+        <div class="text-xs text-muted mt-1" id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</div>
+        <div id="m_ca" class="mt-2"></div>
+      </div>
+      <div class="section-bar mt-4"><span class="form-label">测试</span></div>
+      <div class="input-row">
+        <select class="select" id="m_test_cand" aria-label="测试哪个候选"></select>
+        <select class="select" id="m_test_key" aria-label="用哪个 Key 测试"></select>
+        <button class="btn" id="m_test_send" type="button">发送「你好」</button>
+      </div>
+      <div class="m-test-out" id="m_test_out" hidden></div>
+      <details class="headers-details mt-4">
+        <summary class="form-label">高级（钉死 Key / Key 回退 / 剥离思考 / 非流式）</summary>
+        <div class="form-grid form-grid--2 mt-2">
+          ${fg('钉死到某把 Key', `<input class="input input--code" id="ed_m_act" value="${eh(draft.active_key || '')}" placeholder="供应商:Key标签（留空 = 按策略选）">`)}
+          <div class="form-group">
+            <label class="form-label form-label--check"><input type="checkbox" id="ed_m_keyfb" ${draft.allow_key_fallback ? 'checked' : ''}><span>指定的 Key 不可用时回退同供应商其它 Key</span></label>
+            <label class="form-label form-label--check"><input type="checkbox" id="ed_m_noreas" ${draft.no_reasoning ? 'checked' : ''}><span>剥离思考 / 推理参数</span></label>
+            <label class="form-label form-label--check"><input type="checkbox" id="ed_m_nonstream" ${draft.force_non_stream ? 'checked' : ''}><span>强制非流式（stream=false）</span></label>
           </div>
         </div>
-        <div class="input-row">
-          <select class="select" id="m_test_cand" aria-label="测试哪个候选"></select>
-          <select class="select" id="m_test_key" aria-label="用哪个 Key 测试"></select>
-          <button class="btn btn--primary" id="m_test_send" type="button">发送「你好」</button>
-        </div>
-        <div class="m-test-out" id="m_test_out" hidden></div>
-      </div>
-
-      <div class="section-bar mt-3"><span class="form-label">Key 选择</span><span class="text-xs text-muted">默认任一=全部启用 Key</span></div>
-      <div class="card card-pad" id="m_kw"></div>
-      <details class="headers-details mt-3"><summary class="form-label">高级 (候选权重 / 并发上限)</summary><div id="m_ca" class="mt-2"></div></details>
-      <div class="form-group mt-4">
-        <label class="form-label">路由策略</label>
-        <div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div>
-        <div class="text-xs text-muted mt-1"><span id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</span> · 默认值：${eh(STRATEGY_LABELS[state.config?.settings?.agent_routing_strategy || 'sticky_failover'])}</div>
-      </div>
-      <details class="headers-details mt-3"><summary class="form-label">高级（剥离思考 / 流式 / 指定 Key）</summary>
-        <input class="input mt-2" id="ed_m_act" value="${eh(m.active_key || '')}" placeholder="首选/指定 Key (provider:key_label)">
-        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_noreas" ${m.no_reasoning ? 'checked' : ''}><span>剥离思考/推理参数 (RAG/KB 推荐)</span></label>
-        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_nonstream" ${m.force_non_stream ? 'checked' : ''}><span>强制非流式响应 (stream=false)</span></label>
-        <label class="form-label form-label--check mt-2"><input type="checkbox" id="ed_m_keyfb" ${m.allow_key_fallback ? 'checked' : ''}><span>候选 Key 不可用时回退同供应商其它 Key</span></label>
       </details>
-      <div class="form-actions form-actions--split mt-3">
-        <div class="form-actions-group"><button class="btn btn--danger" id="btn_del_model" type="button">删除此路由</button></div>
-        <div class="form-actions-group"><button class="btn btn--primary" id="btn_save_model" type="button">保存路由配置</button></div>
+      <div class="form-actions form-actions--split mt-4">
+        <div class="form-actions-group">${isCreate ? '' : '<button class="btn btn--danger" id="btn_del_model" type="button">删除此路由</button>'}</div>
+        <div class="form-actions-group">
+          <button class="btn" id="btn_cancel_model" type="button">取消</button>
+          <button class="btn btn--primary" id="btn_save_model" type="button">${isCreate ? '保存路由' : '保存'}</button>
+        </div>
+      </div>
+    `;
+    return { wrap, draft, isCreate };
+  }
+
+  // 「＋ 添加候选」：在编辑器里就地展开一行内联选择（不弹框、不进抽屉）。
+  // 供应商下拉沿用 .np-combo / .np-panel 规范：浮层贴着输入框整行宽度浮起，
+  // 搜索框钉在顶部、只有选项列表滚动。选好供应商后可「拉取上游模型」，
+  // 勾选模型与 Key，再「添加候选」落进候选子表。
+  function wireAddCandidatePanel(host, ctx) {
+    const q = makeScopedQuery(host);
+    const box = q('#m_add_cand_box');
+    const addBtn = q('#btn_add_cand');
+    if (!box || !addBtn) return;
+
+    let provId = '';
+    let pickedModels = new Set();
+    let pickedKeys = new Set();
+
+    box.innerHTML = `
+      <div class="card card-pad">
+        <div class="form-grid">
+          <div class="form-group form-group--full">
+            <label class="form-label" for="m_ac_prov">供应商${fieldHint('只能选已存在的供应商')}</label>
+            <div class="np-combo">
+              <input class="input input--code" id="m_ac_prov" role="combobox" autocomplete="off" placeholder="选择供应商">
+              <div class="card np-panel hidden" id="m_ac_panel" hidden>
+                <div class="np-panel-search"><input class="input" id="m_ac_search" placeholder="搜索供应商"></div>
+                <div class="np-panel-options" id="m_ac_options" role="listbox"></div>
+              </div>
+            </div>
+          </div>
+          <div class="form-group form-group--full">
+            <label class="form-label" for="m_ac_target">上游模型</label>
+            <div class="fields">
+              <button class="btn btn--sm" id="m_ac_probe" type="button" disabled>拉取上游模型</button>
+              <input class="input input--code" id="m_ac_target" placeholder="上游模型 ID（可手填）">
+              <input class="input input--code" id="m_ac_filter" placeholder="过滤已拉取的模型…">
+            </div>
+            <div class="probe-pills-wrap" id="m_ac_models"></div>
+            <div class="text-xs text-muted mt-1 hidden" id="m_ac_cap" hidden></div>
+          </div>
+          <div class="form-group form-group--full">
+            <label class="form-label">Key</label>
+            <div class="probe-pills-wrap" id="m_ac_keys"></div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <div class="form-actions-group"></div>
+          <div class="form-actions-group">
+            <button class="btn" id="m_ac_cancel" type="button">取消</button>
+            <button class="btn" id="m_ac_ok" type="button">添加候选</button>
+          </div>
+        </div>
       </div>
     `;
 
+    const provInput = q('#m_ac_prov');
+    const panel = q('#m_ac_panel');
+    const options = q('#m_ac_options');
+    const search = q('#m_ac_search');
+    const modelsBox = q('#m_ac_models');
+    const keysBox = q('#m_ac_keys');
+    const targetInput = q('#m_ac_target');
+    const probeBtn = q('#m_ac_probe');
+
+    const closePanel = () => toggle(panel, false);
+
+    const syncOptions = () => {
+      if (!options) return;
+      const f = String(search?.value || '').trim().toLowerCase();
+      const provs = state.config?.providers || {};
+      const ids = Object.keys(provs).sort().filter((pId) => {
+        if (!f) return true;
+        const p = provs[pId] || {};
+        return `${pId} ${p.name || ''} ${p.base_url || ''}`.toLowerCase().includes(f);
+      });
+      options.innerHTML = '';
+      if (ids.length === 0) {
+        options.innerHTML = '<div class="row row--static text-xs text-muted">无匹配供应商（请先在供应商页添加）</div>';
+        return;
+      }
+      ids.forEach((pId) => {
+        const p = provs[pId] || {};
+        const rowBtn = ce('button');
+        rowBtn.type = 'button';
+        rowBtn.className = 'row';
+        rowBtn.setAttribute('role', 'option');
+        rowBtn.innerHTML = `<div class="who"><div class="name">${eh(p.name || pId)}</div><div class="text-xs text-muted">${eh(p.base_url || '')}</div></div>`;
+        // mousedown 阻止默认：焦点不从搜索框跳走，点击才会落到这一行上。
+        rowBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        clk(rowBtn, () => {
+          provId = pId;
+          if (provInput) provInput.value = pId;
+          closePanel();
+          // 换供应商 = 换一整套候选池：已选的模型与 Key 都作废。
+          pickedModels = new Set();
+          pickedKeys = new Set();
+          if (targetInput) targetInput.value = '';
+          const filterEl = q('#m_ac_filter');
+          if (filterEl) filterEl.value = '';
+          drawKeys();
+          drawModels();
+          updateCandCapability();
+          if (probeBtn) probeBtn.disabled = false;
+        });
+        options.appendChild(rowBtn);
+      });
+    };
+
+    const showPanel = () => {
+      syncOptions();
+      toggle(panel, true);
+      search?.focus();
+    };
+
+    provInput?.addEventListener('focus', () => { if (panel.hidden) showPanel(); });
+    provInput?.addEventListener('click', () => { if (panel.hidden) showPanel(); });
+    search?.addEventListener('input', syncOptions);
+    provInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) {
+        e.stopPropagation();
+        closePanel();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (panel.hidden) showPanel();
+        panel.querySelector('button.row')?.focus();
+      }
+    });
+    panel?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) {
+        e.stopPropagation();
+        closePanel();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const rows = [...panel.querySelectorAll('button.row')];
+      if (rows.length === 0) return;
+      e.preventDefault();
+      const idx = rows.indexOf(document.activeElement);
+      (e.key === 'ArrowDown' ? rows[idx + 1] || rows[0] : rows[idx - 1] || rows[rows.length - 1])?.focus();
+    });
+    // 点浮层外面收起。面板在 .np-combo 里，落在 combo 内的点击不关。
+    document.addEventListener('pointerdown', (e) => {
+      if (!panel || panel.hidden) return;
+      const combo = panel.closest('.np-combo');
+      if (combo && !combo.contains(e.target)) closePanel();
+    });
+
+    // 已拉取的模型列表：按「过滤」框缩小范围，再点胶囊多选。
+    // 函数声明（不是 const 箭头）：syncOptions 的点击回调里会用到它，
+    // 函数声明会被提升，不存在 TDZ 陷阱。
+    function drawModels() {
+      if (!modelsBox) return;
+      const all = state.probedModelsByProvider[provId] || [];
+      const f = String(q('#m_ac_filter')?.value || '').trim().toLowerCase();
+      const models = f ? all.filter((mo) => String(mo).toLowerCase().includes(f)) : all;
+      if (all.length === 0) {
+        modelsBox.innerHTML = '<span class="text-xs text-muted">还没有探测数据：点「拉取上游模型」，或直接手填上游模型 ID</span>';
+        return;
+      }
+      if (models.length === 0) {
+        modelsBox.innerHTML = `<span class="text-xs text-muted">没有匹配「${eh(f)}」的上游模型</span>`;
+        return;
+      }
+      modelsBox.innerHTML = models.map((mo) => `<button class="probe-pill${pickedModels.has(mo) ? ' probe-pill--managed' : ''}" type="button" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('');
+    }
+    clk(modelsBox, (ev) => {
+      const pill = ev.target instanceof Element ? ev.target.closest('button[data-mo]') : null;
+      if (!pill) return;
+      const mo = pill.dataset.mo;
+      if (pickedModels.has(mo)) pickedModels.delete(mo);
+      else pickedModels.add(mo);
+      pill.classList.toggle('probe-pill--managed', pickedModels.has(mo));
+      // 勾选模型时把它带进「上游模型 ID」输入框（可直接改）。
+      if (targetInput && !targetInput.value) targetInput.value = mo;
+    });
+    // 过滤框输入只重画胶囊，不动已勾选的模型。
+    q('#m_ac_filter')?.addEventListener('input', drawModels);
+
+    // 上游模型能力摘要（上下文 / 最大输出 / 思考档位）。Hub 没有推理引擎，
+    // 目录也没有意义 —— 那里直接不显示。
+    function updateCandCapability() {
+      const box = q('#m_ac_cap');
+      if (!box) return;
+      if (window.HOST.kind === 'hub') {
+        box.hidden = true;
+        box.classList.add('hidden');
+        box.textContent = '';
+        return;
+      }
+      const target = String(targetInput?.value || '').trim();
+      if (!provId || !target) {
+        box.hidden = true;
+        box.classList.add('hidden');
+        box.textContent = '';
+        return;
+      }
+      fetchModelInfo(presetIdForProvider(provId), target).then((info) => {
+        if (!box.isConnected) return;
+        if (String(targetInput?.value || '').trim() !== target) return;
+        box.textContent = capabilitySummary(info);
+        box.hidden = false;
+        box.classList.remove('hidden');
+      });
+    }
+    targetInput?.addEventListener('input', updateCandCapability);
+
+    function drawKeys() {
+      if (!keysBox) return;
+      const prov = state.config?.providers?.[provId] || {};
+      const keys = (prov.api_keys || []).filter((k) => k && k.enabled !== false);
+      if (!provId || keys.length === 0) {
+        keysBox.innerHTML = `<span class="text-xs text-muted">${provId ? '该供应商没有已启用的 Key' : '请先选择供应商'}</span>`;
+        return;
+      }
+      const anyBtn = ce('button');
+      anyBtn.type = 'button';
+      anyBtn.className = `probe-pill${pickedKeys.size === 0 ? ' probe-pill--managed' : ''}`;
+      anyBtn.textContent = '任一 Key';
+      clk(anyBtn, () => {
+        pickedKeys = new Set();
+        drawKeys();
+      });
+      keysBox.innerHTML = '';
+      keysBox.appendChild(anyBtn);
+      keys.forEach((k, idx) => {
+        const label = k.label || k.id || `key-${idx}`;
+        const pill = ce('button');
+        pill.type = 'button';
+        pill.dataset.key = label;
+        pill.className = `probe-pill${pickedKeys.has(label) ? ' probe-pill--managed' : ''}`;
+        pill.textContent = label;
+        clk(pill, () => {
+          if (pickedKeys.has(label)) pickedKeys.delete(label);
+          else pickedKeys.add(label);
+          pill.classList.toggle('probe-pill--managed', pickedKeys.has(label));
+          anyBtn.classList.toggle('probe-pill--managed', pickedKeys.size === 0);
+        });
+        keysBox.appendChild(pill);
+      });
+    }
+
+    clk(probeBtn, async () => {
+      if (!provId) return toast('请先选择供应商', 'warn');
+      const p = state.config?.providers?.[provId] || {};
+      probeBtn.disabled = true;
+      const old = probeBtn.textContent;
+      probeBtn.textContent = '拉取中…';
+      try {
+        const res = await window.HOST.probeModels({
+          provider: provId,
+          base_url: p.base_url || '',
+          api_type: normalizeApiType(p.api_type),
+        });
+        const models = Array.isArray(res?.models) ? res.models : [];
+        if (models.length > 0) {
+          state.probedModelsByProvider[provId] = models;
+          drawModels();
+          toast(`拉取到 ${models.length} 个上游模型`, 'ok');
+        } else {
+          const msg = res?.error ? `未拉取到模型: ${scrubUiText(res.error)}` : '未拉取到可用模型，可手填上游模型 ID';
+          toast(msg, 'warn');
+        }
+      } catch (e) {
+        toast(`拉取异常: ${scrubUiText(e.message)}`, 'err');
+      } finally {
+        probeBtn.disabled = false;
+        probeBtn.textContent = old;
+      }
+    });
+
+    const closeBox = () => {
+      toggle(box, false);
+      closePanel();
+    };
+
+    clk(addBtn, () => {
+      const willOpen = box.hidden;
+      toggle(box, willOpen);
+      if (willOpen) {
+        provId = '';
+        pickedModels = new Set();
+        pickedKeys = new Set();
+        if (provInput) provInput.value = '';
+        if (targetInput) targetInput.value = '';
+        const filterEl = q('#m_ac_filter');
+        if (filterEl) filterEl.value = '';
+        const capBox = q('#m_ac_cap');
+        if (capBox) {
+          capBox.hidden = true;
+          capBox.classList.add('hidden');
+          capBox.textContent = '';
+        }
+        if (probeBtn) probeBtn.disabled = true;
+        drawModels();
+        drawKeys();
+      }
+    });
+    clk(q('#m_ac_cancel'), closeBox);
+
+    clk(q('#m_ac_ok'), () => {
+      if (!provId) return toast('请选择供应商', 'warn');
+      if (!state.config?.providers?.[provId]) return toast(`供应商 ${provId} 不存在，请先在供应商页创建`, 'warn');
+      const manual = String(targetInput?.value || '').trim();
+      const models = [...pickedModels];
+      if (manual && !models.includes(manual)) models.push(manual);
+      if (models.length === 0) return toast('请勾选或手填上游模型', 'warn');
+      // 勾了多把 Key 就「每个模型 × 每把 Key」生成一个候选；没勾 = 任一 Key（一个候选）。
+      const keyLabels = [...pickedKeys];
+      for (const model of models) {
+        if (keyLabels.length === 0) {
+          ctx.candidates.push({ provider: provId, key_label: '', target_model: model, enabled: true, weight: 1, max_concurrency: 0 });
+          continue;
+        }
+        for (const kl of keyLabels) {
+          ctx.candidates.push({ provider: provId, key_label: kl, target_model: model, enabled: true, weight: 1, max_concurrency: 0 });
+        }
+      }
+      closeBox();
+      ctx.redraw();
+    });
+  }
+
+  // 模型路由编辑器的事件接线（buildModelEditor 只出结构）。
+  // 新增与编辑共用同一套接线：保存读的是同一批静态 id，字段与后端契约一一对应。
+  function wireModelEditor(mName, m, built) {
+    const { wrap, draft, isCreate } = built;
+    const q = makeScopedQuery(wrap);
+    const candidates = draft.candidates;
+
+    // 路由策略胶囊：平铺一行，点一下换选中项，说明行同步换成这个策略的
+    // 「它做什么 / 什么时候用」。选中值靠 .probe-pill--managed 标记，
+    // 保存时读被标记的那一个。
     const stratDesc = q('#ed_m_strat_desc');
-    const stratPills = wrap.querySelectorAll('button[data-strat]');
+    const stratPills = [...wrap.querySelectorAll('button[data-strat]')];
     stratPills.forEach((btn) => {
       clk(btn, () => {
-        stratVal = btn.dataset.strat || '';
         stratPills.forEach((b) => b.classList.toggle('probe-pill--managed', b === btn));
-        stratDesc.textContent = STRATEGY_HINTS[stratVal] || '';
+        if (stratDesc) stratDesc.textContent = STRATEGY_HINTS[btn.dataset.strat || ''] || '';
+        // 切到 / 切离「按权重比例分摊」时权重列要出现 / 消失。
+        drawAdv();
       });
     });
 
-    // ② 候选池 rows (magpie style): 序号 + 目标模型 + 供应商 + 绑定 Key + 思考档位 + 上移/下移/移除.
-    // All draws are local so pool edits never collapse the editor via
-    // renderModelsList; one delegated handler serves every row. The per-row Key
-    // pill is what makes unchecked-but-listed keys visible: without it a checked
-    // key beyond the candidate count silently never routes.
-    //
-    // The 思考档位 control is per candidate, not per provider: the catalog's ladder
-    // is model-level (deepseek-v4-pro accepts low/high/max while the preset file
-    // advertises none/low/medium/high). It is filled asynchronously because the
-    // answer comes from the catalog API; until it lands the slot is empty rather
-    // than showing a placeholder that could be mistaken for a real answer.
+    // 每个候选的 Key 绑定：下拉里第一项是「任一」（= 展开该供应商全部启用 Key），
+    // 其后是这个供应商真实存在的 Key 标签。候选自带的具体绑定会被选中。
+    const candKeyOptions = (c) => {
+      const prov = state.config?.providers?.[c.provider] || {};
+      const keys = (prov.api_keys || []).filter((k) => k && (k.label || k.id));
+      const wanted = String(c.key_label || '');
+      const opts = [`<option value=""${wanted ? '' : ' selected'}>任一</option>`];
+      for (const k of keys) {
+        const label = String(k.label || k.id);
+        const off = k.enabled === false ? '（已禁用）' : '';
+        opts.push(`<option value="${eh(label)}"${label === wanted ? ' selected' : ''}>${eh(label)}${off}</option>`);
+      }
+      // 已绑定但本地已没有的 Key 标签：仍然显示出来，别静默改成「任一」。
+      if (wanted && !keys.some((k) => String(k.label || k.id) === wanted)) {
+        opts.push(`<option value="${eh(wanted)}" selected>${eh(wanted)}（本地缺失）</option>`);
+      }
+      return opts.join('');
+    };
+
+    const drawCands = () => {
+      const body = q('#m_cand_body');
+      if (!body) return;
+      if (candidates.length === 0) {
+        body.innerHTML = '<tr><td colspan="5" class="text-muted">还没有候选：点「＋ 添加候选」挑一个供应商与上游模型</td></tr>';
+        return;
+      }
+      const multi = candidates.length > 1;
+      body.innerHTML = candidates.map((c, i) => `<tr data-i="${i}">
+          <td>${eh(c.provider || '')}</td>
+          <td><span class="input--code">${eh(c.target_model || mName)}</span></td>
+          <td><select class="select select--compact" data-key aria-label="这个候选用哪把 Key">${candKeyOptions(c)}</select></td>
+          <td><span class="m-cand-eff" id="m_cand_eff_${i}"></span></td>
+          <td>
+            <div class="fields m-cand-ops">
+              ${multi ? `<button class="btn btn--sm btn--ghost" data-a="u" type="button" title="上移"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm btn--ghost" data-a="d" type="button" title="下移"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button>` : ''}
+              <button class="btn btn--sm btn--ghost btn--danger" data-a="r" type="button" title="移除此候选">移除</button>
+            </div>
+          </td>
+        </tr>`).join('');
+      candidates.forEach((c, i) => fillCandEffort(i, c));
+    };
+
+    // 思考档位是 per-candidate 的：模型目录的档位阶梯是模型级的，答案来自
+    // models.dev 目录（异步），没到之前这一格留空，而不是显示可能被误认成真值的占位符。
     const effortControlHtml = (c, info) => {
       const current = String(c.reasoning_effort || '');
       const follow = '<option value="">跟随客户端</option>';
+      // 目录里查不到这个模型（中转商自定义名常见）：只给「跟随客户端」，不写「能力信息未知」——
+      // 这一列是「能不能选档位」，查不到就是没得选，不需要一句提示占位。
       if (!info || info.ok === false || !info.found) {
-        return '<span class="text-xs text-muted">能力信息未知</span>';
+        return '<span class="text-xs text-muted">—</span>';
       }
       const efforts = Array.isArray(info.efforts) ? info.efforts.filter(Boolean) : [];
       if (efforts.length > 0) {
-        // A value saved against an older catalog that no longer offers that level
-        // stays visible so the change is explicit, never a silent rewrite.
+        // 旧目录里存过的档位即使目录不再提供也保留可见：改动必须是显式的，不能静默改写。
         const extra = current && !efforts.includes(current) && current !== 'on' && current !== 'off'
           ? `<option value="${eh(current)}" selected>${eh(current)}（当前已保存）</option>`
           : '';
@@ -5052,345 +5658,327 @@
         return `<select class="select select--compact" data-eff aria-label="思考档位">${follow}${extra}${opts}</select>`;
       }
       if (info.supports_toggle || info.toggle) {
-        // Toggle-only models have no ladder: the only meaningful choices are
-        // force-on / force-off / leave the client alone.
-        return `<select class="select select--compact" data-eff aria-label="思考开关">${follow}` +
-          `<option value="on"${current === 'on' ? ' selected' : ''}>强制开启</option>` +
-          `<option value="off"${current === 'off' ? ' selected' : ''}>强制关闭</option></select>`;
+        // 只有开关没有阶梯的模型：可选项就是 强制开 / 强制关 / 跟随客户端。
+        return `<select class="select select--compact" data-eff aria-label="思考开关">${follow}`
+          + `<option value="on"${current === 'on' ? ' selected' : ''}>强制开启</option>`
+          + `<option value="off"${current === 'off' ? ' selected' : ''}>强制关闭</option></select>`;
       }
       return '<span class="text-xs text-muted">该模型无思考档位</span>';
     };
 
-    const fillCandEffort = (i) => {
+    const fillCandEffort = (i, c) => {
       const box = q(`#m_cand_eff_${i}`);
-      const c = candidates[i];
       if (!box || !c) return;
       const preset = presetIdForProvider(c.provider);
-      const model = String(c.target_model || mName).trim();
+      const model = String(c.target_model || '').trim();
       if (!preset || !model) {
         box.innerHTML = '';
         return;
       }
       fetchModelInfo(preset, model).then((info) => {
-        // The pool may have been reordered/redrawn while the query was in flight.
+        // 候选表可能已重排 / 重绘：过期的查询结果不能写进别人的格子。
         if (!box.isConnected || candidates[i] !== c) return;
         box.innerHTML = effortControlHtml(c, info);
       });
     };
 
-    const drawCands = () => {
-      q('#m_cl').innerHTML = candidates.map((c, i) => `<div class="row row--static" data-i="${i}"><div class="who"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><span class="pill">${eh(c.provider)}</span><span class="pill">${c.key_label ? `Key ${eh(c.key_label)}` : '任一 Key'}</span></div><div class="fields"><span class="m-cand-eff" id="m_cand_eff_${i}"></span><button class="btn btn--sm" data-a="u"${i ? '' : ' disabled'}>↑</button><button class="btn btn--sm" data-a="d"${i === candidates.length - 1 ? ' disabled' : ''}>↓</button><button class="btn btn--sm btn--danger" data-a="r">移除</button></div></div>`).join('') || '<div class="row row--static text-muted">暂无候选</div>';
-      candidates.forEach((_, i) => fillCandEffort(i));
+    // 路由组参数：≥2 个候选才有意义（一个候选没有「分给谁」可选）。
+    // 权重只在「按权重比例分摊」下生效，并发上限任何策略都生效。
+    const drawAdv = () => {
+      const group = q('#m_group_box');
+      const box = q('#m_ca');
+      const multi = candidates.length > 1;
+      if (group) group.hidden = !multi;
+      if (!box || !multi) return;
+      const strat = wrap.querySelector('button[data-strat].probe-pill--managed')?.dataset.strat || draft.routing_strategy || 'sticky_failover';
+      const showWeight = strat === 'weighted';
+      box.innerHTML = `<table class="data-table m-group-table"><thead><tr><th>候选</th>${showWeight ? '<th>权重</th>' : ''}<th>并发上限</th></tr></thead><tbody>${candidates.map((c, i) => `<tr><td>${eh(c.provider || '')} · <span class="input--code">${eh(c.target_model || mName)}</span>${c.key_label ? ` · ${eh(c.key_label)}` : ''}</td>${showWeight ? `<td><input class="input input--compact tabular" data-w="${i}" type="number" min="1" value="${c.weight || 1}" aria-label="权重"></td>` : ''}<td><input class="input input--compact tabular" data-x="${i}" type="number" min="0" value="${c.max_concurrency || 0}" aria-label="并发上限（0 = 不限）"></td></tr>`).join('')}</tbody></table><div class="text-xs text-muted mt-1">并发上限 0 = 不限${showWeight ? '；权重越大分到的请求越多' : ''}</div>`;
     };
-    const swapCand = (i, j) => {
-      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+
+    // 测试面板：换候选 → 换 Key 清单。
+    // 操作者选「哪个候选（供应商 + 上游模型）」与「用哪把 Key」，然后拿到上游真实回复。
+    // 这是供应商页 per-key 测试的模型级对应物：那边问「这把 Key 活着吗」，
+    // 这边问「这个模型在这把 Key 上答不答得上」—— 正是会承载流量的那个三元组。
+    const drawTestCandidates = () => {
+      const sel = q('#m_test_cand');
+      const keySel = q('#m_test_key');
+      if (!sel) return;
+      sel.innerHTML = candidates.length
+        ? candidates.map((c, i) => `<option value="${i}">${eh(`${c.provider} / ${c.target_model || mName}`)}</option>`).join('')
+        : '<option value="0">（还没有候选）</option>';
+      if (!keySel) return;
+      const c = candidates[Number(sel.value) || 0];
+      if (!c || !c.provider) {
+        keySel.innerHTML = '';
+        return;
+      }
+      const prov = state.config?.providers?.[c.provider] || {};
+      const keys = (prov.api_keys || []).filter((k) => k && (k.label || k.id));
+      const wanted = String(c.key_label || '');
+      keySel.innerHTML = ['<option value="">任一启用 Key</option>'].concat(
+        keys.map((k) => {
+          const label = String(k.label || k.id);
+          const off = k.enabled === false ? '（已禁用）' : '';
+          return `<option value="${eh(label)}"${label === wanted ? ' selected' : ''}>${eh(label)}${off}</option>`;
+        })
+      ).join('');
+      // 候选没有指定 Key 时：预选第一把启用的 Key，让操作者看得见这次会花哪把凭据。
+      if (!wanted) {
+        const firstEnabled = keys.find((k) => k.enabled !== false);
+        if (firstEnabled) keySel.value = String(firstEnabled.label || firstEnabled.id);
+      }
+    };
+
+    const redraw = () => {
       drawCands();
       drawAdv();
+      drawTestCandidates();
     };
-    clk(q('#m_cl'), (ev) => {
+    redraw();
+
+    // 候选行的事件：上移 / 下移 / 移除（委托，子表重绘后仍有效）。
+    clk(q('#m_cand_body'), (ev) => {
       const btn = ev.target instanceof Element ? ev.target.closest('button[data-a]') : null;
       if (!btn) return;
-      const i = Number(btn.closest('[data-i]').dataset.i);
+      const i = Number(btn.closest('[data-i]')?.dataset.i);
       const a = btn.dataset.a;
-      if (a === 'u' && i > 0) swapCand(i, i - 1);
-      else if (a === 'd' && i < candidates.length - 1) swapCand(i, i + 1);
-      else if (a === 'r') {
+      if (a === 'u' && i > 0) {
+        [candidates[i], candidates[i - 1]] = [candidates[i - 1], candidates[i]];
+        redraw();
+      } else if (a === 'd' && i < candidates.length - 1) {
+        [candidates[i], candidates[i + 1]] = [candidates[i + 1], candidates[i]];
+        redraw();
+      } else if (a === 'r') {
         candidates.splice(i, 1);
-        drawCands();
-        drawAdv();
-        drawKeys();
+        redraw();
       }
     });
-    // 思考档位 is written straight onto the candidate; '' = 跟随客户端 (the field is
-    // omitted on save). "on"/"off" are the toggle-only pair. The scheduler side
-    // that turns this into a request body is out of this phase's scope — until
-    // it lands the value is stored but not yet consumed (see contractNotes).
-    q('#m_cl').addEventListener('change', (ev) => {
-      const sel = ev.target instanceof Element ? ev.target.closest('select[data-eff]') : null;
-      if (!sel) return;
-      const row = sel.closest('[data-i]');
+    // 思考档位直接写在候选上：'' = 跟随客户端（保存时省略该字段）。
+    // "on"/"off" 是只有开关的模型。调度侧如何把它变成请求体不在本阶段范围内 ——
+    // 值已存储，是否真正下发由后端契约决定。
+    // 同一委托还处理 Key 绑定：'' = 任一 Key（展开该供应商全部启用 Key）。
+    q('#m_cand_body')?.addEventListener('change', (ev) => {
+      const el = ev.target instanceof Element ? ev.target.closest('select[data-eff], select[data-key]') : null;
+      if (!el) return;
+      const row = el.closest('[data-i]');
       const c = candidates[Number(row?.dataset.i)];
       if (!c) return;
-      const v = String(sel.value || '');
+      if (el.dataset.key !== undefined) {
+        const v = String(el.value || '');
+        if (v) c.key_label = v;
+        else delete c.key_label;
+        // Key 变了，测试面板里这把候选的 Key 清单也要跟着变。
+        drawTestCandidates();
+        return;
+      }
+      const v = String(el.value || '');
       if (v) c.reasoning_effort = v;
       else delete c.reasoning_effort;
     });
-
-    // ③ Key 选择: one row per provider in the pool.「任一」(empty selection) leaves
-    // key_label '' = any enabled key; checking concrete labels re-binds that
-    // provider's candidates cyclically (key[i % n]). When more keys are checked
-    // than there are candidates, the surplus stays selected but binds nothing —
-    // drawKeys badges those as 未绑定候选 so the state is visible, and binding
-    // more candidates (「+ 添加候选」) puts them to work. Selection rides on
-    // m._keySel: it survives the local redraws and dies with the config
-    // round-trip on save (persistConfig strips it — on hub too, where the raw
-    // KV save would otherwise persist and later replay stale selections).
-    // The selection is seeded from the candidates as they exist: candidates
-    // created by the add-model modal carry concrete key_label bindings, so their
-    // pills show checked instead of the lying「任一」highlight.
-    // 测试这个模型: the operator picks which candidate (provider + upstream model)
-    // and which key to spend, then gets the real reply text back. This is the
-    // model-level counterpart of the provider page's per-key test: there the
-    // question is "is this key alive", here it is "does THIS model answer on
-    // THIS key" — the same triple that will serve traffic.
-    const testCandSel = q('#m_test_cand');
-    const testKeySel = q('#m_test_key');
-    const testOut = q('#m_test_out');
-    const testBtn = q('#m_test_send');
-
-    const providerKeys = (pId) => {
-      const prov = state.config?.providers?.[pId] || {};
-      return Array.isArray(prov.api_keys) ? prov.api_keys.filter((k) => k && (k.label || k.id)) : [];
-    };
-
-    const drawTestKeys = () => {
-      if (!testCandSel || !testKeySel) return;
-      const idx = Number(testCandSel.value) || 0;
-      const c = candidates[idx];
-      if (!c || !c.provider) {
-        testKeySel.innerHTML = '';
-        return;
-      }
-      const keys = providerKeys(c.provider);
-      const wanted = String(c.key_label || '');
-      const opts = ['<option value="">任一启用 Key</option>'];
-      for (const k of keys) {
-        const label = String(k.label || k.id);
-        const off = k.enabled === false ? '（已禁用）' : '';
-        const sel = label === wanted ? ' selected' : '';
-        opts.push(`<option value="${eh(label)}"${sel}>${eh(label)}${off}</option>`);
-      }
-      testKeySel.innerHTML = opts.join('');
-      // No explicit binding on the candidate: preselect the first enabled key so
-      // the operator sees exactly which credential the test will spend.
-      if (!wanted) {
-        const firstEnabled = keys.find((k) => k.enabled !== false);
-        if (firstEnabled) testKeySel.value = String(firstEnabled.label || firstEnabled.id);
-      }
-    };
-
-    const drawTestCandidates = () => {
-      if (!testCandSel) return;
-      testCandSel.innerHTML = candidates.length
-        ? candidates.map((c, i) => `<option value="${i}">${eh(`${c.provider} / ${c.target_model || mName}`)}</option>`).join('')
-        : '<option value="0">（还没有候选）</option>';
-      drawTestKeys();
-    };
-    drawTestCandidates();
-    if (testCandSel) testCandSel.addEventListener('change', drawTestKeys);
-
-    if (testBtn) {
-      clk(testBtn, async () => {
-        if (testBtn.disabled) return;
-        const idx = Number(testCandSel?.value) || 0;
-        const c = candidates[idx];
-        if (!c || !c.provider) {
-          if (testOut) {
-            testOut.hidden = false;
-            testOut.className = 'm-test-out m-test-out--err';
-            testOut.textContent = '先在候选池里加一个候选，再测试。';
-          }
-          return;
-        }
-        const keyLabel = String(testKeySel?.value || '');
-        const model = String(c.target_model || mName).trim();
-        const label = testBtn.textContent;
-        testBtn.disabled = true;
-        testBtn.textContent = '请求中…';
-        if (testOut) {
-          testOut.hidden = false;
-          testOut.className = 'm-test-out';
-          testOut.innerHTML = `<div class="gw-test-meta">正在用 ${eh(c.provider)}${keyLabel ? ` / ${eh(keyLabel)}` : ''} 请求 ${eh(model)} …</div>`;
-        }
-        const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-        try {
-          const res = await window.HOST.testKey({ provider: c.provider, key_label: keyLabel, model });
-          const ms = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
-          if (!testOut || !testOut.isConnected) return;
-          const ok = Boolean(res && res.valid === true);
-          const meta = [
-            ok ? '可用' : '失败',
-            res && res.status ? `HTTP ${res.status}` : '',
-            `${(res && res.latency_ms) || ms}ms`,
-            `${res && res.provider ? res.provider : c.provider}${res && res.key_label ? ` / ${res.key_label}` : ''}`,
-            `${res && res.model ? res.model : model}`,
-            res && res.model_source ? `(${res.model_source})` : '',
-          ].filter(Boolean).join(' · ');
-          testOut.className = `m-test-out${ok ? ' m-test-out--ok' : ' m-test-out--err'}`;
-          if (ok) {
-            const reply = String((res && res.reply_text) || '').trim();
-            testOut.innerHTML = `<div class="gw-test-meta">${eh(meta)}</div>`
-              + `<pre class="gw-test-reply">${eh(reply || '（上游返回成功，但没有可显示的文本）')}</pre>`;
-          } else {
-            const bits = [meta];
-            if (res && res.reason) bits.push(`reason=${res.reason}`);
-            if (res && res.err_type) bits.push(`err_type=${res.err_type}`);
-            const errText = res && res.error ? scrubUiText(String(res.error)) : '';
-            testOut.innerHTML = `<div class="gw-test-meta">${eh(bits.join(' · '))}</div>`
-              + (errText ? `<div class="gw-test-error">${eh(errText)}</div>` : '');
-          }
-        } catch (err) {
-          if (testOut && testOut.isConnected) {
-            testOut.className = 'm-test-out m-test-out--err';
-            testOut.textContent = `测试异常：${scrubUiText(err && err.message ? err.message : String(err))}`;
-          }
-        } finally {
-          testBtn.disabled = false;
-          testBtn.textContent = label;
-        }
-      });
-    }
-
-    const keySel = m._keySel = m._keySel || {};
-    for (const c of candidates) {
-      if (c && c.provider && c.key_label) {
-        const set = keySel[c.provider] || (keySel[c.provider] = []);
-        if (!set.includes(c.key_label)) set.push(c.key_label);
-      }
-    }
-    const applyKeySel = (pId) => {
-      const sel = keySel[pId] || [];
-      let ci = 0;
-      for (const c of candidates) {
-        if (c && c.provider === pId) c.key_label = sel.length ? sel[ci++ % sel.length] : '';
-      }
-    };
-    const drawKeys = () => {
-      const provs = state.config?.providers || {};
-      const ids = [...new Set(candidates.map((c) => c && c.provider).filter(Boolean))];
-      q('#m_kw').innerHTML = ids.map((pId) => {
-        const sel = keySel[pId] || [];
-        const labels = ((provs[pId] || {}).api_keys || []).filter((k) => k && k.enabled !== false)
-          .map((k, i) => k.label || k.id || `key-${i}`);
-        const used = new Set(candidates.filter((c) => c && c.provider === pId && c.key_label).map((c) => c.key_label));
-        return `<div class="mb-2"><span class="form-label">${eh(provs[pId]?.name || pId)}</span><div class="probe-pills-wrap"><button class="probe-pill${sel.length ? '' : ' probe-pill--managed'}" data-p="${eh(pId)}" data-k="">任一</button>${labels.map((l) => {
-          const checked = sel.includes(l);
-          const badge = checked && !used.has(l) ? ' <span class="pill pill--amber">未绑定候选</span>' : '';
-          return `<button class="probe-pill${checked ? ' probe-pill--managed' : ''}" data-p="${eh(pId)}" data-k="${eh(l)}">${eh(l)}${badge}</button>`;
-        }).join('')}</div></div>`;
-      }).join('') || '<div class="text-xs text-muted">暂无</div>';
-    };
-    clk(q('#m_kw'), (ev) => {
-      const btn = ev.target instanceof Element ? ev.target.closest('button[data-k]') : null;
-      if (!btn) return;
-      const pId = btn.dataset.p || '';
-      const k = btn.dataset.k || '';
-      if (!k) keySel[pId] = [];
-      else {
-        const cur = new Set(keySel[pId] || []);
-        if (cur.has(k)) cur.delete(k); else cur.add(k);
-        keySel[pId] = [...cur];
-      }
-      applyKeySel(pId);
-      drawKeys();
-      drawCands();
-    });
-
-    // 权重 / 并发上限 fold: per-candidate inputs keyed by 序号 (mirrors the rows);
-    // one delegated change listener on the persistent container.
-    const drawAdv = () => {
-      q('#m_ca').innerHTML = candidates.map((c, i) => `<div class="fields mt-1"><span class="pill tabular">${i + 1}</span><span class="input--code">${eh(c.target_model || mName)}</span><input class="input input--compact tabular" data-w="${i}" type="number" min="1" value="${c.weight || 1}" title="权重"><input class="input input--compact tabular" data-x="${i}" type="number" min="0" value="${c.max_concurrency || 0}"></div>`).join('');
-    };
+    // 权重 / 并发上限
     q('#m_ca')?.addEventListener('change', (e) => {
       const el = e.target;
-      const c = candidates[Number(el.dataset.w || el.dataset.x)];
+      const c = candidates[Number(el.dataset.w ?? el.dataset.x)];
       if (!c) return;
       if (el.dataset.w) c.weight = Math.max(1, Number(el.value) || 1);
       else c.max_concurrency = Math.max(0, Number(el.value) || 0);
     });
-
-    //「+ 添加候选」popup: provider (datalist) → check probed model pills → append
-    // (manual input as fallback). Probes are only run in the add-model form; its
-    // results are cached in state.probedModelsByProvider so the pills light up here.
-    const drawAddPills = () => {
-      const models = state.probedModelsByProvider[(q('#m_ac_prov')?.value || '').trim()] || [];
-      q('#m_ac_models').innerHTML = models.map((mo) => `<button class="probe-pill" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('') || '<span class="text-xs text-muted">暂无探测数据</span>';
-    };
-    clk(q('#m_ac_models'), (ev) => {
-      const pill = ev.target instanceof Element ? ev.target.closest('button[data-mo]') : null;
-      if (pill) pill.classList.toggle('probe-pill--managed');
-    });
-    clk(q('#btn_add_cand'), () => {
-      const box = q('#m_ac');
-      box.hidden = !box.hidden;
-      box.classList.toggle('hidden', box.hidden);
-      drawAddPills();
-    });
-    // The provider input drives the pill pool: redraw on click, datalist pick
-    // and every keystroke. Click alone misses keyboard/datalist switches, which
-    // used to leave the previous provider's pills checked — appending them then
-    // built candidates pairing the NEW provider with the OLD provider's models.
-    // A committed switch (change) also clears the manual target, mirroring the
-    // add-model modal's rule: switching providers invalidates the probe result.
-    const addProvEl = q('#m_ac_prov');
-    if (addProvEl) {
-      clk(addProvEl, drawAddPills);
-      addProvEl.addEventListener('input', drawAddPills);
-      addProvEl.addEventListener('change', () => {
-        drawAddPills();
-        const t = q('#m_ac_target');
-        if (t) t.value = '';
-      });
-    }
-    clk(q('#m_ac_ok'), () => {
-      const prov = (q('#m_ac_prov')?.value || '').trim();
-      if (!state.config?.providers?.[prov]) return toast('供应商不存在', 'warn');
-      const picked = [...q('#m_ac_models').querySelectorAll('.probe-pill--managed')].map((b) => b.dataset.mo);
-      const manual = (q('#m_ac_target')?.value || '').trim();
-      if (manual && !picked.includes(manual)) picked.push(manual);
-      if (picked.length === 0) return toast('请勾选或手填上游模型', 'warn');
-      const sel = keySel[prov] || [];
-      let base = candidates.filter((c) => c && c.provider === prov).length;
-      for (const t of picked) {
-        const kl = sel.length ? sel[base++ % sel.length] : '';
-        candidates.push({ provider: prov, key_label: kl, target_model: t, enabled: true, weight: 1, max_concurrency: 0 });
+    // 测试面板：换候选 → 换 Key 清单。
+    q('#m_test_cand')?.addEventListener('change', drawTestCandidates);
+    // 「测试这个模型」：真发一句「你好」，把上游回复显示出来。
+    clk(q('#m_test_send'), async () => {
+      const btn = q('#m_test_send');
+      const out = q('#m_test_out');
+      if (!btn || btn.disabled) return;
+      const sel = q('#m_test_cand');
+      const keySel = q('#m_test_key');
+      const c = candidates[Number(sel?.value) || 0];
+      if (!c || !c.provider) {
+        if (out) {
+          out.hidden = false;
+          out.className = 'm-test-out m-test-out--err';
+          out.textContent = '先在候选列表里加一个候选，再测试。';
+        }
+        return;
       }
-      drawCands();
-      drawAdv();
-      drawKeys();
+      const keyLabel = String(keySel?.value || '');
+      // 上游模型为空时用路由名：调度器也是这么回退的（候选 → 别名 → 路由名）。
+      const model = String(c.target_model || mName).trim();
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '请求中…';
+      // 测试期间禁用「保存」：test-key 会把结论落盘（配置版本 +1），测试还在
+      // 飞的时候按下保存，提交的版本号必然是旧的 —— 保存必被 CAS 判为冲突、
+      // 用户的改动被整条丢弃。禁掉这一个按钮，竞态根本不会发生。
+      const saveBtn = q('#btn_save_model');
+      if (saveBtn) saveBtn.disabled = true;
+      if (out) {
+        out.hidden = false;
+        out.className = 'm-test-out';
+        out.innerHTML = `<div class="gw-test-meta">正在用 ${eh(c.provider)}${keyLabel ? ` / ${eh(keyLabel)}` : ''} 请求 ${eh(model)} …</div>`;
+      }
+      const started = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      try {
+        const res = await window.HOST.testKey({ provider: c.provider, key_label: keyLabel, model });
+        const ms = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - started);
+        // test-key 会把结论落盘（Full 节点配置版本 +1），本页持有的版本号就此
+        // 落后一版。立刻追平，否则紧接着的保存必被 CAS 判为冲突、改动被丢弃。
+        await refreshConfigVersion();
+        // 服务端把结论写到了那把 Key 上，本地这份配置也得跟上：否则接下来的
+        // 保存（整份提交 state.config）会把服务端刚写下的结论用旧值覆盖掉。
+        const provKeys = state.config?.providers?.[c.provider]?.api_keys || [];
+        const verdictKey = provKeys.find((k) => k && (k.label || k.id) === (keyLabel || res?.key_label));
+        if (verdictKey) applyKeyLastTest(verdictKey, res);
+        if (!out || !out.isConnected) return;
+        const ok = Boolean(res && res.valid === true);
+        const meta = [
+          ok ? '可用' : '失败',
+          res && res.status ? `HTTP ${res.status}` : '',
+          `${(res && res.latency_ms) || ms}ms`,
+          `${res && res.provider ? res.provider : c.provider}${res && res.key_label ? ` / ${res.key_label}` : ''}`,
+          `${res && res.model ? res.model : model}`,
+          res && res.model_source ? `(${res.model_source})` : '',
+        ].filter(Boolean).join(' · ');
+        out.className = `m-test-out${ok ? ' m-test-out--ok' : ' m-test-out--err'}`;
+        if (ok) {
+          const reply = String((res && res.reply_text) || '').trim();
+          out.innerHTML = `<div class="gw-test-meta">${eh(meta)}</div>`
+            + `<pre class="gw-test-reply">${eh(reply || '（上游返回成功，但没有可显示的文本）')}</pre>`;
+        } else {
+          const bits = [meta];
+          if (res && res.reason) bits.push(`reason=${res.reason}`);
+          if (res && res.err_type) bits.push(`err_type=${res.err_type}`);
+          const errText = res && res.error ? scrubUiText(String(res.error)) : '';
+          out.innerHTML = `<div class="gw-test-meta">${eh(bits.join(' · '))}</div>`
+            + (errText ? `<div class="gw-test-error">${eh(errText)}</div>` : '');
+        }
+      } catch (err) {
+        if (out && out.isConnected) {
+          out.className = 'm-test-out m-test-out--err';
+          out.textContent = `测试异常：${scrubUiText(err && err.message ? err.message : String(err))}`;
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+        // 测试结束（无论成败）把「保存」放回来：版本号已在上面追平。
+        const sb = q('#btn_save_model');
+        if (sb) sb.disabled = false;
+      }
     });
 
-    drawCands();
-    drawKeys();
-    drawAdv();
+    // 「＋ 添加候选」内联面板。
+    wireAddCandidatePanel(wrap, { candidates, redraw });
+
+    clk(q('#btn_cancel_model'), () => {
+      if (isCreate) {
+        state.creatingModel = false;
+      } else {
+        state.activeEditorKey = null;
+      }
+      renderModelsList();
+    });
 
     clk(q('#btn_save_model'), async () => {
-      // ① 名称 editable: renaming re-keys the route (agents request by this name),
-      // and the editor stays open on the renamed route.
-      const newName = (q('#ed_m_name')?.value || '').trim() || mName;
+      const typedName = (q('#ed_m_name')?.value || '').trim();
+      // 对外模型名可留空：默认取第一个候选的上游模型 ID（单候选路由的常见情形）。
+      const fallbackName = String(candidates[0]?.target_model || '').trim();
+      const finalName = typedName || fallbackName;
+      if (!finalName) return toast('请填写对外模型名，或先添加一个候选', 'warn');
+      if (candidates.length === 0) return toast('请至少添加一个候选', 'warn');
+
       state.config = state.config || { providers: {}, agent_models: {} };
       state.config.agent_models = state.config.agent_models || {};
-      if (newName !== mName && state.config.agent_models[newName]) return toast(`路由 ${newName} 已存在`, 'warn');
-      m.enabled = true;
-      m.routing_strategy = stratVal;
-      m.active_key = (q('#ed_m_act')?.value || '').trim();
-      m.no_reasoning = Boolean(q('#ed_m_noreas')?.checked);
-      m.force_non_stream = Boolean(q('#ed_m_nonstream')?.checked);
-      m.allow_key_fallback = Boolean(q('#ed_m_keyfb')?.checked);
-      if (newName !== mName) {
-        delete state.config.agent_models[mName];
-        if (state.activeEditorKey === `m_${mName}`) state.activeEditorKey = `m_${newName}`;
+
+      // 同一个对外模型名 = 同一个路由组。新增时撞上已有的同名路由（典型场景：
+      // 另一家供应商也有这个模型 ID），就把新候选并进那个组，而不是拒绝；
+      // 并完展开那个组，让操作者看到并调整分流策略。
+      // 比较「实际向上游要的模型」：上游模型为空 = 用路由名。
+      const upstream = (c) => String(c.target_model || '').trim() || finalName;
+      const sameCand = (a, b) => a.provider === b.provider && upstream(a) === upstream(b) && (a.key_label || '') === (b.key_label || '');
+      if (isCreate && state.config.agent_models[finalName]) {
+        const group = state.config.agent_models[finalName];
+        group.candidates = group.candidates || [];
+        const added = candidates.filter((c) => !group.candidates.some((g) => sameCand(g, c)));
+        if (added.length === 0) {
+          state.creatingModel = false;
+          state.activeEditorKey = `m_${finalName}`;
+          renderModelsList();
+          return toast(`路由组 ${finalName} 里已经有这些候选了`, 'info');
+        }
+        for (const c of added) group.candidates.push({ ...c, enabled: c.enabled !== false, weight: Math.max(1, Number(c.weight) || 1), max_concurrency: Math.max(0, Number(c.max_concurrency) || 0) });
+        state.creatingModel = false;
+        state.activeEditorKey = `m_${finalName}`;
+        await persistConfig(`已并入路由组 ${finalName}（现有 ${group.candidates.length} 个候选），请确认分流策略`, { scope: 'agent_models', key: finalName, value: group });
+        return;
       }
-      state.config.agent_models[newName] = m;
-      // Same-name legacy KB channels go (delete is a no-op if absent).
+      if (!isCreate && finalName !== mName && state.config.agent_models[finalName]) {
+        return toast(`路由 ${finalName} 已存在：要合并请删掉这一条，再把候选加到 ${finalName} 里`, 'warn');
+      }
+
+      const stratEl = wrap.querySelector('button[data-strat].probe-pill--managed');
+      draft.enabled = true;
+      draft.routing_strategy = stratEl?.dataset.strat || draft.routing_strategy || 'sticky_failover';
+      draft.active_key = (q('#ed_m_act')?.value || '').trim();
+      draft.no_reasoning = Boolean(q('#ed_m_noreas')?.checked);
+      draft.force_non_stream = Boolean(q('#ed_m_nonstream')?.checked);
+      draft.allow_key_fallback = Boolean(q('#ed_m_keyfb')?.checked);
+      // 每个候选都补齐后端契约里的字段：weight 缺省 1、max_concurrency 缺省 0、
+      // enabled 缺省 true（后端读的就是这三个字段）。
+      for (const c of draft.candidates) {
+        c.enabled = c.enabled !== false;
+        c.weight = Math.max(1, Number(c.weight) || 1);
+        c.max_concurrency = Math.max(0, Number(c.max_concurrency) || 0);
+      }
+
+      if (!isCreate && finalName !== mName) {
+        // 上游模型为空的候选，调度器拿路由名当上游模型。改名只改「客户端叫它什么」，
+        // 不能顺带改掉「向上游要哪个模型」—— 先把旧名字钉进这些候选。
+        for (const c of draft.candidates) {
+          if (!String(c.target_model || '').trim()) c.target_model = mName;
+        }
+        // 改名 = 换路由键：老键删掉，新键挂上去，编辑器跟着新名字继续开着。
+        delete state.config.agent_models[mName];
+        if (state.activeEditorKey === `m_${mName}`) state.activeEditorKey = `m_${finalName}`;
+      }
+      state.config.agent_models[finalName] = draft;
+      // 同名旧 KB 通道一起删（不存在时是空操作）。
       if (state.config.kb_models) {
         delete state.config.kb_models[mName];
-        delete state.config.kb_models[newName];
+        delete state.config.kb_models[finalName];
       }
-      await persistConfig('路由配置保存成功');
+      state.creatingModel = false;
+      state.activeEditorKey = `m_${finalName}`;
+      // 冲突重试时把「这条路由的新值」贴回服务端最新配置。改名的话旧键
+      // 也要一起处理，所以把改名信息一并带出去。
+      const pendingEdit = {
+        scope: 'agent_models',
+        key: finalName,
+        value: draft,
+        // 改名：冲突重试时服务端那份配置里旧键还在，要一并删掉。
+        removeKey: (!isCreate && finalName !== mName) ? mName : null,
+      };
+      await persistConfig(isCreate ? '路由添加成功' : '路由配置保存成功', pendingEdit);
     });
 
     clk(q('#btn_del_model'), async () => {
-      if (!confirm(`确定删除路由 ${mName} 吗？`)) return;
+      const ok = await confirmDialog({
+        title: '删除路由',
+        message: `确定删除路由 ${mName} 吗？`,
+        confirmText: '删除',
+      });
+      if (!ok) return;
       delete state.config.agent_models[mName];
-      // Same-name legacy KB channel must go with it: leaving it behind would let
-      // the KB fallback resurrect a ghost route on the next config round-trip.
+      // 同名旧 KB 通道必须一起走：留着它会让 KB 回退在下一次配置往返时复活幽灵路由。
       if (state.config.kb_models) delete state.config.kb_models[mName];
       state.activeEditorKey = null;
-      await persistConfig('路由已删除');
+      const saved = await persistConfig('路由已删除');
+      if (!saved) {
+        // 没存上 → 回读服务端配置：路由还在，编辑器也留在原地。
+        await loadData();
+        state.activeEditorKey = `m_${mName}`;
+        renderModelsList();
+      }
     });
-
-    return wrap;
   }
 
   // --- Template Route Import (Full, on-demand) ---
@@ -5400,8 +5988,7 @@
   function openTemplateImportOverlay() {
     const overlay = $('templateImportOverlay');
     if (!overlay) return;
-    overlay.hidden = false;
-    overlay.classList.remove('hidden');
+    openDialog(overlay, { focus: 'btnCloseTemplateImport' });
     renderTemplateImportList();
   }
 
@@ -5411,8 +5998,7 @@
     // Cancel any in-flight batched pull: the button may be mid-loop, and the
     // operator closing the dialog means "do not land these routes".
     state.importRunId++;
-    overlay.hidden = true;
-    overlay.classList.add('hidden');
+    closeDialog(overlay);
   }
 
   function templateRouteMissingProviders(mName, tpl, localProviders) {
@@ -5452,7 +6038,7 @@
     );
     if (entries.length === 0) {
       const empty = ce('div');
-      empty.className = 'row row--static text-muted';
+      empty.className = 'card-pad text-muted';
       if (!state.vaultManifest) {
         empty.textContent = '中枢清单未加载，无法导入模板路由';
       } else if (!state.vaultManifest.agent_models || typeof state.vaultManifest.agent_models !== 'object') {
@@ -5463,6 +6049,11 @@
       listEl.appendChild(empty);
       return;
     }
+    // 统一列表样式（组件 3 · .list > .row）：一行 = 勾选框 + 路由名 +
+    // 一行次要信息（候选摘要）+ 一个状态 + 一个计数。
+    const list = ce('div');
+    list.className = 'list';
+    listEl.appendChild(list);
     for (const [mName, tpl] of entries) {
       const cands = Array.isArray(tpl.candidates) ? tpl.candidates : [];
       const missing = templateRouteMissingProviders(mName, tpl, localProviders);
@@ -5486,20 +6077,71 @@
         (keyGapsByProv[pId] = keyGapsByProv[pId] || []).push(pair.slice(idx + 1));
       }
       const keyGapPairs = Object.entries(keyGapsByProv).flatMap(([pId, labels]) => labels.map((l) => `${pId}:${l}`));
+      const blocked = keyGapPairs.length > 0 || localGapProvs.length > 0;
       const candText = cands.map((c) => `${c.provider}:${c.key_label || '*'}→${c.target_model || mName}`).join(' · ');
+
       const row = ce('div');
-      row.className = 'mb-2';
-      row.innerHTML = `
-        <label class="form-label form-label--check">
-          <input type="checkbox" class="tpl_import_cb" data-model="${eh(mName)}" ${keyGapPairs.length || localGapProvs.length ? 'disabled' : ''}>
-          <span><strong>${eh(mName)}</strong> <span class="pill pill--accent">${eh(STRATEGY_LABELS[tpl.routing_strategy] || tpl.routing_strategy || 'sticky_failover')}</span> <span class="pill tabular">${cands.length} 候选</span></span>
-        </label>
-        ${candText ? `<div class="text-xs text-muted">${eh(candText)}</div>` : ''}
-        ${missing.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> 导入时自动拉取 ${missing.length} 个缺失供应商：${eh(missing.join('、'))}</div>` : ''}
-        ${keyGapPairs.length ? `<div class="text-xs"><span class="pill pill--amber">缺依赖</span> Key 标签本地缺失（该供应商已有但缺这些 Key）：${eh(keyGapPairs.join('、'))} → ${Object.entries(keyGapsByProv).map(([pId, labels]) => `<button class="btn btn--sm" type="button" data-tpl-fetch-keys="${eh(pId)}" data-labels="${eh(JSON.stringify(labels))}">点此补拉 ${eh(pId)}</button>`).join(' ')}</div>` : ''}
-        ${localGapProvs.length ? `<div class="text-xs text-muted">${eh(localGapProvs.join('、'))} 为本地自建供应商，不能从中枢补拉 Key；请在供应商页补齐对应 Key 标签，或改用中枢同名供应商。</div>` : ''}
+      row.className = 'row';
+      const who = ce('div');
+      who.className = 'who';
+      // 名字 + 一行次要信息（候选摘要 / 缺依赖提示）。缺依赖的说明不进 .sub
+      // （那行只放等宽的候选串），另起一行小字说清为什么这一行不可选。
+      const notes = [];
+      if (missing.length) notes.push(`导入时自动拉取 ${missing.length} 个缺失供应商：${missing.join('、')}`);
+      if (keyGapPairs.length) notes.push(`Key 标签本地缺失：${keyGapPairs.join('、')}`);
+      if (localGapProvs.length) notes.push(`${localGapProvs.join('、')} 为本地自建供应商，不能从中枢补拉 Key`);
+      who.innerHTML = `
+        <div class="name">${eh(mName)}</div>
+        <div class="sub">${eh(candText || '（中枢模板没有候选）')}</div>
+        ${notes.length ? `<div class="text-xs text-muted mt-1">${eh(notes.join(' · '))}</div>` : ''}
       `;
-      listEl.appendChild(row);
+
+      // 勾选框（行内第一个元素）+ 状态 + 计数。
+      const pick = ce('label');
+      pick.className = 'fields';
+      const cb = ce('input');
+      cb.type = 'checkbox';
+      cb.className = 'tpl_import_cb';
+      cb.setAttribute('data-model', mName);
+      if (blocked) cb.disabled = true;
+      pick.appendChild(cb);
+
+      const status = ce('span');
+      status.className = 'fields';
+      const dot = ce('span');
+      dot.className = `dot ${blocked ? 'dot--warn' : 'dot--ok'}`;
+      status.appendChild(dot);
+      const word = ce('span');
+      word.className = 'text-xs text-muted';
+      word.textContent = blocked ? '缺依赖' : '可导入';
+      status.appendChild(word);
+
+      const count = ce('span');
+      count.className = 'pill tabular';
+      count.textContent = `${cands.length} 候选`;
+
+      row.appendChild(pick);
+      row.appendChild(who);
+      row.appendChild(status);
+      row.appendChild(count);
+
+      // 「点此补拉」：中枢托管供应商缺的 Key 标签可以就地拉回来。
+      if (keyGapPairs.length) {
+        const act = ce('div');
+        act.className = 'fields';
+        for (const [pId, labels] of Object.entries(keyGapsByProv)) {
+          const btn = ce('button');
+          btn.type = 'button';
+          btn.className = 'btn btn--sm';
+          btn.setAttribute('data-tpl-fetch-keys', pId);
+          btn.setAttribute('data-labels', JSON.stringify(labels));
+          btn.textContent = `补拉 ${pId}`;
+          act.appendChild(btn);
+        }
+        row.appendChild(act);
+      }
+
+      list.appendChild(row);
     }
   }
 
@@ -6198,7 +6840,6 @@
     // KV and may reach models.dev. A Full node pulls the artifact instead.
     const catalogBox = $('modelCatalogBox');
     if (catalogBox) catalogBox.hidden = !isHubMode();
-    renumberSettingsSections();
     if (isHubMode()) renderModelCatalogCard();
 
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
@@ -6209,6 +6850,7 @@
       gwSummaryPill.textContent = clientKey
         ? '主密钥已配置'
         : (isFull ? '主密钥未配置' : '待设置下发至节点');
+      gwSummaryPill.className = clientKey ? 'pill' : 'pill pill--amber';
     }
 
     const gwBaseUrl = $('gwBaseUrl');
@@ -6251,7 +6893,12 @@
       const btnClearCd = $('btnClearAllCooldowns');
       if (btnClearCd) {
         btnClearCd.onclick = async () => {
-          if (!confirm('确定解除所有模型与密钥的当前冷却限制吗？')) return;
+          const ok = await confirmDialog({
+            title: '解除全部冷却',
+            message: '确定解除所有模型与密钥的当前冷却限制吗？',
+            confirmText: '解除',
+          });
+          if (!ok) return;
           try {
             const res = await window.HOST.clearCooldowns();
             if (res && res.ok) toast('已清除所有冷却状态', 'ok');
@@ -6347,8 +6994,43 @@
     }
   }
 
+  // 把「待保存的改动」贴到服务端刚回读的配置上。
+  //
+  // 冲突重试时不能拿本地的过期快照硬覆盖：服务端在冲突发生前可能刚写下
+  // 别的内容（本页的 test-key 结论就是最常见的一种），整份覆盖会把那份
+  // 内容冲掉。所以这里只把「用户正在改的那一项」搬到服务端最新配置上，
+  // 其余部分原样保留。
+  //
+  // edit: { scope: 'agent_models' | 'providers', key, value, removeKey? }
+  function applyPendingEdit(freshCfg, edit) {
+    if (!freshCfg || !edit || !edit.key) return null;
+    const bag = edit.scope === 'agent_models' ? 'agent_models' : edit.scope === 'providers' ? 'providers' : null;
+    if (!bag) return null;
+    const cfg = Object.assign({}, freshCfg);
+    const section = Object.assign({}, freshCfg[bag] || {});
+    const serverProv = section[edit.key];
+    section[edit.key] = edit.value;
+    // 改名：服务端那份配置里的旧键也要删掉，否则两条路由并存。
+    if (edit.removeKey && edit.removeKey !== edit.key) delete section[edit.removeKey];
+    // 服务端在冲突发生前可能刚给某把 Key 写下了测试结论（test-key 会落盘
+    // last_test）。整份替换供应商会把那份结论冲掉，所以按 Key 标签把它
+    // 捞回来 —— 密钥本体与其它属性仍以用户这份为准。
+    if (bag === 'providers' && serverProv?.api_keys && edit.value?.api_keys) {
+      for (const sk of serverProv.api_keys) {
+        const mine = sk?.last_test && edit.value.api_keys.find((k) => k && (k.label || k.id) === (sk.label || sk.id));
+        if (mine && !mine.last_test) mine.last_test = sk.last_test;
+      }
+    }
+    cfg[bag] = section;
+    return cfg;
+  }
+
   // --- Common Helper: Persist Config ---
-  async function persistConfig(successMsg) {
+  //
+  // pendingEdit: 可选的「待保存的改动」。冲突重试时用它把用户的改动重新
+  // 贴到服务端最新的配置上（而不是拿一份过期快照硬覆盖）。
+  // 返回 true = 落盘成功；false = 没保存成（调用方要负责回读 state.config）。
+  async function persistConfig(successMsg, pendingEdit) {
     try {
       // m._keySel is editor-session state (checked-key pills), not config. The
       // full backend drops unknown route fields on the typed round-trip, but the
@@ -6360,41 +7042,85 @@
       const res = await window.HOST.saveConfig(state.config);
       const data = res?.data || res || {};
 
-      const isConflict = res?.status === 409 ||
-        data?.error === 'config_version_conflict' ||
-        res?.error === 'config_version_conflict' ||
-        data?.code === 'cas_version_conflict' ||
-        data?.error?.code === 'cas_version_conflict' ||
-        (typeof data?.error === 'string' && data.error.includes('conflict'));
-
-      if (isConflict) {
-        toast('配置已被其他人修改，请刷新后重试', 'warn');
-        await loadData();
-        return;
-      }
-
-      if (res?.status === 200 || data?.ok || data?._version !== undefined) {
-        if (data.config) {
-          state.config = data.config;
-          if (data._version) state.config._version = data._version;
-        } else if (data._version !== undefined || data.providers) {
-          state.config = data;
+      if (isSaveConflict(res, data)) {
+        // 冲突时服务端会带回 current_version / submitted_version。
+        // 落后一两版 = 本页自己的 test-key 请求把结论落盘导致的（不是
+        // 「别人改了」）；落后更多 = 真的有人在别处改了配置。
+        const curVer = Number(data?.current_version ?? data?.data?.current_version);
+        const subVer = Number(data?.submitted_version ?? data?.data?.submitted_version);
+        const drift = curVer - subVer;
+        // 版本只差一两版：多半是本页的测试请求把配置落盘了。回读服务端最新
+        // 的配置，把用户正在改的那一项贴上去再保存 —— 用户的改动保住了，
+        // 服务端刚写下的测试结论也不会被过期快照冲掉。
+        if (pendingEdit && drift > 0 && drift <= 2) {
+          const fresh = await window.HOST.getConfig?.();
+          const merged = fresh && fresh._version === curVer ? applyPendingEdit(fresh, pendingEdit) : null;
+          if (merged) {
+            toast('配置版本已对齐，正在重试保存…', 'info');
+            if (applySaveResponse(await window.HOST.saveConfig(merged), successMsg)) return true;
+          }
         }
-        const ver = state.config?._version || data._version;
-        const verEl = $('configVersionDisplay');
-        if (verEl && ver) verEl.textContent = `v${ver}`;
-        toast(successMsg || '保存成功', 'ok');
-        refreshDatalists();
-        renderProvidersList();
-        renderModelsList();
-        renderSettingsView();
-      } else {
-        const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
-        toast(scrubUiText(errMsg), 'err');
+        // 真冲突：明确告诉操作者「改动没有保存」，而不是含糊地说「被人改了」。
+        toast('保存未成功：配置已被改动，本次修改没有保存。请刷新后重试。', 'err');
+        await loadData();
+        return false;
       }
+
+      if (!applySaveResponse(res, successMsg)) {
+        const errMsg = typeof data.error === 'string' ? data.error : data.error?.message || '保存失败';
+        if (isEmptyTemplateGuard(res, data)) {
+          // 中枢的模板守卫（edgeone-hub/lib/config.js）：保存后一个「启用且有启用 Key」
+          // 的供应商都不剩，节点下一次拉配置就会全断，守卫直接拒收。透传后端的英文
+          // 报错对操作者没用 —— 要给可执行的补救指引。
+          toast('保存未生效：中枢要求至少保留一个「已启用且有启用 Key」的供应商，否则节点下一次拉配置会全断。请先给某个供应商添加一把启用的 Key，再重试。', 'err');
+          return false;
+        }
+        toast(scrubUiText(errMsg), 'err');
+        return false;
+      }
+      return true;
     } catch (e) {
       toast(`保存异常: ${scrubUiText(e.message)}`, 'err');
+      return false;
     }
+  }
+
+  // 中枢的「空模板」守卫：保存的配置里一个可用供应商都不剩。
+  // edgeone-hub/lib/config.js 抛 ConfigValidationError → HTTP 400。
+  function isEmptyTemplateGuard(res, data) {
+    const msg = typeof data?.error === 'string' ? data.error : data?.error?.message || '';
+    return res?.status === 400 && /empty template|at least one enabled provider/i.test(msg);
+  }
+
+  // 保存请求是不是撞上了 CAS 冲突（409 config_version_conflict）。
+  function isSaveConflict(res, data) {
+    return res?.status === 409 ||
+      data?.error === 'config_version_conflict' ||
+      res?.error === 'config_version_conflict' ||
+      data?.code === 'cas_version_conflict' ||
+      data?.error?.code === 'cas_version_conflict' ||
+      (typeof data?.error === 'string' && data.error.includes('conflict'));
+  }
+
+  // 把一次保存的响应落到 state.config 并重绘。成功返回 true。
+  function applySaveResponse(res, successMsg) {
+    const data = res?.data || res || {};
+    if (isSaveConflict(res, data)) return false;
+    if (!(res?.status === 200 || data?.ok || data?._version !== undefined)) return false;
+    if (data.config) {
+      state.config = data.config;
+      if (data._version) state.config._version = data._version;
+    } else if (data._version !== undefined || data.providers) {
+      state.config = data;
+    }
+    const ver = state.config?._version || data._version;
+    const verEl = $('configVersionDisplay');
+    if (verEl && ver) verEl.textContent = `v${ver}`;
+    toast(successMsg || '保存成功', 'ok');
+    renderProvidersList();
+    renderModelsList();
+    renderSettingsView();
+    return true;
   }
 
   function formatTime(isoOrSec) {

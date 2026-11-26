@@ -485,30 +485,33 @@
 
       const row = document.createElement('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
+      // 组件 3：一行只允许「名称 + 一行次要信息 + 一个状态 + 至多一个计数」。
+      // 模式 / Token / 重试率这些次要标签全部并进 .sub，不再一行堆 pill。
+      const subBits = [
+        item.mode ? item.mode.toUpperCase() : null,
+        `${fmtN(totalT)} tok`,
+        item.retried > 0 ? `重试 ${item.retried}` : null,
+        `成功率 ${rate.toFixed(1)}% (失败 ${item.failed})`,
+        `缓存命中 ${(item.cacheHitRate * 100).toFixed(1)}% (${fmtN(item.cacheRead)})`,
+        item.avgTtft ? `TTFT ${Math.round(item.avgTtft)}ms` : null,
+        item.avgTotal ? `均耗 ${Math.round(item.avgTotal)}ms` : null,
+        item.tps ? `${item.tps.toFixed(1)} tok/s` : null,
+      ].filter(Boolean).join(' · ');
       row.innerHTML = `
-        <span class="dot ${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span>
-        ${icoHtml}
         <div class="who">
           <div class="name">
+            ${icoHtml}
             <span class="${subTab === 'endpoints' ? 'tabular' : ''}">${escapeHtml(item.name)}</span>
-            ${item.mode ? `<span class="pill ${item.mode === 'kb' ? 'pill--amber' : 'pill--accent'}">${escapeHtml(item.mode.toUpperCase())}</span>` : ''}
-            <span class="pill tabular">${item.requests.toLocaleString()} 次</span>
-            <span class="pill pill--accent tabular">${fmtN(totalT)} tok</span>
-            ${item.retried > 0 ? `<span class="pill pill--amber tabular">重试 ${item.retried}</span>` : ''}
           </div>
-          <div class="sub">
-            成功率 ${rate.toFixed(1)}% (失败 ${item.failed})
-            · 缓存命中 ${(item.cacheHitRate * 100).toFixed(1)}% (${fmtN(item.cacheRead)})
-            ${item.avgTtft ? ` · TTFT ${Math.round(item.avgTtft)}ms` : ''}
-            ${item.avgTotal ? ` · 均耗 ${Math.round(item.avgTotal)}ms` : ''}
-            ${item.tps ? ` · ${item.tps.toFixed(1)} tok/s` : ''}
-          </div>
+          <div class="sub">${escapeHtml(subBits)}</div>
         </div>
         <div class="fields">
-          <span class="pill ${rate >= 99 ? 'pill--green' : rate >= 90 ? 'pill--amber' : 'pill--red'} tabular">${rate.toFixed(1)}%</span>
+          <span class="fields"><span class="dot ${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span><span class="text-xs text-muted">${rate >= 99 ? '正常' : rate >= 90 ? '波动' : '异常'}</span></span>
+          <span class="pill tabular">${item.requests.toLocaleString()} 次</span>
           <span class="caret">▾</span>
         </div>
       `;
+
 
       row.addEventListener('click', () => {
         usageState.expandedKey = isExpanded ? null : rowKey;
@@ -653,17 +656,16 @@
         const isOk = tr.status >= 200 && tr.status < 300;
         const brandIco = window.renderBrandIcon ? window.renderBrandIcon(tr.provider) : '';
         trRow.innerHTML = `
-          <span class="dot ${isOk ? 'dot--ok' : 'dot--err'}"></span>
-          ${brandIco}
           <div class="flex-1">
-            <div>
-              <strong>Hop #${tr.attempt}</strong>:
-              <span>${escapeHtml(tr.provider)} / ${escapeHtml(tr.key_id)}</span>
-              ${tr.model ? `<span class="pill tabular">${escapeHtml(tr.model)}</span>` : ''}
-              <span class="pill ${isOk ? 'pill--green' : 'pill--red'}">HTTP ${tr.status}</span>
-              <span class="tabular">(${tr.ms}ms${tr.ttft_ms ? ', TTFT ' + tr.ttft_ms + 'ms' : ''})</span>
-              ${tr.reason ? `<span class="pill">${escapeHtml(tr.reason)}</span>` : ''}
-              ${tr.cooldown_applied_sec ? `<span class="pill pill--amber">触发冷却 ${tr.cooldown_applied_sec}s</span>` : ''}
+            <div class="name">
+              <span class="dot ${isOk ? 'dot--ok' : 'dot--err'}"></span>
+              ${brandIco}
+              <strong>Hop #${tr.attempt}</strong>
+              <span class="tabular">${escapeHtml(tr.provider)} / ${escapeHtml(tr.key_id)}</span>
+              <span class="pill ${isOk ? 'pill--green' : 'pill--red'} tabular">HTTP ${tr.status}</span>
+            </div>
+            <div class="sub">
+              ${tr.model ? `${escapeHtml(tr.model)} · ` : ''}${tr.ms}ms${tr.ttft_ms ? ` · TTFT ${tr.ttft_ms}ms` : ''}${tr.reason ? ` · ${escapeHtml(tr.reason)}` : ''}${tr.cooldown_applied_sec ? ` · 触发冷却 ${tr.cooldown_applied_sec}s` : ''}
             </div>
             ${tr.error_snippet ? `<div class="text-danger text-sm mt-1">${escapeHtml(tr.error_snippet)}</div>` : ''}
           </div>
