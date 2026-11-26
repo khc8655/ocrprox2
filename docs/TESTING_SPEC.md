@@ -4,6 +4,22 @@
 
 ---
 
+
+> 日常改动不需要四层全跑：按改动挑测试，或直接 `npm run check`（构建 + T1 + 中枢单测 + `go vet` + `go test`）。全量 `-race` 与 T3 只在发版门禁里跑一次。规则见 [`AGENTS.md`](../AGENTS.md) 第 3 节。
+
+
+## 本机环境（界面与端到端手测）
+
+| 用途 | 命令 | 地址 / 凭据 |
+|---|---|---|
+| Full 节点 + 模拟上游 | `node scripts/e2e/local-harness.mjs up` / `down` | `http://127.0.0.1:19292/admin`，`E2Epass!2026`，预置 5 个模拟供应商、4 条路由 |
+| 中枢（真实处理器 + 内存 KV） | `node scripts/e2e/hub-local.mjs` | `http://127.0.0.1:19091/admin`，`hub-admin-secret` |
+
+- **改了前端必须重新编译 Full**：Full 内嵌页面，旧二进制服务的是旧界面。先 `npm run build:admin`，再删掉 `scripts/e2e/llmproxy` 后 `up`；用 `curl -s http://127.0.0.1:19292/admin | wc -c` 对比 `shared/admin/dist/index.html` 字节数 + 45 确认。
+- `up` 报「already running」时先 `down`，再删 `scripts/e2e/state/pids.json`。
+- 浏览器用 ego-browser。登录与否看 `#loginPassword` 是否可见；`#loginScreen`、`.dialog` 是全屏元素，`offsetParent` 恒为 null，判断显隐要用 `getComputedStyle(el).display`。
+- 测试数据用 `zz_` 前缀，截图放 `scratch/`。
+
 ## 一、 四层测试金字塔总览
 
 项目实行严格的四层分层测试架构，所有本地测试通过 `npm run test:full`（或分层命令）统一编排，线上部署接入 T4 外部冒烟隔离验证：
@@ -44,7 +60,7 @@
 | **`T1.admin_ui_contract`** | 校验 `shared/contracts/admin-ui-backend.json` 中声明的所有 API 路径、请求方法、响应字段与 `shared/admin/js/host.js` 的 `HOST.capabilities` | `edgeone-hub` 或 Go `internal/admin` 缺失契约路由，或前端引用了未在当前角色声明的 `data-cap` 能力位 |
 | **`T1.presets_integrity`** | 校验 `shared/presets/*.json` 16 家厂商预设与生成的 `catalog.json` 的 Schema 合法性及 `rule_hash` 一致性 | JSON 语法错误、未知 `adapter_rules` 键或构建产物发生漂移 |
 | **`T1.readonly_route_guard`** | 执行 Magpie 搬运的 `internal/router/readonly_test.go` (`routeMux` 门禁) | 任何新注册到 HTTP `ServeMux` 的路由未显式在 `allowedLiteRoutes` 或 `fullOnlyRoutes` 白名单登记 |
-| **`T1.ui_layout_and_zero_inline_style`** | 扫描 `shared/admin/` 全部 `.html`、`.css`、`.js` 文件（执行 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 五大硬门禁） | 出现任何 `style="` 或 `.style.display` 内联样式、出现 `.drawer` 组件、出现左边框彩条，或打包总大小 `> 252 KB`（`258,048 bytes`） |
+| **`T1.ui_layout_and_zero_inline_style`** | 扫描 `shared/admin/` 全部 `.html`、`.css`、`.js` 文件（执行 [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) 五大硬门禁） | 出现任何 `style="` 或 `.style.display` 内联样式、出现 `.drawer` 组件、出现左边框彩条，或打包总大小 `> 384 KiB`（`393,216 bytes`） |
 | **`T1.hub_export_guard`** | 扫描 `edgeone-hub/` 与 `edge-functions/` 的 AST 与纯 Web Standard 边界规范 | 1. 发现任何 `/v1/*` 推理代理路由；<br>2. 投影计算未对 `origin === "local"` 实施物理阻断；<br>3. `edge-functions/` 与 `edgeone-hub/` 引入 `node:*` 模块、`Buffer.from/alloc`、`process.cwd` 或 `../edgeone-hub` 逃逸；<br>4. `edge-functions/` 入口文件使用 `export * from` 或缺失显式 `export function onRequest*`。 |
 
 ---
@@ -66,7 +82,7 @@ go test -race ./...        # 执行 Go 全量模块并发数据竞争检测
 | **`internal/hubsync` (Lazy-Once + Lease)** | 1. **零轮询断言**：启动后静置，断言 Hub 收到 `0` 次请求；<br>2. **并发首请求合并（Singleflight）**：50 个并发客户端请求同时到达未激活节点，断言 Hub 仅收到 **严格 1 次** `POST /api/node/config`；<br>3. **304 续租**：租约到期后携带 `ETag` 请求，收到 `304` 后零载荷延长 `lease_until`；<br>4. **401 即刻销毁**：收到 `401` 后 `RuntimeSnapshot` 立即为 `nil` 且原 Key 字节切片被清零；<br>5. **宽限期（Grace Period）**：Hub 502 时在 `grace_ttl` 内保留 `lastgood`，超期后自动清空停服。 |
 | **`internal/adapters` (声明式规则 + Gemini 兼容)** | 使用 `shared/contracts/adapter_fixtures.json` 驱动：<br>1. 16 家厂商预设规则（`stream_only` SSE 聚合、`rescue_from_text`、`unwrap_root`、Anthropic `strict_signature`/`passback_required`、AMD `strip_reasoning_enabled`）逐一回归；<br>2. Gemini 2.5 `thinking_budget` 与 3.x `thinking_level`、`<thought>` 流式拆分、`{id}:::{thought_signature}` 往返保持、Magpie `gemini_schema.go` 递归清洗。 |
 | **`internal/scheduler`** | 1. 300s 硬总超时、`sticky_failover`（含多路并发会话粘性隔离、前缀指纹与全局策略继承）vs `round_robin` vs `manual`；<br>2. 三级冷却（模型级 / Key 级 24h / 410 Gone）与 `key_bans.json` 持久化；<br>3. **Magpie `forbiddenAlike` 双账号同错免误伤自愈测试**（验证坏请求不会把所有 Key 打入冷却）；<br>4. 流式首包 Peek（拦截 200 OK 流内 `{"error":...}` 与空流 `[DONE]` 并无感换 Key）及 45s `: keep-alive` 预提交。 |
-| **`internal/kb` & `modesched` & `oauth` & `config`** | 1. OCR 预读信号量（超出 `ocr_max_inflight` 在读 body 前即回 429）与零拷贝多 Key 重试重放；<br>2. 时段切换边沿触发、活跃请求优雅排空、同日手动覆盖记忆、HMAC Webhook；<br>3. OAuth PKCE Device Flow 轮询、提前 5m 刷新与 401 强制刷新重试；<br>4. 1 代 Fernet `proxy_config.enc` 自动解密并升级为 AES-256-GCM + Kernel Guard 防 `●` 覆盖。 |
+| **`internal/kb` & `oauth` & `config`** | 1. OCR 预读信号量（超出 `ocr_max_inflight` 在读 body 前即回 429）与零拷贝多 Key 重试重放；<br>2. OAuth PKCE Device Flow 轮询、提前 5m 刷新与 401 强制刷新重试；<br>3. 1 代 Fernet `proxy_config.enc` 自动解密并升级为 AES-256-GCM + Kernel Guard 防 `●` 覆盖。 |
 
 ---
 
@@ -107,7 +123,7 @@ go test -race ./...        # 执行 Go 全量模块并发数据竞争检测
 当 `edgeone-hub/` 或 `edge-functions/` 发生改动并部署至腾讯云 EdgeOne Makers 后，必须执行 T4 实机冒烟与集成验证。
 
 ### 5.1 安全与外部隔离红线
-- **严格在仓库外部 `scratch/` 执行**：所有 T4 测试脚本、快照文件（`before_*.json`、`after_*.json`、`matrix_results.json`）与测试报告（`live_hub_test_report.md`）**严禁保存在 Git 代码仓库目录内**，必须存放在外部临时目录（如 `../scratch/` 或系统临时目录）；
+- **在 `scratch/`（已 gitignore，不提交）执行**：所有 T4 测试脚本、快照文件（`before_*.json`、`after_*.json`、`matrix_results.json`）与测试报告（`live_hub_test_report.md`）**严禁保存在 Git 代码仓库目录内**，必须存放在外部临时目录（如 `../scratch/` 或系统临时目录）；
 - **零生产污染（Zero Side-Effect）**：测试过程不得修改生产环境已有配置或删除已有节点；测试结束后必须达到 **100% 零残留（Zero-Diff）**。
 
 ### 5.2 T4 验证流程与断言规范

@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check": "npm run build:admin && npm run test:t1 && npm run test:hub && go vet ./cmd/... ./internal/... && go test ./cmd/... ./internal/...",
     "build:admin": "node shared/admin/build.mjs",
     "build:presets": "node shared/presets/build-catalog.mjs",
     "build:release": "node scripts/build-release.mjs",

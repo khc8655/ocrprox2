@@ -70,7 +70,7 @@ flowchart TB
     subgraph Full["VM 客户端 B：Go 完整节点 (--role=full)\n适用：自有标准 VM / 主力生产网关"]
         direction TB
         F_STORE["本地加密配置源 (AES-256-GCM)\nMagpie steady 原子写 · lastgood 自愈\n1代 Kernel Guard · 离线完全自治"]
-        F_GW["Go 网关内核 + 1代全量业务\nAgent + KB 双模 · modesched 时段切换\n20MB 零拷贝 OCR 队列 · OAuth 保活"]
+        F_GW["Go 网关内核 + 1代全量业务\nAgent 路由 + KB 固定通道\n20MB 零拷贝 OCR 队列 · OAuth 保活"]
         F_UI["内嵌本地 Web 管理控制台\n(shared/admin + 本地统计/错误日志)"]
         F_STORE --> F_GW
         F_UI --> F_STORE
@@ -207,7 +207,6 @@ internal/
     cooldown.go                    三级冷却 (模型级 / Key级 24h / 410 Gone) + key_bans.json + forbiddenAlike 双Key同错免误封
     peek.go                        流式首包 _peek_until_payload (拦截 200 流内错误与空流) + 45s 预提交保活
   kb/                              [1:1 移植自 1代 proxy_routes.py (Full 专属)] 预读信号量 + 20MB 零拷贝分片流式 OCR + Emb/Rerank
-  modesched/                       [1:1 移植自 1代 mode_scheduler.py (Full 专属)] 时段自动切换 + 活跃请求优雅排空 + Webhook
   oauth/                           [1:1 移植自 1代 oauth_credentials.py (Full 专属)] MiniMax Device Flow + PKCE + 6h 保活
   obs/                             [全面借鉴 Magpie 三层轻量可观测体系，彻底取代 1代 stats.py & agent_metrics.py]
     applog.go                      [搬运自 Magpie · 734版本0修改] 20行内置 scrub 密钥脱敏 + Full 模式 5MB 双文件自轮转 (Lite 仅挂 stderr)
@@ -226,5 +225,5 @@ internal/
 | **M1：共享契约与 EdgeOne Makers 轻中枢** | 迁移 `shared/`（presets/config/admin），实现 EdgeOne 轻中枢（删 `/v1/*`，增 `/api/admin/nodes` 与 `POST /api/node/config`） | 扩展 `HOST.capabilities` 支持 `hub/lite/full`；实现节点 Token 签发、Scope 投影缓存、ETag/304 续租与一键注销 | 契约测试 T1 全绿；模拟节点验证 200/304/401、Scope 隔离与 `origin=local` 物理阻断 |
 | **M2：Go Lite 极简模式（NAT VM 节点）** | 交付 `--role=lite` 完整可用二进制 | 实现 `hubsync`（Lazy-Once + Lease）+ 1 代 `adapters`（含 `gemini_compat`）与 `scheduler`（含 `forbiddenAlike`）的 Go 移植 + 双栈监听 | 在 64MB/128MB NAT 测试 VM 上：① 1000 次请求仅触发 1 次中枢调用；② 全盘/内存/日志扫描 0 明文 Key 落盘；③ 中枢注销后立即 401 清空内存停服；④ Gemini/Vertex/Anthropic/OpenAI 全协议通过 |
 | **M3：Go Full 完整模式（Agent + 管理端 + OAuth）** | 交付 `--role=full` 的 Agent 生产能力与内嵌 Web 控制台 | 接入本地 AES-256-GCM 配置存储（兼容 1 代 Fernet）、内嵌 `shared/admin`、实现 `/api/admin/*`、Vault 手动拉取、MiniMax OAuth Device Flow | 断网离线 100% 可用；管理端 UI 全部操作与 1 代行为一致；Kernel Guard 防掩码覆盖测试通过 |
-| **M4：Go Full 知识库模式（KB + 零拷贝 OCR + 时段调度）** | 补齐 `kb` 模式全部特性 | 实现 `internal/kb`（预读信号量 + 20MB 零拷贝分片流式 OCR + Embeddings + Rerank）与 `internal/modesched` 时段自动切换 | 并发 20MB OCR 压测内存平稳不 OOM；时段切换优雅排空与 Webhook 回归通过 |
+| **M4：Go Full 知识库通道（KB + 零拷贝 OCR）** | 补齐 KB 固定通道 | 实现 `internal/kb`（预读信号量 + 20MB 零拷贝分片流式 OCR + Embeddings + Rerank）；KB 始终可用，不再有 agent/kb 时段切换 | 并发 20MB OCR 压测内存平稳不 OOM |
 | **M5：全量门禁闭环与发版就绪** | G1~G6 六道自动化门禁与一键部署脚本 `install.sh` | 完成多架构交叉编译脚本、systemd 只读加固模板与全量 E2E 回归网 | `npm run verify:release` 与 `go test -race ./...` 100% 全绿 |

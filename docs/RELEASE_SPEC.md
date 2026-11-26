@@ -46,6 +46,8 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="${LDFLAGS}" 
 
 ---
 
+> 日常改动不走本流程：改完跑 `npm run check` 即可提交（见 [`AGENTS.md`](../AGENTS.md) 第 2 节）。本文只管「发版」这条车道。
+
 ## 三、 六道自动化发版门禁（G1 ~ G6）
 
 执行 `npm run verify:release` 时，脚本按顺序严格检查以下 6 道门禁，任一失败即阻断发版：
@@ -96,18 +98,14 @@ npm run verify:release
 ### Step 4：主分支推送与中枢部署（Main Branch Push & Hub Deployment）
 将经过门禁验证的代码提交并推送到 GitHub `main` 分支：
 ```bash
-git add -A
-git commit -m "release: vYYYYMMDD-NN <简明摘要>"
-git push origin main
+git add -A && git commit -m "release: vYYYYMMDD-NN <简明摘要>" && git tag vYYYYMMDD-NN && git push origin main && git push origin vYYYYMMDD-NN
 ```
+提交、打 tag、推送写成一条 `&&` 命令：提交失败时 tag 不会打在上一版提交上。打 tag 前确认 `git log -1` 是这次的 `release:` 提交。
 - **EdgeOne 自动化部署**：推送至 `main` 分支后，腾讯云 EdgeOne Makers 会自动捕获提交并完成边缘函数与静态资源的部署；
-- **可选 T4 外部冒烟验证**：若本次改动涉及 `edgeone-hub/` 或 `edge-functions/`，在部署完成后必须在仓库外部 `scratch/` 目录运行 T4 冒烟脚本，验证生产环境 100% 正常且零残留。
+- **可选 T4 外部冒烟验证**：若本次改动涉及 `edgeone-hub/` 或 `edge-functions/`，在部署完成后必须在 `scratch/`（已 gitignore）运行 T4 冒烟脚本，验证生产环境 100% 正常且零残留。
 
 ### Step 5：Tag 推送与跨平台编译发版（Tag Push & Go Release）
-在本地创建与 `version.json` 完全一致的 Git Tag 并推送到远程仓库：
-```bash
-git tag vYYYYMMDD-NN
-git push origin vYYYYMMDD-NN
-```
+Tag 已在 Step 4 的同一条命令里打好并推送（必须与 `version.json` 的 `version` 一致）。推送后：
 - **GitHub Actions 自动化流水线**：推送到 Tag 后，`.github/workflows/ci-release.yml` 触发流水线，在纯净容器中自动交叉编译 `linux-amd64`、`linux-arm64`、`darwin-arm64` 静态二进制，计算 `SHA256SUMS`，并自动发布 GitHub Release 制品。
+- **核对产物**：CI 变绿后下载 Release，`shasum -a 256 -c SHA256SUMS`，运行二进制看 `--version` 与提交号。
 - **容器镜像发布（`docker-release` job）**：`build-release` 完成后，按 `linux/amd64` 与 `linux/arm64` 分别构建推送 `ghcr.io/khc8655/ocrprox2`，再用 `docker buildx imagetools create` 组装多架构 manifest（`main` → `latest`，`v*` Tag → 版本号）。Gatekeeper 的 G1~G6 通过是前置条件（`needs: build-release` → `needs: verify-gates`）。

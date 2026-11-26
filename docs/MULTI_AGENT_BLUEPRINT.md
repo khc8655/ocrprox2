@@ -122,23 +122,7 @@ type KBCandidate struct {
 	MaxConc  int    `json:"max_concurrency,omitempty"`
 }
 
-// RuntimeSettings 与 shared/config/settings.schema.json 一一对齐的规范化设置项
-type RuntimeSettings struct {
-	RunMode                     RunMode `json:"run_mode"`                        // "agent" | "kb"
-	AgentRoutingStrategy        string  `json:"agent_routing_strategy"`          // "sticky_failover" | "round_robin" | "manual"
-	AgentFirstByteTimeoutSec    int     `json:"agent_first_byte_timeout_sec"`    // 默认 120
-	CooldownRateLimitSec        int     `json:"cooldown_rate_limit_sec"`         // 429 模型级冷却秒数，默认 15
-	CooldownServerErrorSec      int     `json:"cooldown_server_error_sec"`       // 5xx 模型级冷却秒数，默认 30
-	CooldownNetworkErrorSec     int     `json:"cooldown_network_error_sec"`      // 网络超时冷却秒数，默认 15
-	CooldownAuthErrorSec        int     `json:"cooldown_auth_error_sec"`         // 401/402/403 Key 级冷却秒数，默认 86400 (24h)
-	OCRMaxInflight              int     `json:"ocr_max_inflight"`                // KB OCR 预读信号量上限，默认 4
-	KBGlobalMaxConcurrency      int     `json:"kb_global_max_concurrency"`       // KB 全局并发上限，默认 16
-	ModeScheduleEnabled         bool    `json:"mode_schedule_enabled"`           // 是否开启时段自动切换
-	ModeScheduleAgentWindow     string  `json:"mode_schedule_agent_window"`      // 如 "08:30-22:30"
-	ModeScheduleTimezone        string  `json:"mode_schedule_timezone"`          // 如 "Asia/Shanghai"
-	ModeScheduleWebhookURL      string  `json:"mode_schedule_webhook_url,omitempty"`
-	ModeScheduleWebhookSecret   string  `json:"mode_schedule_webhook_secret,omitempty"`
-}
+// RuntimeSettings：字段以 internal/types/types.go 为准（与 shared/config/settings.schema.json 一一对齐），此处不再复制。
 
 // VaultClientConfig Full 节点连接 EdgeOne Hub 的客户端配置
 type VaultClientConfig struct {
@@ -268,7 +252,7 @@ type AdapterEngine interface {
 flowchart LR
     W0["W0: 工程基座与全局接口锁死\n(go.mod + internal/types + 9个Magpie微模块)"] --> W1["W1: 鉴权、本地加密存储与 Lite 极简同步\n(auth + config + hubsync)"]
     W0 --> W2["W2: 声明式适配、Gemini兼容与核心调度器\n(upstream + adapters + scheduler + obs)"]
-    W0 --> W3["W3: Full 模式扩展能力与主入口装配\n(kb + modesched + oauth + admin + cmd)"]
+    W0 --> W3["W3: Full 模式扩展能力与主入口装配\n(kb + oauth + admin + cmd)"]
     W0 --> W4["W4: EdgeOne Makers 轻中枢与共享契约\n(edgeone-hub + shared/config/presets/contracts)"]
     W0 --> W5["W5: Magpie 极简风格单页管理端 UI\n(shared/admin HTML/CSS/JS ≤240KB)"]
     W1 & W2 & W3 & W4 & W5 --> W6["W6: T1/T2/T3 全量测试与 G1~G6 发版门禁验收\n(tests/ + scripts/)"]
@@ -281,7 +265,7 @@ flowchart LR
 | **W0（前置基座）** | **Foundation & Magpie Green-Zone Porter** | `go.mod`, `internal/types/types.go`, `internal/netguard/`, `internal/steady/`, `internal/lastgood/`, `internal/filelock/`, `internal/filememo/`, `internal/crypto/`, `internal/router/readonly.go`, `internal/upstream/sse.go`, `internal/obs/applog.go` | `/Users/xk/.gemini/antigravity/brain/c10ef9e7-77ff-4771-a90c-06ae3a983920/scratch/magpie` | `go test -race ./internal/netguard/... ./internal/steady/... ./internal/lastgood/... ./internal/filelock/... ./internal/filememo/... ./internal/crypto/... ./internal/router/... ./internal/upstream/... ./internal/obs/...` |
 | **W1（配置与同步 Agent）** | **Config, Auth & Lite HubSync Engineer** | `internal/auth/`, `internal/config/`, `internal/hubsync/` | `internal/types`, `internal/crypto`, `internal/steady`, `internal/lastgood`, `internal/filelock` | `go test -race ./internal/auth/... ./internal/config/... ./internal/hubsync/...` |
 | **W2（网关内核 Agent）** | **Core Gateway, Adapters, Scheduler & Obs Engineer** | `internal/upstream/transport.go`, `internal/upstream/url.go`, `internal/adapters/`, `internal/scheduler/`, `internal/obs/usage.go`, `internal/obs/trace.go`, `internal/router/middleware.go` | `internal/types`, `internal/netguard`, `internal/upstream/sse.go`, `internal/obs/applog.go`, `/Users/xk/Documents/ocrprox/vm-app/app/{scheduler,proxy_routes,gemini_compat}.py` | `go test -race ./internal/upstream/... ./internal/adapters/... ./internal/scheduler/... ./internal/obs/...` |
-| **W3（Full 扩展与装配 Agent）** | **Full Node Extensions (KB/OCR/OAuth/Admin) & Main Assembler** | `internal/kb/`, `internal/modesched/`, `internal/oauth/`, `internal/admin/`, `cmd/llmproxy/main.go` | `internal/types` 及 W1/W2 接口, `/Users/xk/Documents/ocrprox/vm-app/app/{mode_scheduler,oauth_credentials,admin_routes}.py` | `CGO_ENABLED=0 go build ./cmd/llmproxy && go test -race ./internal/kb/... ./internal/modesched/... ./internal/oauth/... ./internal/admin/...` |
+| **W3（Full 扩展与装配 Agent）** | **Full Node Extensions (KB/OCR/OAuth/Admin) & Main Assembler** | `internal/kb/`, `internal/oauth/`, `internal/admin/`, `cmd/llmproxy/main.go` | `internal/types` 及 W1/W2 接口, `/Users/xk/Documents/ocrprox/vm-app/app/{oauth_credentials,admin_routes}.py` | `CGO_ENABLED=0 go build ./cmd/llmproxy && go test -race ./internal/kb/... ./internal/modesched/... ./internal/oauth/... ./internal/admin/...` |
 | **W4（EdgeOne 中枢与契约 Agent）** | **EdgeOne Hub & Shared Contracts Engineer** | `edgeone-hub/`, `shared/presets/`, `shared/config/`, `shared/contracts/`, `package.json` | `/Users/xk/Documents/ocrprox/{edge-functions,lib,shared}` | `npm run test:t1 && npm run test:hub` |
 | **W5（Magpie 极简前端 Agent）** | **Minimalist Web UI Engineer** | `shared/admin/` (`admin.html`, `css/app.css`, `js/*.js`) | [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md), [`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md), `magpie/internal/gui/frontend/src/app.css` | `node tests/t1_contracts/verify_ui_gate.mjs`（0 内联样式、0 抽屉、体积 ≤ 240KB） |
 | **W6（QA 与发版门禁 Agent）** | **E2E Verification & Release Gatekeeper** | `tests/`, `scripts/` | 全仓库只读校验 | `npm run verify:release` (G1~G6 全绿) |
@@ -303,4 +287,4 @@ flowchart LR
 - [ ] **100% 使用 `internal/types`**：未在包内重复定义 `ProxyConfig`、`ProviderConfig`、`RuntimeSnapshot`、`RequestTrace`；
 - [ ] **未引入任何禁用依赖**：`go.mod` 保持 `CGO_ENABLED=0` 纯标准库（无第三方重依赖，无 `magpie` 动态依赖）；
 - [ ] **单测带 `-race` 全绿**：本包 `go test -race ./...` 100% 通过且无并发竞争；
-- [ ] **UI 零内联样式（仅 W5）**：无 `style="`、无 `.drawer`、总大小 `≤ 252KB`（`258,048 bytes`）。
+- [ ] **UI 零内联样式（仅 W5）**：无 `style="`、无 `.drawer`、总大小 `≤ 384 KiB`（`393,216 bytes`）。

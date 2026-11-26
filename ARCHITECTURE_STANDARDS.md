@@ -90,4 +90,4 @@
 
 ## 准则七：三层测试与六道自动化发版门禁（G1~G6）
 
-任何功能演进必须同步通过 **T1（静态契约与 Schema 校验）→ T2（Go `-race` 单元测试与边缘函数模拟）→ T3（真实二进制进程黑盒 E2E 测试）**，并通过 **G1~G6 发版门禁**后方可发布。详见 [`docs/TESTING_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/TESTING_SPEC.md) 与 [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md)。
+日常改动走快速迭代（`npm run check`），发版才跑 G1~G6（`npm run verify:release`）。两条车道与按改动挑测试的规则见 [`AGENTS.md`](./AGENTS.md) 第 2–3 节；门禁检查项见 [`docs/RELEASE_SPEC.md`](./docs/RELEASE_SPEC.md)，测试分层见 [`docs/TESTING_SPEC.md`](./docs/TESTING_SPEC.md)。
