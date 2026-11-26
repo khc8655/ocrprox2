@@ -1,6 +1,7 @@
 import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
+import { resolveAdapterRules } from '../../lib/presetbind.js';
 import { touchNodeLastSeen } from '../../lib/nodes.js';
 import { ruleHash } from '../../lib/rulehash.js';
 
@@ -54,14 +55,16 @@ export async function handleVaultManifestRequest(request, env, kv) {
 
     if (exportableKeys.length === 0) continue;
 
-    let rules = pData.adapter_rules;
-    if (!rules && pData.preset_id && presetsMap[pData.preset_id]?.adapter_rules) {
-      rules = presetsMap[pData.preset_id].adapter_rules;
-    }
+    // No custom rules -> the CURRENT preset rules (contract B: deploying a new
+    // preset on the hub links up automatically). preset_version names the preset
+    // version those rules came from; empty when the provider is unbound.
+    const { rules } = resolveAdapterRules(pData, presetsMap);
+    const presetMeta = pData.preset_id ? presetsMap[pData.preset_id] : undefined;
 
     manifest[pId] = {
       name: pData.name || pId,
       preset_id: pData.preset_id || '',
+      preset_version: presetMeta ? String(presetMeta.version || '') : '',
       base_url: pData.base_url || '',
       anthropic_base_url: pData.anthropic_base_url || '',
       keys: exportableKeys,

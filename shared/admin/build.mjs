@@ -298,7 +298,14 @@ export async function onRequestOptions() {
 }
 console.log(`   ✓ ${apiRoutes.length} edge-functions/api/ route entry points generated successfully`);
 
-// 11. Gate 5: EdgeOne Makers bu_script gzip budget (<= 45,000 bytes)
+// 11. Gate 5: EdgeOne Makers script budgets. Two limits, both learned from
+// outages: the per-SCRIPT ceiling (v20261123-07 and v20261126-02 both took the
+// whole Hub down with 545 "Error return from script" when a route's bundle —
+// entry file plus everything its static imports reach — crossed it), and the
+// whole-directory budget. Per-script is what kills the site: it is measured by
+// bundling each route entry with its static import closure, gzip-compressed.
+const DIR_GZ_BUDGET = 41000;
+const SCRIPT_GZ_BUDGET = 13600;
 function sumDirGzip(dir) {
   let total = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -308,13 +315,50 @@ function sumDirGzip(dir) {
   }
   return total;
 }
+function routeScriptGzip(entryPath) {
+  const seen = new Set();
+  const stack = [entryPath];
+  let total = 0;
+  while (stack.length > 0) {
+    const f = stack.pop();
+    if (seen.has(f) || !existsSync(f)) continue;
+    seen.add(f);
+    total += gzipSync(readFileSync(f)).length;
+    const src = readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+      const t = resolve(dirname(f), m[1]);
+      stack.push(existsSync(t) ? t : t + '.js');
+    }
+  }
+  return total;
+}
 const edgeGzBytes = sumDirGzip(edgeFuncDir);
-console.log(`\n10. Verifying EdgeOne edge-functions/ gzip budget: ${edgeGzBytes} bytes (<= 45,000 bytes)...`);
-if (edgeGzBytes > 45000) {
-  console.error(`   ✗ FAILED: edge-functions/ gzip size ${edgeGzBytes} bytes exceeds 45,000 bytes budget!`);
+console.log(`\n10. Verifying EdgeOne edge-functions/ budgets (dir <= ${DIR_GZ_BUDGET}, per-route script <= ${SCRIPT_GZ_BUDGET})...`);
+let scriptFail = null;
+for (const entry of readdirSync(edgeFuncDir, { withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
+  const gz = routeScriptGzip(join(edgeFuncDir, entry.name));
+  if (gz > SCRIPT_GZ_BUDGET) {
+    scriptFail = `${entry.name}: ${gz} bytes > ${SCRIPT_GZ_BUDGET}`;
+    console.error(`   ✗ FAILED: route ${entry.name} bundles ${gz} gzip bytes over the per-script budget`);
+  }
+}
+for (const sub of ['api']) {
+  const apiDir = join(edgeFuncDir, sub);
+  for (const entry of readdirSync(apiDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
+    const gz = routeScriptGzip(join(apiDir, entry.name));
+    if (gz > SCRIPT_GZ_BUDGET) {
+      scriptFail = `${sub}/${entry.name}: ${gz} bytes > ${SCRIPT_GZ_BUDGET}`;
+      console.error(`   ✗ FAILED: route ${sub}/${entry.name} bundles ${gz} gzip bytes over the per-script budget`);
+    }
+  }
+}
+if (edgeGzBytes > DIR_GZ_BUDGET || scriptFail) {
+  console.error(`   ✗ FAILED: edge-functions budgets exceeded (dir ${edgeGzBytes} / ${DIR_GZ_BUDGET}${scriptFail ? '; ' + scriptFail : ''})`);
   process.exit(1);
 }
-console.log(`   ✓ edge-functions/ gzip size ${edgeGzBytes} bytes <= 45,000 bytes budget`);
+console.log(`   ✓ edge-functions/ dir gzip ${edgeGzBytes} bytes <= ${DIR_GZ_BUDGET}; every route script <= ${SCRIPT_GZ_BUDGET}`);
 
 console.log('\n=== ALL 5 HARD GATES PASSED! Dist bundle generated at: ===');
 console.log(distPath);

@@ -6,6 +6,8 @@
  * 2. SCOPE ISOLATION: Nodes only receive providers and models allowed in their scope.
  */
 
+import { presetBindingFor, resolveAdapterRules } from './presetbind.js';
+
 const FIXED_KB_CHANNELS = ['chat', 'ocr', 'embedding', 'reranker'];
 const FIXED_KB_SET = new Set(FIXED_KB_CHANNELS);
 
@@ -48,11 +50,19 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
       continue;
     }
 
+    // Preset binding + the rules this provider actually runs. resolveAdapterRules
+    // is the single shared resolver (also used by vault manifest/fetch): a provider
+    // without custom rules always runs the CURRENT preset rules, so deploying a new
+    // preset on the hub reaches nodes on their next pull with no provider edit.
+    const binding = presetBindingFor(pData, presetsMap);
+    const { rules: effectiveRules } = resolveAdapterRules(pData, presetsMap);
+
     // Clone provider data safely
     const projectedProvider = {
       id: pData.id || pId,
       name: pData.name || pId,
-      preset_id: pData.preset_id || '',
+      preset_id: binding.preset_id,
+      preset_version: binding.preset_version,
       api_type: pData.api_type || '',
       base_url: pData.base_url || '',
       anthropic_base_url: pData.anthropic_base_url || '',
@@ -80,13 +90,12 @@ export function projectConfigForNode(node, config, presetsMap = {}) {
     if (pData.hide_client_name) projectedProvider.hide_client_name = true;
 
     // Attach adapter rules directly on ProviderConfig (for Go ProxyConfig deserialization)
-    // and keep top-level adapter_rules map for backward compatibility.
-    if (pData.adapter_rules && Object.keys(pData.adapter_rules).length > 0) {
-      projectedProvider.adapter_rules = pData.adapter_rules;
-      projectedAdapterRules[pId] = pData.adapter_rules;
-    } else if (pData.preset_id && presetsMap[pData.preset_id]?.adapter_rules) {
-      projectedProvider.adapter_rules = presetsMap[pData.preset_id].adapter_rules;
-      projectedAdapterRules[pId] = presetsMap[pData.preset_id].adapter_rules;
+    // and keep top-level adapter_rules map for backward compatibility. Absent rules and
+    // an empty {} both mean "no custom rules", so both fall back to the preset — the same
+    // emptiness test vault manifest/fetch use.
+    if (Object.keys(effectiveRules).length > 0) {
+      projectedProvider.adapter_rules = effectiveRules;
+      projectedAdapterRules[pId] = effectiveRules;
     }
 
     projectedProviders[pId] = projectedProvider;
