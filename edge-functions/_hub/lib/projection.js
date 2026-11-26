@@ -1,4 +1,3 @@
-import { presetBindingFor, resolveAdapterRules } from './presetbind.js';
 const FIXED_KB_CHANNELS = ['chat', 'ocr', 'embedding', 'reranker'];
 const FIXED_KB_SET = new Set(FIXED_KB_CHANNELS);
 export function projectConfigForNode(node, config, presetsMap = {}) {
@@ -28,13 +27,10 @@ return true;
 if (validKeys.length === 0) {
 continue;
 }
-const binding = presetBindingFor(pData, presetsMap);
-const { rules: effectiveRules } = resolveAdapterRules(pData, presetsMap);
 const projectedProvider = {
 id: pData.id || pId,
 name: pData.name || pId,
-preset_id: binding.preset_id,
-preset_version: binding.preset_version,
+preset_id: pData.preset_id || '',
 api_type: pData.api_type || '',
 base_url: pData.base_url || '',
 anthropic_base_url: pData.anthropic_base_url || '',
@@ -60,9 +56,12 @@ model_aliases: pData.model_aliases || {},
 if (pData.rpm_per_key) projectedProvider.rpm_per_key = pData.rpm_per_key;
 if (pData.quota_reset_at) projectedProvider.quota_reset_at = pData.quota_reset_at;
 if (pData.hide_client_name) projectedProvider.hide_client_name = true;
-if (Object.keys(effectiveRules).length > 0) {
-projectedProvider.adapter_rules = effectiveRules;
-projectedAdapterRules[pId] = effectiveRules;
+if (pData.adapter_rules && Object.keys(pData.adapter_rules).length > 0) {
+projectedProvider.adapter_rules = pData.adapter_rules;
+projectedAdapterRules[pId] = pData.adapter_rules;
+} else if (pData.preset_id && presetsMap[pData.preset_id]?.adapter_rules) {
+projectedProvider.adapter_rules = presetsMap[pData.preset_id].adapter_rules;
+projectedAdapterRules[pId] = presetsMap[pData.preset_id].adapter_rules;
 }
 projectedProviders[pId] = projectedProvider;
 }
