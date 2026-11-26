@@ -207,12 +207,18 @@ func TestCatalog_AndPresetAdapterRules(t *testing.T) {
 		}
 	}
 
-	// Verify canonical URLs and AnthropicBaseURL alignment
-	if mm := FindPreset("minimax"); mm == nil || mm.BaseURL != "https://api.minimax.io/v1" || mm.AnthropicBaseURL != "https://api.minimax.io/anthropic" {
+	// Verify canonical URLs and AnthropicBaseURL alignment. minimax follows
+	// shared/presets/minimax.json (the api.minimaxi.com CN host): the old
+	// api.minimax.io value made the Go preset library disagree with the contract
+	// library the Hub and the console match vendors against (rule A).
+	if mm := FindPreset("minimax"); mm == nil || mm.BaseURL != "https://api.minimaxi.com/v1" || mm.AnthropicBaseURL != "https://api.minimaxi.com/anthropic" {
 		t.Fatalf("unexpected minimax preset URLs: %+v", mm)
 	}
 	if mmCN := FindPreset("minimax-cn"); mmCN == nil || mmCN.BaseURL != "https://api.minimaxi.com/v1" || mmCN.AnthropicBaseURL != "https://api.minimaxi.com/anthropic" {
 		t.Fatalf("unexpected minimax-cn preset URLs: %+v", mmCN)
+	}
+	if amd := FindPreset("amd"); amd == nil || amd.Name != "AMD Radeon Cloud" || amd.BaseURL != "https://developer.amd.com.cn/radeon/api/v1" {
+		t.Fatalf("unexpected amd preset identity: %+v", amd)
 	}
 	if anth := FindPreset("anthropic"); anth == nil || anth.AnthropicBaseURL != "https://api.anthropic.com" {
 		t.Fatalf("unexpected anthropic preset URLs: %+v", anth)
@@ -298,5 +304,63 @@ func TestCatalog_PresetAdapterVersions(t *testing.T) {
 		if got := wireVersion[id]; got != want {
 			t.Errorf("wire preset %q version = %q, want %q", id, got, want)
 		}
+	}
+}
+
+// Rule A (cross-runtime preset binding) matches vendors against the preset library by
+// id / name / base_url. The Hub and the console match against shared/presets/*.json, so
+// the Go binary's built-in catalog must carry the exact same identity fields: a name or
+// URL drift makes the same vendor bind to different presets on the three runtimes.
+// This guard reads the contract library from disk and compares field by field.
+func TestCatalog_MatchesSharedPresetIdentity(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "shared", "presets", "*.json"))
+	if err != nil {
+		t.Fatalf("glob shared presets failed: %v", err)
+	}
+	type identity struct {
+		Name    string `json:"name"`
+		BaseURL string `json:"base_url"`
+		Version string `json:"version"`
+	}
+	compared := 0
+	for _, f := range files {
+		if filepath.Base(f) == "catalog.json" {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s failed: %v", f, err)
+		}
+		var want identity
+		var idHolder struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &idHolder); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", f, err)
+		}
+		if idHolder.ID == "" {
+			continue
+		}
+		if err := json.Unmarshal(raw, &want); err != nil {
+			t.Fatalf("unmarshal %s failed: %v", f, err)
+		}
+		p := FindPreset(idHolder.ID)
+		if p == nil {
+			t.Errorf("preset %q exists in shared/presets but not in the Go catalog", idHolder.ID)
+			continue
+		}
+		compared++
+		if p.Name != want.Name {
+			t.Errorf("preset %q name: Go catalog %q, shared/presets %q (rule A compares vendor names to this)", p.ID, p.Name, want.Name)
+		}
+		if p.BaseURL != want.BaseURL {
+			t.Errorf("preset %q base_url: Go catalog %q, shared/presets %q (rule A compares hostnames against this)", p.ID, p.BaseURL, want.BaseURL)
+		}
+		if p.Version != want.Version {
+			t.Errorf("preset %q version: Go catalog %q, shared/presets %q", p.ID, p.Version, want.Version)
+		}
+	}
+	if compared < 15 {
+		t.Fatalf("expected to compare at least 15 presets, compared %d", compared)
 	}
 }

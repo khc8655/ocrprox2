@@ -1600,6 +1600,13 @@ button.row {
   color: var(--khc-warning-text);
 }
 
+/* 弱化的警告色：供应商行「可更新」这类提示性标记（不抢主状态的视觉权重）。 */
+.pill--warn {
+  background-color: transparent;
+  border-color: var(--khc-warning-500);
+  color: var(--khc-warning-text);
+}
+
 .pill--red {
   background-color: var(--khc-danger-bg);
   border-color: transparent;
@@ -1749,6 +1756,11 @@ button.row {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* 「从中枢添加」数据表装进这层胶囊容器：改回块级，整表占满一行。 */
+.probe-pills-wrap .table-wrap {
+  width: 100%;
 }
 
 .probe-pill {
@@ -2316,4 +2328,17 @@ button.row {
 .btn--ghost.btn--danger:hover:not(:disabled) {
   background-color: var(--khc-danger-bg);
   color: var(--khc-danger-text);
+}
+
+/* 列表行右侧：状态与计数各占固定宽度，几行之间上下对齐（状态词有 2–4 个字）。 */
+.row-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 76px;
+}
+
+.row-count {
+  min-width: 52px;
+  text-align: right;
 }

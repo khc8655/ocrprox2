@@ -73,6 +73,9 @@
     // seconds, and Esc / backdrop click during them must actually cancel instead of
     // letting the loop finish and persist routes the operator just dismissed.
     importRunId: 0,
+    // Full 端 preset-status 的 has_update 集合（供应商 id → true）：列表行的
+    // 「可更新」弱警告与设置页「预设与中枢同步」行共用一次查询的结果。
+    presetUpdateFlags: {},
     importing: false,
     // modelSubMode (the「全部/自定义模型」seg toggle) is gone: with the fixed-4-channel
     // generation removed, every route is a custom route and the toggle filtered nothing.
@@ -860,6 +863,9 @@
     if (guardBox) guardBox.hidden = false;
     const sysBox = $('systemUpdateBox');
     if (sysBox) sysBox.hidden = !caps.systemUpdate;
+    // 预设与中枢同步：Full only（Hub 主机没有 preset-status / sync 能力）。
+    const presetSyncBox = $('presetSyncBox');
+    if (presetSyncBox) presetSyncBox.hidden = !caps.kbModels;
 
     const provSub = $('providersSubtitle');
     if (provSub) {
@@ -1303,11 +1309,9 @@
     google: ['Google AI Studio (Gemini)', 'https://generativelanguage.googleapis.com/v1beta/openai', 'gemini', '1.2.0', '2026-10-18'],
     vertex: ['Google Vertex AI', 'https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{region}/endpoints/openapi', 'openai-completions', '1.1.0', '2026-10-18'],
     openrouter: ['OpenRouter', 'https://openrouter.ai/api/v1', 'openai-completions', '1.0.0', '2026-10-18', 'https://openrouter.ai/api/v1'],
-    minimax: ['MiniMax (国际 api.minimax.io)', 'https://api.minimax.io/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.minimax.io/anthropic'],
-    // minimax-cn binds the shared 'minimax' preset but has NO adapter file of its
-    // own (presets-extra omits version for it): carry no version here, or the card
-    // would show a nonexistent adapter's version.
-    'minimax-cn': ['MiniMax (国内 api.minimaxi.com)', 'https://api.minimaxi.com/v1', 'openai-completions', '', '', 'https://api.minimaxi.com/anthropic', 'minimax'],
+    minimax: ['MiniMax', 'https://api.minimaxi.com/v1', 'openai-completions', '1.4.0', '2026-10-18', 'https://api.minimaxi.com/anthropic'],
+    // minimax / minimax-cn 各有独立适配文件（shared/presets/minimax*.json），版本各自独立。
+    'minimax-cn': ['MiniMax (国内)', 'https://api.minimaxi.com/v1', 'openai-completions', '1.5.0', '2026-11-23', 'https://api.minimaxi.com/anthropic'],
     siliconflow: ['硅基流动 (SiliconFlow)', 'https://api.siliconflow.cn/v1', 'openai-completions', '1.2.0', '2026-10-18'],
     stepfun: ['阶跃星辰 (StepFun)', 'https://api.stepfun.com/step_plan', 'openai-completions', '1.2.0', '2026-10-18'],
     sensenova: ['商汤日日新 (SenseNova)', 'https://token.sensenova.cn/v1', 'openai-completions', '1.3.0', '2026-10-18', 'https://token.sensenova.cn/v1'],
@@ -1759,6 +1763,9 @@
     }
   }
 
+  // 「从中枢添加」供应商数据表（组件 4 · .data-table）：名称 / 预设·版本 / Key 数 /
+  // 状态（已添加 / 可添加）/ 操作（添加）。点「添加」整体拉取该供应商（与底部
+  // 「保存供应商」走同一条 vault 一次性拉取路径）；已添加的行按钮禁用。
   function renderVaultProviderPicks() {
     const box = $('newProvVaultPick');
     if (!box) return;
@@ -1781,54 +1788,124 @@
       box.appendChild(empty);
       return;
     }
+
+    const tableWrap = ce('div');
+    tableWrap.className = 'table-wrap';
+    tableWrap.innerHTML = `<table class="data-table"><thead><tr><th>名称</th><th>预设 · 版本</th><th>Key 数</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>`;
+    const tbody = tableWrap.querySelector('tbody');
     for (const [pId, meta] of entries) {
       const keyCount = Array.isArray(meta.keys) ? meta.keys.length : 0;
-      const pill = ce('button');
-      pill.type = 'button';
-      pill.className = `probe-pill${state.addProvVaultPick === pId ? ' probe-pill--managed' : ''}`;
-      pill.innerHTML = `${eh(meta.name || pId)} · ${keyCount} Key${meta.preset_id ? ` <span class="pill">预设 ${eh(meta.preset_id)}</span>` : ''}`;
-      clk(pill, () => {
-        state.addProvVaultPick = pId;
-        box.querySelectorAll('.probe-pill').forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
-        const nameEl = $('newProvName');
-        if (nameEl) nameEl.value = meta.name || pId;
-        const hintEl2 = $('newProvVaultHint');
-        if (hintEl2) {
-          hintEl2.textContent = `中枢 ${keyCount} 个 Key · 适配规则${meta.preset_id ? ` · 预设 ${meta.preset_id}` : ''}`;
+      const tr = ce('tr');
+      // 预设 · 版本：中枢 manifest 的 preset_id + 服务端预设库的版本（PRESETS_META；
+      // Full 端 presets-extra 已把服务端版本并进表）。没有预设绑定时显示「自定义」。
+      const pickMeta = matchPresetMeta(pId, meta.base_url) || PRESETS_META[meta.preset_id || ''] || null;
+      const presetText = meta.preset_id
+        ? `${meta.preset_id}${pickMeta?.version ? ` v${pickMeta.version}` : ''}`
+        : '自定义';
+      tr.innerHTML = `
+        <td><div class="fields"><strong>${eh(meta.name || pId)}</strong><span class="text-xs text-muted">${eh(pId)}</span></div></td>
+        <td><span class="text-xs text-muted">${eh(presetText)}</span></td>
+        <td><span class="tabular text-xs text-muted">${keyCount}</span></td>
+        <td><span class="pill pill--green">可添加</span></td>
+        <td><button class="btn btn--sm btn--primary" type="button" data-vault-add="${eh(pId)}">添加</button></td>
+      `;
+      clk(tr.querySelector('button[data-vault-add]'), async (ev) => {
+        const btn = ev.currentTarget;
+        // 拉取前重查一遍：列表重绘后按钮不会自动消失，数据是最新的。
+        if (state.config?.providers?.[pId]) return toast(`供应商 ${pId} 已存在`, 'warn');
+        btn.disabled = true;
+        btn.textContent = '拉取中…';
+        toast(`正在从中枢拉取供应商 ${pId}（规则与全部 Key）...`, 'info');
+        try {
+          const res = await window.HOST.fetchVaultCredentials(pId);
+          if (res && res.ok) {
+            state.activeEditorKey = `p_${pId}`;
+            state.creatingProvider = false;
+            await loadData();
+            toast(`已拉取中枢供应商 ${pId}`, 'ok');
+          } else {
+            toast(`从中枢拉取失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+            btn.disabled = false;
+            btn.textContent = '添加';
+          }
+        } catch (e) {
+          toast(`从中枢拉取异常: ${e.message}`, 'err');
+          btn.disabled = false;
+          btn.textContent = '添加';
         }
       });
-      box.appendChild(pill);
+      tbody.appendChild(tr);
+    }
+    box.appendChild(tableWrap);
+  }
+
+  // --- Preset auto-match (custom source) — 规则 A（跨端约定，与中枢 JS / Full Go
+  // 三处同序同结果）：custom 显式不绑 → 已有 preset_id 保留 → 主机名相等绑定 →
+  // 供应商 id === 预设 id → 名称 === 预设名称/预设 id → 不绑。
+  // 预设 base_url 含「{」占位符的跳过主机名匹配；同主机命中多个预设时交给
+  // 4)/5) 在这几个里挑，挑不出就不绑。
+  function presetHostname(baseUrl) {
+    const raw = String(baseUrl || '').trim();
+    if (!raw) return '';
+    try {
+      const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+      return (u.hostname || '').toLowerCase();
+    } catch (_) {
+      return '';
     }
   }
 
-  // --- Preset auto-match (custom source): presets are matched by the typed
-  // name / ID instead of a dropdown (aligned with v1 applyPresetForProviderName:
-  // only fill Base URL when it is still empty, always align the protocol).
-  function matchPresetMeta(idOrName) {
-    const key = String(idOrName || '').trim().toLowerCase();
-    if (!key) return null;
-    for (const meta of Object.values(PRESETS_META)) {
-      if (String(meta.id || '').toLowerCase() === key || String(meta.label || '').toLowerCase() === key) {
-        return meta;
-      }
-    }
-    return null;
+  // 新增供应商时的自动匹配：规则 A（3 → 4 → 5 严格同序，与中枢 JS / Full Go
+  // 一致）。输入 idOrName 在规则 4/5 里既当供应商 id 也当名称用（create 编辑器
+  // 里两者都可能先敲）。
+  function matchPresetMeta(idOrName, baseUrl) {
+    return matchPresetRules({ id: idOrName, name: idOrName, base_url: baseUrl });
   }
 
-  // 预设匹配：按操作者在下拉里显式选的预设，或按输入的名称 / ID 自动匹配。
-  // 只填 Base URL（还空着时）、预设下拉与供应商 ID；协议选择器不动 ——
-  // 「自动识别」是默认口径，保存时才定（见 detectProviderProtocol）。
+  // 供应商对象（已有数据）按规则 A 解析预设 meta；供列表行 / 编辑器取
+  // 「预设 · 版本」显示用。
+  function resolveProviderPresetMeta(p, pId) {
+    if (!p || String(p.preset_id || '').trim() === 'custom') return null; // 规则 1：显式不绑
+    const bound = presetMetaForProvider(p, pId);
+    if (bound) return bound; // 规则 2：已有绑定保留
+    return matchPresetRules({ id: pId, name: p?.name, base_url: p?.base_url });
+  }
+
+  // 规则 A 主体：输入 {id, name, base_url}，返回预设 meta 或 null（不绑）。
+  // 3) 主机名相等绑定（含「{」占位符的预设跳过）；唯一命中直接绑，多命中用
+  //    4)/5) 在这几个里挑，挑不出就不绑（不落回全库匹配）。
+  // 4) 供应商 id（小写）=== 预设 id；5) 名称（小写去空格）=== 预设名称或预设 id。
+  function matchPresetRules(input = {}) {
+    const idKey = String(input.id || '').trim().toLowerCase();
+    const nameKey = String(input.name || '').trim().toLowerCase();
+    const byId = (list) => list.find((m) => String(m.id || '').toLowerCase() === idKey || String(m.preset_id || m.id || '').toLowerCase() === idKey);
+    const byName = (list) => list.find((m) => String(m.label || '').toLowerCase() === nameKey || String(m.preset_id || m.id || '').toLowerCase() === nameKey);
+    const host = presetHostname(input.base_url);
+    if (host) {
+      const sameHost = Object.values(PRESETS_META).filter(
+        (m) => !String(m.base_url || '').includes('{') && presetHostname(m.base_url) === host
+      );
+      if (sameHost.length === 1) return sameHost[0];
+      if (sameHost.length > 1) return (idKey && byId(sameHost)) || (nameKey && byName(sameHost)) || null;
+    }
+    const all = Object.values(PRESETS_META);
+    return (idKey && byId(all)) || (nameKey && byName(all)) || null;
+  }
+
+  // 预设匹配：按操作者在下拉里显式选的预设，或按输入的名称 / ID / Base URL 主机名
+  // 自动匹配（规则 A）。只填 Base URL（还空着时）、预设下拉与供应商 ID；协议选择器
+  // 不动 —— 「自动识别」是默认口径，保存时才定（见 detectProviderProtocol）。
   function applyPresetAutoMatch() {
     if (($('newProvSource')?.value || 'custom') !== 'custom') return;
     const hintEl = $('newProvPresetHint');
     const presetSel = $('newProvPreset');
     const explicit = state.newProvPresetTouched ? (presetSel?.value || '').trim() : '';
     const meta = (explicit && PRESETS_META[explicit])
-      || matchPresetMeta($('newProvName')?.value)
-      || matchPresetMeta($('newProvId')?.value);
+      || matchPresetMeta($('newProvName')?.value, $('newProvBaseUrl')?.value)
+      || matchPresetMeta($('newProvId')?.value, $('newProvBaseUrl')?.value);
     if (hintEl) {
       const rev = meta && meta.version ? `（适配 v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}）` : '';
-      hintEl.textContent = meta ? `已按预设 ${meta.label}${rev} 自动填充` : '';
+      hintEl.textContent = meta ? `已按预设 ${meta.label}${rev} 自动匹配` : '';
       hintEl.hidden = !meta;
       hintEl.classList.toggle('hidden', !meta);
     }
@@ -2493,9 +2570,11 @@
 
       // Vault on-demand path: one-shot fetch (rules + all keys). The gateway
       // merges the hub response server-side, so we only refresh afterwards.
+      // 数据表里每行的「添加」直接拉取（renderVaultProviderPicks）——不再依赖
+      // 先选中一枚胶囊，这里兜底提示即可。
       if (sourceVal === 'vault') {
         const pickId = state.addProvVaultPick;
-        if (!pickId) return toast('请先选择一个中枢托管供应商', 'warn');
+        if (!pickId) return toast('请在上方列表里点「添加」拉取中枢托管供应商', 'warn');
         if (state.config?.providers?.[pickId]) {
           // The existing provider may be vault-origin (editor offers「重新拉取」) or
           // locally created (no such button — it must be deleted or renamed first).
@@ -2728,6 +2807,11 @@
 
       if (!isHubMode() && window.HOST.capabilities.vaultClient) {
         loadVaultManifest();
+      }
+
+      // Full 端：preset-status 一次查询 → 列表行「可更新」标记 + 设置页同步行说明。
+      if (!isHubMode() && window.HOST.capabilities.kbModels) {
+        refreshPresetUpdateFlags();
       }
 
       if (window.HOST.capabilities.systemUpdate && !state.systemVersion && window.HOST.getSystemVersion) {
@@ -3077,6 +3161,24 @@
   // 列表行（组件 3 · .list > .row）：一行只允许 名称 / 一行次要信息 / 一个状态 /
   // 至多一个计数。适配版本、归属、正常数等次要标签整体挪进编辑器（点开行即见），
   // 列表不再堆 pill。
+
+  // Full 端：问一次 preset-status，把 has_update 的供应商 id 记进 state（列表行
+  // 「可更新」弱警告用）。静默失败：拿不到就不标，绝不阻塞列表本身。
+  async function refreshPresetUpdateFlags() {
+    if (isHubMode() || typeof window.HOST.getPresetStatus !== 'function') return;
+    try {
+      const res = await window.HOST.getPresetStatus();
+      const flags = {};
+      if (res && res.ok && Array.isArray(res.providers)) {
+        for (const row of res.providers) {
+          if (row && row.id && row.has_update) flags[row.id] = String(row.latest_version || '') || true;
+        }
+      }
+      state.presetUpdateFlags = flags;
+      renderProvidersList();
+    } catch (_) {}
+  }
+
   function renderProvidersList() {
     const container = $('providersList');
     if (!container) return;
@@ -3179,46 +3281,47 @@
       }
 
       const isExpanded = state.activeEditorKey === `p_${pId}`;
-      const brandIcon = window.renderBrandIcon ? window.renderBrandIcon(p.preset_id || pId) : '';
 
       const row = ce('div');
       row.className = `row ${isExpanded ? 'expanded' : ''}`;
 
-      // 状态 = .dot + 一个词：综合「启用 / Key 健康 / 运行中」。
-      const st = providerStatusWord(p, keyCount, okCount, failCount, busyCount, waitCount);
-      const dot = ce('span');
-      dot.className = `dot ${st.dot}`;
-
+      // 左：名称 + 一行次要信息（ID · 预设 · 来源 · 地址），左边缘永远对齐 ——
+      // 不放首字母头像，状态也不放在最左（状态词长短不一，放左边会把整列名称推得参差不齐）。
+      // 次要信息格式（docs §供应商行）：ID · 预设 amd v2026.10.19 · 中枢 · 地址；
+      // 没绑预设显示「自定义」；Full 上 preset-status 报 has_update 时加弱化警告色「可更新」。
       const who = ce('div');
       who.className = 'who';
-      // 一行次要信息：供应商 ID（与名称不同时）+ Base URL（等宽，长串同列对齐）。
       const subBits = [];
       if (p.name && p.name !== pId) subBits.push(pId);
+      const rowMeta = resolveProviderPresetMeta(p, pId);
+      if (rowMeta) {
+        // 版本显示供应商自己记录的 preset_version（它实际在用的规则版本），
+        // 没记录时才退到预设库版本；有新版时「可更新」里写目标版本。
+        const curVer = String(p.preset_version || rowMeta.version || '');
+        subBits.push(`预设 ${eh(rowMeta.preset_id || rowMeta.id)}${curVer ? ` v${eh(curVer)}` : ''}`);
+      } else {
+        subBits.push('自定义');
+      }
+      // 来源词：中枢托管 / 中枢 / 本地。本地自建允许不写（自定义已能区分），但
+      // vault 供应商一定要标出来。
+      if (!isHubMode() && p.origin === 'vault') subBits.push('中枢');
+      else if (isHubMode()) subBits.push('中枢托管');
       subBits.push(p.base_url || '未配置 Base URL');
       who.innerHTML = `
-        <div class="name">
-          ${brandIcon}
-          <span>${eh(p.name || pId)}</span>
-        </div>
-        <div class="sub">${eh(subBits.join(' · '))}</div>
+        <div class="name"><span>${eh(p.name || pId)}</span></div>
+        <div class="sub">${subBits.join(' · ')}${state.presetUpdateFlags[pId] ? ` <span class="pill pill--warn">可更新${typeof state.presetUpdateFlags[pId] === 'string' ? ` → v${eh(state.presetUpdateFlags[pId])}` : ''}</span>` : ''}</div>
       `;
 
-      const status = ce('span');
-      status.className = 'fields';
-      status.appendChild(dot);
-      const statusWord = ce('span');
-      statusWord.className = 'text-xs text-muted';
-      statusWord.textContent = st.word;
-      status.appendChild(statusWord);
-
+      // 右：状态（.dot + 一个词）· Key 数，固定宽度右对齐，几行之间上下对齐。
+      const st = providerStatusWord(p, keyCount, okCount, failCount, busyCount, waitCount);
       const fields = ce('div');
       fields.className = 'fields';
       fields.innerHTML = `
-        <span class="pill tabular">${keyCount} 把 Key</span>
+        <span class="row-status"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>
+        <span class="row-count text-xs text-muted">${keyCount} 把 Key</span>
         <span class="caret">▾</span>
       `;
 
-      row.appendChild(status);
       row.appendChild(who);
       row.appendChild(fields);
 
@@ -3380,16 +3483,26 @@
     const vaultNotice = isVaultProv
       ? `<div class="notice-strip mb-3"><span>中枢托管供应商：名称、URL、协议与适配规则由中枢统一管理（只读）。如需修改请在中枢操作后点击「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-3"><span>中枢规则已更新：本地适配规则与中枢清单不一致，请点击「重新拉取」同步。</span></div>' : ''}`
       : '';
-    // 中枢托管供应商：Key 只能从中枢补拉；本地自建供应商：表格下方一行输入。
+    // Key 添加行：中枢托管供应商也有本地「添加 Key」行（约定 C：中枢托管允许本地
+    // Key 与中枢 Key 共存），再加一条「从中枢补拉缺失标签」；本地供应商只有前者。
     const vaultKeyPickHtml = isVaultProv
-      ? `<div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
+      ? `<div class="input-row mt-2"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div><div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div><div class="probe-pills-wrap mb-2 hidden" id="vault_keys_pick_${pId}" hidden></div><div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>`
       : `<div class="input-row mt-2"><input class="input" id="new_key_lbl_${pId}" placeholder="Key 标签 (如 pool-01，留空自动递增)"><input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴完整 API Key（支持逗号分隔多把）"><button class="btn" id="btn_add_key_${pId}" type="button">添加 Key</button></div>`;
     const editorActionsHtml = `<div class="form-actions form-actions--split"><div class="form-actions-group"><button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}</div><div class="form-actions-group"><button class="btn" id="btn_cancel_prov_${pId}" type="button">取消</button>${isVaultProv ? '' : `<button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存</button>`}</div></div>`;
 
-    // Preset binding is read-only: the gateway resolves it against the shipped
-    // preset library, so letting the operator type a different id here would
-    // drift from the adapter file that actually runs. Show it as a badge.
+    // Preset binding：Full 节点只读（网关按随包预设库解析，手填会漂移），用徽章
+    // 展示；Hub 是预设的权威端，高级区允许改绑定（各预设 + 「自定义（不绑定）」
+    // = preset_id "custom"，约定 A 规则 1）。中枢托管供应商在 Full 端同样只读。
+    const hubPresetEditable = isHubMode() && !isVaultProv;
     const presetReadOnly = `<span class="pill">${eh(p.preset_id || '（未绑定预设）')}</span>${presetVersionHint}`;
+    const presetBindingId = `ed_p_preset_${pId}`;
+    let presetBindingHtml = presetReadOnly;
+    if (hubPresetEditable) {
+      const cur = String(p.preset_id || '').trim() || 'custom';
+      const opts = ['<option value="custom">自定义（不绑定）</option>']
+        .concat(Object.values(PRESETS_META).map((m2) => `<option value="${eh(m2.id)}"${cur === m2.id ? ' selected' : ''}>${eh(m2.label)}</option>`));
+      presetBindingHtml = `<select class="select" id="${presetBindingId}">${opts.join('')}</select>${presetVersionHint}`;
+    }
 
     wrap.innerHTML = `<div class="form-grid">${[
       fg('名称', `<input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}>`),
@@ -3397,7 +3510,7 @@
       `<div class="form-group form-group--full"><label class="form-label">请求地址（可同时启用两种，客户端按入口调用）</label><div class="mt-1">${openaiRow}</div><div class="mt-2">${anthropicRow}</div></div>`,
     ].join('')}</div><div class="section-bar mt-4"><span class="form-label">API 密钥池 (${keys.length})</span><div class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」">${isHubMode() ? '逐把测 Key' : '一键测全部 Key'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></div></div><div class="snippet-box hidden mb-3" id="oauth_box_${pId}" hidden><div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div><div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签</th><th>Key</th><th>状态</th><th>权重</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div>${vaultKeyPickHtml}<details class="headers-details mt-3"><summary class="form-label">高级（供应商 ID / 预设 / 客户端 UA / 配额重置 / 适配规则）</summary><div class="form-grid mt-2">${[
       fg('供应商 ID（保存后不可改）', `<input class="input input--code" value="${eh(pId)}" readonly>`),
-      fg('预设', presetReadOnly),
+      fg('预设', presetBindingHtml),
       `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
       fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`, '', '', '按此时刻重置每日配额统计（UTC+8）'),
       fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`, '', '', '声明式适配规则 JSON；中枢托管的由中枢统一维护（只读）'),
@@ -3438,14 +3551,20 @@
     const cdInfo = findKeyCooldown(pId, k, idx);
     const cooldownSec = cdInfo.sec;
     const cdTarget = cdInfo.target;
-    const vaultKey = !isHubMode() && (p.origin === 'vault' || k.origin === 'vault');
+    // 归属只看 **Key 自身的 origin**（缺失时回落到供应商 origin）：中枢托管供应商
+    // 允许本地 Key 与中枢 Key 共存（约定 C），按供应商 origin 一刀切会把本地 Key
+    // 误锁成「中枢」只读。Hub 控制台的 Key 一律是中枢的（且可编辑，Hub 是权威）。
+    const keyOrigin = String(k.origin || '').trim().toLowerCase()
+      || (isHubMode() || p.origin === 'vault' ? 'vault' : 'local');
+    const vaultKey = !isHubMode() && keyOrigin === 'vault';
+    const keyIsVault = isHubMode() || keyOrigin === 'vault';
 
     const st = keyStatusView(k, cooldownSec);
     const statusHtml = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
 
     tr.innerHTML = `
       <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
-      <td><div class="fields"><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}${isHubMode() ? '' : `<span class="text-xs text-muted">${vaultKey ? '中枢只读' : '本地'}</span>`}</div></td>
+      <td><div class="fields"><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}<span class="text-xs text-muted">${keyIsVault ? '中枢' : '本地'}</span></div></td>
       <td>${renderKeyCell(k, vaultKey, idx)}</td>
       <td>${statusHtml}</td>
       <td><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重：数值越大分到的请求越多" ${vaultKey ? 'disabled' : ''}></td>
@@ -3594,6 +3713,9 @@
 
         tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
           k.weight = Math.max(1, Number(e.target.value) || 1);
+          // 中枢托管供应商没有「保存」按钮：本地 Key 的权重改动必须立即落盘
+          // （约定 C：本地 Key 可增删改）。中枢 Key 的权重框是 disabled，走不到这里。
+          if (isVaultProv) persistConfig(`已更新 Key [${keyLabel}] 的权重`);
         });
 
         tr.querySelector('.k_enable_cb')?.addEventListener('change', async (e) => {
@@ -3612,6 +3734,8 @@
             }
           }
           k.enabled = e.target.checked;
+          // 同上：中枢托管供应商上的本地 Key 启用开关要立即落盘。
+          if (isVaultProv) persistConfig(`已${k.enabled ? '启用' : '禁用'}本地 Key [${keyLabel}]`);
         });
 
         clk(tr.querySelector('.btn_test_k'), (e) => testOneKey(pId, k, keyLabel, e.currentTarget));
@@ -3743,17 +3867,25 @@
     }
 
     const addKeyBtn = q(`#btn_add_key_${pId}`);
-    if (addKeyBtn && !isVaultProv) {
+    if (addKeyBtn) {
       clk(addKeyBtn, () => {
         const lbl = q(`#new_key_lbl_${pId}`)?.value.trim() || '';
         const val = q(`#new_key_val_${pId}`)?.value.trim() || '';
         if (!val) return toast('请填写密钥内容', 'warn');
-        const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], isHubMode() ? 'vault' : 'local');
+        // 中枢托管供应商上添加的一律是本地 Key（origin=local，可增删改）；
+        // Hub 控制台加的 Key 归中枢（origin=vault）。
+        const newOrigin = isVaultProv ? 'local' : (isHubMode() ? 'vault' : 'local');
+        const parsed = parseMultiApiKeys(val, lbl, p.api_keys || [], newOrigin);
         if (parsed.error) return toast(parsed.error, 'warn');
         syncDraftFields();
         p.api_keys = p.api_keys || [];
         p.api_keys.push(...parsed.keys);
-        renderProvidersList();
+        // 中枢托管供应商没有「保存」按钮：本地 Key 的增改必须立即落盘。
+        if (isVaultProv) {
+          persistConfig(`已在供应商 ${pId} 添加本地 Key（与中枢 Key 共存，互不影响）`);
+        } else {
+          renderProvidersList();
+        }
       });
     }
 
@@ -3924,6 +4056,13 @@
       if (isHubMode()) {
         p.origin = 'vault';
         (p.api_keys || []).forEach((k) => { if (k) k.origin = 'vault'; });
+        // Hub 端高级区的预设绑定下拉：custom（不绑定）/ 各预设 id。
+        const presetSel = q(`#ed_p_preset_${pId}`);
+        if (presetSel) {
+          const v = String(presetSel.value || '').trim();
+          if (v && v !== 'custom' && PRESETS_META[v]) p.preset_id = PRESETS_META[v].preset_id || v;
+          else delete p.preset_id;
+        }
       }
 
       // 冲突重试时把「这个供应商的新值」贴回服务端最新配置（见 persistConfig）。
@@ -5217,7 +5356,7 @@
         <button class="btn btn--sm" id="btn_add_cand" type="button">＋ 添加候选</button>
       </div>
       <div class="table-wrap"><table class="data-table m-cand-table">
-        <thead><tr><th>供应商</th><th>上游模型</th><th>Key</th><th>思考档位</th><th></th></tr></thead>
+        <thead><tr><th>供应商</th><th>上游模型</th><th>Key</th><th>状态</th><th>思考档位</th><th></th></tr></thead>
         <tbody id="m_cand_body"></tbody>
       </table></div>
       <div class="mt-3 hidden" id="m_add_cand_box" hidden></div>
@@ -5232,6 +5371,7 @@
         <select class="select" id="m_test_cand" aria-label="测试哪个候选"></select>
         <select class="select" id="m_test_key" aria-label="用哪个 Key 测试"></select>
         <button class="btn" id="m_test_send" type="button">发送「你好」</button>
+        <button class="btn" id="m_test_all" type="button" title="逐个测试候选列表里的每一个候选（真实推理），并刷新状态列">测试全部候选</button>
       </div>
       <div class="m-test-out" id="m_test_out" hidden></div>
       <details class="headers-details mt-4">
@@ -5615,11 +5755,64 @@
       return opts.join('');
     };
 
+    // 候选状态（加回的「状态」列）：取该候选 供应商:Key 的冷却状态
+    // （state.cooldownsAll，条目 target = p:<provider>:k:<key>[:m:<model>]）与
+    // Key 的 last_test：冷却 Xs / 可用 · 120ms / 失败 · … / 未测。
+    // 「任一 Key」（key_label 空）取该供应商 Key 里最好的一个（有可用取最快可用，
+    // 否则取第一个非冷却的，再退到第一把）。
+    const candCooldownSec = (pId, keyLabel) => {
+      let best = 0;
+      const prefix = `p:${pId}:k:${keyLabel}`;
+      for (const entry of state.cooldownsAll || []) {
+        const t = String(entry?.target || '');
+        if ((t === prefix || t.startsWith(`${prefix}:`)) && (entry.remaining_sec || 0) > best) {
+          best = entry.remaining_sec || 0;
+        }
+      }
+      return best;
+    };
+    const pickBestKey = (prov) => {
+      const keys = (prov.api_keys || []).filter((k) => k && k.enabled !== false);
+      if (keys.length === 0) return null;
+      const usable = keys.filter((k) => candCooldownSec(prov.id || '', k.label || k.id || '') === 0 && keyHealthFlag(k) !== false);
+      const pool = usable.length ? usable : keys.filter((k) => candCooldownSec(prov.id || '', k.label || k.id || '') === 0);
+      const src = pool.length ? pool : keys;
+      return src.reduce((bestK, k) => {
+        if (!bestK) return k;
+        const a = Number(k.last_test?.latency_ms) || Infinity;
+        const b = Number(bestK.last_test?.latency_ms) || Infinity;
+        return a < b ? k : bestK;
+      }, null);
+    };
+    const candStatusHtml = (c) => {
+      const prov = state.config?.providers?.[c.provider];
+      if (!prov) return '<span class="text-xs text-muted">供应商不存在</span>';
+      const keyLabel = String(c.key_label || '');
+      const k = keyLabel
+        ? (prov.api_keys || []).find((x) => x && (x.label || x.id) === keyLabel) || null
+        : pickBestKey(prov);
+      if (!k) return '<span class="text-xs text-muted">无可用 Key</span>';
+      const cd = candCooldownSec(c.provider, k.label || k.id || '');
+      if (cd > 0) {
+        return `<span class="fields" title="候选绑定 Key 正在冷却"><span class="dot dot--warn"></span><span class="text-xs text-muted">冷却 ${eh(formatCooldown(cd))}</span></span>`;
+      }
+      const lt = k.last_test;
+      if (lt && typeof lt === 'object') {
+        if (lt.ok) {
+          return `<span class="fields" title="${eh(String(lt.reply_text || '').trim() || '上游返回 200')}"><span class="dot dot--ok"></span><span class="text-xs text-muted">可用 · ${eh(String(Number(lt.latency_ms) || 0))}ms</span></span>`;
+        }
+        return `<span class="fields" title="${eh(String(lt.error || '上游无响应'))}"><span class="dot dot--err"></span><span class="text-xs text-muted">失败${Number(lt.status) ? ` · ${eh(String(lt.status))}` : ''}</span></span>`;
+      }
+      if (keyHealthFlag(k) === true) return '<span class="fields"><span class="dot dot--ok"></span><span class="text-xs text-muted">正常</span></span>';
+      if (keyHealthFlag(k) === false) return '<span class="fields"><span class="dot dot--err"></span><span class="text-xs text-muted">异常</span></span>';
+      return '<span class="fields"><span class="dot dot--warn"></span><span class="text-xs text-muted">未测</span></span>';
+    };
+
     const drawCands = () => {
       const body = q('#m_cand_body');
       if (!body) return;
       if (candidates.length === 0) {
-        body.innerHTML = '<tr><td colspan="5" class="text-muted">还没有候选：点「＋ 添加候选」挑一个供应商与上游模型</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="text-muted">还没有候选：点「＋ 添加候选」挑一个供应商与上游模型</td></tr>';
         return;
       }
       const multi = candidates.length > 1;
@@ -5627,6 +5820,7 @@
           <td>${eh(c.provider || '')}</td>
           <td><span class="input--code">${eh(c.target_model || mName)}</span></td>
           <td><select class="select select--compact" data-key aria-label="这个候选用哪把 Key">${candKeyOptions(c)}</select></td>
+          <td id="m_cand_st_${i}">${candStatusHtml(c)}</td>
           <td><span class="m-cand-eff" id="m_cand_eff_${i}"></span></td>
           <td>
             <div class="fields m-cand-ops">
@@ -5637,6 +5831,75 @@
         </tr>`).join('');
       candidates.forEach((c, i) => fillCandEffort(i, c));
     };
+
+    // 「测试全部候选」：逐个用现有测试接口（POST /api/admin/test-key，同
+    // 「发送「你好」」一条路）测每个候选，每把候选测完立刻更新状态列。
+    // 逐把串行：与「一键测全部 Key」一致，避免并发把上游打挂。
+    const refreshCandStatusCell = (i) => {
+      const cell = q(`#m_cand_st_${i}`);
+      const c = candidates[i];
+      if (cell && c) cell.innerHTML = candStatusHtml(c);
+    };
+    clk(q('#m_test_all'), async () => {
+      const btn = q('#m_test_all');
+      const out = q('#m_test_out');
+      if (!btn || btn.disabled) return;
+      if (candidates.length === 0) {
+        if (out) {
+          out.hidden = false;
+          out.className = 'm-test-out m-test-out--err';
+          out.textContent = '先在候选列表里加一个候选，再测试。';
+        }
+        return;
+      }
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = `测试中 0/${candidates.length}`;
+      // 与「发送「你好」」同样的竞态保护：test-key 落盘会让本页版本号落后，
+      // 期间禁掉「保存路由」。
+      const saveBtn = q('#btn_save_model');
+      if (saveBtn) saveBtn.disabled = true;
+      let okCount = 0;
+      try {
+        for (let i = 0; i < candidates.length; i++) {
+          const c = candidates[i];
+          if (!c || !c.provider) continue;
+          btn.textContent = `测试中 ${i + 1}/${candidates.length}`;
+          if (out) {
+            out.hidden = false;
+            out.className = 'm-test-out';
+            out.innerHTML = `<div class="gw-test-meta">[${i + 1}/${candidates.length}] 正在测试 ${eh(c.provider)} / ${eh(c.target_model || mName)} …</div>`;
+          }
+          try {
+            const res = await window.HOST.testKey({
+              provider: c.provider,
+              key_label: String(c.key_label || ''),
+              model: String(c.target_model || mName).trim(),
+            });
+            await refreshConfigVersion();
+            // 结论落到 Key 上（「保存」持久化），状态列立刻反映。
+            const provKeys = state.config?.providers?.[c.provider]?.api_keys || [];
+            const verdictKey = provKeys.find((k) => k && (k.label || k.id) === (c.key_label || res?.key_label))
+              || (c.key_label ? null : pickBestKey(state.config?.providers?.[c.provider] || {}));
+            if (verdictKey) applyKeyLastTest(verdictKey, res);
+            if (res && res.valid === true) okCount++;
+          } catch (err) {
+            toast(`候选 ${c.provider} 测试异常: ${scrubUiText(err?.message || String(err))}`, 'err');
+          }
+          refreshCandStatusCell(i);
+          drawTestCandidates();
+        }
+        if (out && out.isConnected) {
+          out.className = `m-test-out${okCount === candidates.length ? ' m-test-out--ok' : ' m-test-out--err'}`;
+          out.innerHTML = `<div class="gw-test-meta">全部候选测试完成：${okCount}/${candidates.length} 可用</div>`;
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+        if (saveBtn) saveBtn.disabled = false;
+        redraw();
+      }
+    });
 
     // 思考档位是 per-candidate 的：模型目录的档位阶梯是模型级的，答案来自
     // models.dev 目录（异步），没到之前这一格留空，而不是显示可能被误认成真值的占位符。
@@ -6708,6 +6971,14 @@
           `<div class="input-row"><a class="text-xs text-link" id="modelCatalogSourceLink" href="https://models.dev" target="_blank" rel="noopener noreferrer" title="数据来源 models.dev">数据来源</a><button class="btn" id="btnUpdateModelCatalog">立即从 models.dev 更新</button></div>`),
       ].join('');
     }
+    // 预设与中枢同步（Full only，约定 C/D）：preset-status 的可更新数放说明里，
+    // 「一键更新」调 POST /api/admin/providers/sync；只有操作者点击才执行。
+    const syncRows = $('presetSyncRows');
+    if (syncRows && !syncRows.childElementCount) {
+      syncRows.innerHTML = settingRow('预设与中枢同步',
+        '检查各供应商的预设适配规则是否有新版本；一键更新会重新拉取中枢托管供应商，并把未手动改过规则的本地供应商换到最新预设规则',
+        `<div class="input-row"><span class="text-xs text-muted tabular" id="presetSyncMeta">检查中…</span><button class="btn btn--sm" id="btnSyncProviders" type="button">一键更新</button></div>`);
+    }
   }
 
   // --- View: Settings (M16, U3, U4) ---
@@ -6800,6 +7071,94 @@
     }
   }
 
+  // --- 预设与中枢同步（Full only, 约定 C/D） ---
+  // 说明位显示「N 个供应商有新版本」（GET /api/admin/providers/preset-status）；
+  // 「一键更新」POST /api/admin/providers/sync，完成后在这行下方给一个简短
+  // 结果清单（更新了谁、从哪个版本到哪个版本、Key 增减、跳过及原因）并刷新配置。
+  // 与 state.presetUpdateFlags（供应商列表行「可更新」）共用同一次 status 查询。
+  function renderPresetSyncRow() {
+    const box = $('presetSyncBox');
+    if (!box) return;
+    const isFull = Boolean(window.HOST.capabilities.kbModels) && !isHubMode();
+    box.hidden = !isFull;
+    if (!isFull) return;
+
+    const metaEl = $('presetSyncMeta');
+    const btn = $('btnSyncProviders');
+    const applyStatus = (res) => {
+      if (metaEl) {
+        if (res && res.ok) {
+          const n = Number(res.update_count) || 0;
+          metaEl.textContent = n > 0 ? `${n} 个供应商有新版本` : '全部为最新版本';
+        } else {
+          metaEl.textContent = '状态获取失败（节点或中枢不可达）';
+        }
+      }
+    };
+
+    // 每次进设置页都取一次：版本比较是服务端算的，前端不缓存。
+    if (typeof window.HOST.getPresetStatus === 'function') {
+      window.HOST.getPresetStatus().then((res) => {
+        applyStatus(res);
+        if (res && res.ok) {
+          const flags = {};
+          for (const row of Array.isArray(res.providers) ? res.providers : []) {
+            if (row && row.id && row.has_update) flags[row.id] = String(row.latest_version || '') || true;
+          }
+          state.presetUpdateFlags = flags;
+          renderProvidersList();
+        }
+      }).catch(() => applyStatus(null));
+    }
+
+    if (btn) {
+      btn.onclick = async () => {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = '更新中…';
+        const out = $('presetSyncResult');
+        try {
+          const res = await window.HOST.syncProviders();
+          if (!res || res.ok !== true) {
+            toast(`一键更新失败: ${scrubUiText(res?.error || '请求未成功')}`, 'err');
+            return;
+          }
+          const updated = Array.isArray(res.updated) ? res.updated : [];
+          const skipped = Array.isArray(res.skipped) ? res.skipped : [];
+          const errors = Array.isArray(res.errors) ? res.errors : [];
+          toast(updated.length
+            ? `已更新 ${updated.length} 个供应商`
+            : (errors.length ? `更新完成，${errors.length} 个失败` : '没有需要更新的供应商'),
+            errors.length ? 'warn' : 'ok');
+          // 简短结果清单：更新（版本 A → B · Key +n/-n）/ 跳过（原因）/ 失败（错误）。
+          if (out) {
+            const lines = [];
+            for (const u of updated) {
+              const keyBits = [];
+              const ka = Number(u.keys_added) || 0;
+              const kr = Number(u.keys_removed) || 0;
+              if (ka) keyBits.push(`+${ka} Key`);
+              if (kr) keyBits.push(`-${kr} Key`);
+              lines.push(`✓ ${u.id}：${u.from_version || '（未绑定）'} → ${u.to_version || '?'}${keyBits.length ? `（${keyBits.join('，')}）` : ''}`);
+            }
+            for (const sp of skipped) lines.push(`− ${sp.id}：跳过（${sp.reason || '未说明'}）`);
+            for (const er of errors) lines.push(`✗ ${er.id}：失败（${scrubUiText(er.error || '未知错误')}）`);
+            out.hidden = lines.length === 0;
+            out.classList.toggle('hidden', lines.length === 0);
+            out.innerHTML = lines.map((l) => `<div class="text-xs">${eh(l)}</div>`).join('');
+          }
+          // 同步改了供应商的规则与 preset_version：重拉配置并让列表行重绘。
+          await loadData();
+        } catch (e) {
+          toast(`一键更新异常: ${scrubUiText(e.message)}`, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '一键更新';
+        }
+      };
+    }
+  }
+
   function renderSettingsView() {
     state.config = state.config || {};
     state.config.settings = state.config.settings || {};
@@ -6841,6 +7200,8 @@
     const catalogBox = $('modelCatalogBox');
     if (catalogBox) catalogBox.hidden = !isHubMode();
     if (isHubMode()) renderModelCatalogCard();
+    // 预设与中枢同步：Full only（Hub 没有这两个接口，不显示入口，约定 D）。
+    renderPresetSyncRow();
 
     const baseOrigin = location.origin || 'http://127.0.0.1:3425';
     const localBase = `${baseOrigin}/v1`;
@@ -7073,6 +7434,12 @@
           // 的供应商都不剩，节点下一次拉配置就会全断，守卫直接拒收。透传后端的英文
           // 报错对操作者没用 —— 要给可执行的补救指引。
           toast('保存未生效：中枢要求至少保留一个「已启用且有启用 Key」的供应商，否则节点下一次拉配置会全断。请先给某个供应商添加一把启用的 Key，再重试。', 'err');
+          return false;
+        }
+        // 约定 C：本地 Key 与中枢 Key 同标签 → Full 节点返回
+        // 400 {"ok":false,"error":"key_label_conflict","label":"…"}。译成可执行的话。
+        if (res?.status === 400 && (data.error === 'key_label_conflict' || data.error?.code === 'key_label_conflict')) {
+          toast(`保存未生效：标签「${data.label || '?'}」已被该供应商的中枢 Key 占用，请换一个标签`, 'err');
           return false;
         }
         toast(scrubUiText(errMsg), 'err');

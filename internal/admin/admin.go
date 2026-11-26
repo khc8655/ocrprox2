@@ -238,6 +238,8 @@ func (s *Server) RegisterRoutes(r any) {
 	register("GET /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/manifest", s.handleVaultManifest)
 	register("POST /api/vault/fetch", s.handleVaultFetch)
+	register("GET /api/admin/providers/preset-status", s.handleProvidersPresetStatus)
+	register("POST /api/admin/providers/sync", s.handleProvidersSync)
 	register("POST /api/admin/oauth/start", s.handleOAuthStart)
 	register("GET /api/admin/oauth/poll", s.handleOAuthPoll)
 	register("POST /api/admin/oauth/poll", s.handleOAuthPoll)
@@ -472,6 +474,18 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 					"error":             "config_version_conflict",
 					"current_version":   vce.CurrentVersion,
 					"submitted_version": vce.SubmittedVersion,
+				})
+				return
+			}
+			// 约定 C：本地 Key 与中枢 Key 同标签 → 400 key_label_conflict（带标签名，
+			// 控制台据此提示改标签）。这条在写盘前从 enforceVaultLock 抛出，配置未被改动。
+			var klc *config.KeyLabelConflictError
+			if errors.As(err, &klc) {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":    false,
+					"error": "key_label_conflict",
+					"label": klc.Label,
 				})
 				return
 			}

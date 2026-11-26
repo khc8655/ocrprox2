@@ -36,6 +36,19 @@ func (e *LocalProviderConflictError) Error() string {
 	return fmt.Sprintf("config: provider %q already exists locally and is not vault-managed (delete it first)", e.Provider)
 }
 
+// KeyLabelConflictError reports that a local key submitted onto a vault provider
+// carries a Label that collides with a hub (origin=vault) key's Label/ID — or with
+// another local key's Label — inside the same provider. The admin layer maps it to
+// 400 {"ok":false,"error":"key_label_conflict","label":"…"}.
+type KeyLabelConflictError struct {
+	Provider string
+	Label    string
+}
+
+func (e *KeyLabelConflictError) Error() string {
+	return fmt.Sprintf("config: provider %q already has a key labeled %q (local keys may not shadow hub keys)", e.Provider, e.Label)
+}
+
 // VersionConflictError reports a CAS 409 version mismatch during config updates.
 type VersionConflictError struct {
 	CurrentVersion   int64
@@ -494,6 +507,7 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			// but only adopted when actually present in the payload (older hubs omit them).
 			existingP.Name = vp.Name
 			existingP.PresetID = vp.PresetID
+			existingP.PresetVersion = vp.PresetVersion
 			existingP.BaseURL = vp.BaseURL
 			existingP.AnthropicBaseURL = vp.AnthropicBaseURL
 			if vp.APIType != "" {
@@ -530,6 +544,7 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 			// local toggle, api_type/rule_hash only move when the payload actually carries them.
 			existingP.Name = vp.Name
 			existingP.PresetID = vp.PresetID
+			existingP.PresetVersion = vp.PresetVersion
 			existingP.BaseURL = vp.BaseURL
 			existingP.AnthropicBaseURL = vp.AnthropicBaseURL
 			if vp.APIType != "" {
@@ -557,7 +572,7 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 				rulesCopy := *vp.AdapterRules
 				existingP.AdapterRules = &rulesCopy
 			}
-			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys, false)
+			existingP.APIKeys = mergeProviderKeys(existingP.APIKeys, incomingKeys, true)
 		}
 	}
 
@@ -570,10 +585,47 @@ func (s *LocalSource) MergeVaultConfig(vaultProviders map[string]*types.Provider
 // copy (same stabilization rules as the removed MergeHubSync). A key that still exists
 // locally keeps its local Enabled toggle; only keys that were locally deleted come back
 // enabled with the Hub payload.
+// Local keys (origin=local) are operator-owned and coexist with the hub keys: they are
+// carried through a re-fetch untouched (value, label, enabled toggle), and only the
+// hub-managed (origin=vault) keys are replaced wholesale.
 func replaceVaultKeyList(oldKeys, incomingKeys []*types.KeyEntry) []*types.KeyEntry {
+	localKeys := make([]*types.KeyEntry, 0, len(oldKeys))
+	for _, ok := range oldKeys {
+		if ok == nil || ok.Origin != "local" {
+			continue
+		}
+		kCopy := *ok
+		if ok.OAuthMeta != nil {
+			m := *ok.OAuthMeta
+			kCopy.OAuthMeta = &m
+		}
+		if kCopy.ID == "" {
+			kCopy.ID = kCopy.Label
+		}
+		if kCopy.Label == "" {
+			kCopy.Label = kCopy.ID
+		}
+		kCopy.Origin = "local"
+		localKeys = append(localKeys, &kCopy)
+	}
 	replaced := make([]*types.KeyEntry, 0, len(incomingKeys))
 	for _, sk := range incomingKeys {
 		if sk == nil {
+			continue
+		}
+		// A hub key that collides with a preserved local key's label is skipped, the
+		// same precedence mergeProviderKeys applies: the operator-owned key stays and
+		// the hub key is not duplicated under an ambiguous identity. (Saving such a
+		// pair is refused with 400 key_label_conflict, so this only triggers when the
+		// hub adds a label the node already used locally.)
+		conflictsLocal := false
+		for _, lk := range localKeys {
+			if keyEntriesMatch(lk, sk) {
+				conflictsLocal = true
+				break
+			}
+		}
+		if conflictsLocal {
 			continue
 		}
 		for _, ok := range oldKeys {
@@ -610,7 +662,10 @@ func replaceVaultKeyList(oldKeys, incomingKeys []*types.KeyEntry) []*types.KeyEn
 			replaced = append(replaced, sk)
 		}
 	}
-	return replaced
+	result := make([]*types.KeyEntry, 0, len(localKeys)+len(replaced))
+	result = append(result, localKeys...)
+	result = append(result, replaced...)
+	return result
 }
 
 func mergeProviderKeys(existingKeys []*types.KeyEntry, incomingVaultKeys []*types.KeyEntry, allowLocalKeys bool) []*types.KeyEntry {
@@ -723,20 +778,33 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig, fromVaultSync 
 
 	// 2. Kernel Guard: Prevent masked placeholders from overwriting real keys
 	if currentCfg != nil {
+		// 2a. 约定 C: a local key may coexist with hub keys, but never under the same
+		// label. The check must run BEFORE recoverMaskedKeys: that recovery re-attributes
+		// a submitted entry to Origin=vault when its Label/ID matches a stored hub key,
+		// which would silently turn the colliding local key into a hub-key "edit" and
+		// hide the conflict instead of refusing the save with key_label_conflict.
+		if err := checkVaultKeyLabelConflicts(newCfg, currentCfg); err != nil {
+			return nil, err
+		}
 		recoverMaskedKeys(newCfg, currentCfg)
 	}
 
-	// 2b. Hub-Managed Lock (Strict No-Mixed-Keys Rule (User Decision #3) + provider field lock):
-	// Vault providers are strictly read-only for keys during external SaveConfig submissions;
-	// never allow Origin=="local" or unstored keys to be added onto an Origin=="vault" provider,
-	// and force-restore hub-managed provider fields (base_url/anthropic_base_url/adapter_rules/
-	// preset_id/api_type/hide_client_name) so a leaked admin password cannot repoint a vault
+	// 2b. Hub-Managed Lock (hub key lock + provider field lock; 约定 C 2026-11):
+	// Vault (origin=="vault") providers keep their hub keys strictly read-only during external
+	// SaveConfig submissions — a hub key's value/label is restored from storage and a stored
+	// key missing from the submission counts as a local deletion. Origin=="local" keys now
+	// coexist on the same provider (they are fully add/update/delete; see
+	// checkVaultKeyLabelConflicts above for the same-label refusal). Hub-managed provider
+	// fields (base_url/anthropic_base_url/adapter_rules/preset_id/preset_version/api_type/
+	// hide_client_name) are force-restored so a leaked admin password cannot repoint a vault
 	// provider at an attacker-controlled endpoint to exfiltrate the vault keys. The
 	// fromVaultSync bypass keeps the on-demand fetch landing path unaffected — that path is
 	// hub-originated (the server itself talked to the hub at the stored URL with the stored
 	// token) and never accepts caller-supplied credentials or caller-supplied providers.
 	if !fromVaultSync {
-		enforceVaultLock(newCfg, currentCfg)
+		if err := enforceVaultLock(newCfg, currentCfg); err != nil {
+			return nil, err
+		}
 	}
 
 	// 3. Vault URL-Change Guard (SECURITY_SPEC §4.4 / SEC-07):
@@ -798,16 +866,88 @@ func (s *LocalSource) saveConfigLocked(newCfg *types.ProxyConfig, fromVaultSync 
 
 // enforceVaultLock enforces hub ownership on Origin=="vault" providers during external
 // SaveConfig submissions:
-//   - Provider field lock: base_url/anthropic_base_url/adapter_rules/preset_id/api_type/
-//     hide_client_name are force-restored to the stored values (hub-hosted content is not
-//     locally editable).
+//   - Provider field lock: base_url/anthropic_base_url/adapter_rules/preset_id/
+//     preset_version/api_type/hide_client_name are force-restored to the stored values
+//     (hub-hosted content is not locally editable).
 //   - Key value lock: vault keys are matched by Label/ID; a tampered value or label is
 //     restored from storage; a key missing from the submission counts as a local deletion
 //     (allowed, the Hub copy is unaffected).
-//   - No mixing: local keys are rejected inside a vault provider (Strict No-Mixed-Keys).
-func enforceVaultLock(target, source *types.ProxyConfig) {
+//   - Coexistence: Origin=="local" keys MAY live on a vault provider next to the hub keys
+//     (运营商本地 Key 与中枢 Key 共存). Local keys are fully add/update/delete; hub keys stay
+//     read-only. Same-label refusal lives in checkVaultKeyLabelConflicts, which
+//     saveConfigLocked runs earlier (before recoverMaskedKeys can re-attribute the
+//     colliding entry to Origin=vault by label).
+//
+// A non-nil error aborts the whole save (the target config must not be persisted then).
+// checkVaultKeyLabelConflicts refuses a SaveConfig submission that puts a *new* local key
+// under a label already used by a hub (Origin=="vault") key of the same provider, or by
+// another local key of that provider. Labels are the key identity the scheduler, the
+// manifest and per-key stats share, so a collision would make them ambiguous.
+//
+// "New" matters: an entry that carries Origin=="local" but whose ID equals a stored hub
+// key's ID is the SEC-06 provenance-flip attempt (operator tries to turn a hub key into a
+// local one so the console unmasks it). That is not a conflict — enforceVaultLock still
+// restores it from storage and keeps it a hub key. Only an entry whose ID identifies no
+// stored hub key while its label collides is a genuine local-key collision.
+//
+// Runs before recoverMaskedKeys/enforceVaultLock: both may re-attribute submitted entries
+// to Origin=vault by label, which would mask the conflict.
+func checkVaultKeyLabelConflicts(target, source *types.ProxyConfig) error {
+	if target == nil || source == nil {
+		return nil
+	}
+	for pID, p := range target.Providers {
+		if p == nil {
+			continue
+		}
+		srcP := source.Providers[pID]
+		if srcP == nil || srcP.Origin != "vault" {
+			continue
+		}
+		storedByID := make(map[string]bool, len(srcP.APIKeys))
+		storedLabels := make(map[string]bool, len(srcP.APIKeys))
+		for _, sk := range srcP.APIKeys {
+			if sk == nil || sk.Origin != "vault" {
+				continue
+			}
+			if sk.ID != "" {
+				storedByID[sk.ID] = true
+			}
+			if sk.Label != "" {
+				storedLabels[sk.Label] = true
+			}
+			if sk.ID != "" {
+				storedLabels[sk.ID] = true
+			}
+		}
+		seenLocal := make(map[string]bool)
+		for _, tk := range p.APIKeys {
+			if tk == nil || tk.Origin != "local" {
+				continue
+			}
+			lbl := tk.Label
+			if lbl == "" {
+				lbl = tk.ID
+			}
+			if lbl == "" {
+				continue
+			}
+			// Provenance-flip attempt on a known hub key: let enforceVaultLock restore it.
+			if tk.ID != "" && storedByID[tk.ID] {
+				continue
+			}
+			if storedLabels[lbl] || seenLocal[lbl] {
+				return &KeyLabelConflictError{Provider: pID, Label: lbl}
+			}
+			seenLocal[lbl] = true
+		}
+	}
+	return nil
+}
+
+func enforceVaultLock(target, source *types.ProxyConfig) error {
 	if target == nil {
-		return
+		return nil
 	}
 	for pID, p := range target.Providers {
 		if p == nil {
@@ -827,6 +967,7 @@ func enforceVaultLock(target, source *types.ProxyConfig) {
 			p.BaseURL = srcP.BaseURL
 			p.AnthropicBaseURL = srcP.AnthropicBaseURL
 			p.PresetID = srcP.PresetID
+			p.PresetVersion = srcP.PresetVersion
 			p.APIType = srcP.APIType
 			p.HideClientName = srcP.HideClientName
 			if srcP.AdapterRules != nil {
@@ -874,7 +1015,30 @@ func enforceVaultLock(target, source *types.ProxyConfig) {
 				}
 				kept = append(kept, &cp)
 			}
-			p.APIKeys = kept
+			// Local keys riding along in the submission are preserved (add / edit /
+			// toggle all work on the vault provider). The same-label refusal is
+			// checkVaultKeyLabelConflicts' job (it runs earlier, before
+			// recoverMaskedKeys could re-attribute a colliding entry); nothing to
+			// re-check here.
+			submittedLocalKeys := make([]*types.KeyEntry, 0, len(p.APIKeys))
+			for _, tk := range p.APIKeys {
+				if tk == nil || tk.Origin != "local" {
+					continue
+				}
+				cp := *tk
+				if tk.OAuthMeta != nil {
+					m := *tk.OAuthMeta
+					cp.OAuthMeta = &m
+				}
+				if cp.ID == "" {
+					cp.ID = cp.Label
+				}
+				if cp.Label == "" {
+					cp.Label = cp.ID
+				}
+				submittedLocalKeys = append(submittedLocalKeys, &cp)
+			}
+			p.APIKeys = append(kept, submittedLocalKeys...)
 		} else {
 			// Initial creation of a vault provider (e.g., test seed): strip any local keys
 			kept := make([]*types.KeyEntry, 0, len(p.APIKeys))
@@ -887,6 +1051,7 @@ func enforceVaultLock(target, source *types.ProxyConfig) {
 			p.APIKeys = kept
 		}
 	}
+	return nil
 }
 
 func recoverMaskedKeys(target, source *types.ProxyConfig) {

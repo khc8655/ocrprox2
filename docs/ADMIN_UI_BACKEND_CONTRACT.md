@@ -411,6 +411,8 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
 }
 ```
 > preset 对象为后端 `PresetDef` 的完整 JSON 序列化（`internal/provider/presets.go`）。其中 `version` / `updated_at` 镜像该供应商适配文件（`shared/presets/<id>.json`，与 `shared/presets/catalog.json` 汇总目录同源）的版本与日期，控制台用于在供应商卡片渲染「适配 `<id>` · v`<version>` · `<updated_at>`」标签；无对应适配文件的预设（如 `anthropic`、`minimax-cn` 等）两字段带 `omitempty`，响应中直接省略。
+>
+> **身份字段与契约库必须逐字段一致（v3.14）**：规则 A（§7.3.7）用 `id` / `name` / `base_url` 匹配供应商，Hub 与前端拿的是 `shared/presets/*.json`，Full 节点拿的是这份内置库——两侧任一字段漂移都会让同一供应商在三端绑到不同预设。因此 `internal/provider/presets.go` 的 `id` / `name` / `base_url` / `version` 与 `shared/presets/<id>.json` 逐条相同，由守卫测试 `internal/provider/provider_test.go` 的 `TestCatalog_MatchesSharedPresetIdentity` 直接读盘比对（例如 `amd` 是「AMD Radeon Cloud」/ `https://developer.amd.com.cn/radeon/api/v1`，`minimax` 是「MiniMax」/ `https://api.minimaxi.com/v1`，与 `minimax-cn` 同主机）。
 
 ### 6.6 节点访问信息与 API 凭据管理
 - **获取节点接入信息 `GET /api/admin/access-info`**:
@@ -591,6 +593,7 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
     "minimax": {
       "name": "MiniMax",
       "preset_id": "minimax",
+      "preset_version": "1.4.0",
       "base_url": "https://api.minimax.chat/v1",
       "anthropic_base_url": "",
       "keys": ["hk-pool-01", "hk-pool-02"],
@@ -613,6 +616,7 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
 }
 ```
 - `providers` 只收录 vault 供应商（`origin="local"` 物理阻断），`keys` 为启用且有 Key 材料（与运行时投影同口径）的**标签**数组；节点 Token 额外受 `scope.providers` 过滤。
+- `preset_id` / `preset_version` 与 `rule_hash` 同为中枢托管元数据：`preset_version` 是预设库里该预设的 `version`（未绑定为空串），节点拉取时记录到 `ProviderConfig.preset_version`，供 `GET /api/admin/providers/preset-status` 判断是否落后于中枢（见 §7.3.6）。
 - `rule_hash` 由中枢按解析后的 `adapter_rules` 内容实时计算（与 `/api/vault/fetch` 下发的同一哈希）：节点存储拉取时的哈希，清单哈希与之不一致即规则漂移，控制台出现「中枢规则已更新」提示。
 - `agent_models` 为**按需路由模板**：仅收录 `enabled` 的路由；按调用方模型 scope（节点 Token 的 `scope.models`，管理员视为 `["*"]`）过滤；候选必须引用在本清单 `providers` 段**存活**的供应商——已禁用或已死亡的候选被剔除，候选清零的路由整条丢弃。
 - 候选携带 Key 标签（`key_label`）与单候选并发上限 `max_concurrency`（与运行时投影、节点 `RouteCandidate` 字段名一致），绝不携带明文 Key 材料。
@@ -623,13 +627,13 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
 ```json
 { "provider": "minimax", "key_label": "hk-pool-01" }
 ```
-- **Response (`200 OK`)**：`provider_config` 携带中枢托管字段（`name`/`preset_id`/`api_type`/`base_url`/`anthropic_base_url`/`hide_client_name`/`adapter_rules`/`rule_hash`）与 `keys`（标签→Key材料 映射；hub 本体返回明文供中枢控制台管理，full 节点自动导入并在回显前掩码）；`imported_keys` 为本次落地的 vault Key 标签数组（full 节点附加）。**不下发 `enabled`**——供应商与 Key 的启停是节点本地运维开关。
+- **Response (`200 OK`)**：`provider_config` 携带中枢托管字段（`name`/`preset_id`/`preset_version`/`api_type`/`base_url`/`anthropic_base_url`/`hide_client_name`/`adapter_rules`/`rule_hash`）与 `keys`（标签→Key材料 映射；hub 本体返回明文供中枢控制台管理，full 节点自动导入并在回显前掩码）；`imported_keys` 为本次落地的 vault Key 标签数组（full 节点附加）。**不下发 `enabled`**——供应商与 Key 的启停是节点本地运维开关。
 - **`409 Conflict`（仅 full 节点）**：目标供应商本地已存在且 `origin=local`（或历史空 origin）—— 本地新建的供应商不可再从中枢拉取，须先删除/改名：
 ```json
 { "ok": false, "error": "provider_exists_local", "provider": "minimax" }
 ```
 该冲突在导入时于配置锁内复核（合并前快照与落地之间同 ID 被并发改为本地供应商也会失败，不会把 vault Key 静默并入本地供应商）。
-- **替换语义**：整体拉取（不带 `key_label`/`keys`）时，full 节点对已存在的 vault 供应商**整体替换中枢托管字段**（`name`/`base_url`/`anthropic_base_url`/`adapter_rules`/`preset_id`/`api_type`/`hide_client_name`/`rule_hash`）与 vault Key 列表——本地删过的 Key 重新拉取即恢复，中枢删掉的 Key 本地随之消失；本地仍存在的 Key 保留其启用开关。按 Key 标签补拉则为增量合并，不影响其它 vault Key，也不改动已存 Key 的启用开关。`origin="local"`（及历史空 origin）的供应商与本地 Key 永不被覆盖。
+- **替换语义**：整体拉取（不带 `key_label`/`keys`）时，full 节点对已存在的 vault 供应商**整体替换中枢托管字段**（`name`/`base_url`/`anthropic_base_url`/`adapter_rules`/`preset_id`/`preset_version`/`api_type`/`hide_client_name`/`rule_hash`）与 vault Key 列表——本地删过的 Key 重新拉取即恢复，中枢删掉的 Key 本地随之消失；本地仍存在的 Key 保留其启用开关。**本地 Key（`origin="local"`）与它们的启用开关原样保留**（约定 C：本地 Key 与中枢 Key 共存于同一供应商，见 §7.3.7）。按 Key 标签补拉则为增量合并，不影响其它 vault Key，也不改动已存 Key 的启用开关。`origin="local"`（及历史空 origin）的供应商与本地 Key 永不被覆盖。
 - **其它错误**：`400 invalid_json` / `400 provider_required` / `400 vault hub url not configured`、`403 provider_out_of_node_scope`（hub、节点越权）、`404 provider_not_found_or_local`（hub）、`502`（中枢不可达，或 200 响应体非 JSON 对象——该形态绝不原样回显给管理端）。
 
 ### 7.3.2 `GET /healthz`（Hub）版本可观测
@@ -654,6 +658,86 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
 - **防暴力破解口径不变**：携带**错误**查询串凭据与错误请求头同等对待——失败并消耗防暴力额度（10 分钟内 5 次错误 → 封禁 IP 10 分钟，守卫测试 `internal/auth/auth_test.go` 的 `TestVerifyAdminAuth_WrongQueryKeyCountsTowardLockout`）；完全无凭据的请求（首屏加载、探针）依旧不消耗额度。凭据校验、优先级与锁定逻辑全部在服务端。
 - **已接受的放大面（v3.4 新增，运营者知悉）**：Full 控制台读到 `?key=` 会**页面加载即自动提交**——旧版无凭据的 `?key=` 首屏不耗额度，现在每个带错误参数的加载都计一次失败。诱导运营者浏览器打开 5 个 `https://node/admin?key=<猜解>` 链接即可远程耗尽其 IP 的防暴力预算并封禁 10 分钟（纯拒绝服务，攻击者得不到任何凭据）；私有部署下接受该取舍，缓解手段是服务端锁定逻辑（10 分钟自动解封）而非前端。
 
+### 7.3.6 预设状态 `GET /api/admin/providers/preset-status`（仅 Full，v3.14 契约）
+> 约定 C（2026-11）：控制台列表行的「可更新」标记与设置页「预设与中枢同步」行都读这一条端点。Hub 主机没有该能力，`host.js` 的 `HOST.getPresetStatus` 在 Hub 上不存在、相关入口也不渲染。
+
+- **鉴权**：`ADMIN_PASSWORD`；仅 `full` 角色注册（`internal/router/readonly.go` 的 `FullOnlyRoutes`）。
+- **Response (`200 OK`)**：
+```json
+{
+  "ok": true,
+  "update_count": 2,
+  "providers": [
+    {
+      "id": "deepseek",
+      "origin": "local",
+      "preset_id": "deepseek",
+      "current_version": "1.2.0",
+      "latest_version": "1.3.0",
+      "has_update": true,
+      "note": ""
+    },
+    {
+      "id": "vault-p1",
+      "origin": "vault",
+      "preset_id": "minimax-cn",
+      "current_version": "1.4.0",
+      "latest_version": "",
+      "has_update": false,
+      "note": "dial tcp 10.0.0.1:443: connect: connection refused"
+    }
+  ]
+}
+```
+- **语义**：
+  - `origin`：`local` | `vault`（历史空 origin 归为 `local`，与合并/锁定同一判定）。
+  - `current_version`：本地供应商取自身 `ProviderConfig.preset_version`；中枢供应商取上次拉取时记录的值。
+  - **本地供应商**的 `latest_version` 取**内置预设库**（编译进二进制的 `internal/provider/presets.go`，`/api/admin/presets-extra` 的同源）；未绑定/`custom`/库内不存在/无版本时 `latest_version=""`、`has_update=false`，`note` 写原因（「未绑定预设」「内置预设库无此预设」「预设无版本信息」）。
+  - **中枢供应商**的 `latest_version` 取中枢 `/api/vault/manifest` 返回的 `preset_version`（一次 manifest 拉取覆盖全部中枢供应商，不逐个 fetch）；连不上中枢或清单未返回该供应商时 `note` 写原因、`has_update=false`。
+  - `update_count` = `has_update=true` 的行数。
+- 该端点**只读**：不写配置、不回传任何 Key 材料。
+
+### 7.3.7 一键更新 `POST /api/admin/providers/sync`（仅 Full，v3.14 契约）
+> **只有操作者点击才执行**：无定时器、无启动钩子、无任何自动触发。Hub 主机没有该端点。
+
+- **鉴权**：`ADMIN_PASSWORD`；仅 `full` 角色注册（`FullOnlyRoutes`）。无请求体。
+- **Response (`200 OK`，部分失败也是 200，供应商之间互不影响)**：
+```json
+{
+  "ok": true,
+  "updated": [
+    { "id": "vault-p1", "from_version": "1.4.0", "to_version": "1.5.0", "keys_added": 2, "keys_removed": 1 }
+  ],
+  "skipped": [
+    { "id": "localp", "reason": "规则已手动修改，未覆盖" }
+  ],
+  "errors": [
+    { "id": "vault-p2", "error": "hub fetch returned HTTP 502" }
+  ]
+}
+```
+- **三类动作**：
+  1. **每个中枢托管供应商（`origin=vault`）**：从中枢 `/api/vault/fetch` 整体重新拉取（地址、协议、规则、中枢 Key 全量替换），**本地 Key 与它们的启用开关原样保留**；`from_version`/`to_version` 为 `preset_version` 前后值，`keys_added`/`keys_removed` 是**中枢 Key 标签**集合的增减数（本地 Key 不计入）。
+  2. **每个绑定了预设的本地供应商（`origin=local` 且 `preset_id` 在库内）**：`adapter_rules` 为空、或仍等于预设当前规则 → 换成最新预设规则并更新 `preset_version`；**手动改过的跳过**，`reason="规则已手动修改，未覆盖"`（节点不保留预设规则历史版本，因此「仍等于所记录版本」只能对当前规则求证；与当前规则不等即视为手改）。已是最新版本时跳过，`reason="已是最新版本"`。
+  3. **未绑定预设的本地供应商**：按**规则 A** 尝试绑定（`preset_id="custom"` 跳过，`reason="已选择自定义（不绑定预设）"`；匹配不到跳过，`reason="未匹配到预设"`）；绑定后空规则随之采用预设规则。
+- **失败隔离**：单个中枢供应商拉取失败只进 `errors`，其余照常；本地供应商的规则更新是一次原子保存，保存失败则该批全部进 `errors` 且磁盘配置不变。
+- **规则 A**（三端同序同结果，实现见 `internal/admin/preset_match.go` / `edgeone-hub/lib/presetbind.js` / `shared/admin/js/app.js` 的 `matchPresetRules`）：
+  1. `preset_id === "custom"` → 显式不绑，保持。
+  2. 已有 `preset_id` 且预设库存在 → 保留。
+  3. `base_url` 主机名（小写）等于某预设 `base_url` 主机名 → 绑定（含「{」占位符的预设跳过）；同主机命中多个预设时用 4)/5) 在这几个里挑，挑不出就不绑（不落回全库匹配）。
+  4. 供应商 id（小写）等于预设 id。
+  5. 供应商名称（小写、去首尾空格）等于预设名称（小写）或预设 id。
+  6. 都不中 → 不绑定（界面显示「自定义」）。
+
+### 7.3.8 中枢供应商上的本地 Key（约定 C，v3.14 契约）
+- `origin="vault"` 的供应商**允许本地 Key**：`origin="local"` 的 Key 与 `origin="vault"` 的 Key **共存于同一个供应商**。本地 Key 完全可增删改（值、标签、启用开关）；中枢 Key 只读可删（沿用既有锁定：值/标签被篡改时从存储恢复，提交里缺它 = 本地删除）。
+- 重新拉取（§7.3.1.2）与一键更新（§7.3.7）只替换中枢 Key；**本地 Key 与它们的启用开关原样保留**。中枢新增的 Key 若标签与本地 Key 相同，该中枢 Key 被跳过（本地 Key 优先，不产生同标签双份）。
+- **同标签冲突**：向中枢供应商保存一个与中枢 Key 同标签（Label 或 ID 相同）的**本地 Key**，`POST /api/config` 返回：
+```json
+{ "ok": false, "error": "key_label_conflict", "label": "hk-pool-01" }
+```
+HTTP `400`。校验在写盘前、Kernel Guard 之前完成，配置不被改动（Go 侧 `config.KeyLabelConflictError`）。同一供应商内两把本地 Key 同标签同样 400。
+
 ### 7.4 管理端可见的凭据范围
 - `GET /api/config` 对上游供应商 `api_keys[].key` 一律掩码（`sk-●●●●●●xxxx`）。
 - `settings.client_key`（网关客户端 Key）**按设计明文返回**：管理员需要该值配置 Cursor/Claude 等客户端，控制台"网关接入中心"直接展示。该接口本身受管理员鉴权保护，不得在未鉴权响应、日志或 traces 中出现。
@@ -664,7 +748,7 @@ req=<trace_id> model=<req_model> endpoint=<endpoint> status=<最终状态码或0
 ## 八、 前端单文件构建预算与门禁规范
 
 - 前端控制台源码统一位于 `shared/admin/`，通过 `node shared/admin/build.mjs` 构建为内嵌单一单页 HTML（输出至 `shared/admin/dist/index.html` 与 `internal/admin/assets/index.html`）。
-- 打包体积硬门禁：**`≤ 320 KiB`（`327,680 bytes`）**（执行 G4 门禁校验与 T1 合同测试；2026-11-22 由 240 KB 重标——magpie 骨架重排与探测/策略胶囊等已确认 UI 的真实字节成本，见 v20261122-06 CHANGELOG）。
+- 打包体积硬门禁：**`≤ 384 KiB`（`393,216 bytes`）**（执行 G4 门禁校验与 T1 合同测试；2026-11-26 由 320 KiB 重标——预设与中枢同步入口（`getPresetStatus`/`syncProviders`）、本地 Key 与中枢 Key 共存编辑器等本轮 UI 的真实字节成本；2026-11-22 曾由 240 KB 重标为 320 KiB，见 v20261122-06 CHANGELOG）。
 - 零内联样式（严禁 `style="` 与 `.style.xxx`）、零 Drawer 抽屉（全部行内展开 `.editor`）、零彩色左边框条、原生 `[hidden]` 显隐控制。
 - **流程纪律**：任何对 `shared/admin/` 源码（`admin.html` / `js/*` / `css/*`）的改动，必须当场跑 `npm run test:admin`（含全部体积/样式门禁并再生成 dist、`internal/admin/assets`、`admin/index.html` 与 `edge-functions/_hub` 同步产物）；只跑 `verify:release` 之类的下游产物校验不算数——下游校验看到的是上一次构建的陈旧产物，门禁失败会被静默漏掉。
 

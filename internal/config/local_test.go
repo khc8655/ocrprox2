@@ -829,7 +829,10 @@ func TestLocalSource_StrictNoMixedKeys_And_DefaultSettings(t *testing.T) {
 		t.Fatalf("P1-3: expected cold-start schema defaults, got %+v", snapInit.Config.Settings)
 	}
 
-	// 2. Strict No-Mixed-Keys Rule (User Decision #3): attempting to add a local key onto a vault provider via SaveConfig is ignored!
+	// 2. Local keys coexist with hub keys on a vault provider (2026-11 约定 C，取代旧
+	//    的 User Decision #3 严格不混 Key)：标签不冲突的本地 Key 原样保留，中枢 Key
+	//    值仍由 Kernel Guard 恢复。同标签冲突走 KeyLabelConflictError（400
+	//    key_label_conflict），见 TestLocalSource_VaultProvider_KeyLabelConflict。
 	snapAttemptMix, err := src.SaveConfig(&types.ProxyConfig{
 		Version: snapInit.Config.Version,
 		Providers: map[string]*types.ProviderConfig{
@@ -853,8 +856,14 @@ func TestLocalSource_StrictNoMixedKeys_And_DefaultSettings(t *testing.T) {
 		t.Fatalf("SaveConfig mix attempt err: %v", err)
 	}
 	vpKeys := snapAttemptMix.Config.Providers["stale-vault-prov"].APIKeys
-	if len(vpKeys) != 1 || vpKeys[0].ID != "svk1" || vpKeys[0].Key != "sk-stale-vault" {
-		t.Fatalf("User Decision #3 violation: expected only stored vault key svk1 on vault provider, got %+v", vpKeys)
+	if len(vpKeys) != 2 {
+		t.Fatalf("expected hub key + local key to coexist on the vault provider, got %+v", vpKeys)
+	}
+	if vpKeys[0].ID != "svk1" || vpKeys[0].Key != "sk-stale-vault" || vpKeys[0].Origin != "vault" {
+		t.Fatalf("hub key value must be restored from storage, got %+v", vpKeys[0])
+	}
+	if vpKeys[1].ID != "injected-local" || vpKeys[1].Key != "sk-user-local-on-vault" || vpKeys[1].Origin != "local" {
+		t.Fatalf("local key must be preserved verbatim on the vault provider, got %+v", vpKeys[1])
 	}
 }
 
@@ -897,8 +906,9 @@ func TestLocalSource_EnforceVaultLock(t *testing.T) {
 		t.Fatalf("Current err: %v", err)
 	}
 
-	// Submit tampered hub-managed fields, a tampered value + renamed label on vk-1, an
-	// injected local key, and omit vk-2 (= local deletion, allowed).
+	// Submit tampered hub-managed fields, a tampered value + renamed label on vk-1, a
+	// local key (coexists, label does not collide), and omit vk-2 (= local deletion,
+	// allowed).
 	snap, err := src.SaveConfig(&types.ProxyConfig{
 		Version: cur.Config.Version,
 		Providers: map[string]*types.ProviderConfig{
@@ -947,8 +957,8 @@ func TestLocalSource_EnforceVaultLock(t *testing.T) {
 		t.Errorf("field lock: expected adapter_rules restored, got %+v", p.AdapterRules)
 	}
 
-	if len(p.APIKeys) != 1 {
-		t.Fatalf("key lock: expected only vk-1 to remain (vk-2 deleted locally, inject rejected), got %+v", p.APIKeys)
+	if len(p.APIKeys) != 2 {
+		t.Fatalf("key lock: expected vk-1 (restored) + local inj-1 (coexisting) to remain, got %+v", p.APIKeys)
 	}
 	got := p.APIKeys[0]
 	if got.ID != "vk-1" || got.Label != "vk-1" || got.Key != "sk-test-vault-real-1" {
@@ -959,6 +969,10 @@ func TestLocalSource_EnforceVaultLock(t *testing.T) {
 	}
 	if got.LastTest == nil || !got.LastTest.OK || got.LastTest.LatencyMS != 42 || got.LastTest.ReplyText != "你好" {
 		t.Errorf("key lock: expected submitted last_test metadata to survive, got %+v", got.LastTest)
+	}
+	local := p.APIKeys[1]
+	if local.Origin != "local" || local.Key != "sk-test-local-inject" || local.Label != "inj-1" {
+		t.Errorf("key lock: expected the local key to coexist untouched, got %+v", local)
 	}
 }
 
@@ -1243,5 +1257,222 @@ func TestLocalSource_LoadFromDisk_MigratesVaultRoutesToLocal(t *testing.T) {
 	}
 	if len(snap.Config.KBModels["ocr"]) != 1 {
 		t.Errorf("migration: kb_models must stay untouched, got %+v", snap.Config.KBModels)
+	}
+}
+
+// 约定 C（2026-11）：中枢托管供应商允许本地 Key。向 vault 供应商保存一个标签不冲突的
+// 本地 Key 后再整体重拉（replace=true），本地 Key 与其启用开关必须原样保留，中枢 Key
+// 列表按中枢载荷全量替换；preset_version 从中枢载荷透传进 ProviderConfig。
+func TestLocalSource_MergeVaultConfig_ReplaceKeepsLocalKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	// Seed the hub provider through the real adoption path (MergeVaultConfig is the only
+	// way a vault provider comes into existence; a plain SaveConfig creating a vault
+	// provider strips its local keys by design), then save a local key onto it.
+	if _, err = src.MergeVaultConfig(map[string]*types.ProviderConfig{
+		"vp": {
+			ID:            "vp",
+			Name:          "Vault Provider",
+			BaseURL:       "https://old.example/v1",
+			Origin:        "vault",
+			PresetID:      "deepseek",
+			PresetVersion: "1.0.0",
+			RuleHash:      "hash-old",
+			Enabled:       true,
+			APIKeys: []*types.KeyEntry{
+				{ID: "hub-1", Label: "hub-1", Key: "sk-hub-1", Enabled: true},
+				{ID: "hub-2", Label: "hub-2", Key: "sk-hub-2", Enabled: true},
+			},
+		},
+	}, true); err != nil {
+		t.Fatalf("MergeVaultConfig seed err: %v", err)
+	}
+	cur, err := src.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Current err: %v", err)
+	}
+	seed := cur.Config.Providers["vp"]
+	seed.APIKeys = append(seed.APIKeys, &types.KeyEntry{
+		ID: "loc-1", Label: "mine", Key: "sk-mine", Origin: "local", Enabled: false,
+	})
+	if _, err := src.SaveConfig(cur.Config); err != nil {
+		t.Fatalf("SaveConfig add local key err: %v", err)
+	}
+
+	// Re-fetch with replace=true: hub drops hub-2, adds hub-3; the local key and its
+	// disabled toggle must survive untouched.
+	snap, err := src.MergeVaultConfig(map[string]*types.ProviderConfig{
+		"vp": {
+			ID:            "vp",
+			Name:          "Vault Provider",
+			BaseURL:       "https://new.example/v1",
+			Origin:        "vault",
+			PresetID:      "deepseek",
+			PresetVersion: "1.2.3",
+			RuleHash:      "hash-new",
+			Enabled:       true,
+			AdapterRules:  &types.AdapterRules{AuthPrefix: "Bearer ", StripParams: []string{"bar"}},
+			APIKeys: []*types.KeyEntry{
+				{ID: "hub-1", Label: "hub-1", Key: "sk-hub-1", Enabled: true},
+				{ID: "hub-3", Label: "hub-3", Key: "sk-hub-3", Enabled: true},
+			},
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig replace err: %v", err)
+	}
+
+	p := snap.Config.Providers["vp"]
+	if p.BaseURL != "https://new.example/v1" || p.RuleHash != "hash-new" {
+		t.Errorf("replace: hub-managed fields not adopted: %+v", p)
+	}
+	if p.PresetVersion != "1.2.3" {
+		t.Errorf("replace: preset_version not adopted from hub payload, got %q", p.PresetVersion)
+	}
+
+	byID := make(map[string]*types.KeyEntry)
+	for _, k := range p.APIKeys {
+		byID[k.ID] = k
+	}
+	if len(p.APIKeys) != 3 {
+		t.Fatalf("expected hub-1 + hub-3 + loc-1, got %+v", p.APIKeys)
+	}
+	if byID["hub-2"] != nil {
+		t.Errorf("replace: hub key hub-2 removed on the hub must disappear: %+v", byID["hub-2"])
+	}
+	if k := byID["hub-3"]; k == nil || k.Key != "sk-hub-3" || k.Origin != "vault" || !k.Enabled {
+		t.Errorf("replace: new hub key hub-3 missing: %+v", k)
+	}
+	if k := byID["loc-1"]; k == nil || k.Origin != "local" || k.Key != "sk-mine" || k.Enabled {
+		t.Errorf("replace: local key loc-1 not preserved verbatim (incl. disabled toggle): %+v", k)
+	}
+}
+
+// 约定 C：本地 Key 与中枢 Key 同标签时，SaveConfig 返回 KeyLabelConflictError（admin 层
+// 映射 400 key_label_conflict）；标签不同的本地 Key 不受影响。
+func TestLocalSource_VaultProvider_KeyLabelConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	src, err := NewLocalSource(tmpDir, "pass")
+	if err != nil {
+		t.Fatalf("NewLocalSource err: %v", err)
+	}
+
+	_, err = src.MergeVaultConfig(map[string]*types.ProviderConfig{
+		"vp": {
+			ID:      "vp",
+			Name:    "Vault Provider",
+			BaseURL: "https://vault.example/v1",
+			Origin:  "vault",
+			Enabled: true,
+			APIKeys: []*types.KeyEntry{
+				{ID: "hub-1", Label: "hub-1", Key: "sk-hub-1", Enabled: true},
+			},
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("MergeVaultConfig seed err: %v", err)
+	}
+
+	cur, err := src.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Current err: %v", err)
+	}
+
+	// Same label as the hub key → conflict, save refused.
+	_, err = src.SaveConfig(&types.ProxyConfig{
+		Version: cur.Config.Version,
+		Providers: map[string]*types.ProviderConfig{
+			"vp": {
+				ID:      "vp",
+				BaseURL: "https://vault.example/v1",
+				Origin:  "vault",
+				Enabled: true,
+				APIKeys: []*types.KeyEntry{
+					{ID: "hub-1", Label: "hub-1", Key: "sk--...b-1", Origin: "vault", Enabled: true},
+					{ID: "loc-clash", Label: "hub-1", Key: "sk-clashing-label", Origin: "local", Enabled: true},
+				},
+			},
+		},
+	})
+	var kc *KeyLabelConflictError
+	if !errors.As(err, &kc) {
+		t.Fatalf("expected KeyLabelConflictError for a local key shadowing a hub key label, got %v", err)
+	}
+	if kc.Provider != "vp" || kc.Label != "hub-1" {
+		t.Errorf("unexpected conflict coordinates: %+v", kc)
+	}
+
+	// Distinct labels still save fine (already covered above, but re-assert the
+	// provider was not mutated by the failed save).
+	cur2, err := src.Current(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Current after conflict err: %v", err)
+	}
+	if len(cur2.Config.Providers["vp"].APIKeys) != 1 {
+		t.Errorf("failed save must not mutate the provider, got %+v", cur2.Config.Providers["vp"].APIKeys)
+	}
+}
+
+// 中枢新增的 Key 与既有本地 Key 同标签时，中枢 Key 被跳过（本地优先），不产生同标签双份；
+// 该规则在整体替换（replace=true）与增量合并两条路径上一致。
+func TestLocalSource_MergeVaultConfig_LocalKeyWinsLabelTie(t *testing.T) {
+	for _, replace := range []bool{true, false} {
+		t.Run(map[bool]string{true: "replace", false: "merge"}[replace], func(t *testing.T) {
+			src, err := NewLocalSource(t.TempDir(), "pass")
+			if err != nil {
+				t.Fatalf("NewLocalSource err: %v", err)
+			}
+			if _, err := src.MergeVaultConfig(map[string]*types.ProviderConfig{
+				"vp": {
+					ID: "vp", Name: "VP", BaseURL: "https://vp.example/v1", Origin: "vault", Enabled: true,
+					APIKeys: []*types.KeyEntry{{ID: "hub-1", Label: "hub-1", Key: "sk-hub-1", Enabled: true}},
+				},
+			}, true); err != nil {
+				t.Fatalf("seed err: %v", err)
+			}
+			cur, err := src.Current(context.Background(), false)
+			if err != nil {
+				t.Fatalf("Current err: %v", err)
+			}
+			cur.Config.Providers["vp"].APIKeys = append(cur.Config.Providers["vp"].APIKeys, &types.KeyEntry{
+				ID: "local-k", Label: "shared-label", Key: "sk-local", Origin: "local", Enabled: true,
+			})
+			if _, err := src.SaveConfig(cur.Config); err != nil {
+				t.Fatalf("SaveConfig err: %v", err)
+			}
+
+			// The hub now publishes a key with the same label as the local one.
+			snap, err := src.MergeVaultConfig(map[string]*types.ProviderConfig{
+				"vp": {
+					ID: "vp", Name: "VP", BaseURL: "https://vp.example/v1", Origin: "vault", Enabled: true,
+					APIKeys: []*types.KeyEntry{
+						{ID: "hub-1", Label: "hub-1", Key: "sk-hub-1", Enabled: true},
+						{ID: "hub-2", Label: "shared-label", Key: "sk-hub-2", Enabled: true},
+					},
+				},
+			}, replace)
+			if err != nil {
+				t.Fatalf("MergeVaultConfig err: %v", err)
+			}
+			var hubLabels, localLabels int
+			for _, k := range snap.Config.Providers["vp"].APIKeys {
+				switch {
+				case k.Label == "shared-label" && k.Origin == "vault":
+					hubLabels++
+				case k.Label == "shared-label" && k.Origin == "local":
+					localLabels++
+				}
+			}
+			if hubLabels != 0 {
+				t.Errorf("hub key with a colliding label must be skipped (local first), got %d", hubLabels)
+			}
+			if localLabels != 1 {
+				t.Errorf("the local key must survive the label tie, got %d", localLabels)
+			}
+		})
 	}
 }

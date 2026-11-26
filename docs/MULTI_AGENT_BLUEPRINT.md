@@ -61,15 +61,20 @@ type ProviderConfig struct {
 	ID               string            `json:"id,omitempty"`
 	Name             string            `json:"name,omitempty"`
 	PresetID         string            `json:"preset_id,omitempty"`
+	PresetVersion    string            `json:"preset_version,omitempty"` // 当前 adapter_rules 来自哪个预设版本（shared/presets/<id>.json 的 version）；空串=未绑定或版本未知；从中枢拉取时取中枢 manifest 的 preset_version，一键更新据此判断规则是否仍与预设同步
 	BaseURL          string            `json:"base_url"`
 	AnthropicBaseURL string            `json:"anthropic_base_url,omitempty"`
 	Enabled          bool              `json:"enabled"`
 	Origin           string            `json:"origin,omitempty"` // "vault" (中枢共享) | "local" (仅本端私有，Hub绝不下发)
 	RuleHash         string            `json:"rule_hash,omitempty"`
-	APIKeys          []*KeyEntry       `json:"api_keys"`
+	APIKeys          []*KeyEntry       `json:"api_keys"` // On an origin=vault provider, origin=local keys coexist with the hub keys and are fully operator-owned
 	ModelAliases     map[string]string `json:"model_aliases,omitempty"`
 	AdapterRules     *AdapterRules     `json:"adapter_rules,omitempty"`
 }
+
+// Full 节点（2026-11 约定 C）在中枢托管供应商上允许本地 Key 共存：origin=local 的 Key
+// 完全可增删改，origin=vault 的 Key 只读可删；重新拉取与一键更新只替换中枢 Key，本地
+// Key 及其启用开关原样保留；本地 Key 与中枢 Key 同标签时保存返回 400 key_label_conflict。
 
 // KeyEntry 单把 API Key 或 OAuth 凭证条目
 type KeyEntry struct {

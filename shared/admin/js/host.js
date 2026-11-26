@@ -462,6 +462,31 @@
       return res.json();
     },
 
+    // Full only (约定 D): GET /api/admin/providers/preset-status — per-provider
+    // preset binding freshness (current_version vs latest_version, has_update).
+    // The Hub host has no such endpoint and must never show the entries that
+    // depend on it (settings row「预设与中枢同步」, list-row「可更新」).
+    async getPresetStatus() {
+      const res = await HOST.request('/api/admin/providers/preset-status');
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false, status: res.status };
+      }
+    },
+
+    // Full only (约定 D): POST /api/admin/providers/sync — the one-click preset
+    // update. Only ever runs on an operator's click; no timers, no startup hooks.
+    // Partial failures still return 200 with per-provider errors.
+    async syncProviders() {
+      const res = await HOST.request('/api/admin/providers/sync', { method: 'POST' });
+      try {
+        return await res.json();
+      } catch (_) {
+        return { ok: false, status: res.status };
+      }
+    },
+
     async exportConfig() {
       if (hostKind === 'hub') {
         const cfg = await HOST.getConfig();

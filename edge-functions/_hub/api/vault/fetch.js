@@ -1,6 +1,7 @@
 import { loadConfig, resolveKvBinding, resolveEnv } from '../../lib/config.js';
 import { checkVaultAuth } from '../../lib/vaultauth.js';
 import { getPresetMap } from '../../lib/presets.js';
+import { resolveAdapterRules } from '../../lib/presetbind.js';
 import { touchNodeLastSeen } from '../../lib/nodes.js';
 import { ruleHash } from '../../lib/rulehash.js';
 export async function handleVaultFetchRequest(request, env, kv) {
@@ -66,10 +67,8 @@ matchedKeys[lbl] = k.key;
 }
 }
 const presetsMap = getPresetMap();
-let rules = pData.adapter_rules;
-if (!rules && pData.preset_id && presetsMap[pData.preset_id]?.adapter_rules) {
-rules = presetsMap[pData.preset_id].adapter_rules;
-}
+const { rules } = resolveAdapterRules(pData, presetsMap);
+const presetMeta = pData.preset_id ? presetsMap[pData.preset_id] : undefined;
 return new Response(
 JSON.stringify({
 ok: true,
@@ -77,6 +76,7 @@ provider,
 provider_config: {
 name: pData.name || provider,
 preset_id: pData.preset_id || '',
+preset_version: presetMeta ? String(presetMeta.version || '') : '',
 api_type: pData.api_type || '',
 base_url: pData.base_url || '',
 anthropic_base_url: pData.anthropic_base_url || '',

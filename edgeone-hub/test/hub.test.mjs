@@ -19,6 +19,8 @@ import { CONFIG_KV_KEY, loadConfig, saveConfigWithCAS, resolveKvBinding, resolve
 import { generateNodeToken, hashToken, constantTimeCompare, computeEtag } from '../lib/crypto.js';
 import { generateClientKey, NODES_KV_KEY, loadNodes, saveNodes } from '../lib/nodes.js';
 import { projectConfigForNode } from '../lib/projection.js';
+import { matchPresetForProvider, resolveAdapterRules, presetBindingFor } from '../lib/presetbind.js';
+import { ruleHash as ruleHashOf } from '../lib/rulehash.js';
 import { PRESET_MAP } from '../lib/generated-presets.js';
 import { MODEL_CATALOG_KV_KEY, loadCatalog, saveCatalog, meta, slimModelsDev } from '../lib/model-catalog.js';
 import * as edgeIndex from '../../edge-functions/index.js';
@@ -3729,6 +3731,514 @@ describe('15. Model catalog storage & admin API', () => {
       );
       assert.equal(updateResp.status, 401);
       assert.equal(await kv.get(MODEL_CATALOG_KV_KEY), null);
+    });
+  });
+});
+
+describe('16. Preset binding (rule A) & preset-driven rules (contract B)', () => {
+  // Rule A is a three-runtime contract (hub JS / admin JS / Go node): same inputs,
+  // same order, same answer. These tests pin the hub's implementation to the
+  // worked examples and edge cases written into the contract itself.
+  describe('16a. matchPresetForProvider is a pure function with the contract order', () => {
+    test('contract examples bind: AMD, Nvidia, MiniMax -> minimax-cn', () => {
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'vendor-amd', name: 'AMD Radeon Cloud', base_url: 'https://developer.amd.com.cn/radeon/api/v1' },
+          PRESET_MAP
+        ),
+        'amd',
+        '「AMD Radeon Cloud」by hostname must bind amd'
+      );
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'nvidia', name: 'Nvidia', base_url: 'https://integrate.api.nvidia.com/v1' },
+          PRESET_MAP
+        ),
+        'nvidia',
+        '「Nvidia」by hostname must bind nvidia'
+      );
+      // api.minimaxi.com is shared by minimax (name "MiniMax", v1.4.0) and
+      // minimax-cn (name "MiniMax (国内)", v1.5.0). The host step finds both and
+      // only rules 4)/5) may pick among them.
+      //
+      // Contract example「MiniMax」-> minimax-cn therefore resolves via rule 4:
+      // the provider id is minimax-cn. With a vendor id that is NOT a preset id,
+      // rule 5 (name === preset name) matches the library's actual「MiniMax」
+      // entry — that is minimax, since minimax-cn is named「MiniMax (国内)」.
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'minimax-cn', name: 'MiniMax', base_url: 'https://api.minimaxi.com/v1' },
+          PRESET_MAP
+        ),
+        'minimax-cn',
+        '「MiniMax」binds minimax-cn via rule 4 (provider id === preset id)'
+      );
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'some-vendor', name: 'MiniMax', base_url: 'https://api.minimaxi.com/v1' },
+          PRESET_MAP
+        ),
+        'minimax',
+        'rule 5 matches the preset actually named「MiniMax」within the shared-host candidates'
+      );
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'some-vendor', name: 'MiniMax (国内)', base_url: 'https://api.minimaxi.com/v1' },
+          PRESET_MAP
+        ),
+        'minimax-cn',
+        'rule 5 matches「MiniMax (国内)」to minimax-cn within the shared-host candidates'
+      );
+    });
+
+    test('preset_id="custom" stays unbound even when the hostname matches a preset', () => {
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'my-openai', name: 'My OpenAI', base_url: 'https://api.openai.com/v1', preset_id: 'custom' },
+          PRESET_MAP
+        ),
+        '',
+        'an explicit custom binding must never be overwritten by rule A'
+      );
+    });
+
+    test('an existing preset_id that exists in the library is kept', () => {
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'whatever', name: 'Whatever', base_url: 'https://example.org', preset_id: 'openai' },
+          PRESET_MAP
+        ),
+        'openai'
+      );
+      // A stale preset_id the library no longer knows falls through to rules 3–5.
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'whatever', name: 'Whatever', base_url: 'https://api.openai.com/v1', preset_id: 'deleted-preset' },
+          PRESET_MAP
+        ),
+        'openai'
+      );
+    });
+
+    test('same-host ties only resolve within the host candidates; otherwise unbound', () => {
+      // Neither provider id nor name matches minimax/minimax-cn -> rule 3's
+      // "挑不出就不绑": it must NOT fall through to an arbitrary global match.
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'zz-random', name: 'Some Vendor', base_url: 'https://api.minimaxi.com/v1' },
+          PRESET_MAP
+        ),
+        '',
+        'an unresolved same-host tie stays unbound'
+      );
+      // Rule 5 inside the candidate set: name "MiniMax (国内)" is minimax-cn's name.
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'zz-random', name: 'MiniMax (国内)', base_url: 'https://api.minimaxi.com/v1' },
+          PRESET_MAP
+        ),
+        'minimax-cn'
+      );
+    });
+
+    test('placeholder presets are skipped by the host step but bindable by id/name', () => {
+      // vertex's base_url carries a {project_id} placeholder: it can never win a
+      // hostname match (the "{" exclusion), but id matching still works.
+      assert.ok(PRESET_MAP.vertex.base_url.includes('{'), 'vertex preset must carry a placeholder base_url');
+      assert.equal(
+        matchPresetForProvider({ id: 'vertex', name: 'Google Vertex', base_url: 'https://x.example.org' }, PRESET_MAP),
+        'vertex'
+      );
+    });
+
+    test('case and whitespace are normalized; nothing matching -> empty string', () => {
+      assert.equal(
+        matchPresetForProvider({ id: 'DEEPSEEK', name: 'x', base_url: 'https://nothing.example.org' }, PRESET_MAP),
+        'deepseek',
+        'provider id is compared lowercased'
+      );
+assert.equal(
+        matchPresetForProvider(
+          { id: 'zz', name: ' nvidia ', base_url: 'https://nothing.example.org' },
+          PRESET_MAP
+        ),
+        'nvidia',
+        'provider name is trimmed and lowercased, then compared to preset name and preset id'
+      );
+      assert.equal(
+        matchPresetForProvider(
+          { id: 'zz', name: 'Not A Preset Name', base_url: 'https://nothing.example.org' },
+          PRESET_MAP
+        ),
+        '',
+        'a name that is neither a preset name nor a preset id stays unbound'
+      );
+      assert.equal(
+        matchPresetForProvider({ id: 'zz', name: 'Nothing', base_url: 'https://nothing.example.org' }, PRESET_MAP),
+        ''
+      );
+      assert.equal(matchPresetForProvider(null, PRESET_MAP), '');
+      assert.equal(matchPresetForProvider({ id: 'zz' }, null), '');
+    });
+
+    test('presetBindingFor reports the library version, empty for unbound', () => {
+      assert.deepEqual(presetBindingFor({ preset_id: 'amd' }, PRESET_MAP), {
+        preset_id: 'amd',
+        preset_version: PRESET_MAP.amd.version,
+      });
+      assert.deepEqual(presetBindingFor({}, PRESET_MAP), { preset_id: '', preset_version: '' });
+      assert.deepEqual(presetBindingFor({ preset_id: 'ghost' }, PRESET_MAP), {
+        preset_id: 'ghost',
+        preset_version: '',
+      });
+    });
+  });
+
+  describe('16b. loadConfig binds missing preset_id; saveConfigWithCAS writes it back', () => {
+    test('legacy KV without preset_id is bound on read and persisted on save', async () => {
+      const kv = new MockKV();
+      // A KV written before preset binding existed: no preset_id anywhere, and the
+      // provider ids are not preset ids either — only name/base_url can match.
+      await kv.put(
+        CONFIG_KV_KEY,
+        JSON.stringify({
+          _version: 7,
+          providers: {
+            amd_custom: {
+              name: 'AMD Radeon Cloud',
+              base_url: 'https://developer.amd.com.cn/radeon/api/v1',
+              enabled: true,
+              api_keys: [{ label: 'k1', key: 'sk-amd-plain-111', enabled: true }],
+            },
+            nvidia_custom: {
+              name: 'Nvidia',
+              base_url: 'https://integrate.api.nvidia.com/v1',
+              enabled: true,
+              api_keys: [{ label: 'k2', key: 'sk-nv-plain-222', enabled: true }],
+            },
+            minimax_custom: {
+              id: 'minimax-cn',
+              name: 'MiniMax',
+              base_url: 'https://api.minimaxi.com/v1',
+              enabled: true,
+              api_keys: [{ label: 'k3', key: 'sk-mm-plain-333', enabled: true }],
+            },
+            explicitly_custom: {
+              name: 'OpenAI Compatible',
+              base_url: 'https://api.openai.com/v1',
+              preset_id: 'custom',
+              enabled: true,
+              api_keys: [{ label: 'k4', key: 'sk-custom-plain-444', enabled: true }],
+            },
+            unknown_vendor: {
+              name: 'Unknown Vendor',
+              base_url: 'https://unknown.example.org/v1',
+              enabled: true,
+              api_keys: [{ label: 'k5', key: 'sk-unknown-plain-555', enabled: true }],
+            },
+          },
+          agent_models: {},
+          settings: {},
+        })
+      );
+
+      // 1. Read binds each provider per rule A, without touching the others.
+      const loaded = await loadConfig(kv);
+      assert.equal(loaded.providers.amd_custom.preset_id, 'amd');
+      assert.equal(loaded.providers.nvidia_custom.preset_id, 'nvidia');
+      assert.equal(loaded.providers.minimax_custom.preset_id, 'minimax-cn');
+      assert.equal(
+        loaded.providers.explicitly_custom.preset_id,
+        'custom',
+        'an explicit custom binding survives a read'
+      );
+      assert.equal(
+        loaded.providers.unknown_vendor.preset_id,
+        undefined,
+        'a provider that matches nothing stays unbound (no preset_id invented)'
+      );
+
+      // 2. Read alone does not write to KV — binding lands on save (CAS contract).
+      const rawAfterRead = JSON.parse(await kv.get(CONFIG_KV_KEY));
+      assert.equal(rawAfterRead.providers.amd_custom.preset_id, undefined);
+
+      // 3. Save writes the bindings back alongside the version bump.
+      const saved = await saveConfigWithCAS(loaded, kv);
+      assert.equal(saved._version, 8);
+      const raw = JSON.parse(await kv.get(CONFIG_KV_KEY));
+      assert.equal(raw._version, 8);
+      assert.equal(raw.providers.amd_custom.preset_id, 'amd');
+      assert.equal(raw.providers.nvidia_custom.preset_id, 'nvidia');
+      assert.equal(raw.providers.minimax_custom.preset_id, 'minimax-cn');
+      assert.equal(raw.providers.explicitly_custom.preset_id, 'custom');
+
+      // 4. A second read/load round trip is stable (idempotent binding).
+      const reloaded = await loadConfig(kv);
+      assert.equal(reloaded.providers.amd_custom.preset_id, 'amd');
+      assert.equal(reloaded.providers.explicitly_custom.preset_id, 'custom');
+    });
+
+    test('an admin POST without preset_id gets bound on the save path', async () => {
+      const kv = new MockKV();
+      await kv.put(CONFIG_KV_KEY, JSON.stringify({ _version: 1, providers: {}, agent_models: {}, settings: {} }));
+      // The console POSTs the provider form without a preset pick; the hub must bind.
+      await handleConfigRequest(
+        makeAdminReq('POST', '/api/config', {
+          _version: 1,
+          providers: {
+            'my-nvidia': {
+              name: 'Nvidia',
+              enabled: true,
+              base_url: 'https://integrate.api.nvidia.com/v1',
+              api_keys: [{ id: 'k1', label: 'k1', key: 'sk-nv-1234567890', enabled: true }],
+            },
+          },
+          settings: {},
+        }),
+        TEST_ENV,
+        kv
+      );
+      const raw = JSON.parse(await kv.get(CONFIG_KV_KEY));
+      assert.equal(raw.providers['my-nvidia'].preset_id, 'nvidia');
+    });
+  });
+
+  describe('16c. Manifest & fetch publish preset_version next to preset_id and rule_hash', () => {
+    test('manifest and fetch carry preset_version from the library; unbound -> empty string', async () => {
+      const kv = new MockKV();
+      await handleConfigRequest(
+        makeAdminReq('POST', '/api/config', {
+          _version: 1,
+          providers: {
+            nvidia: {
+              name: 'NVIDIA NIM',
+              preset_id: 'nvidia',
+              enabled: true,
+              base_url: 'https://integrate.api.nvidia.com/v1',
+              api_keys: [{ id: 'k1', label: 'pool-nv', key: 'sk-nv-secret-111', enabled: true }],
+            },
+            unbound: {
+              name: 'Unbound',
+              preset_id: 'custom',
+              enabled: true,
+              base_url: 'https://unbound.example.org/v1',
+              api_keys: [{ id: 'k2', label: 'pool-un', key: 'sk-un-secret-222', enabled: true }],
+            },
+          },
+        }),
+        TEST_ENV,
+        kv
+      );
+
+      const mf = await (
+        await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)
+      ).json();
+      const boundEntry = mf.providers.nvidia;
+      assert.equal(boundEntry.preset_id, 'nvidia');
+      assert.equal(boundEntry.preset_version, PRESET_MAP.nvidia.version);
+      assert.ok(boundEntry.preset_version, 'a bound provider must publish a non-empty preset_version');
+      assert.equal(boundEntry.rule_hash, ruleHashOf(PRESET_MAP.nvidia.adapter_rules));
+
+      const unboundEntry = mf.providers.unbound;
+      assert.equal(unboundEntry.preset_id, 'custom');
+      assert.equal(unboundEntry.preset_version, '', 'an unbound provider publishes an empty preset_version');
+      assert.equal(typeof unboundEntry.rule_hash, 'string');
+      assert.ok(unboundEntry.rule_hash.length > 0, 'rule_hash is always present');
+
+      const ft = await (
+        await handleVaultFetchRequest(
+          makeAdminReq('POST', '/api/vault/fetch', { provider: 'nvidia' }),
+          TEST_ENV,
+          kv
+        )
+      ).json();
+      assert.equal(ft.provider_config.preset_id, 'nvidia');
+      assert.equal(ft.provider_config.preset_version, PRESET_MAP.nvidia.version);
+      assert.equal(
+        ft.provider_config.rule_hash,
+        boundEntry.rule_hash,
+        'manifest and fetch must stamp the same rule_hash'
+      );
+
+      const ftUnbound = await (
+        await handleVaultFetchRequest(
+          makeAdminReq('POST', '/api/vault/fetch', { provider: 'unbound' }),
+          TEST_ENV,
+          kv
+        )
+      ).json();
+      assert.equal(ftUnbound.provider_config.preset_version, '');
+    });
+  });
+
+  describe('16d. Projection always uses the current preset rules when none are custom', () => {
+    test('no adapter_rules -> current preset rules; custom rules win; empty {} counts as none', () => {
+      // The library is the source of truth for providers without custom rules: a new
+      // preset shipped by the hub reaches the projection without touching the provider.
+      const config = {
+        providers: {
+          nvidia: {
+            name: 'NVIDIA NIM',
+            preset_id: 'nvidia',
+            enabled: true,
+            base_url: 'https://integrate.api.nvidia.com/v1',
+            api_keys: [{ label: 'pool', key: 'sk-nv-1', enabled: true, origin: 'vault' }],
+          },
+          amd_empty_rules: {
+            name: 'AMD',
+            preset_id: 'amd',
+            enabled: true,
+            base_url: 'https://developer.amd.com.cn/radeon/api/v1',
+            adapter_rules: {},
+            api_keys: [{ label: 'pool2', key: 'sk-amd-1', enabled: true, origin: 'vault' }],
+          },
+          hand_edited: {
+            name: 'OpenRouter',
+            preset_id: 'openrouter',
+            enabled: true,
+            base_url: 'https://openrouter.ai/api/v1',
+            adapter_rules: { auth_header: 'X-Custom', auth_prefix: 'Token ' },
+            api_keys: [{ label: 'pool3', key: 'sk-or-1', enabled: true, origin: 'vault' }],
+          },
+        },
+        agent_models: {},
+        settings: {},
+      };
+      const projected = projectConfigForNode(
+        { role: 'full', scope: { providers: ['*'], models: ['*'] } },
+        config,
+        PRESET_MAP
+      );
+
+      assert.deepEqual(
+        projected.providers.nvidia.adapter_rules,
+        PRESET_MAP.nvidia.adapter_rules,
+        'provider without custom rules must receive the current preset rules'
+      );
+      assert.deepEqual(
+        projected.adapter_rules.nvidia,
+        PRESET_MAP.nvidia.adapter_rules,
+        'the backward-compatible adapter_rules map must agree'
+      );
+      assert.equal(projected.providers.nvidia.preset_id, 'nvidia');
+      assert.equal(projected.providers.nvidia.preset_version, PRESET_MAP.nvidia.version);
+
+      assert.deepEqual(
+        projected.providers.amd_empty_rules.adapter_rules,
+        PRESET_MAP.amd.adapter_rules,
+        'an empty adapter_rules object means "no custom rules" and falls back to the preset'
+      );
+
+      assert.deepEqual(
+        projected.providers.hand_edited.adapter_rules,
+        { auth_header: 'X-Custom', auth_prefix: 'Token ' },
+        'custom adapter_rules must never be replaced by the preset'
+      );
+      assert.equal(projected.providers.hand_edited.preset_version, PRESET_MAP.openrouter.version);
+    });
+
+    test('a newly deployed preset version reaches the projection on the next pull', () => {
+      // Simulates "the hub deployed a new preset": the same provider config, a library
+      // whose preset rules changed -> the projection must follow the library.
+      const oldLibrary = { amd: { ...PRESET_MAP.amd, version: '1.0.0', adapter_rules: { merge_system: false } } };
+      const newLibrary = { amd: { ...PRESET_MAP.amd, version: '2.0.0', adapter_rules: { merge_system: true } } };
+      const config = {
+        providers: {
+          amd: {
+            name: 'AMD',
+            preset_id: 'amd',
+            enabled: true,
+            base_url: 'https://developer.amd.com.cn/radeon/api/v1',
+            api_keys: [{ label: 'k', key: 'sk-amd', enabled: true, origin: 'vault' }],
+          },
+        },
+        agent_models: {},
+        settings: {},
+      };
+      const node = { role: 'full', scope: { providers: ['*'], models: ['*'] } };
+      const before = projectConfigForNode(node, config, oldLibrary);
+      const after = projectConfigForNode(node, config, newLibrary);
+      assert.equal(before.providers.amd.preset_version, '1.0.0');
+      assert.equal(before.providers.amd.adapter_rules.merge_system, false);
+      assert.equal(after.providers.amd.preset_version, '2.0.0');
+      assert.equal(after.providers.amd.adapter_rules.merge_system, true);
+    });
+
+    test('an unbound provider with no rules projects no adapter_rules at all', () => {
+      const config = {
+        providers: {
+          bare: {
+            name: 'Bare',
+            preset_id: 'custom',
+            enabled: true,
+            base_url: 'https://bare.example.org',
+            api_keys: [{ label: 'k', key: 'sk-bare', enabled: true, origin: 'vault' }],
+          },
+        },
+        agent_models: {},
+        settings: {},
+      };
+      const projected = projectConfigForNode({ role: 'lite', scope: { providers: ['*'], models: ['*'] } }, config, PRESET_MAP);
+      assert.equal(projected.providers.bare.adapter_rules, undefined);
+      assert.equal(projected.providers.bare.preset_id, 'custom');
+      assert.equal(projected.providers.bare.preset_version, '');
+    });
+  });
+
+  describe('16e. resolveAdapterRules agrees across manifest / fetch / projection', () => {
+    test('absent rules, empty rules and custom rules resolve identically everywhere', () => {
+      const absent = resolveAdapterRules({ preset_id: 'amd' }, PRESET_MAP);
+      assert.equal(absent.fromPreset, true);
+      assert.deepEqual(absent.rules, PRESET_MAP.amd.adapter_rules);
+
+      const empty = resolveAdapterRules({ preset_id: 'amd', adapter_rules: {} }, PRESET_MAP);
+      assert.equal(empty.fromPreset, true);
+      assert.deepEqual(empty.rules, PRESET_MAP.amd.adapter_rules);
+
+      const custom = resolveAdapterRules({ preset_id: 'amd', adapter_rules: { merge_system: true } }, PRESET_MAP);
+      assert.equal(custom.fromPreset, false);
+      assert.deepEqual(custom.rules, { merge_system: true });
+
+      const unbound = resolveAdapterRules({ preset_id: 'custom' }, PRESET_MAP);
+      assert.equal(unbound.fromPreset, false);
+      assert.deepEqual(unbound.rules, {});
+
+      const ghost = resolveAdapterRules({ preset_id: 'deleted' }, PRESET_MAP);
+      assert.deepEqual(ghost.rules, {});
+    });
+
+    test('manifest, fetch and projection agree on the rule_hash of a provider without custom rules', async () => {
+      const kv = new MockKV();
+      await handleConfigRequest(
+        makeAdminReq('POST', '/api/config', {
+          _version: 1,
+          providers: {
+            amd_empty: {
+              name: 'AMD Radeon Cloud',
+              preset_id: 'amd',
+              enabled: true,
+              base_url: 'https://developer.amd.com.cn/radeon/api/v1',
+              adapter_rules: {},
+              api_keys: [{ id: 'k1', label: 'pool-a', key: 'sk-amd-secret-999', enabled: true, origin: 'vault' }],
+            },
+          },
+        }),
+        TEST_ENV,
+        kv
+      );
+      const mf = await (
+        await handleVaultManifestRequest(makeAdminReq('GET', '/api/vault/manifest'), TEST_ENV, kv)
+      ).json();
+      const ft = await (
+        await handleVaultFetchRequest(
+          makeAdminReq('POST', '/api/vault/fetch', { provider: 'amd_empty' }),
+          TEST_ENV,
+          kv
+        )
+      ).json();
+      assert.equal(mf.providers.amd_empty.rule_hash, ft.provider_config.rule_hash);
+      assert.equal(mf.providers.amd_empty.rule_hash, ruleHashOf(PRESET_MAP.amd.adapter_rules));
+      assert.deepEqual(ft.provider_config.adapter_rules, PRESET_MAP.amd.adapter_rules);
     });
   });
 });

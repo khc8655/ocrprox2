@@ -2,6 +2,7 @@
   "$comment": "Backend contract for LLMProxy2 shared Admin UI and Node communication across hub, lite, and full roles.",
   "version": 3,
   "$changelog": [
+    "v3.14: 预设与中枢同步（约定 C，2026-11）。新增 GET /api/admin/providers/preset-status（Full only）：逐供应商给出 origin/preset_id/current_version/latest_version/has_update/note，本地供应商的latest_version 取内置预设库，中枢供应商取中枢 manifest 的 preset_version（连不上中枢时 note 写原因、has_update=false）。新增 POST /api/admin/providers/sync（Full only，仅操作者点击触发，无定时器/启动钩子）：每个中枢供应商整体重新拉取（地址/协议/规则/中枢 Key 全量替换）、每个绑定预设的本地供应商在不被手改时换成最新预设规则、未绑定的本地供应商按规则 A 补绑；返回 {ok, updated[{id,from_version,to_version,keys_added,keys_removed}], skipped[{id,reason}], errors[{id,error}]}，部分失败也 200。ProviderConfig 新增 preset_version（string，omitempty）。中枢托管供应商允许本地 Key 共存：origin=local 的 Key 完全可增删改、重新拉取与一键更新只替换中枢 Key 并保留本地 Key 及其启用开关；本地 Key 与中枢 Key 同标签时 POST /api/config 返回 400 {\"ok\":false,\"error\":\"key_label_conflict\",\"label\":\"…\"}。两个新端点登记在 internal/router/readonly.go 的 FullOnlyRoutes。前端包体硬门禁由 327,680 字节上调为 393,216 字节（384 KiB）。",
     "v3.13: local rejections are now first-class log entries. A request the gateway refuses before dialing any upstream (model not configured -> 404, config unavailable -> 503, no candidate available -> 503, every candidate cooling down or RPM-capped -> 502) writes one usage.jsonl record and one RequestTrace with a synthetic Try carrying reason but no provider/key, so recent-requests and the error analysis no longer omit client-side failures. UsageRecord gains top-level reason / err_type / err / rid (hoisted from the final failed try; try_failed stays per-key only, so keyless rejections never pollute key health stats). The reason enum gains no_candidate and config_unavailable. app.log now describes the LAST FAILURE instead of the last attempt (a successful failover used to print reason=-), appends recovered_by=provider/key when a later attempt succeeded, and appends note= when every candidate was skipped locally. POST /api/admin/test-key now persists its verdict immediately through config.LocalSource.PersistKeyTestState (provider-scoped, last_test only), so the key-row pill survives a refresh without an explicit provider save; PersistKeyEntry additionally never blanks a stored secret when the submitted entry carries none. RouteCandidate.reasoning_effort is no longer write-only: the scheduler now honours it on the wire — OpenAI-dialect providers receive body.reasoning_effort (normalized to the nearest level the model catalog says the model supports), Anthropic-dialect providers receive body.thinking={type:enabled,budget_tokens} only when the response limit leaves room for it (otherwise the body is forwarded untouched rather than risking a 400), and an empty value keeps following the client.",
     "v3.12: added POST /api/admin/test-key (hub + full) — a per-key real inference probe (provider + optional key_id/key_label/model; one 你好, max_tokens 16, stream false, 20s, no retry/scheduler/cooldown) returning {ok, valid, status, latency_ms, provider, key_id, key_label, model, model_source, api_type, reply_text, reason, err_type, error, rid}. model_source is request|route|preset|fallback. Failure reason/err_type reuse the v3.11 taxonomy (full calls scheduler.ClassifyFailure; the hub uses edgeone-hub/lib/failure_reason.js with identical enum values). Full records a probe RequestTrace (source=probe, endpoint=/admin/test-key) and skips the usage ledger for source==probe. Config KeyEntry gains an optional last_test {ok, status, latency_ms, reason, err_type, error, reply_text, at} written by the console and persisted with the provider save. The model row's 测试路由 button was removed from the UI; /api/admin/test-agent-model and /api/admin/test-candidate stay registered but are no longer called by the console.",
     "v3.11: every failed upstream attempt now carries a normalized failure reason. Try.reason is a closed enum (auth_invalid | quota_exhausted | rate_limited | model_not_found | context_too_long | upstream_error | timeout | network | client_disconnected | bad_response | protocol_mismatch | unknown) replacing the coarse auth_error / rate_limit / server_error / client_error / network_error / stream_peek_error values; Try gains err_type (upstream machine code, [a-z0-9_], max 64), err (upstream text, whitespace collapsed to one line, max 280 chars, secret-scrubbed) and rid (upstream request id, [a-z0-9_], max 128), while error_snippet stays for older readers. The usage ledger try_failed[] entries (TryFailure) now carry the same reason/err_type/err/rid for every failed key, including the failed tries of a request that later succeeded through failover. RequestTrace gains an optional source field (empty or client = real client traffic, probe = console-initiated test). app.log writes exactly one line per failing request: req, model, endpoint, status, reason, err_type, provider, key, tries, ms, err.",
@@ -85,7 +86,18 @@
           "current_version": "integer",
           "submitted_version": "integer"
         }
-      }
+      },
+      "full_error_responses": [
+        {
+          "status": 400,
+          "body": {
+            "ok": false,
+            "error": "key_label_conflict",
+            "label": "string (与中枢 Key 冲突的标签)"
+          },
+          "when": "full only（约定 C）：提交的某个 Origin=local Key 的 Label 与同一供应商的中枢（origin=vault）Key 的 Label/ID 相同，或与该供应商另一把本地 Key 同标签。校验在写盘前完成，配置不变；其它本地 Key 与中枢 Key 可正常共存。"
+        }
+      ]
     },
     "nodes_list": {
       "method": "GET",
@@ -361,6 +373,7 @@
           "<provider_id>": {
             "name": "string",
             "preset_id": "string",
+            "preset_version": "string (预设库该预设的 version；未绑定为空串。节点拉取时记录到 ProviderConfig.preset_version)",
             "base_url": "string",
             "anthropic_base_url": "string",
             "keys": "array of key-label strings",
@@ -410,6 +423,7 @@
         "provider_config": {
           "name": "string",
           "preset_id": "string",
+          "preset_version": "string (预设库该预设的 version；未绑定为空串。整体替换时写入节点的 ProviderConfig.preset_version)",
           "api_type": "string",
           "base_url": "string",
           "anthropic_base_url": "string",
@@ -435,6 +449,64 @@
         "502": "hub unreachable, or hub returned 200 with a body that is not a JSON object (never echoed unmasked)"
       },
       "semantics": "on-demand single-provider fetch (replaces the removed full-sync POST /api/vault/sync). The fetch target is ALWAYS the configured vault (stored config URL + node token, or CLI defaults) — callers cannot override hub_url/node_token on this endpoint, so an admin-password leak cannot repoint the auto-import at an attacker hub. A full provider fetch (no key_label/keys) replaces the hub-managed fields (name/base_url/anthropic_base_url/adapter_rules/preset_id/api_type/hide_client_name/rule_hash) and the vault key list wholesale on the full node: keys deleted locally reappear and keys removed on the hub disappear. Provider enabled and per-key enabled are local operational toggles and are never taken from the payload. A key-label subset fetch (key_label or keys present) merges without dropping the other vault keys. Vault keys land with origin=vault; providers with a local/legacy-empty origin and local keys are never overwritten. The full node auto-imports the fetched provider and masks plaintext key material before echoing the hub response."
+    },
+    "providers_preset_status": {
+      "method": "GET",
+      "path": "/api/admin/providers/preset-status",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "response": {
+        "ok": true,
+        "update_count": "integer (has_update=true 的行数)",
+        "providers": [
+          {
+            "id": "string",
+            "origin": "local | vault",
+            "preset_id": "string (未绑定为空串)",
+            "current_version": "string (本地供应商取 ProviderConfig.preset_version；中枢供应商取上次拉取的 preset_version)",
+            "latest_version": "string (本地供应商取内置预设库；中枢供应商取中枢 manifest 的 preset_version；未知为空串)",
+            "has_update": "boolean",
+            "note": "string (未绑定/预设缺失/中枢不可达等原因；空串表示正常)"
+          }
+        ]
+      },
+      "semantics": "预设状态查询（约定 C，Full only）。逐供应商对比 current_version 与 latest_version：本地供应商的 latest_version 取编译进二进制的内置预设库（internal/provider/presets.go，与 /api/admin/presets-extra 同源），中枢供应商的取中枢 /api/vault/manifest 返回的 preset_version（一次 manifest 拉取覆盖全部中枢供应商）。连不上中枢或清单未返回该供应商时 note 写原因、has_update=false。只读端点：不写配置、不回传任何 Key 材料。Hub 主机没有该能力，控制台不显示依赖它的入口。"
+    },
+    "providers_sync": {
+      "method": "POST",
+      "path": "/api/admin/providers/sync",
+      "auth": "ADMIN_PASSWORD",
+      "roles": [
+        "full"
+      ],
+      "request": "无请求体",
+      "response": {
+        "ok": true,
+        "updated": [
+          {
+            "id": "string",
+            "from_version": "string",
+            "to_version": "string",
+            "keys_added": "integer (中枢 Key 标签新增数；本地 Key 不计入)",
+            "keys_removed": "integer (中枢 Key 标签消失数；本地 Key 不计入)"
+          }
+        ],
+        "skipped": [
+          {
+            "id": "string",
+            "reason": "string (规则已手动修改，未覆盖 / 已是最新版本 / 已选择自定义（不绑定预设） / 未匹配到预设 / 预设不存在于内置库)"
+          }
+        ],
+        "errors": [
+          {
+            "id": "string",
+            "error": "string"
+          }
+        ]
+      },
+      "semantics": "一键更新（约定 C，Full only）：只有操作者点击才执行，无定时器、无启动钩子、无任何自动触发。每个中枢托管供应商从中枢 /api/vault/fetch 整体重新拉取（地址、协议、规则、中枢 Key 全量替换）并保留本地 Key 及其启用开关；每个绑定了预设的本地供应商，adapter_rules 为空或仍等于预设当前规则时换成最新预设规则并更新 preset_version，手动改过的跳过（reason=「规则已手动修改，未覆盖」；节点不保留预设规则历史，故「仍等于所记录版本」只能对当前规则求证）；未绑定预设的本地供应商按规则 A（见 provider_config_semantics.preset_match_rule_a）尝试绑定。单个中枢供应商失败只进 errors；本地供应商的规则更新是一次原子保存，保存失败则该批全部进 errors 且磁盘配置不变。部分失败也返回 200，供应商之间互不影响。Hub 主机没有该端点。"
     },
     "detect_provider": {
       "method": "POST",
@@ -744,7 +816,10 @@
   },
   "provider_config_semantics": {
     "rpm_per_key": "该供应商整体 RPM 上限（调度器按供应商维度限流），0=不限：>0 时调度器在派发前先对整个供应商（独立 RPMLimiter 实例 providerRPMLimiter 的桶 provider:<provider_id>，与 Key 级桶 provider:key_label 分属两个实例，命名空间不相交由构造保证）做一次滑动窗口 TryAcquire，窗口满则该供应商全部 Key 一律不再派发（isCandidateHealthy 排序期判不健康与 Dispatch / ExecuteEndpoint 候选遍历两处一致，跳过原因记 <provider_id> (provider RPM limit)，相同供应商去重）。Key 级拒绝、OAuth 刷新或请求构建等拨号前失败会退回已取的供应商令牌（TryAcquireToken/Release 语义），窗口只统计真实发出的请求。不再回退进 Key 级检查——N 把 Key 不会各拿一份整供应商额度。internal/scheduler/rpm.go providerRPMKey()/TryAcquireToken()、internal/scheduler/scheduler.go、internal/scheduler/high_conc.go。",
-    "max_rpm": "Key 级 RPM 上限（api_keys[].max_rpm），语义不变、独立生效：仅约束该 Key 自身的滑动窗口（桶 provider:key_label），0=不限；调度顺序为先查供应商窗口、再查 Key 窗口。"
+    "max_rpm": "Key 级 RPM 上限（api_keys[].max_rpm），语义不变、独立生效：仅约束该 Key 自身的滑动窗口（桶 provider:key_label），0=不限；调度顺序为先查供应商窗口、再查 Key 窗口。",
+    "preset_version": "供应商当前规则来自哪个预设版本（与 shared/presets/<id>.json 的 version 对应；空串 = 未绑定或版本未知）。中枢供应商的值由 /api/vault/manifest 与 /api/vault/fetch 的 preset_version 下发并在拉取时写入；本地供应商由 POST /api/admin/providers/sync 在采用预设规则时写入。GET /api/admin/providers/preset-status 用它对比 latest_version 判断 has_update。",
+    "local_keys_on_vault_providers": "约定 C（2026-11）：origin=vault 的供应商允许 origin=local 的 Key 共存。本地 Key 完全可增删改；中枢 Key 只读可删（既有锁定：值/标签被篡改时从存储恢复，提交缺它 = 本地删除）。重新拉取（/api/vault/fetch 整体替换）与一键更新（/api/admin/providers/sync）只替换中枢 Key，本地 Key 与它们的启用开关原样保留；中枢新增 Key 与本地 Key 同标签时该中枢 Key 被跳过（本地优先）。本地 Key 与中枢 Key 同标签（Label 或 ID 相同）时保存返回 400 key_label_conflict（见 config_write 的 errors），校验在写盘前完成、配置不变。",
+    "preset_match_rule_a": "预设匹配规则 A（三端同序同结果：edgeone-hub/lib/presetbind.js、shared/admin/js/app.js 的 matchPresetRules、internal/admin/preset_match.go）。输入供应商 id/name/base_url 与预设库（shared/presets/*.json：id/name/base_url/version）：1) preset_id===\"custom\" → 显式不绑；2) 已有 preset_id 且库内存在 → 保留；3) base_url 主机名（小写）等于某预设 base_url 主机名 → 绑定（base_url 含「{」占位符的预设跳过；同主机多命中用 4)/5) 在这几个里挑，挑不出就不绑、不落回全库匹配）；4) 供应商 id（小写）等于预设 id；5) 供应商名称（小写去首尾空格）等于预设名称（小写）或预设 id；6) 都不中 → 不绑（界面显示「自定义」）。例：「AMD Radeon Cloud」https://developer.amd.com.cn/radeon/api/v1 → amd；「Nvidia」https://integrate.api.nvidia.com/v1 → nvidia；「MiniMax」https://api.minimaxi.com/v1 → minimax-cn。"
   },
   "auth_semantics": {
     "login": {

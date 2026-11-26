@@ -29,9 +29,14 @@ type ProxyConfig struct {
 
 // ProviderConfig 供应商配置（兼容 1 代字段 + Magpie 探活扩展）
 type ProviderConfig struct {
-	ID               string            `json:"id,omitempty"`
-	Name             string            `json:"name,omitempty"`
-	PresetID         string            `json:"preset_id,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	PresetID string `json:"preset_id,omitempty"`
+	// PresetVersion 记录当前生效的 adapter_rules 来自哪个预设版本（与
+	// shared/presets/<id>.json 的 version 字段对应）。空串 = 版本未知（旧数据或
+	// 未绑定预设）。一键更新（POST /api/admin/providers/sync）用它判断本地供应商
+	// 的规则是否仍与预设同步；从中枢拉取时取中枢 manifest 的 preset_version。
+	PresetVersion    string            `json:"preset_version,omitempty"`
 	APIType          string            `json:"api_type,omitempty"`
 	Protocols        []string          `json:"protocols,omitempty"`
 	BaseURL          string            `json:"base_url"`

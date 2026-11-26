@@ -1,4 +1,6 @@
 import { constantTimeCompare, hashToken } from './crypto.js';
+import { matchPresetForProvider } from './presetbind.js';
+import { getPresetMap } from './presets.js';
 
 export const CONFIG_KV_KEY = 'llmproxy_config';
 
@@ -121,6 +123,37 @@ export function sanitizeStoredConfig(config) {
 }
 
 /**
+ * Fills in preset_id for providers that carry none, using rule A of the
+ * cross-runtime preset-binding contract (lib/presetbind.js). Mutates and
+ * returns the given config.
+ *
+ * Why on read: existing KV entries were written before preset binding existed.
+ * The operator should not have to open every provider to get them bound —
+ * the next read binds them, and the next save writes the result back to KV.
+ *
+ * Only providers WITHOUT a preset_id are touched, exactly as the contract
+ * specifies: "custom" (explicitly unbound), a preset_id that exists in the
+ * library, and even a stale preset_id the library no longer knows are all left
+ * alone. origin=local providers are included: the binding is provider metadata,
+ * not an export decision (the projection still excludes local providers).
+ */
+export function applyPresetBindings(config, presetsMap = getPresetMap()) {
+  if (!config || typeof config !== 'object') return config;
+  const providers = config.providers;
+  if (!providers || typeof providers !== 'object') return config;
+  for (const [pId, pData] of Object.entries(providers)) {
+    if (!pData || typeof pData !== 'object') continue;
+    if (typeof pData.preset_id === 'string' && pData.preset_id.trim()) continue;
+    const matched = matchPresetForProvider(
+      { id: pData.id || pId, name: pData.name || '', base_url: pData.base_url || '' },
+      presetsMap
+    );
+    if (matched) pData.preset_id = matched;
+  }
+  return config;
+}
+
+/**
  * Load config from KV or return default.
  */
 export async function loadConfig(kv) {
@@ -137,7 +170,7 @@ export async function loadConfig(kv) {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (parsed && typeof parsed._version === 'number') {
-        return sanitizeStoredConfig(parsed);
+        return applyPresetBindings(sanitizeStoredConfig(parsed));
       }
     } catch (_) {}
   }
@@ -191,7 +224,10 @@ export async function saveConfigWithCAS(incomingConfig, kv) {
 
   // Apply Kernel Guard to restore masked secrets, then drop removed settings
   // fields so a POST echoing a legacy GET cannot write them back to KV.
-  const sanitized = sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored));
+  // Then fill preset bindings for providers that still carry none: the console
+  // POSTs back whatever GET handed it, and a config written by an older Hub has
+  // no preset_id there, so the save is the moment the binding lands in KV.
+  const sanitized = applyPresetBindings(sanitizeStoredConfig(applyKernelGuard(incomingConfig, stored)));
 
   // Bump version
   sanitized._version = currentVer + 1;
