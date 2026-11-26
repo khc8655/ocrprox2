@@ -3,7 +3,6 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync, existsSy
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gzipSync } from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const adminDir = __dirname;
@@ -298,67 +297,48 @@ export async function onRequestOptions() {
 }
 console.log(`   ✓ ${apiRoutes.length} edge-functions/api/ route entry points generated successfully`);
 
-// 11. Gate 5: EdgeOne Makers script budgets. Two limits, both learned from
-// outages: the per-SCRIPT ceiling (v20261123-07 and v20261126-02 both took the
-// whole Hub down with 545 "Error return from script" when a route's bundle —
-// entry file plus everything its static imports reach — crossed it), and the
-// whole-directory budget. Per-script is what kills the site: it is measured by
-// bundling each route entry with its static import closure, gzip-compressed.
-const DIR_GZ_BUDGET = 41000;
-const SCRIPT_GZ_BUDGET = 13600;
-function sumDirGzip(dir) {
+// 11. Gate 5: EdgeOne edge-functions total size.
+//
+// This gate exists because the Hub went fully dark (545 "Error return from
+// script" on every path, build and CI green) twice: v20261123-07 and
+// v20261126-02. Both times the platform refused to load the deployed edge
+// script: `XX-Script-Debug: query bu_script_<id>.js failed: file too big`.
+//
+// What is actually measured: the platform registers EVERY file under
+// /edge-functions as an edge function (the console's 函数 tab lists them, e.g.
+// 27 routes), and bundles them into one script. Its ceiling is far below the
+// 5 MB/function the public docs state, and neither the docs nor the console
+// expose the number. Three production deploys bracket it:
+//
+//   2.14.0 (this file's baseline)  125,811 bytes of JS  -> served fine
+//   2.15.0                         131,897 bytes        -> whole site 545
+//   2.15.0 slimmed                 131,808 bytes        -> whole site 545
+//
+// So 125,811 is the largest size known to work, and the ceiling lies somewhere
+// between it and 131,808 (gzip is not the metric: all three are 26-28 KB gz).
+// The budget is that known-good size: any hub change must be paid for by
+// deleting something else, or split so it does not touch the edge at all
+// (which is why preset auto-binding now lives in the console, not the Hub).
+const EDGE_TOTAL_JS_BUDGET = 125811;
+function totalJsBytes(dir) {
   let total = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, entry.name);
-    if (entry.isDirectory()) total += sumDirGzip(p);
-    else if (entry.isFile()) total += gzipSync(readFileSync(p)).length;
+    if (entry.isDirectory()) total += totalJsBytes(p);
+    else if (entry.isFile() && entry.name.endsWith('.js')) total += statSync(p).size;
   }
   return total;
 }
-function routeScriptGzip(entryPath) {
-  const seen = new Set();
-  const stack = [entryPath];
-  let total = 0;
-  while (stack.length > 0) {
-    const f = stack.pop();
-    if (seen.has(f) || !existsSync(f)) continue;
-    seen.add(f);
-    total += gzipSync(readFileSync(f)).length;
-    const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
-      const t = resolve(dirname(f), m[1]);
-      stack.push(existsSync(t) ? t : t + '.js');
-    }
-  }
-  return total;
-}
-const edgeGzBytes = sumDirGzip(edgeFuncDir);
-console.log(`\n10. Verifying EdgeOne edge-functions/ budgets (dir <= ${DIR_GZ_BUDGET}, per-route script <= ${SCRIPT_GZ_BUDGET})...`);
-let scriptFail = null;
-for (const entry of readdirSync(edgeFuncDir, { withFileTypes: true })) {
-  if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
-  const gz = routeScriptGzip(join(edgeFuncDir, entry.name));
-  if (gz > SCRIPT_GZ_BUDGET) {
-    scriptFail = `${entry.name}: ${gz} bytes > ${SCRIPT_GZ_BUDGET}`;
-    console.error(`   ✗ FAILED: route ${entry.name} bundles ${gz} gzip bytes over the per-script budget`);
-  }
-}
-for (const sub of ['api']) {
-  const apiDir = join(edgeFuncDir, sub);
-  for (const entry of readdirSync(apiDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
-    const gz = routeScriptGzip(join(apiDir, entry.name));
-    if (gz > SCRIPT_GZ_BUDGET) {
-      scriptFail = `${sub}/${entry.name}: ${gz} bytes > ${SCRIPT_GZ_BUDGET}`;
-      console.error(`   ✗ FAILED: route ${sub}/${entry.name} bundles ${gz} gzip bytes over the per-script budget`);
-    }
-  }
-}
-if (edgeGzBytes > DIR_GZ_BUDGET || scriptFail) {
-  console.error(`   ✗ FAILED: edge-functions budgets exceeded (dir ${edgeGzBytes} / ${DIR_GZ_BUDGET}${scriptFail ? '; ' + scriptFail : ''})`);
+const edgeJsBytes = totalJsBytes(edgeFuncDir);
+console.log(`\n10. Verifying EdgeOne edge-functions size (${edgeJsBytes} bytes of JS <= ${EDGE_TOTAL_JS_BUDGET})...`);
+if (edgeJsBytes > EDGE_TOTAL_JS_BUDGET) {
+  console.error(`   ✗ FAILED: edge-functions carries ${edgeJsBytes} bytes of JS, over the ${EDGE_TOTAL_JS_BUDGET}-byte budget`);
+  console.error('     The platform refuses to load a deployment above its undocumented script ceiling:');
+  console.error('     every path returns 545 with "XX-Script-Debug: file too big". Do not raise this budget');
+  console.error('     without a real deploy proving the new number works — delete bytes, or keep the code out of /edge-functions.');
   process.exit(1);
 }
-console.log(`   ✓ edge-functions/ dir gzip ${edgeGzBytes} bytes <= ${DIR_GZ_BUDGET}; every route script <= ${SCRIPT_GZ_BUDGET}`);
+console.log(`   ✓ edge-functions JS total ${edgeJsBytes} bytes <= ${EDGE_TOTAL_JS_BUDGET} (headroom ${EDGE_TOTAL_JS_BUDGET - edgeJsBytes})`);
 
 console.log('\n=== ALL 5 HARD GATES PASSED! Dist bundle generated at: ===');
 console.log(distPath);
