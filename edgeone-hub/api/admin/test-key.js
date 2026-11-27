@@ -160,10 +160,10 @@ function resolveModel(config, providerName, prov, requested, apiType) {
     : '';
   if (recommended) return { model: recommended.trim(), source: 'preset' };
 
-  return {
-    model: apiType === 'anthropic-messages' ? 'claude-3-haiku-20240307' : 'gpt-4o-mini',
-    source: 'fallback',
-  };
+  // No blind guess (twin of internal/admin/test_key.go resolveTestModel): a
+  // made-up model name is rejected by every relay, and the console then shows a
+  // healthy key as "失败 · 404 model_not_found". Caller answers model_unspecified.
+  return { model: '', source: 'missing' };
 }
 
 function truncateChars(value, max) {
@@ -314,9 +314,19 @@ export async function handleTestKey(request, env, fetchImplOrOpts) {
   const targetUrl = isAnthropic
     ? joinUpstreamUrl(baseUrl, 'messages')
     : joinUpstreamUrl(baseUrl, 'chat/completions');
+  // URL safety first: it is the stronger invariant, and a provider with neither
+  // a route nor a preset model must still be rejected for an unsafe URL.
   if (!isSafePublicHttpUrl(targetUrl)) {
     result.error = 'unsafe_upstream_url';
     result.status = 400;
+    return jsonResponse(result, 400);
+  }
+
+  if (!resolved.model) {
+    // Nothing safe to send the probe to. Answering with an action item beats
+    // blaming a healthy key for a model the vendor does not serve.
+    result.reason = 'model_unspecified';
+    result.error = 'provider has no route and no preset model: pass a model to test this key';
     return jsonResponse(result, 400);
   }
 

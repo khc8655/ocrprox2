@@ -96,6 +96,15 @@ func classifyHTTPStatus(status int, errBody []byte) string {
 		// 429 is overloaded: providers use it for both throttling and an empty
 		// account. The body is the only signal that separates them, and the
 		// distinction decides whether an operator raises RPM limits or tops up.
+		//
+		// Throttling markers win over quota markers: providers name the error
+		// type "quota_exceeded_error" while the message says "rps exhausted"
+		// (SenseNova, observed 2026-11-27). Reading that as an exhausted balance
+		// would park every key until the daily reset on a plain rate limit.
+		if containsAny(body, "rps", "rpm", "tpm", "rate limit", "ratelimit", "too many requests",
+			"concurrency", "throttl", "capacity", "retry in", "retry after", "限流", "请稍后重试") {
+			return ReasonRateLimited
+		}
 		if containsAny(body, "insufficient_quota", "quota", "balance", "credit", "billing", "余额", "欠费") {
 			return ReasonQuotaExhausted
 		}

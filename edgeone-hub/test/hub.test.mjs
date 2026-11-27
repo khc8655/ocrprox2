@@ -791,6 +791,9 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       const req = makeAdminReq('POST', '/api/admin/test-key', {
         provider: 'mockprov',
         key_label: 'live',
+        // The probe no longer invents a model: the console always sends the
+        // model it is testing (see resolveModel's `missing` branch).
+        model: 'mock-model-1',
       });
       const resp = await handleTestKey(req, env, mockFetch);
       assert.equal(resp.status, 200);
@@ -805,15 +808,15 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       assert.equal(data.key_id, 'k_live');
       assert.equal(data.key_label, 'live');
       assert.equal(data.api_type, 'openai-completions');
-      assert.equal(data.model, 'gpt-4o-mini');
-      assert.equal(data.model_source, 'fallback');
+      assert.equal(data.model, 'mock-model-1');
+      assert.equal(data.model_source, 'request');
       assert.equal(data.rid, 'req_hub_42');
       assert.equal(data.reason, '');
       assert.equal(data.err_type, '');
 
       assert.equal(calledUrl, 'https://api.mock.example.com/v1/chat/completions');
       assert.equal(calledHeaders.authorization, `Bearer ${SECRET}`);
-      assert.equal(calledBody.model, 'gpt-4o-mini');
+      assert.equal(calledBody.model, 'mock-model-1');
       assert.equal(calledBody.max_tokens, 16);
       assert.equal(calledBody.stream, false);
       assert.deepEqual(calledBody.messages, [{ role: 'user', content: '你好' }]);
@@ -920,6 +923,7 @@ describe('EdgeOne Makers Lightweight Hub Test Suite', () => {
       const req = makeAdminReq('POST', '/api/admin/test-key', {
         provider: 'mockprov',
         key_id: 'k_live',
+        model: 'claude-mock-1',
       });
       const resp = await handleTestKey(req, env, mockFetch);
       const data = await resp.json();

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -86,7 +87,7 @@ func TestAdminServer_TestKey_Success(t *testing.T) {
 	srv, _, _, mux, _ := newTestKeyServer(t, upstream.URL)
 	srv.SetHTTPClient(upstream.Client())
 
-	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov"}`)
+	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov","model":"mock-model-1"}`)
 	t.Logf("test-key success response: %s", rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -97,8 +98,10 @@ func TestAdminServer_TestKey_Success(t *testing.T) {
 	if resp.Status != 200 || resp.ReplyText != "你好！我是测试回复。" {
 		t.Fatalf("unexpected reply: %+v", resp)
 	}
-	if resp.Model != "gpt-4o-mini" || resp.ModelSource != "fallback" {
-		t.Errorf("expected fallback model gpt-4o-mini, got model=%q source=%q", resp.Model, resp.ModelSource)
+	// No invented model: the caller states what it is probing (see
+	// TestAdminServer_TestKey_NoModelIsRefused for the missing-model branch).
+	if resp.Model != "mock-model-1" || resp.ModelSource != "request" {
+		t.Errorf("expected request model mock-model-1, got model=%q source=%q", resp.Model, resp.ModelSource)
 	}
 	if resp.APIType != "openai-completions" || resp.KeyLabel != "k-one" || resp.KeyID != "k1" {
 		t.Errorf("unexpected protocol/key fields: %+v", resp)
@@ -112,7 +115,7 @@ func TestAdminServer_TestKey_Success(t *testing.T) {
 	if gotAuth != "Bearer "+testKeySecret {
 		t.Errorf("unexpected auth header: %q", gotAuth)
 	}
-	if gotBody["model"] != "gpt-4o-mini" || gotBody["max_tokens"] != float64(16) || gotBody["stream"] != false {
+	if gotBody["model"] != "mock-model-1" || gotBody["max_tokens"] != float64(16) || gotBody["stream"] != false {
 		t.Errorf("unexpected upstream body: %+v", gotBody)
 	}
 	msgs, _ := gotBody["messages"].([]any)
@@ -143,7 +146,7 @@ func TestAdminServer_TestKey_AuthInvalid(t *testing.T) {
 	srv, _, _, mux, _ := newTestKeyServer(t, upstream.URL)
 	srv.SetHTTPClient(upstream.Client())
 
-	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov","key_label":"k-one"}`)
+	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov","key_label":"k-one","model":"mock-model-1"}`)
 	t.Logf("test-key auth_invalid response: %s", rec.Body.String())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 (the test ran), got %d: %s", rec.Code, rec.Body.String())
@@ -178,7 +181,7 @@ func TestAdminServer_TestKey_Timeout(t *testing.T) {
 	// timeout classification without making the test suite wait 20 seconds.
 	srv.SetHTTPClient(&http.Client{Timeout: 50 * time.Millisecond})
 
-	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov"}`)
+	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov","model":"mock-model-1"}`)
 	t.Logf("test-key timeout response: %s", rec.Body.String())
 	if resp.Valid {
 		t.Fatalf("expected invalid on timeout, got %+v", resp)
@@ -269,12 +272,12 @@ func TestAdminServer_TestKey_SelectsTargetKey(t *testing.T) {
 	srv.RegisterRoutes(mux)
 
 	// Explicit label targets the disabled key (operator decides re-enable).
-	_, resp := postTestKey(t, mux, `{"provider":"two-keys","key_label":"old"}`)
+	_, resp := postTestKey(t, mux, `{"provider":"two-keys","key_label":"old","model":"mock-model-1"}`)
 	if !resp.Valid || resp.KeyLabel != "old" {
 		t.Fatalf("expected explicit label to hit disabled key, got %+v", resp)
 	}
 	// No target: first enabled key.
-	_, resp = postTestKey(t, mux, `{"provider":"two-keys"}`)
+	_, resp = postTestKey(t, mux, `{"provider":"two-keys","model":"mock-model-1"}`)
 	if !resp.Valid || resp.KeyLabel != "live" || resp.KeyID != "k_live" {
 		t.Fatalf("expected first enabled key, got %+v", resp)
 	}
@@ -295,7 +298,7 @@ func TestAdminServer_TestKey_RecordsProbeTraceWithoutLedger(t *testing.T) {
 	srv, _, obsMgr, mux, tmpDir := newTestKeyServer(t, upstream.URL)
 	srv.SetHTTPClient(upstream.Client())
 
-	if rec, resp := postTestKey(t, mux, `{"provider":"mock-prov"}`); rec.Code != http.StatusOK || !resp.Valid {
+	if rec, resp := postTestKey(t, mux, `{"provider":"mock-prov","model":"mock-model-1"}`); rec.Code != http.StatusOK || !resp.Valid {
 		t.Fatalf("test-key failed: %d %+v", rec.Code, resp)
 	}
 
@@ -310,7 +313,7 @@ func TestAdminServer_TestKey_RecordsProbeTraceWithoutLedger(t *testing.T) {
 			if tr.WinnerProvider != "mock-prov" || tr.WinnerKey != "k-one" {
 				t.Errorf("probe trace missing provider/key: %+v", tr)
 			}
-			if tr.ReqModel != "gpt-4o-mini" || tr.ServedModel != "gpt-4o-mini" {
+			if tr.ReqModel != "mock-model-1" || tr.ServedModel != "mock-model-1" {
 				t.Errorf("probe trace missing model: %+v", tr)
 			}
 			if tr.Status != 200 || tr.TotalMillis < 0 || tr.TTFTMillis < 0 {
@@ -389,5 +392,106 @@ func TestAdminServer_TestKey_LastTestPersists(t *testing.T) {
 	}
 	if keys[0].LastTest.ReplyText != "你好！" || keys[0].LastTest.LatencyMS != 812 || !keys[0].LastTest.OK {
 		t.Errorf("last_test not preserved: %+v", keys[0].LastTest)
+	}
+}
+
+// A provider with neither a route nor a preset model must not have a model
+// invented for it: the probe answers model_unspecified instead of sending a
+// name the vendor rejects. Before this, a healthy key on such a provider was
+// reported as "失败 · 404 model_not_found" (2026-11-27, amd / Nvidia / minimax).
+func TestAdminServer_TestKey_NoModelIsRefused(t *testing.T) {
+	var called bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"x"}}]}`))
+	}))
+	defer upstream.Close()
+
+	srv, _, _, mux, _ := newTestKeyServer(t, upstream.URL)
+	srv.SetHTTPClient(upstream.Client())
+
+	// "mock-prov" is not a preset id and the config carries no agent_models.
+	rec, resp := postTestKey(t, mux, `{"provider":"mock-prov"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with a verdict body, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if resp.OK || resp.Valid {
+		t.Errorf("expected a refusal verdict, got %+v", resp)
+	}
+	if resp.Reason != "model_unspecified" || resp.Model != "" {
+		t.Errorf("expected reason=model_unspecified and empty model, got reason=%q model=%q", resp.Reason, resp.Model)
+	}
+	if called {
+		t.Error("upstream must not be called without a model to probe")
+	}
+}
+
+// A preset carrying Models gives the probe something real to send.
+func TestAdminServer_TestKey_UsesPresetModel(t *testing.T) {
+	var gotModel string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel, _ = body["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"你好"}}]}`))
+	}))
+	defer upstream.Close()
+
+	srv, localSrc, _, mux, _ := newTestKeyServer(t, upstream.URL)
+	srv.SetHTTPClient(upstream.Client())
+
+	cfgs, _ := localSrc.Current(context.Background(), false)
+	cfg := cfgs.Config
+	cfg.Providers["mock-prov"].PresetID = "nvidia"
+	cfg.Providers["mock-prov"].BaseURL = upstream.URL
+	if _, err := localSrc.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	_, resp := postTestKey(t, mux, `{"provider":"mock-prov"}`)
+	if resp.ModelSource != "preset" {
+		t.Errorf("expected preset model source, got %q (model %q)", resp.ModelSource, resp.Model)
+	}
+	if gotModel != resp.Model || gotModel == "" {
+		t.Errorf("upstream received model %q, response reported %q", gotModel, resp.Model)
+	}
+}
+
+// A vendor whose OpenAI and Anthropic front doors share one URL must be probed
+// over the protocol it actually declares. AMD's preset sets both URLs to the
+// same string; an equality-only check used to send every AMD key probe down the
+// Anthropic path (x-api-key + /messages) while the provider was api_type=openai.
+func TestResolveProbeTarget_SameURLDoesNotImplyAnthropic(t *testing.T) {
+	const shared = "https://developer.amd.example/radeon/api/v1"
+	prov := &types.ProviderConfig{
+		ID:               "amd",
+		APIType:          "openai",
+		BaseURL:          shared,
+		AnthropicBaseURL: shared,
+	}
+
+	baseURL, headers, isAnthropic := resolveProbeTargetAndHeaders("", "", "sk-amd-test-key", prov)
+	if isAnthropic {
+		t.Errorf("same-URL provider with api_type=openai must not be probed as Anthropic (headers %v, url %s)", headers, baseURL)
+	}
+	if baseURL != shared {
+		t.Errorf("expected %q, got %q", shared, baseURL)
+	}
+	if headers["x-api-key"] != "" {
+		t.Errorf("openai protocol must not set x-api-key: %v", headers)
+	}
+
+	// A provider that really declares Anthropic still takes that path.
+	anth := &types.ProviderConfig{
+		ID:               "anth",
+		APIType:          "anthropic-messages",
+		BaseURL:          "https://api.anth.example/v1",
+		AnthropicBaseURL: "https://api.anth.example",
+	}
+	_, headers2, isAnth2 := resolveProbeTargetAndHeaders("", "", "sk-ant-xyz", anth)
+	if !isAnth2 || headers2["x-api-key"] != "sk-ant-xyz" || headers2["anthropic-version"] == "" {
+		t.Errorf("explicit anthropic provider must use x-api-key + version: anth=%v headers=%v", isAnth2, headers2)
 	}
 }

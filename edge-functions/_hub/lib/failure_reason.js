@@ -81,6 +81,10 @@ if (v) return v;
 return '';
 }
 const QUOTA_MARKERS = ['insufficient_quota', 'quota', 'balance', 'credit', 'billing', '余额', '欠费'];
+const THROTTLE_MARKERS = [
+'rps', 'rpm', 'tpm', 'rate limit', 'ratelimit', 'too many requests',
+'concurrency', 'throttl', 'capacity', 'retry in', 'retry after', '限流', '请稍后重试',
+];
 const CONTEXT_MARKERS = ['context_length', 'context length', 'too long', 'max_tokens', 'maximum context'];
 function containsAny(haystack, needles) {
 return needles.some((n) => haystack.includes(n));
@@ -90,6 +94,7 @@ const body = String(bodyText == null ? '' : bodyText).toLowerCase();
 if (status === 401 || status === 403) return REASON.AUTH_INVALID;
 if (status === 402) return REASON.QUOTA_EXHAUSTED;
 if (status === 429) {
+if (containsAny(body, THROTTLE_MARKERS)) return REASON.RATE_LIMITED;
 return containsAny(body, QUOTA_MARKERS) ? REASON.QUOTA_EXHAUSTED : REASON.RATE_LIMITED;
 }
 if (status === 404 && body.includes('model')) return REASON.MODEL_NOT_FOUND;

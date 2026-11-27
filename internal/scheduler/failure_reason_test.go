@@ -343,3 +343,31 @@ type fakeTimeoutErr struct{}
 func (e *fakeTimeoutErr) Error() string   { return "i/o timeout" }
 func (e *fakeTimeoutErr) Timeout() bool   { return true }
 func (e *fakeTimeoutErr) Temporary() bool { return true }
+
+// A 429 whose body names RPS/RPM/TPM throttling must classify as rate_limited
+// even when the provider labels the error type quota-ish. SenseNova does exactly
+// that ("quota_exceeded_error" + "rps exhausted"); reading it as an exhausted
+// balance used to cool every key down until the next daily reset, taking the
+// whole provider off-line after one busy minute (2026-11-27).
+func TestClassifyFailure_ThrottleBeatsQuotaMarker(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"sensenova rps exhausted", `{"error":{"message":"rps exhausted","type":"quota_exceeded_error","code":"8"}}`},
+		{"sensenova tpm/rpm limit", `{"error":{"message":"inference exceeds tpm/rpm limit","type":"rate_limit_error","code":"8"}}`},
+		{"amd model concurrency", `{"detail":{"error":{"message":"Model 'GLM-5.3-Flash' is at capacity; you can also use another model. Please retry in 7 seconds.","type":"rate_limit_error"}}}`},
+	}
+	for _, tc := range cases {
+		reason, _ := ClassifyFailure(429, []byte(tc.body), FailureKindHTTP)
+		if reason != ReasonRateLimited {
+			t.Errorf("%s: want %s, got %s (body %s)", tc.name, ReasonRateLimited, reason, tc.body)
+		}
+	}
+
+	// A genuine balance/quota exhaustion still classifies as quota_exhausted.
+	reason, _ := ClassifyFailure(429, []byte(`{"error":{"type":"insufficient_quota","message":"You exceeded your current quota, please check your plan"}}`), FailureKindHTTP)
+	if reason != ReasonQuotaExhausted {
+		t.Errorf("insufficient_quota: want %s, got %s", ReasonQuotaExhausted, reason)
+	}
+}

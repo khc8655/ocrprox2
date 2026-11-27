@@ -113,10 +113,7 @@ const recommended = Array.isArray(preset.models)
 ? preset.models.find((m) => typeof m === 'string' && m.trim())
 : '';
 if (recommended) return { model: recommended.trim(), source: 'preset' };
-return {
-model: apiType === 'anthropic-messages' ? 'claude-3-haiku-20240307' : 'gpt-4o-mini',
-source: 'fallback',
-};
+return { model: '', source: 'missing' };
 }
 function truncateChars(value, max) {
 const chars = Array.from(String(value == null ? '' : value));
@@ -244,6 +241,11 @@ const targetUrl = isAnthropic
 if (!isSafePublicHttpUrl(targetUrl)) {
 result.error = 'unsafe_upstream_url';
 result.status = 400;
+return jsonResponse(result, 400);
+}
+if (!resolved.model) {
+result.reason = 'model_unspecified';
+result.error = 'provider has no route and no preset model: pass a model to test this key';
 return jsonResponse(result, 400);
 }
 const cleanKey = selected.key;

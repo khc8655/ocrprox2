@@ -474,6 +474,10 @@ var catalogPresets = []PresetDef{
 		ChatURL:   "https://integrate.api.nvidia.com/v1",
 		Website:   "https://build.nvidia.com",
 		KeysURL:   "https://build.nvidia.com/settings/api-keys",
+		// Probe-safe defaults (verified against a live key 2026-11-27). Without
+		// them the console's per-key probe falls through to a made-up model name
+		// the relay rejects, so good keys get reported as 404.
+		Models: []string{"nvidia/nemotron-3.5-bolt-e4b", "minimaxai/minimax-m3.1-flash"},
 	},
 
 	// 22. Baidu Qianfan
@@ -560,6 +564,10 @@ var catalogPresets = []PresetDef{
 		AnthropicURL:     "https://developer.amd.com.cn/radeon/api/v1",
 		AnthropicBaseURL: "https://developer.amd.com.cn/radeon/api/v1",
 		Website:          "https://developer.amd.com",
+		// Probe-safe defaults, upstream spelling (verified 2026-11-27). AMD
+		// throttles per model, so the first one can answer 429 at capacity —
+		// that is a rate limit, not a bad key.
+		Models: []string{"DeepSeek-V4-Flash", "GLM-5.3-Flash"},
 	},
 
 	// 26. Ollama Local
@@ -639,6 +647,9 @@ var catalogPresets = []PresetDef{
 		ChatURL:          "https://token.sensenova.cn/v1",
 		AnthropicBaseURL: "https://token.sensenova.cn/v1",
 		Website:          "https://platform.sensenova.cn",
+		// Probe-safe defaults (verified 2026-11-27). Keys differ in remaining
+		// quota, so a probe can legitimately answer 429 on a healthy key.
+		Models: []string{"sensenova-6.8-flash", "sensenova-6.8-flash-lite"},
 	},
 
 	// 32. TokenRhythm

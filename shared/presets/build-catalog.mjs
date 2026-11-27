@@ -157,18 +157,33 @@ export function normalizeAdapterRules(rawRules) {
   return out;
 }
 
-// The Hub only ever reads two fields from a preset: adapter_rules (projection,
-// vault manifest/fetch, node config) and base_url (probe-models / verify-key).
-// Shipping the whole preset (descriptions, feature flags, recommended models)
-// inflated the deployed edge bundle for nothing — and in v20261123-07 the grown
-// library pushed the bundle past the platform's per-script limit, which took
-// the Hub down with `XX-Script-Debug: file too big`. Emit the two fields only.
+// The Hub reads three field sets from a preset: adapter_rules (projection,
+// vault manifest/fetch, node config), base_url (probe-models / verify-key), and
+// models (the per-key probe's model fallback — see edgeone-hub/api/admin/
+// test-key.js). Without `models` the probe falls through to a made-up model
+// name that relay vendors reject, so good keys were reported as 404; that cost
+// more than the bytes save. Everything else (descriptions, feature flags,
+// doc URLs) is still dropped: keeping the bundle small is a hard platform
+// requirement, documented in docs/EDGEONE_MAKERS_PLATFORM_GUIDE.md.
+//
+// Only the upstream model ids are emitted (one short string per preset) —
+// `recommended_models[].upstream_model`, which is what the probe must send.
 const presetMap = {};
 for (const p of presets) {
   if (p && p.id) {
+    const probeModels = [];
+    for (const m of Array.isArray(p.recommended_models) ? p.recommended_models : []) {
+      const upstream = typeof m === 'string' ? m : m && (m.upstream_model || m.name);
+      const clean = typeof upstream === 'string' ? upstream.trim() : '';
+      if (clean && !probeModels.includes(clean)) probeModels.push(clean);
+    }
     presetMap[p.id] = {
       base_url: p.base_url || '',
       ...(p.anthropic_base_url ? { anthropic_base_url: p.anthropic_base_url } : {}),
+      // One id per preset is enough: the probe takes the first non-empty entry
+      // (edgeone-hub/api/admin/test-key.js resolveModel). Extra names would buy
+      // nothing and the edge bundle has a hard byte ceiling.
+      ...(probeModels.length > 0 ? { models: probeModels.slice(0, 1) } : {}),
       adapter_rules: normalizeAdapterRules(p.adapter_rules),
     };
   }

@@ -1110,15 +1110,20 @@ func (s *Scheduler) Dispatch(
 				rel()
 				lastErrSnippet = string(errBytes)
 
+				// Classify first: the daily-reset quota cooldown is only correct for a
+				// real balance/quota exhaustion. A plain 429 (RPM/TPM throttling) must
+				// keep the short rate-limit cooldown — otherwise one busy minute parks
+				// every key until the next quota_reset_at (observed: 7h12m), and the
+				// whole provider answers 502 no_candidate for the rest of the day.
+				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
+
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
-				// Check if QuotaResetAt is configured for daily reset on quota limit
-				if cand.Provider.QuotaResetAt != "" && (resp.StatusCode == 429 || resp.StatusCode == 402) {
+				if cand.Provider.QuotaResetAt != "" && reason == ReasonQuotaExhausted {
 					if sec, _, err := s.cooldowns.ApplyQuotaCooldown(cand.Provider.ID, cand.TargetModel, keyID, cand.Provider.QuotaResetAt); err == nil {
 						cooldownSec = sec
 					}
 				}
 
-				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
 				requestID := ExtractRequestID(resp.Header)
 
 				currAttempt := TryAttempt{
@@ -1963,12 +1968,22 @@ func (s *Scheduler) logDispatchOutcome(
 		errText = "-"
 	}
 
+	// The prefix fields describe the LAST FAILURE, so on a recovered request
+	// `status=` would print 200 next to that failure's reason, reading like
+	// "200 quota_exhausted" (observed 2026-11-27, and any alert keyed on
+	// reason counts a healthy request as a quota event). Print the failure's
+	// own status in that case and keep the client's status in the suffix.
+	lineStatus := status
+	if lastStatus >= 200 && lastStatus < 300 && last.Status != 0 {
+		lineStatus = last.Status
+	}
+
 	line := fmt.Sprintf(
 		"req=%s model=%s endpoint=%s status=%d reason=%s err_type=%s provider=%s key=%s tries=%d ms=%d err=%s",
 		logField(traceID, 128),
 		logField(reqModel, 128),
 		logField(endpoint, 128),
-		status,
+		lineStatus,
 		logField(last.Reason, maxErrTypeLen),
 		logField(last.ErrType, maxErrTypeLen),
 		logField(last.Provider, 64),
@@ -1987,7 +2002,7 @@ func (s *Scheduler) logDispatchOutcome(
 	// log says so rather than reading like a total failure.
 	if lastStatus >= 200 && lastStatus < 300 && len(tries) > 0 {
 		if final := tries[len(tries)-1]; final.Status >= 200 && final.Status < 300 {
-			line += fmt.Sprintf(" recovered_by=%s/%s", logField(final.Provider, 64), logField(final.KeyID, 64))
+			line += fmt.Sprintf(" client_status=%d recovered_by=%s/%s", lastStatus, logField(final.Provider, 64), logField(final.KeyID, 64))
 		}
 	}
 	log.Printf("%s", obs.ScrubStringWithSecrets(line, usedSecrets...))

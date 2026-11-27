@@ -3541,7 +3541,10 @@
       fg('供应商 ID（保存后不可改）', `<input class="input input--code" value="${eh(pId)}" readonly>`),
       fg('预设', presetBindingHtml),
       `<div class="form-group"><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>隐藏客户端 User-Agent</span></label></div>`,
-      fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '00:00+08:00')}">`, '', '', '按此时刻重置每日配额统计（UTC+8）'),
+      // 空值就是空值：不在输入框里预填默认时刻。预填会被 syncDraftFields() 写进
+      // 配置，于是一次普通 429 就把整个供应商的 Key 冷却到次日 0 点（2026-11-27 实测
+      // 7h12m，24 请求里 12 个 502 no_candidate）。留空 = 不做按日重置。
+      fg('每日重置时间 (quota_reset_at)', `<input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '')}" placeholder="如 00:00+08:00（留空 = 不按日重置）">`, '', '', '余额耗尽（402 或 429 明确说余额不足）时把 Key 冷却到这个时刻；普通限流不受影响'),
       fg('声明式适配规则 (adapter_rules JSON)', `<textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea>`, '', '', '声明式适配规则 JSON；中枢托管的由中枢统一维护（只读）'),
     ].join('')}</div></details>${vaultNotice}${editorActionsHtml}`;
 
@@ -3595,7 +3598,7 @@
       <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
       <td><div class="fields"><strong>${eh(keyLabel)}</strong>${k.auth_type === 'oauth_device' ? ' <span class="pill pill--accent">OAuth</span>' : ''}<span class="text-xs text-muted">${keyIsVault ? '中枢' : '本地'}</span></div></td>
       <td>${renderKeyCell(k, vaultKey, idx)}</td>
-      <td>${statusHtml}</td>
+      <td class="k-status-cell">${statusHtml}</td>
       <td><input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重：数值越大分到的请求越多" ${vaultKey ? 'disabled' : ''}></td>
       <td>
         <div class="fields">
@@ -3723,7 +3726,12 @@
         if (q(`#ed_p_hide_ua_${pId}`).checked) p.hide_client_name = true;
         else delete p.hide_client_name;
       }
-      if (q(`#ed_p_reset_${pId}`)) p.quota_reset_at = q(`#ed_p_reset_${pId}`).value.trim();
+      // 空值必须真的写回「没有」：留着旧值会让一次误填的重置时刻永远生效。
+      if (q(`#ed_p_reset_${pId}`)) {
+        const resetAt = q(`#ed_p_reset_${pId}`).value.trim();
+        if (resetAt) p.quota_reset_at = resetAt;
+        else delete p.quota_reset_at;
+      }
       if (q(`#ed_p_rpm_${pId}`)) {
         const rpm = Number(q(`#ed_p_rpm_${pId}`).value);
         if (rpm > 0) p.rpm_per_key = rpm;
@@ -3817,14 +3825,57 @@
 
     // Batch test: every key gets the same real inference probe, one at a time,
     // so the verdict reflects inference quota — not just "can list models".
+    //
+    // Progress is the whole point: one key probe can block for 20 s (the server
+    // side budget), so 6 keys used to leave the UI completely still for two
+    // minutes — no disabled button, no changing text, no row updates — and the
+    // operator concluded the click did nothing (2026-11-27). The button now
+    // counts x/N and the table repaints after every verdict. The model page's
+    // 「测试全部候选」 has always worked this way; this is the same contract.
     clk(q(`#btn_batch_test_keys_${pId}`), async () => {
-      toast(`正在逐把测试 ${keys.length} 把 Key（真实推理）...`, 'info');
-      let succ = 0;
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        if ((await testKeyOnce(pId, k, k.label || k.id || `key-${i}`)).ok) succ++;
+      const btn = q(`#btn_batch_test_keys_${pId}`);
+      if (!btn || btn.disabled) return;
+      const label = btn.textContent;
+      const total = keys.length;
+      if (total === 0) {
+        toast('这个供应商还没有 Key，先添加一把', 'warn');
+        return;
       }
-      toast(`逐把测试完成: ${succ}/${keys.length} 把 Key 可用`, succ === keys.length ? 'ok' : 'warn');
+      btn.disabled = true;
+      let succ = 0;
+      // 篇幅：批量测 Key 每把都要写盘（配置版本 +1），逐把重绘整张列表会打断
+      // 用户正在编辑的字段。只重画状态列：值都来自同一个 p.api_keys 数组。
+      const redrawKeyRows = () => {
+        if (!wrap.isConnected) return;
+        wrap.querySelectorAll(`#p_keys_tbody_${pId} tr`).forEach((tr) => {
+          const idx = Number(tr.dataset.keyIdx);
+          const k = keys[idx];
+          const cell = tr.querySelector('.k-status-cell');
+          if (!k || !cell) return;
+          const cd = findKeyCooldown(pId, k, idx);
+          const st = keyStatusView(k, cd.sec);
+          cell.innerHTML = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
+          tr.dataset.cdSec = String(cd.sec);
+          tr.dataset.cdTarget = cd.target || '';
+        });
+      };
+      try {
+        for (let i = 0; i < total; i++) {
+          const k = keys[i];
+          const keyLabel = k.label || k.id || `key-${i}`;
+          btn.textContent = `测试中 ${i + 1}/${total}…`;
+          // Painted before the await so the counter is visible while the probe
+          // is in flight, not only after it returns.
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const lt = await testKeyOnce(pId, k, keyLabel);
+          if (lt.ok) succ++;
+          redrawKeyRows();
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+      toast(`逐把测试完成: ${succ}/${total} 把 Key 可用`, succ === total ? 'ok' : 'warn');
       renderProvidersList();
     });
 

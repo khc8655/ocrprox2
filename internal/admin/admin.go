@@ -1644,9 +1644,23 @@ func resolveProbeTargetAndHeaders(reqBaseURL, reqAPIType, rawKey string, prov *t
 		}
 	}
 
-	lowerURL := strings.ToLower(baseURL)
-	matchesAnthBase := prov != nil && strings.TrimSpace(prov.AnthropicBaseURL) != "" &&
-		strings.EqualFold(strings.TrimRight(baseURL, "/"), strings.TrimRight(strings.TrimSpace(prov.AnthropicBaseURL), "/"))
+lowerURL := strings.ToLower(baseURL)
+	// Same-URL vendors must not be mistaken for Anthropic. AMD's preset sets
+	// base_url and anthropic_base_url to the identical string, so an equality
+	// test alone made every AMD key probe run the /messages path with x-api-key
+	// against an OpenAI endpoint (observed 2026-11-27: api_type=openai but the
+	// probe reported anthropic-messages). Only treat the match as decisive when
+	// the two URLs actually differ.
+	anthBase := ""
+	if prov != nil {
+		anthBase = strings.TrimRight(strings.TrimSpace(prov.AnthropicBaseURL), "/")
+	}
+	provBase := ""
+	if prov != nil {
+		provBase = strings.TrimRight(strings.TrimSpace(prov.BaseURL), "/")
+	}
+	matchesAnthBase := anthBase != "" && !strings.EqualFold(anthBase, provBase) &&
+		strings.EqualFold(strings.TrimRight(baseURL, "/"), anthBase)
 
 	isAnthropic := explicitAnthropic || matchesAnthBase || strings.Contains(lowerURL, "anthropic") ||
 		(apiType == "" && strings.HasPrefix(rawKey, "sk-ant-"))

@@ -118,6 +118,13 @@ export function extractErrType(bodyText) {
 }
 
 const QUOTA_MARKERS = ['insufficient_quota', 'quota', 'balance', 'credit', 'billing', '余额', '欠费'];
+// Throttling markers win over quota markers on a 429: providers label the error
+// type "quota_exceeded_error" while the message says "rps exhausted" (SenseNova,
+// observed 2026-11-27). Must stay identical to internal/scheduler/failure_reason.go.
+const THROTTLE_MARKERS = [
+  'rps', 'rpm', 'tpm', 'rate limit', 'ratelimit', 'too many requests',
+  'concurrency', 'throttl', 'capacity', 'retry in', 'retry after', '限流', '请稍后重试',
+];
 const CONTEXT_MARKERS = ['context_length', 'context length', 'too long', 'max_tokens', 'maximum context'];
 
 function containsAny(haystack, needles) {
@@ -130,7 +137,10 @@ function classifyHTTPStatus(status, bodyText) {
   if (status === 402) return REASON.QUOTA_EXHAUSTED;
   if (status === 429) {
     // 429 is overloaded: throttling vs an empty account. Only the body says
-    // which — and the operator action differs (raise RPM vs top up).
+    // which — and the operator action differs (raise RPM vs top up). A throttle
+    // marker wins, because an "rps exhausted" body often carries a quota-ish
+    // error type as well.
+    if (containsAny(body, THROTTLE_MARKERS)) return REASON.RATE_LIMITED;
     return containsAny(body, QUOTA_MARKERS) ? REASON.QUOTA_EXHAUSTED : REASON.RATE_LIMITED;
   }
   if (status === 404 && body.includes('model')) return REASON.MODEL_NOT_FOUND;

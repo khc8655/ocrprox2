@@ -714,14 +714,18 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 				releaseSlot()
 				lastErrSnippet = string(errBytes)
 
+				// Same rule as the streaming path (scheduler.go): the daily-reset
+				// quota cooldown is only for a genuine balance/quota exhaustion; a
+				// plain 429 keeps the short rate-limit cooldown.
+				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
+
 				cooldownSec, _ := s.cooldowns.ApplyCooldown(cand.Provider.ID, cand.TargetModel, keyID, resp.StatusCode, durRateLimit, durServerError, durNetwork, durAuth)
-				if cand.Provider.QuotaResetAt != "" && (resp.StatusCode == 429 || resp.StatusCode == 402) {
+				if cand.Provider.QuotaResetAt != "" && reason == ReasonQuotaExhausted {
 					if sec, _, qErr := s.cooldowns.ApplyQuotaCooldown(cand.Provider.ID, cand.TargetModel, keyID, cand.Provider.QuotaResetAt); qErr == nil {
 						cooldownSec = sec
 					}
 				}
 
-				reason, errType := ClassifyFailure(resp.StatusCode, errBytes, FailureKindHTTP)
 				currAttempt := TryAttempt{
 					Provider:     cand.Provider.ID,
 					KeyID:        keyID,

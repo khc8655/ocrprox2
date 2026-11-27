@@ -156,6 +156,15 @@ func (s *Server) handleTestKey(w http.ResponseWriter, r *http.Request) {
 	model, modelSource := resolveTestModel(snap.Config, providerName, prov, resp.Model, apiType)
 	resp.Model = model
 	resp.ModelSource = modelSource
+	if model == "" {
+		// Nothing to send the probe to. Fail fast with an actionable message
+		// instead of guessing a model the vendor will reject.
+		resp.Reason = "model_unspecified"
+		resp.Error = "provider has no route and no preset model: pass a model to test this key"
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
 
 	var targetURL string
 	if isAnthropic {
@@ -354,13 +363,11 @@ func resolveTestModel(cfg *types.ProxyConfig, providerName string, prov *types.P
 		}
 	}
 
-	// Protocol-appropriate common value: the same defaults the provider probe
-	// uses (internal/provider/test.go) so one console never shows two answers
-	// for "what did you send".
-	if apiType == "anthropic-messages" {
-		return "claude-3-haiku-20240307", "fallback"
-	}
-	return "gpt-4o-mini", "fallback"
+	// No blind guess. A made-up model name ("gpt-4o-mini") is rejected by most
+	// relay vendors, and the console then reports a perfectly good key as
+	// "失败 · 404 model_not_found" — observed 2026-11-27 on amd / Nvidia /
+	// minimax / sensenova. Saying "pick a model first" is the honest answer.
+	return "", "missing"
 }
 
 // probeFailureKind buckets a client.Do error into the scheduler failure kinds.
