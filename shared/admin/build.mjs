@@ -237,6 +237,7 @@ const apiRoutes = [
   { file: 'api/admin/probe-models.js', target: '../../_hub/api/admin/probe-models.js' },
   { file: 'api/vault/manifest.js', target: '../../_hub/api/vault/manifest.js' },
   { file: 'api/vault/fetch.js', target: '../../_hub/api/vault/fetch.js' },
+  { file: 'api/admin/fetch-probe.js', target: '../../_hub/api/admin/fetch-probe.js' },
 ];
 
 // Guard: every handler module in edgeone-hub/api/ must have a route entry above.
