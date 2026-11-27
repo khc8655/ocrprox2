@@ -66,6 +66,9 @@
 6. **新增 HTTP 端点必须登记**：`internal/admin/admin.go` 的 `register`、`internal/router/readonly.go`，
    中枢的还要登记 `shared/admin/build.mjs` 的 `apiRoutes`，否则线上 404。
 7. 测试产物、截图、临时脚本放 `scratch/`（已 gitignore）；测试数据用 `zz_` 前缀，用完删。
+8. **验收报告由主代理写。** 子代理只产生观察并落盘（截图路径、命令、关键输出），不派子代理把观察
+   再重读一遍总结成报告。工作流本身的设计规矩在全局 `~/.zcode/AGENTS.md`「工作流设计」里，
+   这里不重复。
 
 ## 5. 文档规范
 
