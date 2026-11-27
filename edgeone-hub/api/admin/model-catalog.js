@@ -22,6 +22,7 @@
  */
 
 import { checkAdminAuth, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { probeSum } from '../../lib/zz-route-probe.js';
 import { loadCatalog, lookup, lookupByModelID, meta, readCatalogText, saveCatalog, slimModelsDev } from '../../lib/model-catalog.js';
 import { OVERRIDES, PROVIDER_MAP } from '../../lib/generated-model-map.js';
 import { authenticateVaultCaller } from '../../lib/vaultauth.js';
@@ -144,6 +145,8 @@ export async function handleModelCatalogRequest(request, env, kv, fetchImpl) {
 }
 
 // EdgeOne Pages standard entry points
+void probeSum();
+
 export async function onRequest(context) {
   const kv = resolveKvBinding(context);
   const env = resolveEnv(context);

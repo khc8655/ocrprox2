@@ -1,4 +1,5 @@
 import { checkAdminAuth, resolveKvBinding, resolveEnv } from '../../lib/config.js';
+import { probeSum } from '../../lib/zz-route-probe.js';
 import { loadCatalog, lookup, lookupByModelID, meta, readCatalogText, saveCatalog, slimModelsDev } from '../../lib/model-catalog.js';
 import { OVERRIDES, PROVIDER_MAP } from '../../lib/generated-model-map.js';
 import { authenticateVaultCaller } from '../../lib/vaultauth.js';
@@ -91,6 +92,7 @@ return jsonResponse({ ok: false, error: action ? 'not_found' : 'method_not_allow
 }
 return jsonResponse({ ok: false, error: 'method_not_allowed' }, 405);
 }
+void probeSum();
 export async function onRequest(context) {
 const kv = resolveKvBinding(context);
 const env = resolveEnv(context);
