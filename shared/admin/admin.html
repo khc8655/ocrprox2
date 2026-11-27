@@ -21,7 +21,7 @@
           <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>节点</button>
           <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
           <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
-          <button class="seg-btn" id="navModels" data-tab="models" type="button">模型路由</button>
+          <button class="seg-btn" id="navModels" data-tab="models" type="button">模型</button>
           <button class="seg-btn" id="navAccess" data-tab="access" type="button">接入信息</button>
           <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
         </div>
@@ -194,12 +194,12 @@
     <section id="viewModels" hidden>
       <div class="view-header">
         <div>
-          <h1 class="view-title" id="modelsTitle">模型路由与高并发通道</h1>
-          <p class="view-sub" id="modelsSubtitle">管理网关对外暴露的模型路由与多密钥故障转移</p>
+          <h1 class="view-title" id="modelsTitle">模型</h1>
+          <p class="view-sub" id="modelsSubtitle">每个模型由一个供应商提供；同一模型来自多个供应商时自动组成故障转移</p>
         </div>
         <div class="view-actions">
           <button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button>
-          <button class="btn btn--primary" id="btnAddModel">新增模型路由</button>
+          <button class="btn btn--primary" id="btnAddModel">添加模型</button>
         </div>
       </div>
 
@@ -217,8 +217,8 @@
         <div class="dialog-body dialog-body--wide">
           <div class="dialog-head">
             <div>
-              <h2 class="dialog-title">从模板导入模型路由</h2>
-              <p class="dialog-sub">列出中枢模板中本地尚未配置的模型路由，按需导入（不自动整批落地）</p>
+              <h2 class="dialog-title">从模板导入模型</h2>
+              <p class="dialog-sub">列出中枢模板中本地尚未配置的模型，按需导入（不自动整批落地）</p>
             </div>
             <button class="dialog-close" id="btnCloseTemplateImport" type="button" aria-label="关闭">✕</button>
           </div>

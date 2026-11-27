@@ -849,7 +849,7 @@
     // 接入信息 only describes a gateway this console can answer for: the Hub is
     // a config plane with no data plane of its own.
     if (navAccess) navAccess.hidden = isHub;
-    // Hub 没有独立概览页：导航只剩「节点 / 供应商 / 模型路由 / 设置」，
+    // Hub 没有独立概览页：导航只剩「节点 / 供应商 / 模型 / 设置」，
     // 登录后默认进「节点」；活跃节点信息由节点列表本身承担。
     if (navActivity) navActivity.hidden = isHub;
     if (topVersionBox) topVersionBox.hidden = !caps.vaultHub;
@@ -876,12 +876,12 @@
     const modelsTitle = $('modelsTitle');
     const modelsSub = $('modelsSubtitle');
     if (modelsTitle) {
-      modelsTitle.textContent = isHub ? '模型路由模板（下发编排）' : '模型路由与高并发通道';
+      modelsTitle.textContent = isHub ? '模型模板（下发编排）' : '模型';
     }
     if (modelsSub) {
       modelsSub.textContent = isHub
         ? '仅下发给 lite 节点；full 节点可选导入'
-        : '管理当前网关对外暴露的模型路由与多密钥粘性/轮询策略。';
+        : '每个模型由一个供应商提供；同一模型来自多个供应商时自动组成故障转移。';
     }
     // 「并发护栏」在 Hub 上只是下发默认值，Lite 节点会忽略 —— 一句话说清，不再铺标题 + 副标题。
     const cgTitle = $('concurrencyGuardTitle');
@@ -2009,7 +2009,7 @@
     if (btnAll) btnAll.hidden = models.length < 2;
     if (!box) return;
     if (!models.length) {
-      box.innerHTML = '<div class="gw-model-empty">暂无可用模型：到「模型路由」添加并启用路由后，这里会列出 /v1/models 实际返回的全部模型 ID</div>';
+      box.innerHTML = '<div class="gw-model-empty">暂无可用模型：到「模型」添加并启用后，这里会列出 /v1/models 实际返回的全部模型 ID</div>';
       return;
     }
     box.innerHTML = models.map((m) => {
@@ -5230,7 +5230,7 @@
     const btnAddModel = $('btnAddModel');
     if (btnAddModel) {
       btnAddModel.classList.toggle('btn--primary', !state.creatingModel);
-      btnAddModel.textContent = state.creatingModel ? '收起' : '新增模型路由';
+      btnAddModel.textContent = state.creatingModel ? '收起' : '添加模型';
     }
 
     const models = state.config?.agent_models || {};
@@ -5270,14 +5270,14 @@
       const msg = ce('p');
       msg.className = 'text-muted';
       msg.textContent = filtered
-        ? '没有匹配的模型路由'
-        : '还没有模型路由：加一个对外模型名，挑好供应商与上游模型，网关就能对外提供它';
+        ? '没有匹配的模型'
+        : '还没有模型：选一个供应商，挑它下面的一个模型，网关就能对外提供它';
       empty.appendChild(msg);
       if (!filtered && !state.creatingModel) {
         const btn = ce('button');
         btn.type = 'button';
         btn.className = 'btn btn--primary mt-3';
-        btn.textContent = '新增模型路由';
+        btn.textContent = '添加模型';
         clk(btn, () => {
           closeOtherCreateEditors('models');
           state.creatingModel = true;
@@ -5320,7 +5320,7 @@
       const meta = [];
       if (m.enabled === false) meta.push('停用');
       if (cCount >= 2) meta.push(STRATEGY_LABELS[m.routing_strategy || 'sticky_failover'] || m.routing_strategy);
-      meta.push(`${cCount} 候选`);
+      meta.push(`${cCount} 个来源`);
       fields.innerHTML = `
         <span class="text-xs text-muted">${eh(meta.join(' · '))}</span>
         <span class="caret">▾</span>
@@ -5375,14 +5375,37 @@
     // 策略胶囊：平铺一行，值存在 data-strat 上，保存时读被选中的那个。
     const stratPill = (k) => `<button class="probe-pill${stratVal === k ? ' probe-pill--managed' : ''}" type="button" data-strat="${k}">${eh(k === 'sticky_failover' ? '会话粘性优先（推荐）' : STRATEGY_LABELS[k] || k)}</button>`;
 
+    // 新增 = 从某个供应商挑一个模型（默认路径）；编辑 = 该模型的供应商列表 + 高级。
+    // 路由组（多个候选之间分流）只在同一个模型名被第二个供应商提供时才出现，
+    // 不作为新增入口 —— 见 wireModelEditor 的合并逻辑。
+    if (isCreate) {
+      wrap.innerHTML = `
+        <div class="form-grid form-grid--2">
+          ${fg('供应商', `<select class="select" id="ed_m_provider"><option value="">选择供应商</option></select>`)}
+          ${fg('模型', `<div class="input-row"><input class="input input--code" id="ed_m_upstream" placeholder="上游模型 ID"><button class="btn" id="btn_m_probe" type="button">拉取模型</button></div><div class="probe-pills-wrap mt-1" id="m_probe_list"></div>`)}
+          ${fg('Key', `<select class="select" id="ed_m_key"><option value="">任一启用 Key</option></select>`, '', '', '默认用该供应商下任一启用 Key')}
+          ${fg('对外模型名', `<input class="input input--code" id="ed_m_name" placeholder="默认与上面的模型 ID 相同">`)}
+        </div>
+        <div class="text-xs text-muted mt-3">同一个模型名如果已经由另一个供应商提供，添加时会自动并入那条模型，作为故障转移的第二个来源。</div>
+        <div class="form-actions form-actions--split mt-4">
+          <div class="form-actions-group"></div>
+          <div class="form-actions-group">
+            <button class="btn" id="btn_cancel_model" type="button">取消</button>
+            <button class="btn btn--primary" id="btn_save_model" type="button">添加模型</button>
+          </div>
+        </div>
+      `;
+      return { wrap, draft, isCreate };
+    }
+
     // 结构：对外模型名 → 候选表 → 路由组参数（≥2 个候选才出现）→ 测试 → 高级 → 底栏。
     // 一个对外模型名挂多个候选（不同供应商 / 同一供应商不同 Key）= 路由组；
     // 只有一个候选时没有「怎么分流」可选，策略区藏起来。
     wrap.innerHTML = `
       ${fg('对外模型名', `<input class="input input--code" id="ed_m_name" value="${eh(isCreate ? '' : mName)}" placeholder="留空则用第一个候选的上游模型 ID">`, '', '', '客户端调用时填的 model 名；新增和编辑都能改')}
       <div class="section-bar mt-4">
-        <span class="form-label">候选</span>
-        <button class="btn btn--sm" id="btn_add_cand" type="button">＋ 添加候选</button>
+        <span class="form-label">供应商来源</span>
+        <button class="btn btn--sm" id="btn_add_cand" type="button">＋ 再加一个供应商</button>
       </div>
       <div class="table-wrap"><table class="data-table m-cand-table">
         <thead><tr><th>供应商</th><th>上游模型</th><th>Key</th><th>状态</th><th>思考档位</th><th></th></tr></thead>
@@ -5390,7 +5413,7 @@
       </table></div>
       <div class="mt-3 hidden" id="m_add_cand_box" hidden></div>
       <div class="m-group mt-4" id="m_group_box" hidden>
-        <div class="section-bar"><span class="form-label">路由组：多个候选之间怎么分流</span></div>
+        <div class="section-bar"><span class="form-label">多个供应商之间怎么分流</span></div>
         <div class="probe-pills-wrap">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map(stratPill).join('')}</div>
         <div class="text-xs text-muted mt-1" id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</div>
         <div id="m_ca" class="mt-2"></div>
@@ -5415,7 +5438,7 @@
         </div>
       </details>
       <div class="form-actions form-actions--split mt-4">
-        <div class="form-actions-group">${isCreate ? '' : '<button class="btn btn--danger" id="btn_del_model" type="button">删除此路由</button>'}</div>
+        <div class="form-actions-group">${isCreate ? '' : '<button class="btn btn--danger" id="btn_del_model" type="button">删除此模型</button>'}</div>
         <div class="form-actions-group">
           <button class="btn" id="btn_cancel_model" type="button">取消</button>
           <button class="btn btn--primary" id="btn_save_model" type="button">${isCreate ? '保存路由' : '保存'}</button>
@@ -5750,6 +5773,70 @@
     const { wrap, draft, isCreate } = built;
     const q = makeScopedQuery(wrap);
     const candidates = draft.candidates;
+
+    // 新增：只做「供应商 → 模型 → Key」三件事。保存时把它折成一个候选，
+    // 后面与编辑路径共用同一段保存逻辑（同名且不同供应商会自动并入）。
+    if (isCreate) {
+      const provSel = q('#ed_m_provider');
+      const keySel = q('#ed_m_key');
+      const upInput = q('#ed_m_upstream');
+      const probeList = q('#m_probe_list');
+      const provs = Object.entries(state.config?.providers || {})
+        .filter(([, p]) => p && p.enabled !== false)
+        .sort((a, b) => a[0].localeCompare(b[0]));
+      if (provSel) {
+        provSel.innerHTML = ['<option value="">选择供应商</option>']
+          .concat(provs.map(([id, p]) => `<option value="${eh(id)}">${eh(p.name || id)}</option>`))
+          .join('');
+      }
+      const fillKeys = () => {
+        if (!keySel) return;
+        const prov = state.config?.providers?.[provSel?.value || ''] || {};
+        const keys = (prov.api_keys || []).filter((k) => k && (k.label || k.id));
+        keySel.innerHTML = ['<option value="">任一启用 Key</option>']
+          .concat(keys.map((k) => {
+            const lbl = String(k.label || k.id);
+            const off = k.enabled === false ? '（已禁用）' : '';
+            return `<option value="${eh(lbl)}">${eh(lbl)}${off}</option>`;
+          })).join('');
+      };
+      provSel?.addEventListener('change', () => { fillKeys(); if (probeList) probeList.innerHTML = ''; });
+      fillKeys();
+      q('#btn_m_probe')?.addEventListener('click', async () => {
+        const pId = provSel?.value || '';
+        if (!pId) return toast('请先选择供应商', 'warn');
+        const p = state.config?.providers?.[pId] || {};
+        const btn = q('#btn_m_probe');
+        const old = btn.textContent;
+        btn.disabled = true; btn.textContent = '拉取中…';
+        try {
+          const res = await window.HOST.probeModels({ provider: pId, base_url: p.base_url || '', api_type: normalizeApiType(p.api_type) });
+          const models = Array.isArray(res?.models) ? res.models : [];
+          if (!models.length) {
+            toast(res?.error ? `未拉取到模型：${scrubUiText(res.error)}` : '未拉取到模型，可直接手填模型 ID', 'warn');
+            return;
+          }
+          if (probeList) {
+            probeList.innerHTML = models.map((mo) => `<button class="probe-pill" type="button" data-mo="${eh(mo)}">${eh(mo)}</button>`).join('');
+          }
+          toast(`拉取到 ${models.length} 个模型`, 'ok');
+        } catch (e) {
+          toast(`拉取异常：${scrubUiText(e.message)}`, 'err');
+        } finally {
+          btn.disabled = false; btn.textContent = old;
+        }
+      });
+      probeList?.addEventListener('click', (ev) => {
+        const pill = ev.target instanceof Element ? ev.target.closest('button[data-mo]') : null;
+        if (!pill || !upInput) return;
+        upInput.value = pill.dataset.mo || '';
+        [...probeList.querySelectorAll('button[data-mo]')].forEach((b) => b.classList.toggle('probe-pill--managed', b === pill));
+      });
+      clk(q('#btn_cancel_model'), () => {
+        state.creatingModel = false;
+        renderModelsList();
+      });
+    }
 
     // 路由策略胶囊：平铺一行，点一下换选中项，说明行同步换成这个策略的
     // 「它做什么 / 什么时候用」。选中值靠 .probe-pill--managed 标记，
@@ -6171,8 +6258,20 @@
     });
 
     clk(q('#btn_save_model'), async () => {
+      // 新增路径：把「供应商 + 模型 + Key」折成一个候选，再走下面的公共保存逻辑。
+      if (isCreate && candidates.length === 0) {
+        const prov = q('#ed_m_provider')?.value || '';
+        const up = (q('#ed_m_upstream')?.value || '').trim();
+        if (!prov) return toast('请选择供应商', 'warn');
+        if (!state.config?.providers?.[prov]) return toast(`供应商 ${prov} 不存在，请先在供应商页创建`, 'warn');
+        if (!up) return toast('请拉取或填写一个模型 ID', 'warn');
+        candidates.push({
+          provider: prov, target_model: up, key_label: q('#ed_m_key')?.value || '',
+          enabled: true, weight: 1, max_concurrency: 0,
+        });
+      }
       const typedName = (q('#ed_m_name')?.value || '').trim();
-      // 对外模型名可留空：默认取第一个候选的上游模型 ID（单候选路由的常见情形）。
+      // 对外模型名可留空：默认取第一个候选的上游模型 ID（单供应商模型的常见情形）。
       const fallbackName = String(candidates[0]?.target_model || '').trim();
       const finalName = typedName || fallbackName;
       if (!finalName) return toast('请填写对外模型名，或先添加一个候选', 'warn');
@@ -6195,12 +6294,12 @@
           state.creatingModel = false;
           state.activeEditorKey = `m_${finalName}`;
           renderModelsList();
-          return toast(`路由组 ${finalName} 里已经有这些候选了`, 'info');
+          return toast(`${finalName} 已经有这些供应商了`, 'info');
         }
         for (const c of added) group.candidates.push({ ...c, enabled: c.enabled !== false, weight: Math.max(1, Number(c.weight) || 1), max_concurrency: Math.max(0, Number(c.max_concurrency) || 0) });
         state.creatingModel = false;
         state.activeEditorKey = `m_${finalName}`;
-        await persistConfig(`已并入路由组 ${finalName}（现有 ${group.candidates.length} 个候选），请确认分流策略`, { scope: 'agent_models', key: finalName, value: group });
+        await persistConfig(`已并入 ${finalName}（现有 ${group.candidates.length} 个供应商来源），可设置分流方式`, { scope: 'agent_models', key: finalName, value: group });
         return;
       }
       if (!isCreate && finalName !== mName && state.config.agent_models[finalName]) {
@@ -6249,7 +6348,7 @@
         // 改名：冲突重试时服务端那份配置里旧键还在，要一并删掉。
         removeKey: (!isCreate && finalName !== mName) ? mName : null,
       };
-      await persistConfig(isCreate ? '路由添加成功' : '路由配置保存成功', pendingEdit);
+      await persistConfig(isCreate ? '模型添加成功' : '模型配置保存成功', pendingEdit);
     });
 
     clk(q('#btn_del_model'), async () => {
@@ -6336,7 +6435,7 @@
       } else if (!state.vaultManifest.agent_models || typeof state.vaultManifest.agent_models !== 'object') {
         empty.textContent = '中枢清单未包含模板路由（中枢版本较旧或未发布任何模板）';
       } else {
-        empty.textContent = '中枢模板中没有本地缺失的模型路由';
+        empty.textContent = '中枢模板中没有本地缺失的模型';
       }
       listEl.appendChild(empty);
       return;
@@ -6459,7 +6558,7 @@
     const picked = [...(listEl?.querySelectorAll('.tpl_import_cb:checked') || [])]
       .map((cb) => cb.getAttribute('data-model'))
       .filter(Boolean);
-    if (picked.length === 0) return toast('请先勾选要导入的模型路由', 'warn');
+    if (picked.length === 0) return toast('请先勾选要导入的模型', 'warn');
     const runId = state.importRunId;
     const cancelled = () => state.importRunId !== runId;
     const manifestModels = vaultManifestModels();
@@ -6574,7 +6673,7 @@
       // via their 补拉 buttons) while the imported ones disappear from the list.
       toast(`已导入 ${imported} 条，未导入：${skipped.join('；')}`, 'warn');
       renderTemplateImportList();
-      await persistConfig(`已从模板导入 ${imported} 条模型路由`);
+      await persistConfig(`已从模板导入 ${imported} 个模型`);
       return;
     }
     closeTemplateImportOverlay();
