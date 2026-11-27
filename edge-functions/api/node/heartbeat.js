@@ -1,8 +1,11 @@
-import { onRequest as h } from '../../_hub/api/node/heartbeat.js';
-export async function onRequest(c){return h(c)}
-export async function onRequestGet(c){return h(c)}
-export async function onRequestPost(c){return h(c)}
-export async function onRequestPut(c){return h(c)}
-export async function onRequestPatch(c){return h(c)}
-export async function onRequestDelete(c){return h(c)}
-export async function onRequestOptions(){return new Response(null,{status:204})}
+import { onRequest as _onRequest } from '../../_hub/api/node/heartbeat.js';
+
+export async function onRequest(context) { return _onRequest(context); }
+export async function onRequestGet(context) { return _onRequest(context); }
+export async function onRequestPost(context) { return _onRequest(context); }
+export async function onRequestPut(context) { return _onRequest(context); }
+export async function onRequestPatch(context) { return _onRequest(context); }
+export async function onRequestDelete(context) { return _onRequest(context); }
+export async function onRequestOptions() {
+  return new Response(null, { status: 204 });
+}

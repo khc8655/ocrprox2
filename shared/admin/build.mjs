@@ -278,24 +278,20 @@ if (missingEntries.length > 0) {
 }
 console.log(`   ✓ all ${registeredSources.size} handler modules have a route entry`);
 
-// Route entry points: one file per route, and each one is registered by the
-// platform as its own edge function — so their bytes are part of the deployment
-// budget (see Gate 5 below). The platform statically scans for
-// `export async function onRequest*`, so all seven method exports must stay and
-// must keep that exact form (a `export const onRequestGet = h` would not be
-// scanned); the bytes are won back by shortening the names instead.
-// hub.test.mjs asserts this shape — do not "simplify" it away.
 for (const { file, target } of apiRoutes) {
   const filePath = join(edgeFuncDir, file);
   mkdirSync(dirname(filePath), { recursive: true });
-  const content = `import { onRequest as h } from '${target}';
-export async function onRequest(c){return h(c)}
-export async function onRequestGet(c){return h(c)}
-export async function onRequestPost(c){return h(c)}
-export async function onRequestPut(c){return h(c)}
-export async function onRequestPatch(c){return h(c)}
-export async function onRequestDelete(c){return h(c)}
-export async function onRequestOptions(){return new Response(null,{status:204})}
+  const content = `import { onRequest as _onRequest } from '${target}';
+
+export async function onRequest(context) { return _onRequest(context); }
+export async function onRequestGet(context) { return _onRequest(context); }
+export async function onRequestPost(context) { return _onRequest(context); }
+export async function onRequestPut(context) { return _onRequest(context); }
+export async function onRequestPatch(context) { return _onRequest(context); }
+export async function onRequestDelete(context) { return _onRequest(context); }
+export async function onRequestOptions() {
+  return new Response(null, { status: 204 });
+}
 `;
   writeFileSync(filePath, content, 'utf8');
 }
