@@ -258,11 +258,31 @@
         headers['authorization'] = `Bearer ${token}`;
       }
 
-      const res = await fetch(path, {
-        credentials: 'same-origin',
-        ...options,
-        headers,
-      });
+      const send = () =>
+        fetch(path, {
+          credentials: 'same-origin',
+          ...options,
+          headers,
+        });
+
+      let res = await send();
+
+      // EdgeOne's edge script fails with HTTP 545 + a plain "Error return from
+      // script" body on a fraction of requests (measured ~25% on the live hub,
+      // 2026-11-27). It is a load failure of the deployed script, not an answer
+      // from our code, so the request never reached a handler and is safe to
+      // repeat — for any method, GET included. Without this every save and every
+      // refresh randomly "did nothing", which reads exactly like a product bug.
+      if (res.status === 545) {
+        for (let attempt = 0; attempt < 2 && res.status === 545; attempt++) {
+          await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+          try {
+            res = await send();
+          } catch (_) {
+            break;
+          }
+        }
+      }
 
       if (res.status === 401) {
         // Drop the stale credential: otherwise the 3s lane poll keeps retrying

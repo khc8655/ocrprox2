@@ -128,10 +128,12 @@ func TestDispatch_AllKeysCoolingDownCarriesNoCandidate(t *testing.T) {
 	if rec := send(); rec.Code < 400 {
 		t.Fatalf("first attempt should surface the upstream failure, got %d", rec.Code)
 	}
-	// The key is now cooling down, so the second request is rejected locally
-	// with 502 (the all-candidates-failed status).
-	if rec := send(); rec.Code != http.StatusBadGateway {
-		t.Fatalf("second attempt should be 502 (cooling down), got %d: %s", rec.Code, rec.Body.String())
+	// The key is now cooling down, so the second request is rejected locally.
+	// Nothing was dialed, so this is our admission decision, not an upstream
+	// failure: 503 ("try again shortly"). A 502 would claim the upstream broke,
+	// and clients stop retrying on 502.
+	if rec := send(); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second attempt should be 503 (all keys cooling down), got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	traces := sink.RecentTraces(false)

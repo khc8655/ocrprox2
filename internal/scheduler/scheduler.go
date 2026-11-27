@@ -1779,6 +1779,14 @@ func (s *Scheduler) Dispatch(
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
+	// Every candidate was skipped locally (all keys cooling down, RPM-capped,
+	// disabled) — nothing was ever dialed, so this is our own admission decision,
+	// not an upstream failure. 502 says "the upstream broke"; 503 says "try again
+	// shortly", which is the truth and matches the no-candidates branch above.
+	// Clients retry a 503 and stop retrying a 502.
+	if len(tries) == 0 && len(skips) > 0 {
+		status = http.StatusServiceUnavailable
+	}
 	lastStatus = status // keep the failure log line in step with what the client saw
 	reason := lastErrSnippet
 	if reason == "" && len(skips) > 0 {

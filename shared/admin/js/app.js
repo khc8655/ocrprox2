@@ -1001,6 +1001,28 @@
     const poll = async () => {
       if (document.visibilityState === 'hidden' || !window.HOST.getToken()) return;
       if (state.activeTab !== 'providers' && state.activeTab !== 'models' && state.activeTab !== 'activity') return;
+      // 刷新页面上已经渲染出来的 Key 状态列。冷却会自己到期、也可能被解除，
+// 不回写的话用户得手动折叠再展开才看得到变化。
+      const repaintKeyStatusCells = () => {
+        document.querySelectorAll('.k-status-cell').forEach((cell) => {
+          const tr = cell.closest('tr');
+          const tbody = cell.closest('tbody');
+          const pId = tbody && tbody.id && tbody.id.startsWith('p_keys_tbody_')
+            ? tbody.id.slice('p_keys_tbody_'.length)
+            : '';
+          if (!pId) return;
+          const idx = Number(tr?.dataset.keyIdx);
+          const k = state.config?.providers?.[pId]?.api_keys?.[idx];
+          if (!k) return;
+          const cd = findKeyCooldown(pId, k, idx);
+          cell.innerHTML = keyStatusCellHtml(k, cd.sec, cd.target);
+          if (tr) {
+            tr.dataset.cdSec = String(cd.sec);
+            tr.dataset.cdTarget = cd.target || '';
+          }
+        });
+      };
+      state.repaintKeyStatusCells = repaintKeyStatusCells;
       try {
         const [lanesRes, cdRes] = await Promise.all([
           window.HOST.getLanes(),
@@ -1017,6 +1039,7 @@
           state.cooldowns = cdMap;
           state.cooldownsAll = cdRes.cooldowns || [];
         }
+        if (state.activeTab === 'providers') repaintKeyStatusCells();
         if (state.activeTab === 'activity' && window.USAGE) {
           if (state.usage) {
             window.USAGE.renderKPIs(state.usage, { lanes: state.lanes, cooldowns: state.cooldownsAll });
@@ -3570,6 +3593,15 @@
           }
         });
       }
+      if (!tbody.dataset.cdWired) {
+        tbody.dataset.cdWired = '1';
+        tbody.addEventListener('click', (ev) => {
+          const btn = ev.target instanceof Element ? ev.target.closest('.btn_clear_k_cd_inline') : null;
+          if (!btn || !btn.dataset.cdTarget) return;
+          ev.stopPropagation();
+          clearSingleCooldown(btn.dataset.cdTarget);
+        });
+      }
       keys.forEach((k, idx) => tbody.appendChild(buildProviderKeyRow(pId, p, k, idx)));
     }
     return wrap;
@@ -3591,8 +3623,7 @@
     const vaultKey = !isHubMode() && keyOrigin === 'vault';
     const keyIsVault = isHubMode() || keyOrigin === 'vault';
 
-    const st = keyStatusView(k, cooldownSec);
-    const statusHtml = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
+    const statusHtml = keyStatusCellHtml(k, cooldownSec, cdTarget);
 
     tr.innerHTML = `
       <td><input type="checkbox" class="k_enable_cb" data-idx="${idx}" ${k.enabled !== false ? 'checked' : ''} ${vaultKey ? 'disabled title="中枢下发的 Key 不可在节点修改"' : ''}></td>
@@ -3614,9 +3645,42 @@
   }
 
   // Key 状态：.dot + 一个词 + title 里的完整说明。
+  // 失败原因要说人话，并且分清「该改谁」：这几类在操作者眼里是三件完全不同的事，
+// 都显示成「失败 · 404」的话没人分得清是 Key 坏了还是模型名写错了。
+// reason 枚举与 internal/scheduler/failure_reason.go 的常量一致。
+  const REASON_HUMAN = {
+    model_not_found: '模型不存在（换模型，不是 Key 的问题）',
+    model_unspecified: '未指定模型（先加一个路由或用模型页测试）',
+    auth_invalid: 'Key 无效或已过期',
+    quota_exhausted: '余额或配额耗尽',
+    rate_limited: '被限流（稍后自动恢复）',
+    context_too_long: '输入超出上下文长度',
+    network: '网络不通',
+    timeout: '超时无响应',
+    upstream_error: '上游报错',
+    bad_response: '上游返回异常格式',
+    client_disconnected: '客户端提前断开',
+  };
+  function reasonWord(reason) {
+    return REASON_HUMAN[reason] || reason || '未知原因';
+  }
+
+  // 一把 Key 的状态列 HTML。模块级，因为有两个调用方：展开时构建行，以及
+// lanes/cooldowns 每 3 秒轮询后回写（不轮询回写的话，冷却中/冷却结束的
+// 变化要等用户手动折叠再展开才看得到 —— 这就是「冷却 7h」一直挂着的原因之一）。
+  function keyStatusCellHtml(k, cooldownSec, cdTarget) {
+    const st = keyStatusView(k, cooldownSec);
+    if (cooldownSec > 0) {
+      // 冷却做成可直接点的按钮：看到「冷却 7m」的第一反应是「怎么立刻恢复」，
+      // 不该再去「⋯」菜单里找「解除冷却」。
+      return `<button class="btn btn--sm btn--ghost btn_clear_k_cd_inline" data-cd-target="${eh(cdTarget || '')}" type="button" title="${eh(st.title)} · 点击立即解除"><span class="dot ${st.dot}"></span><span class="text-xs">${eh(st.word)} · 解除</span></button>`;
+    }
+    return `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
+  }
+
   function keyStatusView(k, cooldownSec) {
     if (cooldownSec > 0) {
-      return { dot: 'dot--warn', word: `冷却 ${formatCooldown(cooldownSec)}`, title: `冷却 ${formatCooldown(cooldownSec)}` };
+      return { dot: 'dot--warn', word: `冷却 ${formatCooldown(cooldownSec)}`, title: `冷却 ${formatCooldown(cooldownSec)}（到期后自动恢复）` };
     }
     const lt = k.last_test;
     if (lt && typeof lt === 'object') {
@@ -3626,7 +3690,14 @@
       const status = Number(lt.status) || 0;
       const reason = String(lt.reason || 'unknown');
       const errType = String(lt.err_type || '');
-      return { dot: 'dot--err', word: `失败 · ${status} ${reason}`, title: `${lt.error || '上游无响应'}${errType ? ` · ${errType}` : ''}${lt.at ? ` · ${lt.at}` : ''}` };
+      // 限流和余额耗尽不是「Key 坏了」：用警告色而不是错误色，避免操作者
+      // 看到一片红点就去删 Key（2026-11-27 的实测就是这样误伤的）。
+      const soft = reason === 'rate_limited' || reason === 'quota_exhausted' || reason === 'timeout';
+      return {
+        dot: soft ? 'dot--warn' : 'dot--err',
+        word: `失败 · ${reasonWord(reason)}`,
+        title: `${lt.error || '上游无响应'}${errType ? ` · ${errType}` : ''}${status ? ` · HTTP ${status}` : ''}${lt.at ? ` · ${lt.at}` : ''}`,
+      };
     }
     if (k.last_ok === true) return { dot: 'dot--ok', word: `正常 · ${k.last_latency_ms || 0}ms`, title: '正常' };
     if (k.last_ok === false) return { dot: 'dot--err', word: `异常${k.last_status ? ` · ${k.last_status}` : ''}`, title: k.last_status ? `探活失败：${k.last_status}` : '探活失败' };
@@ -3635,7 +3706,11 @@
 
   // 单把 Key 的真实推理测试：服务端按 key_id / key_label 解析已存的密钥，
   // 浏览器不传密钥本体。结论落在 key 对象上（由「保存」持久化）。
-  async function testKeyOnce(pId, k, keyLabel) {
+  //
+  // quiet=true 用于批量测：服务端每次都把结论落盘（配置版本 +1），批量里
+  // 逐把追平版本号就是 2N 次往返（6 把 Key = 12 次）。批量改在全部结束后
+  // 追一次，中间那几版本页不再提交，冲突由 persistConfig 的 pendingEdit 处理。
+  async function testKeyOnce(pId, k, keyLabel, quiet) {
     const payload = { provider: pId, key_id: k.id || '', key_label: keyLabel };
     const routeModel = firstRouteTargetModel(pId);
     if (routeModel) payload.model = routeModel;
@@ -3643,7 +3718,7 @@
       const res = await window.HOST.testKey(payload);
       // test-key 会把结论落盘（Full 节点配置版本 +1），本页持有的版本号就此
       // 落后一版。立刻追平，否则紧接着的保存必被 CAS 判为冲突、改动被丢弃。
-      await refreshConfigVersion();
+      if (!quiet) await refreshConfigVersion();
       return applyKeyLastTest(k, res);
     } catch (err) {
       k.last_ok = false;
@@ -3842,7 +3917,12 @@
         return;
       }
       btn.disabled = true;
+      // 置灰的同时就把计数改掉：不然从一个没变化的按钮跳到「2/6」，
+      // 操作者会以为第一把被跳过了。
+      btn.textContent = `测试中 0/${total}…`;
       let succ = 0;
+      let done = 0;
+      let aborted = '';
       // 篇幅：批量测 Key 每把都要写盘（配置版本 +1），逐把重绘整张列表会打断
       // 用户正在编辑的字段。只重画状态列：值都来自同一个 p.api_keys 数组。
       const redrawKeyRows = () => {
@@ -3859,23 +3939,58 @@
           tr.dataset.cdTarget = cd.target || '';
         });
       };
-      try {
-        for (let i = 0; i < total; i++) {
-          const k = keys[i];
-          const keyLabel = k.label || k.id || `key-${i}`;
-          btn.textContent = `测试中 ${i + 1}/${total}…`;
-          // Painted before the await so the counter is visible while the probe
-          // is in flight, not only after it returns.
-          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-          const lt = await testKeyOnce(pId, k, keyLabel);
-          if (lt.ok) succ++;
-          redrawKeyRows();
+      // 串行测 6 把最坏 120 秒（每把 20 秒超时）。这里放到 3 路并发：
+      // 一个供应商的 Key 通常是同一账号的不同小号，串行省不下什么；
+      // 而连续 3 把都是 429 / 余额耗尽时，后面的 Key 结论早已注定 ——
+      // 继续测只是把 90 秒浪费在同一个答案上。命中就直接停。
+      const CONCURRENCY = 3;
+      let streakLimited = 0;
+      const okCount = new Map();
+      const runOne = async (i) => {
+        if (aborted) return;
+        const k = keys[i];
+        const keyLabel = k.label || k.id || `key-${i}`;
+        const lt = await testKeyOnce(pId, k, keyLabel, true);
+        if (lt.ok) {
+          succ++;
+          streakLimited = 0;
+        } else {
+          const r = String(lt.reason || '');
+          streakLimited = r === 'rate_limited' || r === 'quota_exhausted' ? streakLimited + 1 : 0;
         }
+        okCount.set(i, Boolean(lt.ok));
+        done++;
+        btn.textContent = `测试中 ${Math.min(done + 1, total)}/${total}…`;
+        redrawKeyRows();
+        if (streakLimited >= 3 && !aborted) {
+          aborted = '连续 3 把被限流或余额不足，已提前结束';
+        }
+      };
+      try {
+        let next = 0;
+        const worker = async () => {
+          while (next < total && !aborted) {
+            const i = next++;
+            await runOne(i);
+          }
+        };
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
       } finally {
+        // 只追一次版本号：中间每把落盘都会让版本前进，但本页此刻不再提交，
+        // 全部结束后对齐到最新即可（原来逐把追平 = 2N 次往返）。
+        await refreshConfigVersion();
         btn.disabled = false;
         btn.textContent = label;
       }
-      toast(`逐把测试完成: ${succ}/${total} 把 Key 可用`, succ === total ? 'ok' : 'warn');
+      const tested = okCount.size;
+      if (tested === 0) {
+        toast('没有测到任何 Key', 'warn');
+      } else if (aborted) {
+        toast(`${aborted}（测了 ${tested}/${total} 把，${succ} 把可用）`, 'warn');
+      } else {
+        toast(`逐把测试完成: ${succ}/${tested} 把 Key 可用`, succ === tested ? 'ok' : 'warn');
+      }
       renderProvidersList();
     });
 
@@ -3994,7 +4109,33 @@
           pickBox.appendChild(empty);
         };
         if (!manifestProv) {
-          emptyMsg('中枢清单未加载，无法补拉（请稍后重试或检查 Vault 连接）');
+          // 中枢清单加载失败最常见的原因是边缘接口偶发 545，不是 Vault 配错。
+          // 只给一句话等于死路：重新加载必须就在这里能点。
+          emptyMsg('中枢清单未加载（可能是中枢瞬时不可用）');
+          const retry = ce('button');
+          retry.type = 'button';
+          retry.className = 'btn btn--sm';
+          retry.textContent = '重新加载清单';
+          clk(retry, async () => {
+            retry.disabled = true;
+            retry.textContent = '加载中…';
+            try {
+              await loadVaultManifest({ force: true });
+              if (state.vaultManifest) {
+                toast('中枢清单已加载', 'ok');
+                renderProvidersList();
+              } else {
+                toast('仍然取不到中枢清单，请检查系统设置里的 Vault 连接', 'err');
+                retry.disabled = false;
+                retry.textContent = '重新加载清单';
+              }
+            } catch (e) {
+              toast(`加载失败: ${scrubUiText(e.message)}`, 'err');
+              retry.disabled = false;
+              retry.textContent = '重新加载清单';
+            }
+          });
+          pickBox.appendChild(retry);
           return;
         }
         const localLabels = new Set(keys.map((k) => k.label || k.id).filter(Boolean));
@@ -5897,6 +6038,10 @@
     stratPills.forEach((btn) => {
       clk(btn, () => {
         stratPills.forEach((b) => b.classList.toggle('probe-pill--managed', b === btn));
+        // 同时写进草稿：DOM 上的 --managed 只是渲染态，drawAdv() 重绘参数表、
+        // addCandidate 重建候选行之后都可能丢失；保存时读草稿就不会存成旧策略
+        // （2026-11-27 实测：设成 weighted + 3/7 + 5/0，存进去却是 sticky/1/1/0）。
+        draft.routing_strategy = btn.dataset.strat || 'sticky_failover';
         if (stratDesc) stratDesc.textContent = STRATEGY_HINTS[btn.dataset.strat || ''] || '';
         // 切到 / 切离「按权重比例分摊」时权重列要出现 / 消失。
         drawAdv();
@@ -6133,9 +6278,16 @@
       const sel = q('#m_test_cand');
       const keySel = q('#m_test_key');
       if (!sel) return;
+      // 重绘必须保留当前选中的候选。以前每次重建 option 都把 value 丢回 0，
+      // 于是「选中第二个候选 → 换 Key 清单 → 点发送」实际打的是第一个候选
+      // （2026-11-27 实测连试 4 次都被重置成 0）。
+      const prevSel = String(sel.value ?? '');
       sel.innerHTML = candidates.length
         ? candidates.map((c, i) => `<option value="${i}">${eh(`${c.provider} / ${c.target_model || mName}`)}</option>`).join('')
         : '<option value="0">（还没有候选）</option>';
+      if (candidates.length && prevSel !== '' && Number(prevSel) < candidates.length) {
+        sel.value = prevSel;
+      }
       if (!keySel) return;
       const c = candidates[Number(sel.value) || 0];
       if (!c || !c.provider) {
@@ -6359,7 +6511,9 @@
 
       const stratEl = wrap.querySelector('button[data-strat].probe-pill--managed');
       draft.enabled = true;
-      draft.routing_strategy = stratEl?.dataset.strat || draft.routing_strategy || 'sticky_failover';
+      // 策略以草稿为准；只有草稿里没有时才看 DOM（草稿在点胶囊时就写好了，
+      // 重绘不会动它）。
+      draft.routing_strategy = draft.routing_strategy || stratEl?.dataset.strat || 'sticky_failover';
       draft.active_key = (q('#ed_m_act')?.value || '').trim();
       draft.no_reasoning = Boolean(q('#ed_m_noreas')?.checked);
       draft.force_non_stream = Boolean(q('#ed_m_nonstream')?.checked);

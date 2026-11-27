@@ -918,6 +918,12 @@ func (s *Scheduler) ExecuteEndpoint(ctx context.Context, spec EndpointRequestSpe
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
+	// Same rule as the streaming path (scheduler.go): every candidate skipped
+	// locally means nothing reached the upstream, so the honest answer is 503
+	// "try again shortly" rather than 502 "the upstream broke".
+	if len(tries) == 0 && len(skips) > 0 {
+		status = http.StatusServiceUnavailable
+	}
 	reason := lastErrSnippet
 	if reason == "" && len(skips) > 0 {
 		reason = "skipped: " + strings.Join(skips, "; ")

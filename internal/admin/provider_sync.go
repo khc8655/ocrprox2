@@ -294,9 +294,13 @@ func (s *Server) handleProvidersPresetStatus(w http.ResponseWriter, r *http.Requ
 			}
 			row.LatestVersion = latest
 			row.Note = note
-			if latest != "" {
-				row.HasUpdate = latest != row.CurrentVersion
-			}
+			// Only claim an update when we know what the node currently runs.
+			// A hub older than v20261126-02 never sends preset_version, so the
+			// node's own version is empty and `latest != ""` is trivially true —
+			// that painted a permanent "可更新 → v2.0.0" badge on rows already at
+			// v2.0.0 (observed 2026-11-27). With no current version the honest
+			// state is "unknown", not "update available".
+			row.HasUpdate = latest != "" && row.CurrentVersion != "" && latest != row.CurrentVersion
 			rows = append(rows, row)
 			continue
 		}

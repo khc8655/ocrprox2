@@ -711,3 +711,66 @@ func TestAdminServer_SyncProviders_PartialFailure(t *testing.T) {
 		t.Errorf("sync: bad-p must stay untouched when its fetch fails, got %+v", p)
 	}
 }
+
+// A hub that never sends preset_version (anything older than v20261126-02) leaves
+// the node with no current version. That must not read as "update available":
+// `latest != ""` alone was trivially true and painted a permanent
+// 「可更新 → v2.0.0」 badge on rows already running v2.0.0 (2026-11-27).
+func TestAdminServer_PresetStatus_UnknownCurrentVersionIsNotAnUpdate(t *testing.T) {
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/vault/manifest" {
+			// Answer, but omit preset_version — the shape a 2.14.0 hub returns.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":        true,
+				"providers": map[string]any{"hub-p": map[string]any{"preset_id": "deepseek"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer hubServer.Close()
+
+	srv, localSrc, mux := newPresetTestServer(t)
+	srv.SetHTTPClient(hubServer.Client())
+	srv.SetDefaultVault(hubServer.URL, "tok1")
+
+	// No PresetVersion: the node cannot know what it currently runs.
+	if _, err := localSrc.MergeVaultConfig(map[string]*types.ProviderConfig{
+		"hub-p": {
+			ID: "hub-p", Name: "Hub P", BaseURL: "https://hub.example/v1", Origin: "vault", Enabled: true,
+			PresetID: "deepseek",
+			APIKeys:  []*types.KeyEntry{{ID: "k1", Label: "k1", Key: "sk-hub", Enabled: true}},
+		},
+	}, true); err != nil {
+		t.Fatalf("MergeVaultConfig: %v", err)
+	}
+
+	rec := doPresetReq(t, mux, http.MethodGet, "/api/admin/providers/preset-status", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		UpdateCount int               `json:"update_count"`
+		Providers   []presetStatusRow `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, r := range out.Providers {
+		if r.ID != "hub-p" {
+			continue
+		}
+		if r.CurrentVersion != "" {
+			t.Fatalf("fixture expects an unknown current version, got %q", r.CurrentVersion)
+		}
+		if r.HasUpdate {
+			t.Errorf("unknown current version must not report has_update (latest=%q, note=%q)", r.LatestVersion, r.Note)
+		}
+		if r.LatestVersion == "" {
+			t.Errorf("latest_version should still be filled from the local library, got empty")
+		}
+		return
+	}
+	t.Fatalf("hub-p row missing: %+v", out.Providers)
+}
