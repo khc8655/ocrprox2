@@ -111,7 +111,7 @@ llmproxy2/
 | **Magpie 复用决策审计** | [`docs/MAGPIE_REUSE_MATRIX.md`](file:///Users/xk/Documents/llmproxy2/docs/MAGPIE_REUSE_MATRIX.md) | 2026-11-08 的「要不要搬」论证与变更热度实测（历史背景；现状以同步手册为准） |
 | **安全与凭据规范** | [`docs/SECURITY_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/SECURITY_SPEC.md) | 节点签发/吊销、极简模式内存安全、SSRF DNS Pinning、密钥隔离 |
 | **前后端与节点契约** | [`docs/ADMIN_UI_BACKEND_CONTRACT.md`](file:///Users/xk/Documents/llmproxy2/docs/ADMIN_UI_BACKEND_CONTRACT.md) | `POST /api/node/config` 协议、`HOST.capabilities`、设置项生效契约 |
-| **Web 管理端 UI 规范** | [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) | **Magpie 极简风格 UI 标准**：安静表面、列表行内原地展开编辑（零抽屉）、零内联样式门禁 |
+| **Web 管理端 UI 规范** | [`docs/UI_DESIGN_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/UI_DESIGN_SPEC.md) | **控制台 UI 规范 v2**：列表负责找、弹框负责改，token 统一定义，效果图见 `docs/ui-v2/` |
 | **测试体系规范** | [`docs/TESTING_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/TESTING_SPEC.md) | T1 契约 / T2 Go 单元 (`-race`) / T3 黑盒 E2E 与零轮询/零落盘专项测试 |
 | **发版与门禁规范** | [`docs/RELEASE_SPEC.md`](file:///Users/xk/Documents/llmproxy2/docs/RELEASE_SPEC.md) | 版本规范、多平台静态交叉编译、G1~G6 六道自动化门禁 |
 | **运维与 NAT 部署** | [`docs/OPERATIONS_GUIDE.md`](file:///Users/xk/Documents/llmproxy2/docs/OPERATIONS_GUIDE.md) | EdgeOne Makers 部署、NAT VM 极简模式只读加固、标准 VM 运维 |
