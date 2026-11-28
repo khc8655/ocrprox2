@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <!-- shared -->
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
@@ -18,12 +19,16 @@
 
       <nav class="nav-wrap" aria-label="主导航">
         <div class="seg" id="navSeg">
+          <!-- Hub = 节点 / 供应商 / 模型 / 统计 / 设置；Full = 概览 / 供应商 / 模型 / 接入信息 / 设置。
+               显隐由 setupCapabilities 按 host 能力切换；「统计」是 nodes-stats 包落地的
+               统计页入口，落地前保持 hidden。 -->
           <button class="seg-btn" id="navNodes" data-tab="nodes" type="button" hidden>节点</button>
+          <button class="seg-btn" id="navStats" data-tab="stats" type="button" hidden>统计</button>
           <button class="seg-btn active" id="navActivity" data-tab="activity" type="button">概览</button>
           <button class="seg-btn" id="navProviders" data-tab="providers" type="button">供应商</button>
           <button class="seg-btn" id="navModels" data-tab="models" type="button">模型</button>
           <button class="seg-btn" id="navAccess" data-tab="access" type="button">接入信息</button>
-          <button class="seg-btn" id="navSettings" data-tab="settings" type="button">系统设置</button>
+          <button class="seg-btn" id="navSettings" data-tab="settings" type="button">设置</button>
         </div>
       </nav>
 
@@ -35,16 +40,19 @@
       </div>
     </div>
   </header>
+  <!-- /shared -->
 
   <main class="main-wrap">
-    <!-- 1. 概览与统计 -->
+    <!-- page:activity（概览与统计共用 viewActivity：page:overview 是 Full 的概览，
+         page:stats 是 Hub 的统计页，由 nodes-stats 包展开落地） -->
     <section id="viewActivity">
+      <!-- page:overview -->
       <!-- Full Node Analytics & Traces -->
       <div id="fullOverviewBox" hidden>
         <div class="view-header">
-          <div>
+          <div class="view-headings">
             <h1 class="view-title">网关运行概览</h1>
-            <p class="view-sub">实时请求吞吐、Token 消耗分布与上游链路追踪</p>
+            <span class="view-count" id="overviewCount"></span>
           </div>
           <div class="view-actions">
             <button class="btn" id="btnRefreshActivity" type="button">刷新数据</button>
@@ -57,46 +65,48 @@
           </div>
         </div>
 
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <span class="kpi-label">请求总数</span>
-            <span class="kpi-value" id="statRequests">0</span>
-            <span class="kpi-sub" id="statRequestsSub">-</span>
+        <!-- 8 项 KPI 用指标带（.metric-grid + .metric-box，仅边框无阴影）：
+             数值与说明仍按 id 填充（usage.js renderKPIs），结构换成组件 9 的格子。 -->
+        <div class="metric-grid">
+          <div class="metric-box">
+            <span class="metric-box-label">请求总数</span>
+            <div class="metric-box-val tabular" id="statRequests">0</div>
+            <span class="metric-box-label" id="statRequestsSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">请求成功率</span>
-            <span class="kpi-value" id="statSuccess">-</span>
-            <span class="kpi-sub" id="statSuccessSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">请求成功率</span>
+            <div class="metric-box-val tabular" id="statSuccess">-</div>
+            <span class="metric-box-label" id="statSuccessSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">Token 总消耗</span>
-            <span class="kpi-value" id="statTokens">0</span>
-            <span class="kpi-sub" id="statTokensSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">Token 总消耗</span>
+            <div class="metric-box-val tabular" id="statTokens">0</div>
+            <span class="metric-box-label" id="statTokensSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">缓存命中与写入</span>
-            <span class="kpi-value" id="statCacheHit">0%</span>
-            <span class="kpi-sub" id="statCacheHitSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">缓存命中与写入</span>
+            <div class="metric-box-val tabular" id="statCacheHit">0%</div>
+            <span class="metric-box-label" id="statCacheHitSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">平均首字 (TTFT)</span>
-            <span class="kpi-value" id="statTTFT">-</span>
-            <span class="kpi-sub" id="statTTFTSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">平均首字 (TTFT)</span>
+            <div class="metric-box-val tabular" id="statTTFT">-</div>
+            <span class="metric-box-label" id="statTTFTSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">生成速率 (TPS)</span>
-            <span class="kpi-value" id="statTPS">-</span>
-            <span class="kpi-sub" id="statTPSSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">生成速率 (TPS)</span>
+            <div class="metric-box-val tabular" id="statTPS">-</div>
+            <span class="metric-box-label" id="statTPSSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">上下行流量</span>
-            <span class="kpi-value" id="statBandwidth">0 B</span>
-            <span class="kpi-sub" id="statBandwidthSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">上下行流量</span>
+            <div class="metric-box-val tabular" id="statBandwidth">0 B</div>
+            <span class="metric-box-label" id="statBandwidthSub">-</span>
           </div>
-          <div class="kpi-card">
-            <span class="kpi-label">活跃路由 / 实时并发</span>
-            <span class="kpi-value" id="statActiveScope">-</span>
-            <span class="kpi-sub" id="statActiveScopeSub">-</span>
+          <div class="metric-box">
+            <span class="metric-box-label">活跃路由 / 实时并发</span>
+            <div class="metric-box-val tabular" id="statActiveScope">-</div>
+            <span class="metric-box-label" id="statActiveScopeSub">-</span>
           </div>
         </div>
 
@@ -163,42 +173,143 @@
           <div id="errorAnalysisList"></div>
         </div>
       </div>
+      <!-- /page:overview -->
 
+      <!-- page:stats -->
+      <!-- 统计页（Hub）：一条指标带 + 「模型使用分布」「节点分布」两张表。
+           原节点页折叠的 #hubOverviewBox 展开为这一页（id 保留，内容即原中枢概览）；
+           数据只来自节点上报，页头注明更新时间；导航入口 #navStats 由
+           nodes-stats 包在运行时按 host 能力放开。 -->
+      <div id="statsView" hidden>
+        <div class="view-header">
+          <div class="view-headings">
+            <h1 class="view-title">统计</h1>
+          </div>
+          <div class="view-actions">
+            <span class="view-count" id="statsUpdatedAt"></span>
+            <button class="btn" id="btnStatsRefresh" type="button">刷新</button>
+          </div>
+        </div>
+
+        <div id="hubOverviewBox">
+          <div class="kpi-grid" id="statsKpiGrid"></div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2 class="block-title">模型使用分布</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>模型</th>
+                    <th>节点</th>
+                    <th>调用</th>
+                    <th>成功率</th>
+                    <th>输入 / 输出 Token</th>
+                    <th>占比</th>
+                  </tr>
+                </thead>
+                <tbody id="statsModelUsageBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-head">
+              <h2 class="block-title">节点分布</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>节点</th>
+                    <th>状态</th>
+                    <th>调用</th>
+                    <th>最常用模型</th>
+                    <th>最近同步</th>
+                  </tr>
+                </thead>
+                <tbody id="statsNodeDistBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- /page:stats -->
     </section>
+    <!-- /page:activity -->
 
-    <!-- 2. 供应商与密钥池 -->
+    <!-- page:providers -->
     <section id="viewProviders" hidden>
       <div class="view-header">
-        <div>
-          <h1 class="view-title">供应商与密钥池</h1>
-          <p class="view-sub" id="providersSubtitle">集中管理上游 API 地址、协议适配与高可用轮询密钥</p>
+        <div class="view-headings">
+          <h1 class="view-title">供应商</h1>
+          <span class="view-count" id="providersCount"></span>
         </div>
         <div class="view-actions">
           <button class="btn" id="btnHubBatchVerifyAll" type="button" hidden>一键探活全部 Key</button>
-          <button class="btn btn--primary" id="btnAddProvider" type="button">新增供应商</button>
+          <button class="btn btn--primary" id="btnAddProvider" type="button">添加供应商</button>
         </div>
       </div>
 
       <div class="toolbar">
         <div class="search-box">
           <span class="search-ico" id="providerSearchIcon"></span>
-          <input class="input search-input" id="providerSearchInput" placeholder="搜索供应商名称、ID 或 Base URL">
+          <input class="input search-input" id="providerSearchInput" placeholder="搜索名称、地址或 Key 标签">
         </div>
-        <div class="alpha-bar" id="providerAlphaBar" role="tablist" aria-label="按首字母过滤"></div>
+        <div class="fields" id="providerFilterChips" role="group" aria-label="筛选供应商"></div>
       </div>
 
       <div class="card" id="providersList"></div>
-    </section>
 
-    <!-- 3. 模型与路由 -->
+      <!-- 供应商详情弹框（宽弹框）：启用 / 预设 / 接口地址 → Key 池表格 → 粘贴框
+           → 「高级设置」折叠 → 尾部左删除右保存。内容由 providers.js 的弹框同步
+           逻辑按 state.activeEditorKey 构建；Esc / 遮罩 / 关闭都可关，有改动先确认。 -->
+      <div class="dialog hidden" id="providerDialog" hidden>
+        <div class="dialog-panel dialog-panel--wide">
+          <div class="dialog-head">
+            <div class="fields" id="providerDialogHead"></div>
+            <button class="dialog-close" id="btnCloseProviderDialog" type="button" aria-label="关闭">✕</button>
+          </div>
+          <div class="dialog-scroll" id="providerDialogBody"></div>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left" id="providerDialogFootLeft"></div>
+            <div class="dialog-foot-right" id="providerDialogFootRight"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 添加供应商弹框：预设网格（含末尾「自定义」）→ 名称 / 地址 / Key →
+           尾部左「粘贴 cURL」，右「取消 / 添加并测试」。内容由 providers.js
+           按 state.creatingProvider 构建。 -->
+      <div class="dialog hidden" id="addProviderDialog" hidden>
+        <div class="dialog-panel">
+          <div class="dialog-head">
+            <div>
+              <h2 class="dialog-title">添加供应商</h2>
+              <p class="dialog-sub">选一个预设，地址和适配规则会自动填好</p>
+            </div>
+            <button class="dialog-close" id="btnCloseAddProvider" type="button" aria-label="关闭">✕</button>
+          </div>
+          <div class="dialog-scroll" id="addProviderDialogBody"></div>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left" id="addProviderFootLeft"></div>
+            <div class="dialog-foot-right" id="addProviderFootRight"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- /page:providers -->
+
+    <!-- page:models -->
     <section id="viewModels" hidden>
       <div class="view-header">
-        <div>
+        <div class="view-headings">
           <h1 class="view-title" id="modelsTitle">模型</h1>
-          <p class="view-sub" id="modelsSubtitle">每个模型由一个供应商提供；同一模型来自多个供应商时自动组成故障转移</p>
+          <span class="view-count" id="modelsCount"></span>
         </div>
         <div class="view-actions">
-          <button class="btn" id="btnImportFromTemplate" hidden>从模板导入</button>
           <button class="btn btn--primary" id="btnAddModel">添加模型</button>
         </div>
       </div>
@@ -212,31 +323,70 @@
 
       <div class="card" id="modelsList"></div>
 
-      <!-- Template Route Import Overlay (.dialog) -->
-      <div class="dialog hidden" id="templateImportOverlay" hidden>
-        <div class="dialog-body dialog-body--wide">
+      <!-- 添加模型弹框（v2：一个窗口不分步）：来源（供应商 / Key 芯片 / 主备·轮询）
+           → 模型（筛选 + 复选 + 手动填写）→ 对外模型名 → 思考档位 → 高级折叠。
+           体唯一滚动区；尾左「测试」+ 摘要，尾右「取消 / 添加模型」。 -->
+      <div class="dialog hidden" id="addModelDialog" hidden>
+        <div class="dialog-panel dialog-panel--wide">
           <div class="dialog-head">
             <div>
-              <h2 class="dialog-title">从模板导入模型</h2>
-              <p class="dialog-sub">列出中枢模板中本地尚未配置的模型，按需导入（不自动整批落地）</p>
+              <h2 class="dialog-title">添加模型</h2>
+              <p class="dialog-sub">从已有供应商挑上游模型；与现有模型同名时并作它的备用来源</p>
             </div>
-            <button class="dialog-close" id="btnCloseTemplateImport" type="button" aria-label="关闭">✕</button>
+            <button class="dialog-close" id="btnCloseAddModel" type="button" aria-label="关闭">✕</button>
           </div>
-          <div id="templateImportList"></div>
-          <div class="dialog-actions">
-            <button class="btn" id="btnCloseTemplateImportFoot" type="button">取消</button>
-            <button class="btn btn--primary" id="btnConfirmImportRoutes">导入选中路由</button>
+          <div class="dialog-scroll">
+            <div class="form-2col" id="am_form"></div>
+            <div class="m-test-out" id="am_test_out" hidden></div>
+          </div>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left">
+              <button class="btn" id="am_test" type="button">测试</button>
+              <span class="text-xs text-muted" id="am_summary"></span>
+            </div>
+            <div class="dialog-foot-right">
+              <button class="btn" id="btnCancelAddModel" type="button">取消</button>
+              <button class="btn btn--primary" id="btnSaveAddModel" type="button">添加模型</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 编辑模型弹框（v2）：对外模型名 / 分流 → 来源表（拖动把手排序 · Key 下拉 ·
+           状态 · 测试 ···）→「添加来源」（复用添加模型的来源与模型控件）→ 高级折叠。 -->
+      <div class="dialog hidden" id="modelEditDialog" hidden>
+        <div class="dialog-panel dialog-panel--wide">
+          <div class="dialog-head">
+            <div>
+              <h2 class="dialog-title" id="me_title">模型</h2>
+              <p class="dialog-sub" id="me_sub"></p>
+            </div>
+            <button class="dialog-close" id="btnCloseEditModel" type="button" aria-label="关闭">✕</button>
+          </div>
+          <div class="dialog-scroll">
+            <div class="form-2col" id="me_form"></div>
+            <div class="m-test-out" id="me_test_out" hidden></div>
+          </div>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left">
+              <button class="btn btn--danger" id="btnDelModel" type="button">删除模型</button>
+            </div>
+            <div class="dialog-foot-right">
+              <button class="btn" id="btnCancelEditModel" type="button">取消</button>
+              <button class="btn btn--primary" id="btnSaveEditModel" type="button">保存</button>
+            </div>
           </div>
         </div>
       </div>
     </section>
+    <!-- /page:models -->
 
-    <!-- 4. 中转节点 (Hub) -->
+    <!-- page:nodes -->
     <section id="viewNodes" hidden>
       <div class="view-header">
-        <div>
+        <div class="view-headings">
           <h1 class="view-title">节点</h1>
-          <p class="view-sub" id="nodesSubtitle">签发节点、分发一键安装命令、轮换与吊销同步凭证</p>
+          <span class="view-count" id="nodesCount"></span>
         </div>
         <div class="view-actions">
           <button class="btn" id="btnHubRefreshOverview" type="button">刷新</button>
@@ -246,32 +396,40 @@
 
       <div class="card" id="nodesList"></div>
 
-      <!-- 中枢概览（折叠）：原「概览」页的内容收在这里，节点页承担活跃节点信息。 -->
-      <details class="headers-details" id="hubOverviewBox">
-        <summary class="form-label">中枢概览（下发规模与全部节点的模型使用分布）</summary>
-        <div class="mt-2">
-          <div class="metric-grid" id="hubKpiGrid"></div>
-          <div class="table-wrap mt-3">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>模型</th>
-                  <th>使用节点数</th>
-                  <th>总调用</th>
-                  <th>成功 / 失败</th>
-                  <th>输入 / 输出 Token</th>
-                  <th>节点分布</th>
-                </tr>
-              </thead>
-              <tbody id="hubModelUsageBody"></tbody>
-            </table>
+      <!-- 节点详情 / 添加节点弹框：名称 / 角色（分段）/ 租约与宽限 / 供应商与模型
+           范围（芯片）→ 运行状态（只读：节点 ID、同步、配置版本、IP、Token 等掩码
+           + 显示 / 复制、常用模型）→ 尾部左吊销 / 删除，右安装命令 / 轮换 Token /
+           保存。内容由 nodes.js 按 nodeDialogState 构建；Esc / 遮罩 / 关闭都可关，
+           有改动先确认。一次性材料走下面的安装命令弹框。 -->
+      <div class="dialog hidden" id="nodeEditDialog" hidden>
+        <div class="dialog-panel dialog-panel--wide">
+          <div class="dialog-head">
+            <div class="fields">
+              <h2 class="dialog-title" id="nodeEditTitle">节点</h2>
+              <span class="row-status" id="nodeEditStatus" hidden></span>
+            </div>
+            <button class="dialog-close" id="btnCloseNodeEdit" type="button" aria-label="关闭">✕</button>
+          </div>
+          <div class="dialog-scroll">
+            <div class="form-2col" id="nodeEditBody"></div>
+          </div>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left" id="nodeEditFootLeft"></div>
+            <div class="dialog-foot-right">
+              <button class="btn" id="btnNodeInstallCmd" type="button" hidden>安装命令</button>
+              <button class="btn" id="btnNodeRotateTok" type="button" hidden>轮换 Token</button>
+              <button class="btn" id="btnNodeEditCancel" type="button">取消</button>
+              <button class="btn btn--primary" id="btnNodeEditSave" type="button">保存</button>
+            </div>
           </div>
         </div>
-      </details>
+      </div>
 
-      <!-- Node Install Command Overlay (.dialog) -->
+      <!-- 一次性安装命令弹框：签发 / 轮换 / 重新获取后只显示一次；顶部是轮换与
+           缓存提示条，一次性材料（新 NODE_TOKEN / 启动环境变量）+ 命令面板
+           （mountNodeCommandPanel），尾部关闭。 -->
       <div class="dialog hidden" id="nodeInstallOverlay" hidden>
-        <div class="dialog-body dialog-body--wide">
+        <div class="dialog-panel dialog-panel--wide">
           <div class="dialog-head">
             <div>
               <h2 class="dialog-title" id="nodeInstallTitle">一次性安装命令</h2>
@@ -279,24 +437,33 @@
             </div>
             <button class="dialog-close" id="btnCloseNodeInstall" type="button" aria-label="关闭">✕</button>
           </div>
-          <div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden>
-            <span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span>
+          <div class="dialog-scroll">
+            <div class="notice-strip notice-strip--warn mb-2" id="nodeInstallRotateNotice" hidden>
+              <span>本次重新获取已<b>轮换</b>了节点 Token（原 Token 已失效）。请在目标机器上使用下方最新命令完成安装。</span>
+            </div>
+            <div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden>
+              <span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span>
+            </div>
+            <div id="nodeInstallOnceMaterial" class="mb-2" hidden></div>
+            <div id="nodeInstallPanel"></div>
           </div>
-          <div class="notice-strip mb-2" id="nodeInstallStaleHint" hidden>
-            <span>以下命令来自本页签缓存。若在目标机器执行后节点迟迟不在线，可能是命令已被其它页签轮换失效——请点击「重新获取」。</span>
+          <div class="dialog-foot">
+            <div class="dialog-foot-left"></div>
+            <div class="dialog-foot-right">
+              <button class="btn" id="btnCloseNodeInstallFoot" type="button">关闭</button>
+            </div>
           </div>
-          <div id="nodeInstallPanel"></div>
         </div>
       </div>
     </section>
+    <!-- /page:nodes -->
 
-
-    <!-- 5. 系统设置 -->
+    <!-- page:access -->
     <section id="viewAccess" hidden>
       <div class="view-header">
-        <div>
+        <div class="view-headings">
           <h1 class="view-title">接入信息</h1>
-          <p class="view-sub">把基址、密钥、模型 ID 填进客户端即可；两种协议的差别只在客户端方言</p>
+          <span class="view-count" id="accessCount"></span>
         </div>
       </div>
 
@@ -308,10 +475,36 @@
             <button class="seg-btn" type="button" data-gw-client="anthropic">Claude 系</button>
           </div>
         </div>
-        <div class="copy-chips" id="gwCopyChips">
-          <button class="btn copy-chip" type="button" data-copy="base"><span class="copy-chip-label" id="chipBaseLabel">base_url</span><span class="copy-chip-value" id="chipBaseValue"></span></button>
-          <button class="btn copy-chip" type="button" data-copy="key"><span class="copy-chip-label">API Key</span><span class="copy-chip-value privacy-mask" id="chipKeyValue"></span></button>
-          <button class="btn copy-chip" type="button" data-copy="endpoint"><span class="copy-chip-label">请求地址</span><span class="copy-chip-value" id="chipEndpointValue"></span></button>
+        <!-- 复制项 = 只读输入框 + 复制按钮（与设置页同一套 setting-row 行清单）。
+             值由 access.js 按协议分段填充；data-copy 语义不变（base / key / endpoint）。 -->
+        <div class="setting-rows" id="gwCopyChips">
+          <div class="setting-row">
+            <div class="setting-main"><div class="setting-title" id="chipBaseLabel">base_url</div></div>
+            <div class="setting-control">
+              <div class="input-row">
+                <input class="input input--code" id="chipBaseValue" readonly>
+                <button class="btn" type="button" data-copy="base" title="复制基址">复制</button>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main"><div class="setting-title">API Key</div></div>
+            <div class="setting-control">
+              <div class="input-row">
+                <input class="input input--code privacy-mask" id="chipKeyValue" readonly placeholder="尚未配置，到「设置 · 接入」生成">
+                <button class="btn" type="button" data-copy="key" title="复制主客户端密钥">复制</button>
+              </div>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="setting-main"><div class="setting-title">请求地址</div></div>
+            <div class="setting-control">
+              <div class="input-row">
+                <input class="input input--code" id="chipEndpointValue" readonly>
+                <button class="btn" type="button" data-copy="endpoint" title="复制请求地址">复制</button>
+              </div>
+            </div>
+          </div>
         </div>
         <p class="access-note" id="gwAccessNote"></p>
         <p class="access-note access-note--warn" id="gwAccessKeyState" hidden></p>
@@ -348,22 +541,31 @@
         <div class="block-head">
           <h2 class="block-title">支持的接口</h2>
         </div>
-        <div class="copy-chips" id="gwEndpointChips"></div>
+        <!-- 接口路径清单：一条路径一行（setting-row），只读输入框 + 复制按钮；
+             行清单由 renderGatewayEndpoints() 挂载。 -->
+        <div class="setting-rows" id="gwEndpointChips"></div>
       </div>
     </section>
+    <!-- /page:access -->
 
+    <!-- page:settings -->
     <section id="viewSettings" hidden>
       <div class="view-header">
-        <div>
-          <h1 class="view-title">系统设置</h1>
+        <div class="view-headings">
+          <h1 class="view-title">设置</h1>
+          <span class="view-count" id="settingsCount"></span>
         </div>
-        <div class="view-actions">
-          <button class="btn btn--primary" id="btnSaveSettings">保存全部设置</button>
-        </div>
+      </div>
+
+      <!-- 分组锚点（效果图 11-settings 的左侧锚点，用分段控件呈现；分组按端能力
+           动态增减，锚点由 renderSettingsAnchorNav() 生成，点击滚动到对应分组，
+           滚动时同步选中态）。保存入口在底部浮条：有改动才浮出「N 项未保存」。 -->
+      <div class="toolbar" id="settingsAnchorBar">
+        <div class="seg" id="settingsAnchorSeg" role="tablist" aria-label="设置分组锚点"></div>
       </div>
 
       <!-- 分组 1 · 接入：网关地址 + 客户端密钥 -->
-      <div class="block" id="gatewayAccessCenter">
+      <div class="block" id="settingsGrpAccess">
         <div class="block-head">
           <h2 class="block-title">接入</h2>
           <span class="fields" id="gwAccessSummaryPill"></span>
@@ -375,34 +577,34 @@
         <p class="access-note">客户端要粘贴的基址 / 密钥 / 模型 ID 在「接入信息」页，这里只改配置。</p>
       </div>
 
-      <!-- 分组 2 · 路由与限流：路由策略、冷却、首字超时、并发护栏 -->
-      <div class="block">
+      <!-- 分组 2 · 路由与冷却：默认策略、首字超时、四类冷却；解除全部冷却仅 Full -->
+      <div class="block" id="settingsGrpRouting">
         <div class="block-head">
-          <h2 class="block-title">路由与限流</h2>
+          <h2 class="block-title">路由与冷却</h2>
           <div class="block-actions">
             <button class="btn btn--sm btn--danger" id="btnClearAllCooldowns" hidden>解除全部冷却</button>
           </div>
         </div>
-
         <div class="setting-rows" id="routingPolicyRows"></div>
-
-        <!-- 并发护栏和路由策略不是一回事，用一个小标题隔开；说明文字收进各行，
-             这里不再重复一层「标题 + 副标题」。 -->
-        <div class="setting-section" id="concurrencyGuardBox">
-          <h3 class="block-title setting-section-title" id="concurrencyGuardTitle">并发护栏</h3>
-          <div class="setting-rows" id="concurrencyGuardRows"></div>
-        </div>
       </div>
 
-      <!-- 分组 3 · 系统：模型目录、Vault 连接、备份导入导出、版本与升级 -->
-      <div class="block">
+      <!-- 分组 3 · 并发护栏：OCR 预读 / 固定通道并发上限 -->
+      <div class="block" id="settingsGrpGuards">
         <div class="block-head">
-          <h2 class="block-title">系统</h2>
+          <h2 class="block-title" id="concurrencyGuardTitle">并发护栏</h2>
+        </div>
+        <div class="setting-rows" id="concurrencyGuardRows"></div>
+      </div>
+
+      <!-- 分组 4 · 模型目录：Hub 是 models.dev 目录，Full 是预设与中枢同步；
+           分组标题由 renderSettingsView() 按端设置（#grpCatalogTitle） -->
+      <div class="block" id="settingsGrpCatalog">
+        <div class="block-head">
+          <h2 class="block-title" id="grpCatalogTitle">模型目录</h2>
         </div>
 
-        <!-- 模型目录（Hub only: it owns the KV catalog a Full node pulls） -->
+        <!-- models.dev 目录（Hub only: it owns the KV catalog a Full node pulls） -->
         <div class="setting-section" id="modelCatalogBox" hidden>
-          <h3 class="block-title setting-section-title">模型目录</h3>
           <div class="setting-rows" id="modelCatalogRows"></div>
         </div>
 
@@ -411,21 +613,14 @@
           <div class="setting-rows" id="presetSyncRows"></div>
           <div class="update-box hidden" id="presetSyncResult" hidden></div>
         </div>
+      </div>
 
-        <!-- Vault 中枢连接（Full） -->
-        <div class="setting-section" id="cfgVaultLinkBox" hidden>
-          <div class="block-head">
-            <h3 class="block-title setting-section-title">Vault 中枢连接</h3>
-            <div class="block-actions">
-              <button class="btn btn--sm" id="btnTestVaultLink">测试连接</button>
-            </div>
-          </div>
-          <div class="setting-rows" id="vaultLinkRows"></div>
+      <!-- 分组 5 · 备份与迁移：导出 / 导入 / 高级（原始 JSON） -->
+      <div class="block" id="settingsGrpBackup">
+        <div class="block-head">
+          <h2 class="block-title">备份与迁移</h2>
         </div>
-
-        <!-- 配置备份与迁移（Hub + Full） -->
         <div class="setting-section" id="configBackupBox">
-          <h3 class="block-title setting-section-title">备份与迁移</h3>
           <div class="setting-rows" id="configBackupRows"></div>
           <details class="headers-details" id="rawJsonDetails">
             <summary class="form-label">高级 (原始 JSON 查看与直接保存，脱敏快照下保留未改密钥)</summary>
@@ -438,6 +633,21 @@
               </div>
             </div>
           </details>
+        </div>
+      </div>
+
+      <!-- 分组 6 · 中枢连接与升级（Full only）：Vault 连接 + 版本与升级；
+           Hub 端整个分组隐藏（两个能力都没有） -->
+      <div class="block" id="settingsGrpHub" hidden>
+        <!-- Vault 中枢连接（Full） -->
+        <div class="setting-section" id="cfgVaultLinkBox" hidden>
+          <div class="block-head">
+            <h3 class="block-title setting-section-title">Vault 中枢连接</h3>
+            <div class="block-actions">
+              <button class="btn btn--sm" id="btnTestVaultLink">测试连接</button>
+            </div>
+          </div>
+          <div class="setting-rows" id="vaultLinkRows"></div>
         </div>
 
         <!-- 版本维护与平滑重启（Full） -->
@@ -454,24 +664,33 @@
         </div>
       </div>
     </section>
+    <!-- /page:settings -->
   </main>
 
-  <!-- 统一确认弹框（组件 .dialog）：删除 / 吊销 / 轮换 / 覆盖类二次确认 -->
+  <!-- shared -->
+  <!-- 统一确认弹框（组件 .dialog）：删除 / 吊销 / 轮换 / 覆盖类二次确认。
+       结构 = 头 / 体（唯一滚动区）/ 尾（右：取消 + 主按钮），confirmDialog() 打开。 -->
   <div class="dialog hidden" id="confirmDialog" hidden>
-    <div class="dialog-body">
+    <div class="dialog-panel">
       <div class="dialog-head">
         <h2 class="dialog-title" id="confirmDialogTitle">确认操作</h2>
         <button class="dialog-close" id="btnConfirmDialogClose" type="button" aria-label="关闭">✕</button>
       </div>
-      <p class="dialog-text" id="confirmDialogText"></p>
-      <div class="dialog-actions">
-        <button class="btn" id="btnConfirmDialogCancel" type="button">取消</button>
-        <button class="btn btn--danger" id="btnConfirmDialogOk" type="button">确定</button>
+      <div class="dialog-scroll">
+        <p class="dialog-text" id="confirmDialogText"></p>
+      </div>
+      <div class="dialog-foot">
+        <div class="dialog-foot-left"></div>
+        <div class="dialog-foot-right">
+          <button class="btn" id="btnConfirmDialogCancel" type="button">取消</button>
+          <button class="btn btn--danger" id="btnConfirmDialogOk" type="button">确定</button>
+        </div>
       </div>
     </div>
   </div>
+  <!-- /shared -->
 
-  <!-- Login Overlay (独立外观，样式名与业务弹框分开) -->
+  <!-- shared -->
   <div class="login-overlay hidden" id="loginScreen" hidden>
     <div class="login-card">
       <div class="login-head">
@@ -493,12 +712,22 @@
       </form>
     </div>
   </div>
+  <!-- /shared -->
 
+  <!-- shared -->
   <div class="toast-box" id="toastBox"></div>
+  <!-- /shared -->
 
   <script src="js/icons.js"></script>
   <script src="js/usage.js"></script>
   <script src="js/host.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/pages/overview.js"></script>
+  <script src="js/pages/access.js"></script>
+  <script src="js/pages/providers.js"></script>
+  <script src="js/pages/nodes.js"></script>
+  <script src="js/pages/models.js"></script>
+  <script src="js/pages/stats.js"></script>
+  <script src="js/pages/settings.js"></script>
 </body>
 </html>

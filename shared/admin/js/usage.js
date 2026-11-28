@@ -483,8 +483,8 @@
         ? window.renderBrandIcon(item.iconHint || item.name)
         : '';
 
-      const row = document.createElement('div');
-      row.className = `row ${isExpanded ? 'expanded' : ''}`;
+      // 行结构走 W1 的 listRow()（v2 §4.1 全站唯一写法）。usage.js 是独立 IIFE，
+      // 拿不到 core.js 的作用域，所以经 window.listRow 调用。
       // 组件 3：一行只允许「名称 + 一行次要信息 + 一个状态 + 至多一个计数」。
       // 模式 / Token / 重试率这些次要标签全部并进 .sub，不再一行堆 pill。
       const subBits = [
@@ -497,26 +497,25 @@
         item.avgTotal ? `均耗 ${Math.round(item.avgTotal)}ms` : null,
         item.tps ? `${item.tps.toFixed(1)} tok/s` : null,
       ].filter(Boolean).join(' · ');
-      row.innerHTML = `
-        <div class="who">
-          <div class="name">
-            ${icoHtml}
-            <span class="${subTab === 'endpoints' ? 'tabular' : ''}">${escapeHtml(item.name)}</span>
-          </div>
-          <div class="sub">${escapeHtml(subBits)}</div>
-        </div>
-        <div class="fields">
-          <span class="fields"><span class="dot ${rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err'}"></span><span class="text-xs text-muted">${rate >= 99 ? '正常' : rate >= 90 ? '波动' : '异常'}</span></span>
-          <span class="pill tabular">${item.requests.toLocaleString()} 次</span>
-          <span class="caret">▾</span>
-        </div>
-      `;
-
-
-      row.addEventListener('click', () => {
-        usageState.expandedKey = isExpanded ? null : rowKey;
-        renderBreakdown(usage);
+      let logoEl = null;
+      if (icoHtml) {
+        const holder = document.createElement('span');
+        holder.innerHTML = icoHtml;
+        logoEl = holder.firstElementChild;
+      }
+      const row = window.listRow({
+        logo: logoEl,
+        title: `<span class="${subTab === 'endpoints' ? 'tabular' : ''}">${escapeHtml(item.name)}</span>`,
+        sub: escapeHtml(subBits),
+        status: { dot: rate >= 99 ? 'dot--ok' : rate >= 90 ? 'dot--warn' : 'dot--err', label: rate >= 99 ? '正常' : rate >= 90 ? '波动' : '异常' },
+        count: `<span class="pill tabular">${item.requests.toLocaleString()} 次</span>`,
+        onOpen: () => {
+          usageState.expandedKey = isExpanded ? null : rowKey;
+          renderBreakdown(usage);
+        },
       });
+      // 展开态高亮是过渡行为（v2 列表行没有展开态，编辑迁到弹框后删）。
+      if (isExpanded) row.classList.add('expanded');
       container.appendChild(row);
 
       if (isExpanded) {
@@ -545,10 +544,8 @@
   }
 
   function renderEmptyRow(container, text) {
-    const emptyRow = document.createElement('div');
-    emptyRow.className = 'row row--static text-muted';
-    emptyRow.textContent = text;
-    container.appendChild(emptyRow);
+    // 空状态走 W1 的 listRow()（静态行）；usage.js 是独立 IIFE，经 window.listRow 调用。
+    container.appendChild(window.listRow({ title: text, cls: 'text-muted' }));
   }
 
   // Visual Stacked SVG Waterfall & Trace Details Inspector (Magpie style)

@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>设置</title><link rel="stylesheet" href="v2.css"></head><body>
+<header class="top"><div class="top-in"><div class="brand"><i></i>LLMProxy2<small>Hub</small></div>
+<nav class="tabs"><a class="">节点</a><a class="">供应商</a><a class="">模型</a><a class="">统计</a><a class="on">设置</a></nav>
+<div class="top-r"><span class="mono muted" style="margin-right:6px">v42</span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M1.5 8s2.5-5 6.5-5 6.5 5 6.5 5-2.5 5-6.5 5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg></span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></svg></span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M6 2.5H3.5v11H6M10 5l3 3-3 3M13 8H6"/></svg></span></div></div></header>
+<main class="wrap"><div class="ph"><h1>设置</h1></div>
+<div class="set"><nav><a class="on">接入</a><a>路由与冷却</a><a>并发护栏</a><a>模型目录</a><a>备份与迁移</a></nav><div>
+<div class="grp"><h2>接入</h2><div class="list">
+<div class="srow"><div><div class="t">客户端密钥</div><div class="d">所有节点的 /v1/* 共用这一把；修改后旧密钥立即失效</div></div><div class="c"><input class="in mono w" value="sk-client-••••••••a91c"><span class="btn">生成</span></div></div>
+</div><div class="note" style="margin-top:8px">保存后在节点下次同步时生效（最长 24 小时，或在节点页手动触发）。</div></div>
+<div class="grp"><h2>路由与冷却</h2><div class="list">
+<div class="srow"><div><div class="t">默认分流策略</div><div class="d">新模型的默认值，可在模型里单独覆盖</div></div><div class="c"><div class="sel in" style="width:200px">会话粘性优先</div></div></div>
+<div class="srow"><div><div class="t">首字超时</div><div class="d">上游迟迟不出首字时换下一个来源</div></div><div class="c"><input class="in" value="120"><span class="muted">秒</span></div></div>
+<div class="srow"><div><div class="t">429 冷却</div><div class="d">被限流的 Key 暂停调度</div></div><div class="c"><input class="in" value="15"><span class="muted">秒</span></div></div>
+<div class="srow"><div><div class="t">5xx 冷却</div><div class="d">上游服务端错误后暂停</div></div><div class="c"><input class="in" value="30"><span class="muted">秒</span></div></div>
+<div class="srow"><div><div class="t">网络超时冷却</div><div class="d">连接或读取超时后暂停</div></div><div class="c"><input class="in" value="15"><span class="muted">秒</span></div></div>
+<div class="srow"><div><div class="t">401 / 403 冷却</div><div class="d">鉴权失败后封禁，0 = 不封禁</div></div><div class="c"><input class="in" value="86400"><span class="muted">秒</span></div></div>
+</div></div>
+<div class="grp"><h2>模型目录</h2><div class="list">
+<div class="srow"><div><div class="t">models.dev 目录</div><div class="d">1,286 个模型 · 更新于 2026-11-27 14:02</div></div><div class="c"><span class="btn">立即更新</span></div></div>
+</div></div></div></div>
+<div class="savebar">2 项未保存<span class="btn">放弃</span><span class="btn pri">保存</span></div></main></body></html>

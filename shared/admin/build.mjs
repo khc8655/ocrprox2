@@ -13,7 +13,12 @@ console.log('=== LLMProxy2 Magpie Minimalist Admin UI Builder & Gate Verificatio
 
 // 1. Gate 5: Node.js syntax check (node --check)
 console.log('1. Checking JS syntax (node --check)...');
-const jsFiles = ['js/icons.js', 'js/usage.js', 'js/host.js', 'js/app.js'];
+const jsFiles = [
+  'js/icons.js', 'js/usage.js', 'js/host.js',
+  'js/core.js',
+  'js/pages/overview.js', 'js/pages/access.js', 'js/pages/providers.js',
+  'js/pages/nodes.js', 'js/pages/models.js', 'js/pages/stats.js', 'js/pages/settings.js',
+];
 for (const file of jsFiles) {
   const fullPath = join(adminDir, file);
   try {
@@ -31,14 +36,27 @@ const cssPath = join(adminDir, 'css/app.css');
 const iconsJsPath = join(adminDir, 'js/icons.js');
 const usageJsPath = join(adminDir, 'js/usage.js');
 const hostJsPath = join(adminDir, 'js/host.js');
-const appJsPath = join(adminDir, 'js/app.js');
+// The app controller is split into core + pages/* (fixed order = original line order).
+// The build concatenates them back into ONE IIFE so dist stays a single outer IIFE.
+const appJsPaths = [
+  'js/core.js',
+  'js/pages/overview.js',
+  'js/pages/access.js',
+  'js/pages/providers.js',
+  'js/pages/nodes.js',
+  'js/pages/models.js',
+  'js/pages/stats.js',
+  'js/pages/settings.js',
+];
 
 let html = readFileSync(htmlPath, 'utf8');
 const css = readFileSync(cssPath, 'utf8');
 const iconsJs = readFileSync(iconsJsPath, 'utf8');
 const usageJs = readFileSync(usageJsPath, 'utf8');
 const hostJs = readFileSync(hostJsPath, 'utf8');
-const appJs = readFileSync(appJsPath, 'utf8');
+const appJs = `(function () {\n${appJsPaths
+  .map((f) => readFileSync(join(adminDir, f), 'utf8').replace(/\s+$/, ''))
+  .join('\n')}\n})();`;
 
 // 3. Gate 1: Zero inline style check (Zero Inline Style Gate)
 console.log('\n2. Verifying Gate 1: Zero inline styles (style= / .style.)...');
@@ -83,6 +101,136 @@ if (leftBorderMatch) {
 }
 console.log('   ✓ Zero left-border stripes verified (100% compliant)');
 
+// ---- v2 UI gates (docs/UI_DESIGN_SPEC.md v2 §6). The same three rules live in
+// tests/t1_contracts/verify_contracts.test.mjs (T1.ui_layout_and_zero_inline_style);
+// keep both in sync when changing them. ----
+
+// Extract the body of the listRow() generator in core.js: from "function listRow("
+// to its balanced closing brace. It is the ONLY place allowed to assign a .row
+// className; every other row must go through listRow().
+function extractListRowBody(coreJsSrc) {
+  const marker = 'function listRow(';
+  const start = coreJsSrc.indexOf(marker);
+  if (start < 0) return { found: false, rest: coreJsSrc };
+  // Skip the parameter list (a default like `opts = {}` holds braces of its own),
+  // then brace-count the function body.
+  const parenOpen = coreJsSrc.indexOf('(', start + marker.length);
+  if (parenOpen < 0) return { found: false, rest: coreJsSrc };
+  let pDepth = 0;
+  let parenClose = -1;
+  for (let i = parenOpen; i < coreJsSrc.length; i++) {
+    if (coreJsSrc[i] === '(') pDepth++;
+    else if (coreJsSrc[i] === ')') {
+      pDepth--;
+      if (pDepth === 0) { parenClose = i; break; }
+    }
+  }
+  if (parenClose < 0) return { found: false, rest: coreJsSrc };
+  const open = coreJsSrc.indexOf('{', parenClose);
+  if (open < 0) return { found: false, rest: coreJsSrc };
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < coreJsSrc.length; i++) {
+    if (coreJsSrc[i] === '{') depth++;
+    else if (coreJsSrc[i] === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end < 0) return { found: false, rest: coreJsSrc };
+  return { found: true, rest: coreJsSrc.slice(0, start) + coreJsSrc.slice(end + 1) };
+}
+
+// Neutralize comments while keeping line structure: block comments become blank
+// lines; line comments are cut (a ':' guard keeps 'https://...' intact).
+function stripCommentsForGate(src, isHtml) {
+  let s = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+  if (isHtml) s = s.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
+  return s
+    .split('\n')
+    .map((l) => l.replace(/(^|[^:'"`])\/\/.*$/, (m, p1) => p1))
+    .join('\n');
+}
+
+// Remove a top-level CSS block (selector matched by startRe) with brace counting.
+function removeCssBlocks(src, startRe) {
+  let s = src;
+  for (;;) {
+    const m = new RegExp(startRe).exec(s);
+    if (!m) break;
+    const open = s.indexOf('{', m.index);
+    if (open < 0) break;
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < s.length; i++) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    if (end < 0) break;
+    s = s.slice(0, m.index) + s.slice(end + 1);
+  }
+  return s;
+}
+
+// 5b. Gate 6: single list row generator (Single List-Row Generator Gate)
+console.log('\n4b. Verifying Gate 6: every list row comes from listRow()...');
+const gateJsFiles = jsFiles.map((f) => ({ name: f, src: readFileSync(join(adminDir, f), 'utf8') }));
+const coreSrc = gateJsFiles.find((f) => f.name === 'js/core.js');
+const listRow = extractListRowBody(coreSrc.src);
+if (!listRow.found) {
+  console.error('   ✗ FAILED: core.js must define the listRow() generator.');
+  process.exit(1);
+}
+const rowScanTargets = gateJsFiles
+  .map((f) => (f === coreSrc ? { name: f.name, src: listRow.rest } : f))
+  .concat([{ name: 'admin.html', src: html }]);
+const rowRe = [/className\s*=\s*['"`]row(?![\w-])/, /class\s*=\s*["']row(?![\w-])/];
+let rowHit = null;
+for (const t of rowScanTargets) {
+  for (const re of rowRe) {
+    const m = t.src.match(re);
+    if (m) { rowHit = `${t.name}: ${m[0]}`; break; }
+  }
+  if (rowHit) break;
+}
+if (rowHit) {
+  console.error(`   ✗ FAILED: hand-written .row in ${rowHit}. Generate rows with listRow() (core.js, v2 §4.1).`);
+  process.exit(1);
+}
+console.log('   ✓ Single list-row generator verified (listRow() in core.js)');
+
+// 5c. Gate 7: no px literals in JS / HTML (No px Literal Gate; comments exempt)
+console.log('\n4c. Verifying Gate 7: no px literals in JS / HTML (comments exempt)...');
+const pxRe = /\b\d+(?:\.\d+)?px\b/i;
+let pxHit = null;
+for (const t of rowScanTargets) {
+  const scanned = stripCommentsForGate(t.src, t.name === 'admin.html');
+  const line = scanned.split('\n').find((l) => pxRe.test(l));
+  if (line) { pxHit = `${t.name}: ${line.trim().slice(0, 120)}`; break; }
+}
+if (pxHit) {
+  console.error(`   ✗ FAILED: px literal in ${pxHit}. Sizes come from app.css tokens; JS/HTML carry no dimensions.`);
+  process.exit(1);
+}
+console.log('   ✓ No px literals in JS / HTML (comments exempt)');
+
+// 5d. Gate 8: no color literals in app.css outside :root / dark tokens (Token-Only Color Gate)
+console.log('\n4d. Verifying Gate 8: colors live only in :root / dark theme tokens...');
+const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+const cssNoTokens = removeCssBlocks(
+  removeCssBlocks(cssNoComments, ':root[^{}]*\\{'),
+  '@media[^{]*prefers-color-scheme[^{]*\\{',
+);
+const colorHit = cssNoTokens.split('\n').find((l) => /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/i.test(l));
+if (colorHit) {
+  console.error(`   ✗ FAILED: color literal outside :root/dark tokens: ${colorHit.trim().slice(0, 120)}. Add a token in :root instead.`);
+  process.exit(1);
+}
+console.log('   ✓ app.css colors verified (tokens only outside :root / dark blocks)');
+
 // 6. Inlining into single bundle
 console.log('\n5. Inlining CSS & JS into standalone bundle...');
 const minCss = css
@@ -119,7 +267,10 @@ bundledHtml = bundledHtml.replace('<link rel="stylesheet" href="css/app.css">', 
 bundledHtml = bundledHtml.replace('<script src="js/icons.js"></script>', () => `<script>\n${cleanIconsJs}\n</script>`);
 bundledHtml = bundledHtml.replace('<script src="js/usage.js"></script>', () => `<script>\n${cleanUsageJs}\n</script>`);
 bundledHtml = bundledHtml.replace('<script src="js/host.js"></script>', () => `<script>\n${cleanHostJs}\n</script>`);
-bundledHtml = bundledHtml.replace('<script src="js/app.js"></script>', () => `<script>\n${cleanAppJs}\n</script>`);
+bundledHtml = bundledHtml.replace('<script src="js/core.js"></script>', () => `<script>\n${cleanAppJs}\n</script>`);
+for (const f of appJsPaths.slice(1)) {
+  bundledHtml = bundledHtml.replace(`<script src="${f}"></script>`, '');
+}
 
 mkdirSync(distDir, { recursive: true });
 const distPath = join(distDir, 'index.html');
@@ -150,7 +301,10 @@ mkdirSync(edgeFuncDir, { recursive: true });
 const hubHtml = bundledHtml
   .replace('<head>', '<head>\n  <script>window.__HOST_KIND__="hub";</script>')
   .replace(`<script>\n${cleanUsageJs}\n</script>`, '')
-  .replace(/<div id="fullOverviewBox" hidden>[\s\S]*?<\/section>/, '</section>');
+  // Hub carries no Full overview: strip exactly the page:overview region. The old
+  // form (…[\s\S]*?<\/section>) also swallowed the rest of #viewActivity, which
+  // since W1 holds the page:stats skeleton (统计页) that the Hub needs.
+  .replace(/<div id="fullOverviewBox" hidden>[\s\S]*?(?=<div id="statsView")/, '');
 
 const staticAdminDir = join(projectRoot, 'admin');
 mkdirSync(staticAdminDir, { recursive: true });

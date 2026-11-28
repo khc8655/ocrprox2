@@ -288,20 +288,118 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
   });
 
   describe('T1.ui_layout_and_zero_inline_style', () => {
-    test('zero inline style, zero drawer, zero left-border stripes, and bundle <= 393,216 bytes', () => {
+    test('zero inline style, zero drawer, zero left-border stripes, single listRow generator, no px literals, token-only colors, bundle <= 393,216 bytes', () => {
       const adminDir = join(projectRoot, 'shared/admin');
       const htmlPath = join(adminDir, 'admin.html');
       const cssPath = join(adminDir, 'css/app.css');
       const hostJsPath = join(adminDir, 'js/host.js');
-      const appJsPath = join(adminDir, 'js/app.js');
+      // The app controller is split into core + pages/*; the same gates run over
+      // the concatenation so the assertions keep their original semantics.
+      const appJsPaths = [
+        join(adminDir, 'js/core.js'),
+        join(adminDir, 'js/pages/overview.js'),
+        join(adminDir, 'js/pages/access.js'),
+        join(adminDir, 'js/pages/providers.js'),
+        join(adminDir, 'js/pages/nodes.js'),
+        join(adminDir, 'js/pages/models.js'),
+        join(adminDir, 'js/pages/stats.js'),
+        join(adminDir, 'js/pages/settings.js'),
+      ];
       const usageJsPath = join(adminDir, 'js/usage.js');
+      const iconsJsPath = join(adminDir, 'js/icons.js');
       const distPath = join(adminDir, 'dist/index.html');
 
       const html = readFileSync(htmlPath, 'utf8');
       const css = readFileSync(cssPath, 'utf8');
       const hostJs = readFileSync(hostJsPath, 'utf8');
-      const appJs = readFileSync(appJsPath, 'utf8');
+      const appJs = appJsPaths.map((p) => readFileSync(p, 'utf8')).join('\n');
       const usageJs = readFileSync(usageJsPath, 'utf8');
+      const iconsJs = readFileSync(iconsJsPath, 'utf8');
+
+      // ---- v2 gate helpers (mirror shared/admin/build.mjs Gates 6-8; keep in sync) ----
+
+      // Body of the listRow() generator in core.js: from "function listRow(" to its
+      // balanced closing brace. It is the ONLY place allowed to assign a .row class.
+      const extractListRowBody = (coreJsSrc) => {
+        const marker = 'function listRow(';
+        const start = coreJsSrc.indexOf(marker);
+        if (start < 0) return { found: false, rest: coreJsSrc };
+        // Skip the parameter list (a default like `opts = {}` holds braces of its
+        // own), then brace-count the function body.
+        const parenOpen = coreJsSrc.indexOf('(', start + marker.length);
+        if (parenOpen < 0) return { found: false, rest: coreJsSrc };
+        let pDepth = 0;
+        let parenClose = -1;
+        for (let i = parenOpen; i < coreJsSrc.length; i++) {
+          if (coreJsSrc[i] === '(') pDepth++;
+          else if (coreJsSrc[i] === ')') {
+            pDepth--;
+            if (pDepth === 0) { parenClose = i; break; }
+          }
+        }
+        if (parenClose < 0) return { found: false, rest: coreJsSrc };
+        const open = coreJsSrc.indexOf('{', parenClose);
+        if (open < 0) return { found: false, rest: coreJsSrc };
+        let depth = 0;
+        let end = -1;
+        for (let i = open; i < coreJsSrc.length; i++) {
+          if (coreJsSrc[i] === '{') depth++;
+          else if (coreJsSrc[i] === '}') {
+            depth--;
+            if (depth === 0) { end = i; break; }
+          }
+        }
+        if (end < 0) return { found: false, rest: coreJsSrc };
+        return { found: true, rest: coreJsSrc.slice(0, start) + coreJsSrc.slice(end + 1) };
+      };
+
+      // Neutralize comments keeping line structure (block comments -> blanks,
+      // line comments cut with a ':' guard so 'https://...' survives).
+      const stripCommentsForGate = (src, isHtml) => {
+        let s = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+        if (isHtml) s = s.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
+        return s
+          .split('\n')
+          .map((l) => l.replace(/(^|[^:'"`])\/\/.*$/, (m, p1) => p1))
+          .join('\n');
+      };
+
+      // Remove a top-level CSS block (selector matched by startRe) by brace counting.
+      const removeCssBlocks = (src, startRe) => {
+        let s = src;
+        for (;;) {
+          const m = new RegExp(startRe).exec(s);
+          if (!m) break;
+          const open = s.indexOf('{', m.index);
+          if (open < 0) break;
+          let depth = 0;
+          let end = -1;
+          for (let i = open; i < s.length; i++) {
+            if (s[i] === '{') depth++;
+            else if (s[i] === '}') {
+              depth--;
+              if (depth === 0) { end = i; break; }
+            }
+          }
+          if (end < 0) break;
+          s = s.slice(0, m.index) + s.slice(end + 1);
+        }
+        return s;
+      };
+
+      // Files the v2 row/px gates scan: every console JS source plus admin.html.
+      const coreSrc = appJsPaths[0];
+      const listRowBody = extractListRowBody(readFileSync(coreSrc, 'utf8'));
+      const v2ScanTargets = [
+        ...appJsPaths.map((p, i) => ({
+          name: `shared/admin/js/${i === 0 ? 'core.js' : p.replace(`${adminDir}/js/`, '')}`,
+          src: i === 0 ? listRowBody.rest : readFileSync(p, 'utf8'),
+        })),
+        { name: 'js/usage.js', src: usageJs },
+        { name: 'js/icons.js', src: iconsJs },
+        { name: 'js/host.js', src: hostJs },
+        { name: 'admin.html', src: html },
+      ];
 
       // 1. Zero inline style in HTML and JS
       const htmlStyleMatch = html.match(/style\s*=/i);
@@ -311,7 +409,7 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       assert.strictEqual(hostStyleMatch, null, 'host.js must have 0 style= inline attributes');
 
       const appStyleMatch = appJs.match(/style\s*=/i);
-      assert.strictEqual(appStyleMatch, null, 'app.js must have 0 style= inline attributes');
+      assert.strictEqual(appStyleMatch, null, 'admin console js (core + pages/*) must have 0 style= inline attributes');
 
       const usageStyleMatch = usageJs.match(/style\s*=/i);
       assert.strictEqual(usageStyleMatch, null, 'usage.js must have 0 style= inline attributes');
@@ -333,7 +431,47 @@ describe('T1 Static Contracts & Schema Gate Suite', () => {
       const leftBorderMatch = css.match(/border-left\s*:\s*[^;]*(#|rgb|hsl|var\(--)/i);
       assert.strictEqual(leftBorderMatch, null, 'app.css must have 0 colored left-border stripes');
 
-      // 4. Dist bundle <= 393,216 bytes (384 KiB)
+      // 4. Single list-row generator (v2 §4.1): every .row comes from listRow().
+      assert.ok(listRowBody.found, 'core.js must define the listRow() generator');
+      const rowRes = [/className\s*=\s*['"`]row(?![\w-])/, /class\s*=\s*["']row(?![\w-])/];
+      for (const t of v2ScanTargets) {
+        for (const re of rowRes) {
+          const m = t.src.match(re);
+          assert.strictEqual(
+            m,
+            null,
+            `hand-written .row in ${t.name} (${m ? m[0] : ''}); generate rows with listRow() (core.js, v2 §4.1)`
+          );
+        }
+      }
+
+      // 5. No px literals in JS / HTML (v2 §1.4: sizes come from tokens; comments exempt)
+      const pxRe = /\b\d+(?:\.\d+)?px\b/i;
+      for (const t of v2ScanTargets) {
+        const scanned = stripCommentsForGate(t.src, t.name === 'admin.html');
+        const line = scanned.split('\n').find((l) => pxRe.test(l));
+        assert.strictEqual(
+          line,
+          undefined,
+          `px literal in ${t.name}: "${line ? line.trim().slice(0, 120) : ''}". Sizes come from app.css tokens.`
+        );
+      }
+
+      // 6. Token-only colors (v2 §2): app.css carries color literals only inside
+      // :root and the dark-theme token blocks.
+      const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+      const cssNoTokens = removeCssBlocks(
+        removeCssBlocks(cssNoComments, ':root[^{}]*\\{'),
+        '@media[^{]*prefers-color-scheme[^{]*\\{',
+      );
+      const colorLine = cssNoTokens.split('\n').find((l) => /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/i.test(l));
+      assert.strictEqual(
+        colorLine,
+        undefined,
+        `color literal outside :root/dark tokens in app.css: "${colorLine ? colorLine.trim().slice(0, 120) : ''}". Add a token in :root instead.`
+      );
+
+      // 7. Dist bundle <= 393,216 bytes (384 KiB)
       assert.ok(statSync(distPath), 'shared/admin/dist/index.html must exist');
       const stat = statSync(distPath);
       assert.ok(
