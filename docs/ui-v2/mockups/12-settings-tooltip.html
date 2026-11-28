@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>设置</title><link rel="stylesheet" href="v2.css"></head><body class="">
+<header class="top"><div class="top-in"><div class="brand"><i></i>LLMProxy2<small>Hub</small></div>
+<nav class="tabs"><a class="">节点</a><a class="">供应商</a><a class="">模型</a><a class="">统计</a><a class="on">设置</a></nav>
+<div class="top-r"><span class="muted" style="margin-right:6px;font-size:12px">配置 v42</span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M1.5 8s2.5-5 6.5-5 6.5 5 6.5 5-2.5 5-6.5 5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg></span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></svg></span><span class="ib"><svg viewBox="0 0 16 16" class=""><path d="M6 2.5H3.5v11H6M10 5l3 3-3 3M13 8H6"/></svg></span></div></div></header>
+<main class="wrap"><div class="ph"><h1>设置</h1></div><div class="set2"><nav><a class="on">接入</a><a>路由与冷却</a><a>并发护栏</a><a>模型目录</a><a>备份与迁移</a></nav><div>
+<div class="glabel">接入</div><div class="gcard">
+<div class="srow2"><div class="t">客户端密钥<span class="qi">?</span></div><div class="c"><input class="in" style="width:300px" value="sk-client-••••••••a91c"><span class="btn">生成</span></div></div>
+</div>
+<div class="glabel">路由与冷却</div><div class="gcard">
+<div class="srow2"><div class="t">默认分流策略<span class="qi">?</span></div><div class="c"><span class="pillsel">会话粘性优先</span></div></div>
+<div class="srow2"><div class="t">首字超时<span class="qi">?</span></div><div class="c"><div class="segp"><span class="">60 秒</span><span class="on">120 秒</span><span class="">300 秒</span><span class="cus">自定义…</span></div></div></div>
+<div class="tipwrap"><div class="srow2"><div class="t">429 限流冷却<span class="qi">?</span></div><div class="c"><div class="segp"><span class="on">15 秒</span><span class="">30 秒</span><span class="">60 秒</span><span class="cus">自定义…</span></div></div></div><div class="tip" style="left:120px;top:44px"><b>429 限流冷却</b>Key 被上游限流（HTTP 429）后暂停调度的时长。期间同一模型改用其它 Key 或来源；到期自动恢复，也可以在供应商里当场解除。</div></div>
+<div class="srow2"><div class="t">5xx 冷却<span class="qi">?</span></div><div class="c"><div class="segp"><span class="">15 秒</span><span class="on">30 秒</span><span class="">60 秒</span><span class="cus">自定义…</span></div></div></div>
+<div class="srow2"><div class="t">网络超时冷却<span class="qi">?</span></div><div class="c"><div class="segp"><span class="on">15 秒</span><span class="">30 秒</span><span class="">60 秒</span><span class="cus">自定义…</span></div></div></div>
+<div class="srow2"><div class="t">401 / 403 封禁<span class="qi">?</span></div><div class="c"><div class="segp"><span class="">不封禁</span><span class="">1 小时</span><span class="on">1 天</span><span class="cus">自定义…</span></div></div></div>
+</div>
+<div class="glabel">并发护栏 · Lite 节点忽略</div><div class="gcard">
+<div class="srow2"><div class="t">OCR 预读并发<span class="qi">?</span></div><div class="c"><div class="segp"><span class="">2</span><span class="on">4</span><span class="">8</span><span class="cus">自定义…</span></div></div></div>
+<div class="srow2"><div class="t">固定通道并发<span class="qi">?</span></div><div class="c"><div class="segp"><span class="">8</span><span class="on">16</span><span class="">32</span><span class="cus">自定义…</span></div></div></div>
+</div>
+<div class="glabel">模型目录</div><div class="gcard">
+<div class="srow2"><div class="t">models.dev 目录</div><div class="c"><span class="note">1,286 个模型 · 2026-11-27 更新</span><span class="btn">立即更新</span></div></div>
+</div></div></div>
+</main></body></html>
