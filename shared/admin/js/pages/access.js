@@ -26,12 +26,12 @@
     const epInput = $('chipEndpointValue');
     if (epInput) epInput.value = v.endpoint;
     if ($('gwAccessNote')) {
-      $('gwAccessNote').textContent = gatewayClientKind() === 'anthropic'
-        ? 'Claude Code / Anthropic SDK：把 ANTHROPIC_BASE_URL 填上面的基址（结尾不要带 /v1），SDK 会自己拼 /v1/messages；密钥填 ANTHROPIC_AUTH_TOKEN。'
-        : 'OpenAI SDK / Cursor / Cherry Studio 等：base_url 填上面的基址（含 /v1），SDK 会自己拼 /chat/completions；密钥填 API Key。';
+      $('gwAccessNote').innerHTML = gatewayClientKind() === 'anthropic'
+        ? '<b>ANTHROPIC_BASE_URL</b>Claude Code / Anthropic SDK 填此基址（结尾不要带 /v1），SDK 会自己拼 /v1/messages；密钥填 ANTHROPIC_AUTH_TOKEN。'
+        : '<b>base_url</b>OpenAI SDK / Cursor / Cherry Studio 等填此基址（含 /v1），SDK 会自己拼 /chat/completions；密钥填 API Key。';
     }
     const seg = $('gwClientSeg');
-    if (seg) seg.querySelectorAll('[data-gw-client]').forEach((b) => b.classList.toggle('active', b.getAttribute('data-gw-client') === gatewayClientKind()));
+    if (seg) seg.querySelectorAll('[data-gw-client]').forEach((b) => b.classList.toggle('on', b.getAttribute('data-gw-client') === gatewayClientKind()));
   }
 
   // 密钥状态与协议提示共用一行说明（字段说明不常驻，只在缺密钥时才占一行）。
@@ -180,10 +180,8 @@
       box.appendChild(listRow({ title: '接口清单暂不可用', cls: 'text-muted' }));
       return;
     }
-    // 复制项 = 只读输入框 + 复制按钮（与「客户端接入」同一行式样）。
-    box.innerHTML = eps.map((p) => settingRow(p, '',
-      `<div class="input-row"><input class="input input--code" readonly value="${eh(p)}"><button class="btn" type="button" data-copy="endpoint-path" data-path="${eh(p)}" title="复制 ${eh(p)}">复制</button></div>`
-    )).join('');
+    // 复制项 = 只读输入框 + 复制按钮（.srow2 行，匹配 v2.1 分组卡片规范）。
+    box.innerHTML = eps.map((p) => `<div class="srow2"><div class="t"><span>${eh(p)}</span></div><div class="c"><input class="input input--code input--wide" readonly value="${eh(p)}"><button class="btn" type="button" data-copy="endpoint-path" data-path="${eh(p)}" title="复制 ${eh(p)}">复制</button></div></div>`).join('');
   }
 
   function renderAccessView() {
@@ -219,8 +217,8 @@
     if (list) list.innerHTML = models.map((m) => `<option value="${eh(m)}"></option>`).join('');
     const input = $('gwTestModel');
     if (input && !input.value && models.length) input.value = models[0];
-    document.querySelectorAll('#gwTestProto .seg-btn').forEach((b) => {
-      b.classList.toggle('active', b.getAttribute('data-gw-proto') === gwTestProto);
+    document.querySelectorAll('#gwTestProto .segp-btn').forEach((b) => {
+      b.classList.toggle('on', b.getAttribute('data-gw-proto') === gwTestProto);
       b.onclick = () => {
         gwTestProto = b.getAttribute('data-gw-proto') || 'openai';
         renderGatewayTestPanel();

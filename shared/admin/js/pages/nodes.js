@@ -383,59 +383,49 @@
       <details class="headers-details mt-2">
         <summary class="form-label">其它安装方式</summary>
         <div class="mt-2">
-          <div class="seg" data-cmd-seg>
-            <button class="seg-btn active" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
-            <button class="seg-btn" data-cmd-mode="docker" type="button">Docker 部署</button>
-            <button class="seg-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
-          </div>
-          <textarea class="textarea input--code mt-2" data-cmd-alt readonly rows="2" hidden></textarea>
+        <div class="segp" data-cmd-seg>
+          <button class="segp-btn on" data-cmd-mode="install" type="button">一键安装 (systemd)</button>
+          <button class="segp-btn" data-cmd-mode="docker" type="button">Docker 部署</button>
+          <button class="segp-btn" data-cmd-mode="binary" type="button">单行直跑 (免安装)</button>
         </div>
-      </details>
-      <details class="headers-details mt-2">
-        <summary class="form-label">安装选项</summary>
-        <div class="form-grid mt-2" data-cmd-opts>
-          <div class="form-group">
-            <label class="form-label">监听端口</label>
-            <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
-          </div>
-          <div class="form-group" data-cmd-source-wrap>
-            <label class="form-label">安装脚本源</label>
-            <select class="select" data-cmd-source>
-              <option value="hub">Hub 同域 /install.sh (推荐)</option>
-              <option value="ghfast">ghfast.top 加速</option>
-              <option value="ghraw">GitHub Raw 直连</option>
-            </select>
-          </div>
-          <div class="form-group" data-cmd-mirror-wrap>
-            <label class="form-label">二进制下载源</label>
-            <select class="select" data-cmd-mirror>
-              <option value="auto">GitHub 直连 + 国内自动回退</option>
-              <option value="ghfast">优先走 ghfast.top 镜像</option>
-            </select>
-          </div>
-          <div class="form-group" data-cmd-yes-wrap>
-            <label class="form-label">交互方式</label>
-            <label class="form-label form-label--check">
-              <input type="checkbox" data-cmd-yes checked>
-              <span>无人值守 (-y)，取消可交互确认</span>
-            </label>
-          </div>
-          <div class="form-group" data-cmd-bind-wrap>
-            <label class="form-label">监听范围</label>
-            <select class="select" data-cmd-bind>
-              <option value="local">仅本机 127.0.0.1（需 ssh -L / 反代）</option>
-              <option value="public">对外 0.0.0.0（需自行做鉴权与防火墙）</option>
-            </select>
-          </div>
-          <div class="form-group" data-cmd-private-wrap>
-            <label class="form-label">内网上游</label>
-            <label class="form-label form-label--check">
-              <input type="checkbox" data-cmd-private>
-              <span>允许内网 / 本机上上游地址</span>
-            </label>
-          </div>
+        <textarea class="textarea input--code mt-2" data-cmd-alt readonly rows="2" hidden></textarea>
+      </div>
+    </details>
+    <details class="headers-details mt-2">
+      <summary class="form-label">安装选项</summary>
+      <div class="form-grid mt-2" data-cmd-opts>
+        <div class="form-group">
+          <label class="form-label">监听端口</label>
+          <input class="input tabular" data-cmd-port type="number" min="1" max="65535" value="8787">
         </div>
-      </details>
+        <div class="form-group" data-cmd-source-wrap>
+          <label class="form-label">安装脚本源</label>
+          <div data-cmd-source-slot></div>
+        </div>
+        <div class="form-group" data-cmd-mirror-wrap>
+          <label class="form-label">二进制下载源</label>
+          <div data-cmd-mirror-slot></div>
+        </div>
+        <div class="form-group" data-cmd-yes-wrap>
+          <label class="form-label">交互方式</label>
+          <label class="form-label form-label--check">
+            <input type="checkbox" data-cmd-yes checked>
+            <span>无人值守 (-y)，取消可交互确认</span>
+          </label>
+        </div>
+        <div class="form-group" data-cmd-bind-wrap>
+          <label class="form-label">监听范围</label>
+          <div data-cmd-bind-slot></div>
+        </div>
+        <div class="form-group" data-cmd-private-wrap>
+          <label class="form-label">内网上游</label>
+          <label class="form-label form-label--check">
+            <input type="checkbox" data-cmd-private>
+            <span>允许内网 / 本机上上游地址</span>
+          </label>
+        </div>
+      </div>
+    </details>
     </div>`;
 
     const q = (sel) => container.querySelector(sel);
@@ -446,10 +436,7 @@
     const mirrorWrap = q('[data-cmd-mirror-wrap]');
     const yesWrap = q('[data-cmd-yes-wrap]');
     const baseHintEl = q('[data-client-base-hint]');
-    const srcEl = q('[data-cmd-source]');
-    const mirrorEl = q('[data-cmd-mirror]');
     const yesEl = q('[data-cmd-yes]');
-    const bindEl = q('[data-cmd-bind]');
     const privEl = q('[data-cmd-private]');
 
     const build = (mode) => buildNodeShellCommands({
@@ -484,20 +471,37 @@
       }
     };
 
+    const mountCmdPill = (slotSel, options, cur, onChange) => {
+      const slot = q(slotSel);
+      if (!slot) return;
+      const ps = makePillSelect({ full: true, options, value: cur, onChange });
+      slot.appendChild(ps.el);
+    };
+    mountCmdPill('[data-cmd-source-slot]', [
+      { value: 'hub', label: 'Hub 同域 /install.sh (推荐)' },
+      { value: 'ghfast', label: 'ghfast.top 加速' },
+      { value: 'ghraw', label: 'GitHub Raw 直连' },
+    ], panelState.scriptSource, (v) => { panelState.scriptSource = v; refresh(); });
+    mountCmdPill('[data-cmd-mirror-slot]', [
+      { value: 'auto', label: 'GitHub 直连 + 国内自动回退' },
+      { value: 'ghfast', label: '优先走 ghfast.top 镜像' },
+    ], panelState.mirror, (v) => { panelState.mirror = v; refresh(); });
+    mountCmdPill('[data-cmd-bind-slot]', [
+      { value: 'local', label: '仅本机 127.0.0.1（需 ssh -L / 反代）' },
+      { value: 'public', label: '对外 0.0.0.0（需自行做鉴权与防火墙）' },
+    ], panelState.bind, (v) => { panelState.bind = v === 'public' ? 'public' : 'local'; refresh(); });
+
     container.querySelectorAll('[data-cmd-mode]').forEach((btn) => {
       clk(btn, () => {
         panelState.mode = btn.getAttribute('data-cmd-mode') || 'install';
         container.querySelectorAll('[data-cmd-mode]').forEach((b) => {
-          b.classList.toggle('active', b === btn);
+          b.classList.toggle('on', b === btn);
         });
         refresh();
       });
     });
     if (portEl) portEl.addEventListener('input', () => { panelState.port = portEl.value; refresh(); });
-    if (srcEl) srcEl.addEventListener('change', () => { panelState.scriptSource = srcEl.value; refresh(); });
-    if (mirrorEl) mirrorEl.addEventListener('change', () => { panelState.mirror = mirrorEl.value; refresh(); });
     if (yesEl) yesEl.addEventListener('change', () => { panelState.autoYes = yesEl.checked; refresh(); });
-    if (bindEl) bindEl.addEventListener('change', () => { panelState.bind = bindEl.value === 'public' ? 'public' : 'local'; refresh(); });
     if (privEl) privEl.addEventListener('change', () => { panelState.allowPrivate = privEl.checked; refresh(); });
     const copyBtn = q('[data-cmd-copy]');
     if (copyBtn) clk(copyBtn, () => copyToClipboard(outEl?.value, '部署命令已复制'));
@@ -510,14 +514,17 @@
 
   // --- 节点详情 / 添加节点弹框（组件 6 · .dialog） ---
   // 租约以小时呈现（效果图口径），下发到节点的配置仍以秒存储。
-  function nodeHoursFromSeconds(sec) {
+  function nodeHoursFromSeconds(sec, allowZero = false) {
+    if (allowZero && sec === 0) return '0';
     const s = Number(sec) || 0;
     if (!s) return '';
     return String(Math.round((s / 3600) * 10) / 10);
   }
 
-  function nodeHoursToSeconds(val, defHours) {
-    const n = Number(String(val ?? '').trim());
+  function nodeHoursToSeconds(val, defHours, allowZero = false) {
+    const raw = String(val ?? '').trim();
+    if (allowZero && raw === '0') return 0;
+    const n = Number(raw);
     const h = n > 0 ? n : defHours;
     return Math.max(1, Math.round(h * 3600));
   }
@@ -640,17 +647,18 @@
     if (installBtn) installBtn.hidden = isCreate;
     if (rotateBtn) rotateBtn.hidden = isCreate;
 
-    const leaseHours = isCreate ? (nodeCreateDraft.leaseHours || '') : nodeHoursFromSeconds(node.lease_ttl);
-    const graceHours = isCreate ? (nodeCreateDraft.graceHours || '') : nodeHoursFromSeconds(node.grace_ttl);
+    const leaseHours = isCreate ? (nodeCreateDraft.leaseHours || '24') : (nodeHoursFromSeconds(node.lease_ttl) || '24');
+    const graceHours = isCreate ? (nodeCreateDraft.graceHours || '1') : (nodeHoursFromSeconds(node.grace_ttl, true) || '1');
     const nameVal = isCreate ? (nodeCreateDraft.name || '') : (node.name || '');
 
     const rows = [
       `<label>名称</label><div><input class="input" id="nodeEditName" value="${eh(nameVal)}" placeholder="例如 hk-edge-01"></div>`,
-      `<label>角色</label><div class="seg" data-node-role-seg>${[
+      `<label>角色</label><div class="segp" data-node-role-seg>${[
         ['lite', 'Lite · 纯内存代理'],
         ['full', 'Full · 带控制台'],
-      ].map(([v, lbl]) => `<button class="seg-btn${role === v ? ' active' : ''}" data-node-role="${v}" type="button">${lbl}</button>`).join('')}</div>`,
-      `<label>租约${fieldHint('单位小时；节点配置里仍以秒存储（24 小时 = 86400 秒）')}</label><div class="input-row"><input class="input tabular" id="nodeEditLease" type="number" min="0.5" step="any" value="${eh(leaseHours)}" placeholder="24"><span class="text-xs text-muted">小时，宽限</span><input class="input tabular" id="nodeEditGrace" type="number" min="0.5" step="any" value="${eh(graceHours)}" placeholder="1"><span class="text-xs text-muted">小时</span></div>`,
+      ].map(([v, lbl]) => `<button class="segp-btn${role === v ? ' on' : ''}" data-node-role="${v}" type="button">${lbl}</button>`).join('')}</div>`,
+      `<label>租约${fieldHint('节点配置在租约到期前无需重新拉取；单位小时（24 小时 = 86400 秒）', '租约')}</label><div id="nodeEditLeaseSlot"></div>`,
+      `<label>宽限${fieldHint('中枢暂不可达时，节点凭缓存配置继续服务的最大时长；选「无」表示租约到期即停服', '宽限')}</label><div id="nodeEditGraceSlot"></div>`,
       `<label>供应商范围</label><div class="fields" id="nodeEditProvChips"></div>`,
       `<label>模型范围</label><div class="fields" id="nodeEditModelChips"></div>`,
     ];
@@ -659,23 +667,60 @@
       body.innerHTML = rows.join('');
     } else {
       // 凭据行：掩码默认，显示 / 复制走只读凭据接口的内存缓存。
-      const secretRow = (key, label, emptyNote) => `<label>${label}</label><div class="input-row"><span class="who sub tabular" data-detail-secret="${key}" data-detail-empty="${eh(emptyNote)}">${CRED_PASS_MASK}</span><button class="btn btn--sm" type="button" data-detail-eye="${key}" aria-pressed="false">显示</button><button class="btn btn--sm" type="button" data-detail-copy="${key}">复制</button></div>`;
+      const secretRow = (key, label, emptyNote) => `<label>${label}</label><div class="fields"><span class="text-sm tabular" data-detail-secret="${key}" data-detail-empty="${eh(emptyNote)}">${CRED_PASS_MASK}</span><button class="btn btn--sm btn--ghost" type="button" data-detail-eye="${key}" aria-pressed="false">显示</button><button class="btn btn--sm btn--ghost" type="button" data-detail-copy="${key}">复制</button></div>`;
       const syncAgo = node.last_seen ? fmtTime(node.last_seen) : '';
       const syncWord = syncAgo ? `${syncAgo}同步` : '从未同步';
+      const syncDetail = [
+        `${Number(node.sync_count || 0)} 次`,
+        `配置 ${nodeConfigVersionText(node)}`,
+        node.last_ip ? `最近 IP ${node.last_ip}` : '',
+      ].filter(Boolean).join(' · ');
       rows.push(
-        `<div class="dlg-secline section-bar"><span>运行状态</span><span class="text-xs text-muted">${eh(syncWord)}</span></div>`,
-        `<label>节点 ID</label><div><span class="tabular">${eh(node.id)}</span></div>`,
-        `<label>同步</label><div><span class="tabular">${Number(node.sync_count || 0)} 次 · ${eh(syncWord)}</span></div>`,
-        `<label>配置版本</label><div><span class="tabular">${eh(nodeConfigVersionText(node))}</span></div>`,
-        `<label>最近 IP</label><div><span class="tabular">${eh(node.last_ip || '—')}</span></div>`,
+        `<div class="dlg-secline"><span>运行状态</span><span class="text-xs text-muted">${eh(syncWord)}</span></div>`,
+        `<label>节点 ID</label><div class="text-sm tabular">${eh(node.id)}</div>`,
+        `<label>同步</label><div class="text-sm tabular">${eh(syncDetail)}</div>`,
         secretRow('node_token', '节点 Token', '未保存明文（旧版本节点，轮换后可回看）'),
         secretRow('client_key', '客户端密钥', 'Hub 未配置主客户端密钥'),
       );
       if ((node.role || 'lite') !== 'lite') {
         rows.push(secretRow('admin_password', '后台密码', '该节点未存有后台密码'));
       }
-      rows.push(`<label>常用模型</label><div id="node_model_usage_${eh(id)}"></div>`);
+      rows.push(`<label>常用模型</label><div class="text-sm tabular" id="node_model_usage_${eh(id)}"></div>`);
       body.innerHTML = rows.join('');
+    }
+
+    const leaseSlot = $('nodeEditLeaseSlot');
+    if (leaseSlot) {
+      leaseSlot.appendChild(makeSegPicker({
+        id: 'nodeEditLease',
+        presets: [
+          { value: '1', label: '1 小时' },
+          { value: '6', label: '6 小时' },
+          { value: '24', label: '24 小时' },
+        ],
+        value: leaseHours,
+        customUnit: '小时',
+        min: 0.5,
+        step: 'any',
+        onChange: () => markNodeDialogDirty(),
+      }).el);
+    }
+
+    const graceSlot = $('nodeEditGraceSlot');
+    if (graceSlot) {
+      graceSlot.appendChild(makeSegPicker({
+        id: 'nodeEditGrace',
+        presets: [
+          { value: '0', label: '无' },
+          { value: '1', label: '1 小时' },
+          { value: '6', label: '6 小时' },
+        ],
+        value: graceHours,
+        customUnit: '小时',
+        min: 0,
+        step: 'any',
+        onChange: () => markNodeDialogDirty(),
+      }).el);
     }
 
     mountNodeScopeChips('nodeEditProvChips', 'providers');
@@ -684,12 +729,12 @@
     body.querySelectorAll('[data-node-role]').forEach((btn) => {
       clk(btn, () => {
         nodeScopeDraft.role = btn.getAttribute('data-node-role') || 'full';
-        body.querySelectorAll('[data-node-role]').forEach((b) => b.classList.toggle('active', b === btn));
+        body.querySelectorAll('[data-node-role]').forEach((b) => b.classList.toggle('on', b === btn));
         markNodeDialogDirty();
       });
     });
 
-    // 底部左侧的危险动作（仅编辑态）：吊销 / 恢复 + 删除。
+    // 底部左侧的危险动作（仅编辑态）：吊销 / 恢复 + 删除（09-node-dialog.png）。
     const footLeft = $('nodeEditFootLeft');
     if (footLeft) {
       footLeft.innerHTML = '';
@@ -697,13 +742,13 @@
         const revoked = node.enabled === false;
         const toggleBtn = ce('button');
         toggleBtn.type = 'button';
-        toggleBtn.className = revoked ? 'btn' : 'btn btn--danger';
+        toggleBtn.className = revoked ? 'btn btn--ghost' : 'btn btn--ghost btn--danger';
         toggleBtn.textContent = revoked ? '恢复' : '吊销';
         clk(toggleBtn, () => toggleNodeEnabled(node));
         footLeft.appendChild(toggleBtn);
         const delBtn = ce('button');
         delBtn.type = 'button';
-        delBtn.className = 'btn btn--danger';
+        delBtn.className = 'btn btn--ghost btn--danger';
         delBtn.textContent = '删除';
         clk(delBtn, () => deleteNodeFromDialog(node));
         footLeft.appendChild(delBtn);
@@ -750,7 +795,7 @@
         if (!val) return toast('该凭据暂不可回看', 'warn');
         if (valEl) valEl.textContent = revealed ? CRED_PASS_MASK : val;
         btn.setAttribute('aria-pressed', revealed ? 'false' : 'true');
-        btn.innerHTML = `${window.uiIcon ? window.uiIcon(revealed ? 'eye' : 'eyeOff') : ''}<span>${revealed ? '显示' : '隐藏'}</span>`;
+        btn.textContent = revealed ? '显示' : '隐藏';
       });
     });
     body.querySelectorAll('[data-detail-copy]').forEach((btn) => {
@@ -848,7 +893,7 @@
       models: collectNodeScope('models'),
     };
     const leaseTtl = nodeHoursToSeconds($('nodeEditLease')?.value, 24);
-    const graceTtl = nodeHoursToSeconds($('nodeEditGrace')?.value, 1);
+    const graceTtl = nodeHoursToSeconds($('nodeEditGrace')?.value, 1, true);
 
     if (isCreate) {
       try {
@@ -1043,20 +1088,13 @@
       }
     }
     if (rows.length === 0) {
-      container.innerHTML = '<div class="text-muted text-xs">暂无上报：节点在下一次配置同步时会上报它实际用到的模型。</div>';
+      container.innerHTML = '<span class="text-muted text-xs">暂无上报</span>';
       return;
     }
     rows.sort((a, b) => b.calls - a.calls);
-    container.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>模型</th><th>调用</th><th>成功 / 失败</th><th>输入 / 输出 Token</th></tr></thead>
-      <tbody>${rows.map((r) => `
-        <tr>
-          <td>${eh(r.model)}</td>
-          <td class="tabular">${r.calls}</td>
-          <td class="tabular">${statsMap ? `${r.success} / ${r.failed}` : '-'}</td>
-          <td class="tabular">${statsMap ? `${r.inTok} / ${r.outTok}` : '-'}</td>
-        </tr>`).join('')}</tbody>
-    </table></div>`;
+    const top = rows.slice(0, 4).map((r) => `${eh(r.model)} ${r.calls} 次`).join(' · ');
+    const fullTitle = rows.map((r) => `${r.model}: ${r.calls} 次${statsMap ? ` (成功 ${r.success} / 失败 ${r.failed})` : ''}`).join('\n');
+    container.innerHTML = `<span title="${eh(fullTitle)}">${top}${rows.length > 4 ? ` 等 ${rows.length} 个` : ''}</span>`;
   }
 
   // --- 弹框接线（静态按钮一次接好；主体每次打开重建） ---

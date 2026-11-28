@@ -184,14 +184,8 @@
         : '集中管理本地私有供应商；中枢托管供应商按需拉取（清单 → 整体拉取 → 按 Key 补拉）';
     }
     const modelsTitle = $('modelsTitle');
-    const modelsSub = $('modelsSubtitle');
     if (modelsTitle) {
-      modelsTitle.textContent = isHub ? '模型模板（下发编排）' : '模型';
-    }
-    if (modelsSub) {
-      modelsSub.textContent = isHub
-        ? '仅下发给 lite 节点；full 节点可选导入'
-        : '每个模型由一个供应商提供；同一模型来自多个供应商时自动组成故障转移。';
+      modelsTitle.textContent = '模型';
     }
     // 「并发护栏」在 Hub 上只是下发默认值，Lite 节点会忽略 —— 一句话说清，不再铺标题 + 副标题。
     const cgTitle = $('concurrencyGuardTitle');
@@ -313,20 +307,20 @@
 // 不回写的话用户得手动折叠再展开才看得到变化。
       const repaintKeyStatusCells = () => {
         document.querySelectorAll('.k-status-cell').forEach((cell) => {
-          const tr = cell.closest('tr');
-          const tbody = cell.closest('tbody');
+          const row = cell.closest('.krow') || cell.closest('tr');
+          const tbody = cell.closest('[id^="p_keys_tbody_"]');
           const pId = tbody && tbody.id && tbody.id.startsWith('p_keys_tbody_')
             ? tbody.id.slice('p_keys_tbody_'.length)
             : '';
           if (!pId) return;
-          const idx = Number(tr?.dataset.keyIdx);
+          const idx = Number(row?.dataset.keyIdx);
           const k = state.config?.providers?.[pId]?.api_keys?.[idx];
           if (!k) return;
           const cd = findKeyCooldown(pId, k, idx);
           cell.innerHTML = keyStatusCellHtml(k, cd.sec, cd.target);
-          if (tr) {
-            tr.dataset.cdSec = String(cd.sec);
-            tr.dataset.cdTarget = cd.target || '';
+          if (row) {
+            row.dataset.cdSec = String(cd.sec);
+            row.dataset.cdTarget = cd.target || '';
           }
         });
       };
@@ -760,12 +754,6 @@
     return null;
   }
 
-  // Version pill for provider cards: 适配 {id} · v{version} · {updated_at}.
-  function presetVersionText(meta) {
-    if (!meta || !meta.version) return '';
-    return `适配 ${meta.id} · v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}`;
-  }
-
   // 适配信息只出现在供应商编辑器的「高级」区（列表行不再堆标签）。
 
   function setupToolbars() {
@@ -785,10 +773,9 @@
       });
     }
 
-    // 节点页的「刷新」：重拉节点 + 中枢概览。
+    // 节点页的「刷新」。
     clk($('btnHubRefreshOverview'), async () => {
       await loadNodesData();
-      renderHubOverview();
     });
     clk($('btnHubBatchVerifyAll'), verifyAllHubKeys);
   }
@@ -1016,11 +1003,8 @@
     setDisabled('newProvName', vaultMode);
     setDisabled('newProvBaseUrl', vaultMode);
     setDisabled('newProvApiKey', vaultMode);
-    setDisabled('newProvApiType', vaultMode);
     toggle('newProvVaultGroup', vaultMode);
-    toggle('newProvKeyAliasGroup', !vaultMode);
     toggle('newProvApiKeyGroup', !vaultMode);
-    toggle('btnDetectProvider', !vaultMode);
     toggle('btnToggleCurlPaste', !vaultMode);
     if (vaultMode) {
       const curlWrap = $('curlPasteWrap');
@@ -1132,15 +1116,6 @@
     return matchPresetRules({ id: idOrName, name: idOrName, base_url: baseUrl });
   }
 
-  // 供应商对象（已有数据）按规则 A 解析预设 meta；供列表行 / 编辑器取
-  // 「预设 · 版本」显示用。
-  function resolveProviderPresetMeta(p, pId) {
-    if (!p || String(p.preset_id || '').trim() === 'custom') return null; // 规则 1：显式不绑
-    const bound = presetMetaForProvider(p, pId);
-    if (bound) return bound; // 规则 2：已有绑定保留
-    return matchPresetRules({ id: pId, name: p?.name, base_url: p?.base_url });
-  }
-
   // 规则 A 主体：输入 {id, name, base_url}，返回预设 meta 或 null（不绑）。
   // 3) 主机名相等绑定（含「{」占位符的预设跳过）；唯一命中直接绑，多命中用
   //    4)/5) 在这几个里挑，挑不出就不绑（不落回全库匹配）。
@@ -1167,24 +1142,9 @@
   // 不动 —— 「自动识别」是默认口径，保存时才定（见 detectProviderProtocol）。
   function applyPresetAutoMatch() {
     if (($('newProvSource')?.value || 'custom') !== 'custom') return;
-    const hintEl = $('newProvPresetHint');
-    const presetSel = $('newProvPreset');
-    const explicit = state.newProvPresetTouched ? (presetSel?.value || '').trim() : '';
-    const meta = (explicit && PRESETS_META[explicit])
-      || matchPresetMeta($('newProvName')?.value, $('newProvBaseUrl')?.value)
-      || matchPresetMeta($('newProvId')?.value, $('newProvBaseUrl')?.value);
-    if (hintEl) {
-      const rev = meta && meta.version ? `（适配 v${meta.version}${meta.updated_at ? ` · ${meta.updated_at}` : ''}）` : '';
-      hintEl.textContent = meta ? `已按预设 ${meta.label}${rev} 自动匹配` : '';
-      hintEl.hidden = !meta;
-      hintEl.classList.toggle('hidden', !meta);
-    }
-    if (!meta) return;
-    if (presetSel && presetSel.value !== meta.id) presetSel.value = meta.id;
+    const meta = matchPresetMeta($('newProvName')?.value, $('newProvBaseUrl')?.value);
     const baseEl = $('newProvBaseUrl');
-    if (baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
-    const idEl = $('newProvId');
-    if (idEl && !state.newProvIdTouched && !idEl.value.trim()) idEl.value = meta.preset_id || meta.id;
+    if (meta && baseEl && !baseEl.value.trim() && meta.base_url) baseEl.value = meta.base_url;
   }
 
   // --- 4b. 接入信息 view (its own tab) --------------------------------------

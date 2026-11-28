@@ -99,22 +99,22 @@
     return dotWord('warn', '未测');
   }
 
-  // 每候选 Key 下拉：第一项「任一」（= 展开该供应商全部启用 Key），其后是
-  // 真实存在的 Key 标签；已绑定但本地缺失的标签照样显示，不静默改成「任一」。
-  function keyOptsHtml(c) {
+  // 每候选 Key 下拉选项（供胶囊下拉 makePillSelect 使用）：第一项「任一」，
+  // 其后是真实存在的 Key 标签；已绑定但本地缺失的标签照样保留。
+  function keyOptsList(c) {
     const prov = state.config?.providers?.[c.provider] || {};
     const keys = (prov.api_keys || []).filter((k) => k && (k.label || k.id));
     const wanted = String(c.key_label || '');
-    const opts = [`<option value=""${wanted ? '' : ' selected'}>任一</option>`];
+    const opts = [{ value: '', label: '任一' }];
     for (const k of keys) {
       const label = String(k.label || k.id);
       const off = k.enabled === false ? '（已禁用）' : '';
-      opts.push(`<option value="${eh(label)}"${label === wanted ? ' selected' : ''}>${eh(label)}${off}</option>`);
+      opts.push({ value: label, label: `${label}${off}` });
     }
     if (wanted && !keys.some((k) => String(k.label || k.id) === wanted)) {
-      opts.push(`<option value="${eh(wanted)}" selected>${eh(wanted)}（本地缺失）</option>`);
+      opts.push({ value: wanted, label: `${wanted}（本地缺失）` });
     }
-    return opts.join('');
+    return opts;
   }
 
   // 候选去重键：供应商 ‡ 上游模型（空 = 路由名，调度器同序回退）‡ Key 标签。
@@ -143,28 +143,35 @@
     return set;
   }
 
-  // 思考档位下拉（per 候选 / per 添加流程）：档位阶梯来自 models.dev 目录
-  //（异步），没到之前留空——不显示可能被误认成真值的占位符。
-  function effortControlHtml(current, info) {
-    const follow = '<option value="">跟随客户端</option>';
+  // 思考档位胶囊下拉（per 候选）：档位阶梯来自 models.dev 目录（异步）。
+  function mountEffortPill(box, current, info, onChange) {
+    if (!box) return;
+    box.innerHTML = '';
     if (!info || info.ok === false || !info.found) {
-      return '<span class="text-xs text-muted">—</span>';
+      box.innerHTML = '<span class="text-xs text-muted">—</span>';
+      return;
     }
     const efforts = Array.isArray(info.efforts) ? info.efforts.filter(Boolean) : [];
+    const opts = [{ value: '', label: '跟随客户端' }];
     if (efforts.length > 0) {
-      // 旧目录里存过的档位即使目录不再提供也保留可见：改动必须是显式的。
-      const extra = current && !efforts.includes(current) && current !== 'on' && current !== 'off'
-        ? `<option value="${eh(current)}" selected>${eh(current)}（当前已保存）</option>`
-        : '';
-      const opts = efforts.map((lv) => `<option value="${eh(lv)}"${lv === current ? ' selected' : ''}>${eh(lv)}</option>`).join('');
-      return `<select class="select select--compact" data-eff aria-label="思考档位">${follow}${extra}${opts}</select>`;
+      if (current && !efforts.includes(current) && current !== 'on' && current !== 'off') {
+        opts.push({ value: current, label: `${current}（当前已保存）` });
+      }
+      for (const lv of efforts) opts.push({ value: lv, label: lv });
+    } else if (info.supports_toggle || info.toggle) {
+      opts.push({ value: 'on', label: '强制开启' }, { value: 'off', label: '强制关闭' });
+    } else {
+      box.innerHTML = '<span class="text-xs text-muted">无档位</span>';
+      return;
     }
-    if (info.supports_toggle || info.toggle) {
-      return `<select class="select select--compact" data-eff aria-label="思考开关">${follow}`
-        + `<option value="on"${current === 'on' ? ' selected' : ''}>强制开启</option>`
-        + `<option value="off"${current === 'off' ? ' selected' : ''}>强制关闭</option></select>`;
-    }
-    return '<span class="text-xs text-muted">该模型无思考档位</span>';
+    const ps = makePillSelect({
+      sm: true,
+      options: opts,
+      value: current || '',
+      ariaLabel: '思考档位',
+      onChange,
+    });
+    box.appendChild(ps.el);
   }
 
   // 模型在 models.dev 目录里是否支持思考（决定「思考档位」行是否出现）。
@@ -351,24 +358,37 @@
   // 状态放在调用方的 st 对象里（字段同名：provId / anyKey / pickedKeys /
   // pickedModels / manualOpen / probingFor）；这里只画、只接线。
 
-  // 只列「启用且有 Key」的供应商（不能在这里新建供应商）；选项文案带可用 Key 数。
-  function fillUsableProviderSelect(sel) {
-    if (!sel) return;
+  // 只列「启用且有 Key」的供应商（胶囊下拉，06-add-model.png）。
+  function mountUsableProviderPill(slot, id, curVal, onChange) {
+    if (!slot) return null;
+    slot.innerHTML = '';
     const provs = Object.entries(state.config?.providers || {})
       .filter(([, p]) => {
         if (!p || p.enabled === false) return false;
         return (p.api_keys || []).some((k) => k && k.enabled !== false);
       })
       .sort((a, b) => String(a[1]?.name || a[0]).localeCompare(String(b[1]?.name || b[0])));
-    sel.innerHTML = ['<option value="">选择供应商</option>']
-      .concat(provs.map(([id, p]) => {
-        const n = (p.api_keys || []).filter((k) => k && k.enabled !== false).length;
-        return `<option value="${eh(id)}">${eh(p.name || id)}（${n} 把 Key 可用）</option>`;
-      })).join('');
+    const opts = [{ value: '', label: '选择供应商' }].concat(provs.map(([pId, p]) => {
+      const n = (p.api_keys || []).filter((k) => k && k.enabled !== false).length;
+      const name = p.name || pId;
+      return { value: pId, label: name, meta: `${n} 把 Key 可用`, avatar: { name } };
+    }));
+    const ps = makePillSelect({
+      id,
+      options: opts,
+      value: curVal || '',
+      placeholder: '选择供应商',
+      full: true,
+      ariaLabel: '选择供应商',
+      onChange,
+    });
+    slot.appendChild(ps.el);
+    slot._pillSelect = ps;
+    return ps;
   }
 
-  // Key 芯片组：第一颗「任一可用」；点具体 Key 取消「任一可用」并显示点选
-  // 序号；全取消回到「任一可用」。停用的 Key 不出现；冷却中的标黄（.dot）可选。
+  // Key 芯片组（06-add-model.png）：第一颗「任一可用」；点具体 Key 显示序号角标与状态点；
+  // 全取消回到「任一可用」。停用的 Key 不出现；冷却中标黄点可选。
   function drawKeyChips(box, st, onChange) {
     if (!box) return;
     box.innerHTML = '';
@@ -381,42 +401,52 @@
       box.appendChild(span);
       return;
     }
-    box.appendChild(buildChip({
-      label: '任一可用',
-      on: st.anyKey,
-      title: '不选具体 Key：每个模型生成 1 个来源，网关在该供应商的启用 Key 里自动挑',
-      onClick: () => {
-        st.anyKey = true;
-        st.pickedKeys.length = 0;
-        onChange();
-      },
-    }));
+    const anyBtn = ce('button');
+    anyBtn.type = 'button';
+    anyBtn.className = `kchip${st.anyKey ? ' on' : ''}`;
+    anyBtn.textContent = '任一可用';
+    anyBtn.title = '不选具体 Key：每个模型生成 1 个来源，网关在该供应商的启用 Key 里自动挑';
+    clk(anyBtn, () => {
+      st.anyKey = true;
+      st.pickedKeys.length = 0;
+      onChange();
+    });
+    box.appendChild(anyBtn);
+
     keys.forEach((k, idx) => {
       const label = String(k.label || k.id || `key-${idx}`);
       const cooling = candCooldownSec(st.provId, label) > 0;
+      const flag = keyHealthFlag(k);
       const ord = st.pickedKeys.indexOf(label);
-      const chip = buildChip({
-        label: ord >= 0 ? `${ord + 1} · ${label}` : label,
-        on: ord >= 0,
-        title: cooling ? `${label}：冷却中，仍可选择` : label,
-        onClick: (next) => {
-          if (next) {
-            st.anyKey = false;
-            if (ord < 0) st.pickedKeys.push(label);
-          } else {
-            const i = st.pickedKeys.indexOf(label);
-            if (i >= 0) st.pickedKeys.splice(i, 1);
-          }
-          if (st.pickedKeys.length === 0) st.anyKey = true;
-          onChange();
-        },
-      });
-      if (cooling) {
-        const dot = ce('span');
-        dot.className = 'dot dot--warn';
-        dot.setAttribute('aria-hidden', 'true');
-        chip.appendChild(dot);
+      const chip = ce('button');
+      chip.type = 'button';
+      chip.className = `kchip${ord >= 0 ? ' on' : ''}`;
+      chip.title = cooling ? `${label}：冷却中，仍可选择` : label;
+      if (ord >= 0) {
+        const badge = ce('i');
+        badge.className = 'ord';
+        badge.textContent = String(ord + 1);
+        chip.appendChild(badge);
       }
+      const txt = ce('span');
+      txt.textContent = label;
+      chip.appendChild(txt);
+      const dot = ce('span');
+      const dotCls = cooling ? 'dot--warn' : (flag === true ? 'dot--ok' : (flag === false ? 'dot--err' : ''));
+      dot.className = `dot${dotCls ? ` ${dotCls}` : ''}`;
+      dot.setAttribute('aria-hidden', 'true');
+      chip.appendChild(dot);
+      clk(chip, () => {
+        if (ord < 0) {
+          st.anyKey = false;
+          st.pickedKeys.push(label);
+        } else {
+          const i = st.pickedKeys.indexOf(label);
+          if (i >= 0) st.pickedKeys.splice(i, 1);
+        }
+        if (st.pickedKeys.length === 0) st.anyKey = true;
+        onChange();
+      });
       box.appendChild(chip);
     });
   }
@@ -464,6 +494,8 @@
         title: `${eh(mo)}${capPills(ctx.provId, mo)}`,
         sub: eh(capSub(ctx.provId, mo)),
         status: exists ? { dot: 'off', label: '已添加' } : '',
+        off: exists,
+        cls: !exists && picked ? 'row--picked' : '',
         onOpen: exists ? null : () => ctx.onToggle(mo, !picked),
       });
       row.dataset.mo = mo;
@@ -472,17 +504,23 @@
     }
   }
 
-  // 「模型」段骨架：筛选 / 重新拉取 / 手动填写 / 列表 / 手填框 / 拉取说明。
+  // 「模型」段骨架（.mlistbox，06-add-model.png）：筛选 / 拉取时间 / 重新拉取 / 手动填写 / 滚动列表。
   function pickerTpl(prefix) {
     return `
       <div class="dlg-secline">模型</div>
       <div class="col-full">
-        <div class="input-row">
-          <input class="input" id="${prefix}_filter" placeholder="选择供应商后筛选上游模型" aria-label="筛选上游模型">
-          <button class="btn" id="${prefix}_reprobe" type="button">重新拉取</button>
-          <button class="btn" id="${prefix}_manual" type="button">手动填写</button>
+        <div class="mlistbox">
+          <div class="mlistbox-tool">
+            <div class="search-box">
+              <span class="search-ico">${window.uiIcon ? window.uiIcon('search') : ''}</span>
+              <input class="input search-input" id="${prefix}_filter" placeholder="选择供应商后筛选上游模型" aria-label="筛选上游模型">
+            </div>
+            <span class="text-xs text-muted" id="${prefix}_probe_note"></span>
+            <button class="btn btn--sm btn--ghost" id="${prefix}_reprobe" type="button">重新拉取</button>
+            <button class="btn btn--sm btn--ghost" id="${prefix}_manual" type="button">手动填写</button>
+          </div>
+          <div class="mlistbox-sc" id="${prefix}_models"></div>
         </div>
-        <div class="list mt-2" id="${prefix}_models"></div>
         <div class="mt-2" id="${prefix}_manual_box" hidden>
           <textarea class="textarea" id="${prefix}_manual_text" placeholder="每行一个上游模型 ID，多个模型用换行分隔"></textarea>
           <div class="fields mt-1">
@@ -490,7 +528,6 @@
             <span class="text-xs text-muted">换行分隔的每个模型都会被勾选</span>
           </div>
         </div>
-        <div class="text-xs text-muted mt-1" id="${prefix}_probe_note"></div>
       </div>`;
   }
 
@@ -603,8 +640,8 @@
         confirmText: '更换',
       });
       if (!ok) {
-        const sel = $(hooks.provSelId);
-        if (sel) sel.value = st.provId;
+        const slot = $(hooks.provSlotId);
+        if (slot && slot._pillSelect) slot._pillSelect.setValue(st.provId);
         return;
       }
     }
@@ -762,7 +799,7 @@
 
   function onAddProvChange(nextId) {
     return changePickerProv(amState, nextId, {
-      provSelId: 'am_prov',
+      provSlotId: 'am_prov_slot',
       draw: drawAddModels,
       afterChange: () => amProvChanged(),
       afterDraw: () => amProvChanged(),
@@ -780,8 +817,8 @@
       const show = !amState.anyKey && amState.pickedKeys.length >= 2;
       seg.hidden = !show;
       seg.classList.toggle('hidden', !show);
-      seg.querySelectorAll('button[data-amstrat]').forEach((b) => {
-        b.classList.toggle('active', b.dataset.amstrat === amState.strategy);
+      seg.querySelectorAll('.segp-btn[data-amstrat]').forEach((b) => {
+        b.classList.toggle('on', b.dataset.amstrat === amState.strategy);
       });
     }
     // Key 回退只在指定了具体 Key 时出现（对应 allow_key_fallback）；
@@ -885,24 +922,23 @@
     label.hidden = false;
     ctrl.hidden = false;
     const prev = amState.effort;
-    const opts = ['<option value="">跟随客户端</option>'];
-    for (const v of [...ladders]) {
-      opts.push(`<option value="${eh(v)}"${v === prev ? ' selected' : ''}>${eh(v)}</option>`);
-    }
+    const opts = [{ value: '', label: '跟随客户端' }];
+    for (const v of [...ladders]) opts.push({ value: v, label: v });
     if (toggleOnly) {
-      opts.push(`<option value="on"${prev === 'on' ? ' selected' : ''}>强制开启</option>`);
-      opts.push(`<option value="off"${prev === 'off' ? ' selected' : ''}>强制关闭</option>`);
+      opts.push({ value: 'on', label: '强制开启' }, { value: 'off', label: '强制关闭' });
     }
-    ctrl.innerHTML = `<select class="select" id="am_effort" aria-label="思考档位">${opts.join('')}</select>`
-      + '<div class="text-xs text-muted mt-1">只应用到支持思考的所选模型；不支持的保持跟随客户端</div>';
-    const sel = $('am_effort');
-    if (sel) {
-      sel.value = prev;
-      sel.addEventListener('change', () => {
-        amState.effort = String(sel.value || '');
+    ctrl.innerHTML = '';
+    const ps = makePillSelect({
+      id: 'am_effort',
+      options: opts,
+      value: prev || '',
+      ariaLabel: '思考档位',
+      onChange: (v) => {
+        amState.effort = String(v || '');
         amState.dirty = true;
-      });
-    }
+      },
+    });
+    ctrl.appendChild(ps.el);
   }
 
   function drawAddSummary() {
@@ -923,13 +959,15 @@
     box.innerHTML = `
       <div class="dlg-secline">来源</div>
       <label>供应商</label>
-      <div><select class="select" id="am_prov" aria-label="选择供应商"></select></div>
+      <div id="am_prov_slot"></div>
       <label>Key</label>
       <div>
-        <div class="copy-chips" id="am_key_chips"></div>
-        <div class="seg mt-2" id="am_strat_seg" hidden>
-          <button class="seg-btn" data-amstrat="sticky_failover" type="button">主备</button>
-          <button class="seg-btn" data-amstrat="round_robin" type="button">轮询</button>
+        <div class="kchips">
+          <div class="kchips" id="am_key_chips"></div>
+          <div class="segp" id="am_strat_seg" hidden>
+            <button class="segp-btn" data-amstrat="sticky_failover" type="button">主备</button>
+            <button class="segp-btn" data-amstrat="round_robin" type="button">轮询</button>
+          </div>
         </div>
         <div class="text-xs text-muted mt-1" id="am_key_help"></div>
       </div>
@@ -945,16 +983,14 @@
           ${checkRow('am_noreas', false, '剥离思考 / 推理参数')}
           ${checkRow('am_nonstream', false, '强制非流式（stream=false）')}
           <label>并发上限</label>
-          <div class="input-row"><input class="input tabular" id="am_maxc" type="number" min="0" placeholder="不限" aria-label="并发上限"><span class="text-xs text-muted">每个来源同时处理的请求数，0 = 不限</span></div>
+          <div class="input-row"><input class="input tabular input--short" id="am_maxc" type="number" min="0" placeholder="不限" aria-label="并发上限"><span class="text-xs text-muted">每个来源同时处理的请求数，0 = 不限</span></div>
           <label id="am_weight_label" hidden>权重</label>
-          <div class="input-row" id="am_weight_row" hidden><input class="input tabular" id="am_weight" type="number" min="1" value="1" aria-label="权重"><span class="text-xs text-muted">数值越大分到的请求越多</span></div>
+          <div class="input-row" id="am_weight_row" hidden><input class="input tabular input--short" id="am_weight" type="number" min="1" value="1" aria-label="权重"><span class="text-xs text-muted">数值越大分到的请求越多</span></div>
         </div>
       </details>
     `;
 
-    fillUsableProviderSelect($('am_prov'));
-
-    $('am_prov')?.addEventListener('change', (e) => onAddProvChange(String(e.target.value || '')));
+    mountUsableProviderPill($('am_prov_slot'), 'am_prov', '', (val) => onAddProvChange(String(val || '')));
     $('am_strat_seg')?.addEventListener('click', (e) => {
       const b = e.target instanceof Element ? e.target.closest('button[data-amstrat]') : null;
       if (!b) return;
@@ -1125,7 +1161,7 @@
   function edPickerHooks() {
     return {
       draw: drawEdAddModels,
-      probe: () => probePicker(edAdd, 'me_ac_note', drawEdAddModels),
+      probe: () => probePicker(edAdd, 'me_ac_probe_note', drawEdAddModels),
       onDirty: () => {},
       onPicked: () => {},
     };
@@ -1158,8 +1194,11 @@
     const t = $('me_title');
     if (t) t.textContent = edDlg.orig;
     const st = routeStatusOf(edDlg.draft);
-    const sub = $('me_sub');
-    if (sub) sub.textContent = `${st.word} · ${edDlg.draft.candidates.length} 个来源`;
+    const stEl = $('me_status');
+    if (stEl) {
+      stEl.hidden = false;
+      stEl.innerHTML = `<span class="dot dot--${st.dot}" aria-hidden="true"></span><span>${eh(st.word)}</span>`;
+    }
     // 分流策略只在 ≥2 个来源时有意义（一个来源没有「分给谁」可选）。
     const showStrat = edDlg.draft.candidates.length >= 2;
     const l = $('ed_strat_label');
@@ -1186,12 +1225,28 @@
         <td class="text-muted" title="按住 ⋮⋮ 拖动调整顺序"><span aria-hidden="true">⋮⋮</span> ${i + 1}</td>
         <td>${eh(providerNameOf(c.provider))}</td>
         <td><span class="input--code">${eh(edUpstreamOf(c))}</span></td>
-        <td><select class="select select--compact" data-key aria-label="这个来源用哪把 Key">${keyOptsHtml(c)}</select></td>
+        <td><span class="m-cand-key" id="me_cand_key_${i}"></span></td>
         <td id="me_cand_st_${i}">${candStatusHtml(c)}</td>
         <td><span class="m-cand-eff" id="me_cand_eff_${i}"></span></td>
         <td><div class="fields m-cand-ops"><button class="btn btn--sm btn--ghost" data-a="t" type="button" title="用这个来源真实发一句「你好」">测试</button></div></td>
       </tr>`).join('');
     cands.forEach((c, i) => {
+      const keySlot = $(`me_cand_key_${i}`);
+      if (keySlot) {
+        const ps = makePillSelect({
+          sm: true,
+          options: keyOptsList(c),
+          value: String(c.key_label || ''),
+          ariaLabel: '这个来源用哪把 Key',
+          onChange: (v) => {
+            if (v) c.key_label = v;
+            else delete c.key_label;
+            drawEdCands();
+            drawEdHeader();
+          },
+        });
+        keySlot.appendChild(ps.el);
+      }
       const tr = body.querySelector(`tr[data-i="${i}"]`);
       const opsSlot = tr ? (tr.querySelector('.m-cand-ops') || tr.querySelector('td:last-child')) : null;
       if (opsSlot) {
@@ -1283,7 +1338,10 @@
     fetchModelInfo(preset, model).then((info) => {
       // 候选表可能已重排：过期的查询结果不能写进别人的格子。
       if (!box.isConnected || edDlg.draft.candidates[i] !== c) return;
-      box.innerHTML = effortControlHtml(String(c.reasoning_effort || ''), info);
+      mountEffortPill(box, String(c.reasoning_effort || ''), info, (v) => {
+        if (v) c.reasoning_effort = v;
+        else delete c.reasoning_effort;
+      });
     });
   }
 
@@ -1380,19 +1438,15 @@
       <label>对外模型名</label>
       <div><input class="input input--code" id="ed_m_name" value="${eh(edDlg.orig)}" placeholder="留空则用第一个来源的上游模型 ID"></div>
       <label id="ed_strat_label" hidden>分流</label>
-      <div id="ed_strat_ctrl" hidden>
-        <select class="select" id="ed_m_strat" aria-label="分流策略">${['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map((k) => `<option value="${eh(k)}"${k === stratVal ? ' selected' : ''}>${eh(STRATEGY_LABELS[k] || k)}</option>`).join('')}</select>
-        <div class="text-xs text-muted mt-1" id="ed_m_strat_desc">${eh(STRATEGY_HINTS[stratVal] || '')}</div>
-      </div>
-      <div class="dlg-secline">来源 · 按顺序尝试</div>
+      <div id="ed_strat_ctrl" hidden><div id="ed_m_strat_slot"></div></div>
+      <div class="dlg-secline"><span>来源 · 按顺序尝试</span><button class="btn btn--sm" id="me_test_all" type="button" title="逐个真实测试来源列表里的每一个来源，并刷新状态列">测试全部</button></div>
       <div class="col-full">
         <div class="table-wrap"><table class="data-table">
           <thead><tr><th>顺序</th><th>供应商</th><th>上游模型</th><th>Key</th><th>状态</th><th>思考档位</th><th></th></tr></thead>
           <tbody id="me_cand_body"></tbody>
         </table></div>
         <div class="fields mt-2">
-          <button class="btn" id="me_add_src" type="button">添加来源</button>
-          <button class="btn" id="me_test_all" type="button" title="逐个真实测试来源列表里的每一个来源，并刷新状态列">测试全部</button>
+          <button class="btn btn--sm" id="me_add_src" type="button">+ 添加来源</button>
         </div>
         <div class="mt-2" id="me_add_box" hidden></div>
       </div>
@@ -1409,13 +1463,26 @@
         </div>
       </details>
     `;
+    const stratSlot = $('ed_m_strat_slot');
+    if (stratSlot) {
+      const stratOpts = ['sticky_failover', 'round_robin', ...ADVANCED_STRATEGIES].map((k) => ({
+        value: k,
+        label: STRATEGY_HINTS[k] ? `${STRATEGY_LABELS[k] || k} — ${STRATEGY_HINTS[k]}` : (STRATEGY_LABELS[k] || k),
+      }));
+      const ps = makePillSelect({
+        id: 'ed_m_strat',
+        full: true,
+        options: stratOpts,
+        value: stratVal,
+        ariaLabel: '分流策略',
+        onChange: (val) => {
+          edDlg.draft.routing_strategy = String(val || 'sticky_failover');
+          drawEdAdv();
+        },
+      });
+      stratSlot.appendChild(ps.el);
+    }
     wireEdCandBody($('me_cand_body'));
-    $('ed_m_strat')?.addEventListener('change', (e) => {
-      edDlg.draft.routing_strategy = String(e.target.value || 'sticky_failover');
-      const desc = $('ed_m_strat_desc');
-      if (desc) desc.textContent = STRATEGY_HINTS[edDlg.draft.routing_strategy] || '';
-      drawEdAdv();
-    });
     clk($('me_add_src'), () => openEdAddSourcePanel());
     clk($('me_test_all'), () => testAllEdCandidates());
     $('me_ca')?.addEventListener('change', (e) => {
@@ -1461,35 +1528,34 @@
 
   function onEdAddProvChange(nextId) {
     return changePickerProv(edAdd, nextId, {
-      provSelId: 'me_ac_prov',
+      provSlotId: 'me_ac_prov_slot',
       draw: drawEdAddModels,
-    }, 'me_ac_note');
+    }, 'me_ac_probe_note');
   }
 
   function buildEdAddSourcePanel() {
     const boxEl = $('me_add_box');
     if (!boxEl) return;
     boxEl.innerHTML = `
-      <div class="card card-pad">
+      <div class="gcard gcard--padded">
         <div class="form-2col">
           <div class="dlg-secline">来源</div>
           <label>供应商</label>
-          <div><select class="select" id="me_ac_prov" aria-label="选择供应商"></select></div>
+          <div id="me_ac_prov_slot"></div>
           <label>Key</label>
           <div>
-            <div class="copy-chips" id="me_ac_keys"></div>
+            <div class="kchips" id="me_ac_keys"></div>
             <div class="text-xs text-muted mt-1" id="me_ac_key_help"></div>
           </div>
           ${pickerTpl('me_ac')}
         </div>
         <div class="fields mt-3">
-          <button class="btn" id="me_ac_cancel" type="button">取消</button>
-          <button class="btn" id="me_ac_ok" type="button">添加来源</button>
+          <button class="btn btn--ghost" id="me_ac_cancel" type="button">取消</button>
+          <button class="btn btn--primary" id="me_ac_ok" type="button">添加来源</button>
         </div>
       </div>
     `;
-    fillUsableProviderSelect($('me_ac_prov'));
-    $('me_ac_prov')?.addEventListener('change', (e) => onEdAddProvChange(String(e.target.value || '')));
+    mountUsableProviderPill($('me_ac_prov_slot'), 'me_ac_prov', '', (val) => onEdAddProvChange(String(val || '')));
     wirePicker('me_ac', edAdd, edPickerHooks());
     clk($('me_ac_cancel'), closeEdAddSourcePanel);
     clk($('me_ac_ok'), confirmEdAddSource);

@@ -272,8 +272,8 @@
     const meta = presetMetaForProvider(p, p.preset_id);
     const head = $('providerDialogHead');
     if (head) {
-      head.innerHTML = `${window.renderBrandIcon ? window.renderBrandIcon(p.name || pId) : ''}`
-        + `<span class="name">${eh(p.name || pId)}</span>`
+      head.innerHTML = `${window.renderBrandIcon ? window.renderBrandIcon(p.name || pId, { off: p.enabled === false }) : ''}`
+        + `<h2 class="dialog-title">${eh(p.name || pId)}</h2>`
         + `<span class="text-xs text-muted">${eh(hostOfBaseUrl(p.base_url || p.anthropic_base_url || '')) || '未配置接口地址'}</span>`;
     }
     const body = $('providerDialogBody');
@@ -281,17 +281,6 @@
 
     // Hub 是预设的权威端：详情弹框里可改绑定（含「自定义（不绑定）」）；Full 只读。
     const hubPresetEditable = isHubMode() && !isVaultProv;
-    const versionText = presetVersionText(meta)
-      || (p.rule_hash ? `中枢规则指纹 ${String(p.rule_hash).slice(0, 8)}` : '自定义（无适配文件）');
-    let presetCell;
-    if (hubPresetEditable) {
-      const cur = String(p.preset_id || '').trim() || 'custom';
-      const opts = ['<option value="custom">自定义（不绑定）</option>']
-        .concat(Object.values(PRESETS_META).map((m) => `<option value="${eh(m.id)}"${cur === m.id ? ' selected' : ''}>${eh(m.label)}</option>`));
-      presetCell = `<select class="select" id="ed_p_preset_${pId}">${opts.join('')}</select>`;
-    } else {
-      presetCell = `<span class="pill">${eh(p.preset_id || '（未绑定预设）')}</span>`;
-    }
     const baseDefault = meta?.base_url || '';
     const antDefault = meta?.anthropic_base_url || '';
     const antEnabled = Boolean(p.anthropic_base_url) || normalizeApiType(p.api_type) === 'anthropic-messages';
@@ -311,51 +300,96 @@
       ${isVaultProv ? `<div class="notice-strip mb-2"><span>中枢托管供应商：名称、接口地址与适配规则由中枢统一管理（只读）。如需修改请在中枢操作后点「重新拉取」。</span></div>${ruleHashDrift ? '<div class="notice-strip notice-strip--warn mb-2"><span>中枢规则已更新：本地与中枢清单不一致，请点「重新拉取」同步。</span></div>' : ''}` : ''}
       <div class="form-2col">
         <label>启用</label><div id="ed_p_enable_slot"></div>
-        <label>预设</label><div>${presetCell}${hubPresetEditable ? '' : `<div class="text-xs text-muted mt-1">${eh(versionText)}</div>`}</div>
+        <label>预设</label><div id="ed_p_preset_slot_${pId}"></div>
         <label>接口地址</label><div class="input-row"><input class="input input--code" id="ed_p_base_${pId}" value="${eh(p.base_url || '')}" placeholder="${eh(baseDefault || 'https://api.example.com/v1')}"${lockAttr}><button class="btn btn--sm" id="btn_base_default_${pId}" type="button" title="重置为预设默认"${baseDefault ? '' : ' disabled'}${lockAttr}>默认</button></div>
-      </div>
-      <div class="section-bar mt-3">
-        <span class="form-label" id="pKeysSectionHead"></span>
-        <div class="fields">
-          <button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」">${isHubMode() ? '逐把测 Key' : '全部测试'}</button>
-          <button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button>
+        <div class="dlg-secline"><span id="pKeysSectionHead">Key 池</span><span class="fields"><button class="btn btn--sm" id="btn_batch_test_keys_${pId}" type="button" title="用每把 Key 真发一句「你好」">${isHubMode() ? '逐把测 Key' : '全部测试'}</button><button class="btn btn--sm" id="btn_oauth_start_${pId}" type="button" ${showOAuth ? '' : 'hidden'}>OAuth 扫码登录</button></span></div>
+        <div class="col-full">
+          <div class="klist">
+            <div id="p_keys_tbody_${pId}"></div>
+            <div class="kadd">
+              <input class="input kadd-lbl" id="new_key_lbl_${pId}" placeholder="标签（可选）">
+              <input class="input kadd-val input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴一把或多把 Key，换行分隔">
+              <button class="btn" id="btn_add_key_${pId}" type="button">添加</button>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>启用</th><th>标签 / Key</th><th>状态</th><th>操作</th></tr></thead><tbody id="p_keys_tbody_${pId}"></tbody></table></div>
-      <div class="input-row mt-2">
-        <input class="input" id="new_key_lbl_${pId}" placeholder="标签（可选，留空自动递增）">
-        <input class="input input--code privacy-mask" id="new_key_val_${pId}" placeholder="粘贴一把或多把 Key，换行分隔">
-        <button class="btn" id="btn_add_key_${pId}" type="button">添加</button>
-      </div>
-      ${isVaultProv ? `
-      <div class="section-bar mt-3"><span class="form-label">从中枢添加 Key（本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div>
-      <div class="probe-pills-wrap hidden" id="vault_keys_pick_${pId}" hidden></div>
-      <div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>` : ''}
-      <div class="snippet-box hidden mt-3" id="oauth_box_${pId}" hidden>
-        <div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div>
-        <div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div>
-      </div>
-      <details class="adv-details mt-3">
-        <summary>高级设置</summary>
-        <div class="adv-body"><div class="form-2col">
-          <label>名称</label><div><input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}></div>
-          <label>RPM 上限</label><div class="input-row"><input class="input tabular" id="ed_p_rpm_${pId}" type="number" min="1" value="${p.rpm_per_key || ''}" placeholder="不限"${lockAttr}><span class="text-xs text-muted">次 / 分钟，整个供应商合计；所有 Key 共享</span></div>
-          <label>每日重置</label><div><input class="input" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '')}" placeholder="如 00:00+08:00（留空 = 不按日重置）"${lockAttr}></div>
-          <label>客户端标识</label><div><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>不向上游透传客户端 UA</span></label></div>
-          <label>供应商 ID</label><div class="fields"><span class="tabular text-sm">${eh(pId)}</span><span class="text-xs text-muted">· 保存后不可修改</span></div>
-          <label>Anthropic 端点</label><div><label class="form-label form-label--check"><input type="checkbox" id="ed_p_ant_on_${pId}" ${antEnabled ? 'checked' : ''}${lockAttr}><span>同时启用 /v1/messages 入口</span></label><div class="input-row mt-1"><input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || antDefault)}" placeholder="${eh(antDefault || 'https://api.example.com/anthropic')}"${antEnabled ? '' : ' disabled'}${lockAttr}><button class="btn btn--sm" id="btn_ant_default_${pId}" type="button" title="重置为预设默认"${antDefault ? '' : ' disabled'}${lockAttr}>默认</button></div></div>
-          <label>适配规则 JSON</label><div><textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea></div>
-        </div></div>
-      </details>`;
+        ${isVaultProv ? `
+        <div class="col-full">
+          <div class="section-bar"><span class="form-label">从中枢添加 Key（本地缺失的标签）</span><div class="fields"><button class="btn btn--sm" id="btn_vault_add_keys_${pId}" type="button">从中枢添加</button></div></div>
+          <div class="probe-pills-wrap hidden" id="vault_keys_pick_${pId}" hidden></div>
+          <div class="form-actions hidden" id="vault_keys_actions_${pId}" hidden><button class="btn btn--sm btn--primary" id="btn_vault_fetch_keys_${pId}" type="button">拉取所选 Key</button></div>
+        </div>` : ''}
+        <div class="col-full snippet-box hidden" id="oauth_box_${pId}" hidden>
+          <div class="snippet-header"><span class="form-label">MiniMax OAuth 设备授权码:</span><span class="pill pill--amber" id="oauth_status_${pId}">等待扫码...</span></div>
+          <div class="text-sm mt-1">请点击访问：<a id="oauth_link_${pId}" target="_blank" rel="noopener noreferrer" class="tabular"></a> 并在页面中输入验证码：<strong class="tabular" id="oauth_code_${pId}"></strong></div>
+        </div>
+        <div class="dlg-secline">限流与适配</div>
+        <label>RPM 上限</label><div id="ed_p_rpm_slot_${pId}"></div>
+        <label>每日重置</label><div><input class="input input--short" id="ed_p_reset_${pId}" value="${eh(p.quota_reset_at || '')}" placeholder="00:00"${lockAttr}></div>
+        <label>客户端标识</label><div><label class="form-label form-label--check"><input type="checkbox" id="ed_p_hide_ua_${pId}" ${p.hide_client_name ? 'checked' : ''}${lockAttr}><span>不向上游透传客户端 UA</span></label></div>
+        <label>供应商 ID</label><div class="fields"><span class="tabular text-sm">${eh(pId)}</span><span class="text-xs text-muted">· 保存后不可修改</span></div>
+        <details class="adv-details">
+          <summary>高级设置</summary>
+          <div class="adv-body"><div class="form-2col">
+            <label>名称</label><div><input class="input" id="ed_p_name_${pId}" value="${eh(p.name || pId)}"${lockAttr}></div>
+            <label>Anthropic 端点</label><div><label class="form-label form-label--check"><input type="checkbox" id="ed_p_ant_on_${pId}" ${antEnabled ? 'checked' : ''}${lockAttr}><span>同时启用 /v1/messages 入口</span></label><div class="input-row mt-1"><input class="input input--code" id="ed_p_ant_${pId}" value="${eh(p.anthropic_base_url || antDefault)}" placeholder="${eh(antDefault || 'https://api.example.com/anthropic')}"${antEnabled ? '' : ' disabled'}${lockAttr}><button class="btn btn--sm" id="btn_ant_default_${pId}" type="button" title="重置为预设默认"${antDefault ? '' : ' disabled'}${lockAttr}>默认</button></div></div>
+            <label>适配规则 JSON</label><div><textarea class="textarea textarea--json" id="ed_p_rules_${pId}" placeholder='{"stream_only":false}'${lockAttr}>${eh(adapterText)}</textarea></div>
+          </div></div>
+        </details>
+      </div>`;
+
+    const presetSlot = $(`ed_p_preset_slot_${pId}`);
+    if (presetSlot) {
+      const curPreset = String(p.preset_id || '').trim() || 'custom';
+      const presetOpts = hubPresetEditable
+        ? [{ value: 'custom', label: '自定义（不绑定）' }].concat(
+          Object.values(PRESETS_META).map((m) => ({
+            value: m.id,
+            label: `${m.label} · ${m.preset_id || m.id}${m.version ? ` v${m.version}` : ''}`,
+          }))
+        )
+        : [{
+          value: curPreset,
+          label: meta
+            ? `${meta.label} · ${meta.preset_id || meta.id}${meta.version ? ` v${meta.version}` : ''}`
+            : (p.preset_id || '自定义（未绑定预设）'),
+        }];
+      const ps = makePillSelect({
+        id: `ed_p_preset_${pId}`,
+        options: presetOpts,
+        value: curPreset,
+        disabled: !hubPresetEditable,
+        ariaLabel: '预设',
+      });
+      presetSlot.appendChild(ps.el);
+    }
+
+    const rpmSlot = $(`ed_p_rpm_slot_${pId}`);
+    if (rpmSlot) {
+      const rpmSeg = makeSegPicker({
+        id: `ed_p_rpm_${pId}`,
+        presets: [
+          { value: '', label: '不限' },
+          { value: '60', label: '60' },
+          { value: '300', label: '300' },
+          { value: '1000', label: '1000' },
+        ],
+        value: p.rpm_per_key ? String(p.rpm_per_key) : '',
+        allowEmpty: true,
+        min: 1,
+        disabled: isVaultProv,
+      });
+      rpmSlot.appendChild(rpmSeg.el);
+    }
 
     const footLeft = $('providerDialogFootLeft');
     if (footLeft) {
-      footLeft.innerHTML = `<button class="btn btn--danger" id="btn_del_prov_${pId}" type="button">删除供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}`;
+      footLeft.innerHTML = `<button class="btn btn--ghost btn--danger" id="btn_del_prov_${pId}" type="button">删除供应商</button>${isVaultProv ? `<button class="btn" id="btn_refetch_prov_${pId}" type="button">重新拉取</button>` : ''}`;
     }
     const footRight = $('providerDialogFootRight');
     if (footRight) {
       // 中枢托管供应商没有「保存」（中枢是权威），本地 Key 的增删改即时落盘。
-      footRight.innerHTML = `<button class="btn" id="btn_cancel_prov_${pId}" type="button">取消</button>${isVaultProv ? '' : `<button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存</button>`}`;
+      footRight.innerHTML = `<button class="btn btn--ghost" id="btn_cancel_prov_${pId}" type="button">取消</button>${isVaultProv ? '' : `<button class="btn btn--primary" id="btn_save_prov_${pId}" type="button">保存</button>`}`;
     }
 
     // 顶部「启用」开关：关掉 = enabled:false，重新打开删掉字段（与旧配置形状一致）。
@@ -412,10 +446,11 @@
     buildProviderKeyTable(pId, p);
   }
 
-  // Key 行（组件 4 · .data-table）：启用开关 / 标签+掩码+被引用数（权重同行）/
+  // Key 行（.krow）：启用开关 / 标签+掩码+被引用数（无权重框，v2.1 §1.8）/
   // 状态+最近测试时间（冷却中在状态下方给「立即解除」）/ 测试 +「⋯」菜单。
   function buildProviderKeyRow(pId, p, k, idx, isVaultProv) {
-    const tr = ce('tr');
+    const row = ce('div');
+    row.className = 'krow';
     const keyLabel = k.label || k.id || `key-${idx}`;
     const cdInfo = findKeyCooldown(pId, k, idx);
     // 归属只看 Key 自身的 origin（缺失时回落到供应商 origin）：中枢托管供应商
@@ -426,31 +461,28 @@
     const keyIsVault = isHubMode() || keyOrigin === 'vault';
     const refs = routesUsingKey(pId, keyLabel);
 
-    tr.innerHTML = `
-      <td class="k-enable-cell"></td>
-      <td>
-        <div class="fields">
-          <strong>${eh(keyLabel)}</strong>
+    row.innerHTML = `
+      <span class="k-enable-cell"></span>
+      <div>
+        <div class="krow-n">
+          <span>${eh(keyLabel)}</span>
           ${k.auth_type === 'oauth_device' ? '<span class="pill pill--accent">OAuth</span>' : ''}
-          <span class="text-xs text-muted">${keyIsVault ? '中枢' : '本地'}</span>
-          <input class="input input--compact tabular k_weight_in" type="number" min="1" value="${k.weight || 1}" title="权重：数值越大分到的请求越多" aria-label="Key ${eh(keyLabel)} 的权重" ${vaultKey ? 'disabled' : ''}>
+          ${!isHubMode() ? `<span class="text-xs text-muted">${keyIsVault ? '中枢' : '本地'}</span>` : ''}
         </div>
-        <div class="mt-1">
+        <div class="krow-s">
           ${renderKeyCell(k, vaultKey, idx)}
-          <span class="text-xs text-muted ml-2">${refs.length ? `用于 ${refs.length} 个模型` : '未被模型引用'}</span>
+          <span>· ${refs.length ? `用于 ${refs.length} 个模型` : '未被引用'}</span>
         </div>
-      </td>
-      <td class="k-status-cell">${keyStatusCellHtml(k, cdInfo.sec, cdInfo.target)}</td>
-      <td>
-        <div class="fields">
-          <button class="btn btn--sm btn--ghost btn_test_k" type="button" title="用这把 Key 真发一句「你好」">测试</button>
-          <span class="key-menu-slot"></span>
-        </div>
-      </td>
+      </div>
+      <div class="krow-st k-status-cell">${keyStatusCellHtml(k, cdInfo.sec, cdInfo.target)}</div>
+      <div class="krow-a">
+        <button class="btn btn--sm btn--ghost btn_test_k" type="button" title="用这把 Key 真发一句「你好」">测试</button>
+        <span class="key-menu-slot"></span>
+      </div>
     `;
-    tr.dataset.keyIdx = String(idx);
-    tr.dataset.cdSec = String(cdInfo.sec);
-    tr.dataset.cdTarget = cdInfo.target || '';
+    row.dataset.keyIdx = String(idx);
+    row.dataset.cdSec = String(cdInfo.sec);
+    row.dataset.cdTarget = cdInfo.target || '';
 
     // 启用开关：中枢下发的 Key 只读；禁用被引用的 Key 前先确认（旧约定保留）。
     const sw = makeSwitch({
@@ -478,17 +510,12 @@
         else renderProvidersList();
       },
     });
-    tr.querySelector('.k-enable-cell')?.appendChild(sw);
+    row.querySelector('.k-enable-cell')?.appendChild(sw);
 
-    tr.querySelector('.k_weight_in')?.addEventListener('change', (e) => {
-      k.weight = Math.max(1, Number(e.target.value) || 1);
-      if (isVaultProv) persistConfig(`已更新 Key [${keyLabel}] 的权重`).then(() => storeProviderDialogSnap());
-    });
-
-    clk(tr.querySelector('.btn_test_k'), (e) => testOneKey(pId, k, keyLabel, e.currentTarget));
+    clk(row.querySelector('.btn_test_k'), (e) => testOneKey(pId, k, keyLabel, e.currentTarget));
 
     // 「⋯」菜单：校验 / 解除冷却 / 删除此 Key。测试留在行内（常用）。
-    const menuSlot = tr.querySelector('.key-menu-slot');
+    const menuSlot = row.querySelector('.key-menu-slot');
     if (menuSlot) {
       menuSlot.appendChild(buildMenu([
         {
@@ -530,21 +557,20 @@
         },
       ], { label: `Key ${keyLabel} 的更多操作` }));
     }
-    return tr;
+    return row;
   }
 
-  // 一把 Key 的状态列 HTML。模块级，因为有两个调用方：弹框构建行，以及
-  // lanes/cooldowns 每 3 秒轮询后回写（overview.js）。冷却中的 Key 在状态下方
-  // 直接给「立即解除」；有最近测试结论时再给一行相对时间。
+  // 一把 Key 的状态列 HTML。冷却中的 Key 在时间旁给「立即解除」链接；有最近测试结论时给一行相对时间。
   function keyStatusCellHtml(k, cooldownSec, cdTarget) {
     const st = keyStatusView(k, cooldownSec);
-    let html = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs text-muted">${eh(st.word)}</span></span>`;
+    let html = `<span class="fields" title="${eh(st.title)}"><span class="dot ${st.dot}"></span><span class="text-xs">${eh(st.word)}</span></span>`;
     if (cooldownSec > 0) {
-      html += `<div class="mt-1"><button class="btn btn--sm btn--ghost btn_clear_k_cd_inline" data-cd-target="${eh(cdTarget || '')}" type="button" title="到期前手动恢复调度">立即解除</button></div>`;
-    }
-    const testedAt = k && k.last_test && k.last_test.at ? fmtTime(k.last_test.at) : '';
-    if (testedAt) {
-      html += `<div class="text-xs text-muted mt-1">${eh(testedAt)}测试</div>`;
+      html += `<div class="krow-s"><span>${eh(formatCooldown(cooldownSec))}后恢复 · </span><button class="text-link btn_clear_k_cd_inline" data-cd-target="${eh(cdTarget || '')}" type="button" title="到期前手动恢复调度">立即解除</button></div>`;
+    } else {
+      const testedAt = k && k.last_test && k.last_test.at ? fmtTime(k.last_test.at) : '';
+      if (testedAt) {
+        html += `<div class="krow-s">${eh(testedAt)}测试</div>`;
+      }
     }
     return html;
   }
@@ -1038,7 +1064,6 @@
       lt.ok ? 'ok' : 'err'
     );
     renderProvidersList();
-    if (window.HOST.kind === 'hub') renderHubOverview();
   }
 
   // 单把 Key 的探活（校验）：不消耗推理额度，只确认凭据是否有效。
@@ -1068,7 +1093,6 @@
     }
     if (quiet) return;
     renderProvidersList();
-    if (window.HOST.kind === 'hub') renderHubOverview();
   }
 
   // 批量测一个供应商的全部 Key：3 路并发、逐把真实推理、结论即时重画到
@@ -1095,15 +1119,15 @@
     const redrawKeyRows = () => {
       const tbody = $(`p_keys_tbody_${pId}`);
       if (!tbody || !tbody.isConnected) return;
-      tbody.querySelectorAll('tr').forEach((tr) => {
-        const idx = Number(tr.dataset.keyIdx);
+      tbody.querySelectorAll('.krow').forEach((row) => {
+        const idx = Number(row.dataset.keyIdx);
         const k = keys[idx];
-        const cell = tr.querySelector('.k-status-cell');
+        const cell = row.querySelector('.k-status-cell');
         if (!k || !cell) return;
         const cd = findKeyCooldown(pId, k, idx);
         cell.innerHTML = keyStatusCellHtml(k, cd.sec, cd.target);
-        tr.dataset.cdSec = String(cd.sec);
-        tr.dataset.cdTarget = cd.target || '';
+        row.dataset.cdSec = String(cd.sec);
+        row.dataset.cdTarget = cd.target || '';
       });
     };
     // 串行测 6 把最坏 120 秒（每把 20 秒超时）。这里放到 3 路并发；
@@ -1285,7 +1309,7 @@
       if (cfgResp && (cfgResp.ok || cfgResp.providers || cfgResp._version !== undefined)) {
         state.config = cfgResp;
         const verEl = $('configVersionDisplay');
-        if (verEl) verEl.textContent = `v${cfgResp._version || 1}`;
+        if (verEl) verEl.textContent = `配置 v${cfgResp._version || 1}`;
 
         renderProvidersList();
         renderModelsList();
@@ -1330,8 +1354,8 @@
         }).catch(() => {});
       }
 
-      if (window.HOST.kind === 'hub' && state.activeTab === 'nodes') {
-        renderHubOverview();
+      if (window.HOST.kind === 'hub' && state.activeTab === 'stats') {
+        renderStatsView();
       } else if (window.HOST.capabilities.usageAndTraces && state.activeTab === 'activity') {
         await loadActivityData();
       }
@@ -1346,118 +1370,12 @@
       if (res && res.ok) {
         state.nodes = res.nodes || [];
         renderNodesList();
-        if (window.HOST.kind === 'hub' && state.activeTab === 'nodes') {
-          renderHubOverview();
+        if (window.HOST.kind === 'hub' && state.activeTab === 'stats') {
+          renderStatsView();
         }
       }
     } catch (e) {
       toast(`节点加载失败: ${e.message}`, 'err');
-    }
-  }
-
-
-  // 中枢概览（节点页底部折叠区）：下发规模 KPI + 全部节点的模型使用分布。
-  function renderHubOverview() {
-    const kpiGrid = $('hubKpiGrid');
-    const usageBody = $('hubModelUsageBody');
-    if (!kpiGrid || !usageBody) return;
-
-    const cfg = state.config || {};
-    const providers = cfg.providers || {};
-    const agentModels = cfg.agent_models || {};
-    const nodes = (state.nodes || []).slice();
-
-    const ONLINE_MS = 15 * 60 * 1000;
-    const nowMs = Date.now();
-    let onlineCount = 0;
-    let enabledNodes = 0;
-    let totalSyncs = 0;
-    let total304 = 0;
-    const modelUsage = new Map(); // model -> { nodes:Set, requests, success, failed, inTok, outTok }
-
-    for (const n of nodes) {
-      if (n.enabled !== false) enabledNodes++;
-      totalSyncs += Number(n.sync_count || 0);
-      total304 += Number(n.hit_304_count || 0);
-      const lastMs = n.last_seen ? new Date(n.last_seen).getTime() : 0;
-      if (n.enabled !== false && lastMs && nowMs - lastMs <= ONLINE_MS) onlineCount++;
-
-      const u = n.usage;
-      if (!u || typeof u !== 'object') continue;
-      const statsMap = u.model_stats && typeof u.model_stats === 'object' ? u.model_stats : null;
-      if (statsMap && Object.keys(statsMap).length > 0) {
-        for (const [model, st] of Object.entries(statsMap)) {
-          if (!st || typeof st !== 'object') continue;
-          const calls = Number(st.calls ?? st.requests) || 0;
-          if (calls <= 0) continue;
-          let agg = modelUsage.get(model);
-          if (!agg) {
-            agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0, hasExactStats: false };
-            modelUsage.set(model, agg);
-          }
-          agg.nodes.add(n.name || n.id);
-          agg.requests += calls;
-          agg.success += Number(st.successes ?? st.success) || 0;
-          agg.failed += Number(st.failed) || 0;
-          agg.inTok += Number(st.in_tokens ?? st.input_tokens) || 0;
-          agg.outTok += Number(st.out_tokens ?? st.output_tokens) || 0;
-          agg.hasExactStats = true;
-        }
-      } else {
-        const models = u.models && typeof u.models === 'object' ? u.models : {};
-        for (const [model, count] of Object.entries(models)) {
-          const c = Number(count) || 0;
-          if (c <= 0) continue;
-          let agg = modelUsage.get(model);
-          if (!agg) {
-            agg = { nodes: new Set(), requests: 0, success: 0, failed: 0, inTok: 0, outTok: 0, hasExactStats: false };
-            modelUsage.set(model, agg);
-          }
-          agg.nodes.add(n.name || n.id);
-          agg.requests += c;
-        }
-      }
-    }
-
-    let totalKeys = 0;
-    for (const p of Object.values(providers)) totalKeys += (p.api_keys || []).length;
-
-    const kpis = [
-      { label: '纳管 VM 节点', value: String(nodes.length), sub: `${onlineCount} 在线 · ${enabledNodes} 已启用` },
-      { label: '下发供应商', value: String(Object.keys(providers).length), sub: `${totalKeys} 把密钥` },
-      { label: '下发模型', value: String(Object.keys(agentModels).length), sub: `${Object.values(agentModels).reduce((a, m) => a + (m?.candidates || []).length, 0)} 个候选` },
-      { label: '实际在用模型', value: String(modelUsage.size), sub: modelUsage.size ? '近一个上报窗口' : '暂无上报' },
-      { label: '节点同步总次数', value: String(totalSyncs), sub: `304 命中 ${total304} 次` },
-      { label: '当前配置版本', value: `v${cfg._version || 1}`, sub: 'EdgeOne KV CAS' },
-    ];
-
-    kpiGrid.innerHTML = kpis.map((item) => `
-      <div class="metric-box">
-        <div class="metric-box-label">${eh(item.label)}</div>
-        <div class="metric-box-val tabular">${eh(item.value)}</div>
-        <div class="text-xs text-muted">${eh(item.sub)}</div>
-      </div>
-    `).join('');
-
-    // --- Model usage distribution ---
-    const usageRows = [...modelUsage.entries()].sort((a, b) => b[1].requests - a[1].requests);
-    if (usageRows.length === 0) {
-      usageBody.innerHTML = '<tr><td colspan="6" class="text-muted">暂无节点上报模型使用数据。节点在下一次配置同步时会自动上报。</td></tr>';
-      return;
-    }
-    usageBody.innerHTML = '';
-    for (const [model, agg] of usageRows) {
-      const tr = ce('tr');
-      const icoHtml = window.renderBrandIcon ? window.renderBrandIcon(model) : '';
-      tr.innerHTML = `
-        <td><div class="name">${icoHtml}<span>${eh(model)}</span></div></td>
-        <td class="tabular">${agg.nodes.size}</td>
-        <td class="tabular">${agg.requests}</td>
-        <td class="tabular">${agg.hasExactStats ? `${agg.success} / ${agg.failed}` : '-'}</td>
-        <td class="tabular">${agg.hasExactStats ? `${agg.inTok} / ${agg.outTok}` : '-'}</td>
-        <td class="text-sm">${eh([...agg.nodes].slice(0, 4).join(', '))}${agg.nodes.size > 4 ? ' …' : ''}</td>
-      `;
-      usageBody.appendChild(tr);
     }
   }
 
@@ -1483,7 +1401,6 @@
           await verifyOneKey(pId, p, k, k.label || k.id || `key-${i}`, true);
           if (k.last_ok) ok++;
         }
-        renderHubOverview();
       }
       toast(`全部密钥探活完成: ${ok}/${total} 正常`, ok === total ? 'ok' : 'warn');
     } finally {
@@ -1635,42 +1552,34 @@
     return '需要处理';
   }
 
-  // 正常行的次要信息：预设版本 · 地址（没绑预设显示「自定义」；Full 上中枢托管
-  // 供应商标「中枢」）。
+  // 正常行的次要信息：精简地址（Full 中枢托管加「中枢」标记）。
   function providerPresetUrlText(p, pId) {
-    const bits = [];
-    const meta = resolveProviderPresetMeta(p, pId);
-    if (meta) {
-      const curVer = String(p.preset_version || meta.version || '');
-      bits.push(`预设 ${meta.preset_id || meta.id}${curVer ? ` v${curVer}` : ''}`);
-    } else {
-      bits.push('自定义');
-    }
-    if (!isHubMode() && p.origin === 'vault') bits.push('中枢');
-    else if (isHubMode()) bits.push('中枢托管');
-    bits.push(hostOfBaseUrl(p.base_url || '') || '未配置接口地址');
-    return bits.map((b) => eh(b)).join(' · ');
+    const host = hostOfBaseUrl(p.base_url || p.anthropic_base_url || '') || '未配置接口地址';
+    if (!isHubMode() && p.origin === 'vault') return `${eh(host)} · 中枢`;
+    return eh(host);
   }
 
-  // Key 健康条：每把 Key 一小段，颜色同状态（现有图元里最接近的是语义圆点）。
-  // 供应商停用或 Key 停用 = 灰段；冷却 = 警告；可用 / 失败 / 未测各按其色。
-  // 超过 10 把只画前 10 段，真实数量由旁边的 N/M 文本承载。
+  // Key 健康条（v2.1 §2）：14x6 横条，颜色同状态色；超过 10 把省略后由旁边的 N/M 文本承载。
   function keyHealthDotsHtml(pId, keys, providerEnabled = true) {
     const parts = [];
     const shown = keys.slice(0, 10);
-    for (let i = 0; i < shown.length; i++) {
-      const k = shown[i];
-      let cls = 'dot';
-      if (providerEnabled && k && k.enabled !== false) {
-        if (findKeyCooldown(pId, k, i).sec > 0) cls = 'dot dot--warn';
-        else if (keyHealthFlag(k) === true) cls = 'dot dot--ok';
-        else if (keyHealthFlag(k) === false) cls = 'dot dot--err';
-        else cls = 'dot dot--warn';
+    if (!shown.length) {
+      parts.push('<i class="kdots-bar" aria-hidden="true"></i>');
+    } else {
+      for (let i = 0; i < shown.length; i++) {
+        const k = shown[i];
+        let cls = 'kdots-bar';
+        if (providerEnabled && k && k.enabled !== false) {
+          if (findKeyCooldown(pId, k, i).sec > 0) cls = 'kdots-bar kdots-bar--warn';
+          else if (keyHealthFlag(k) === true) cls = 'kdots-bar kdots-bar--ok';
+          else if (keyHealthFlag(k) === false) cls = 'kdots-bar kdots-bar--err';
+          else cls = 'kdots-bar kdots-bar--warn';
+        }
+        parts.push(`<i class="${cls}" aria-hidden="true"></i>`);
       }
-      parts.push(`<span class="${cls}" aria-hidden="true"></span>`);
     }
     if (keys.length > shown.length) parts.push('<span class="text-xs text-muted">…</span>');
-    return `<span class="fields">${parts.join('')}</span>`;
+    return `<span class="kdots">${parts.join('')}</span>`;
   }
 
   // 一个供应商的列表视图数据（分组 / 状态 / 次要信息 / 健康计数）。
@@ -1713,9 +1622,7 @@
     return { pId, p, keys, okCount, failCount, cooling, coolingCount, busyCount, waitCount, status, group, usedBy, sub, subError };
   }
 
-  // 筛选芯片（全部 / 需要处理 / 已停用，带数量）：buildChip 生成，单选语义，
-  // 选中态由 state.providerFilter 驱动。数量没变时不重建（class flip）——
-  // 重建会把键盘焦点从刚点过的芯片上打掉。
+  // 筛选分段（全部 / 需要处理 / 已停用，带数量，01-providers.png）。
   const PROVIDER_FILTER_DEFS = [['all', '全部'], ['attention', '需要处理'], ['disabled', '已停用']];
 
   function mountProviderFilterChips(counts) {
@@ -1723,25 +1630,29 @@
     if (!box) return;
     if (!['all', 'attention', 'disabled'].includes(state.providerFilter)) state.providerFilter = 'all';
     const sig = `${counts.all}|${counts.attention}|${counts.disabled}`;
-    if (box.dataset.sig === sig && box.childElementCount === PROVIDER_FILTER_DEFS.length) {
-      [...box.children].forEach((chip, i) => {
-        chip.classList.toggle('chip--on', state.providerFilter === PROVIDER_FILTER_DEFS[i][0]);
+    if (box.dataset.sig === sig && box.firstElementChild) {
+      box.querySelectorAll('.segp-btn').forEach((btn, i) => {
+        btn.classList.toggle('on', state.providerFilter === PROVIDER_FILTER_DEFS[i][0]);
       });
       return;
     }
     box.dataset.sig = sig;
     box.innerHTML = '';
+    const seg = ce('div');
+    seg.className = 'segp';
     for (const [key, label] of PROVIDER_FILTER_DEFS) {
-      box.appendChild(buildChip({
-        label: `${label} ${counts[key]}`,
-        on: state.providerFilter === key,
-        title: `只看${label}的供应商`,
-        onClick: () => {
-          state.providerFilter = key;
-          renderProvidersList();
-        },
-      }));
+      const b = ce('button');
+      b.type = 'button';
+      b.className = `segp-btn${state.providerFilter === key ? ' on' : ''}`;
+      b.textContent = `${label} ${counts[key]}`;
+      b.title = `只看${label}的供应商`;
+      clk(b, () => {
+        state.providerFilter = key;
+        renderProvidersList();
+      });
+      seg.appendChild(b);
     }
+    box.appendChild(seg);
   }
 
   function buildProviderListRow(v) {
@@ -1749,20 +1660,20 @@
     const title = `<span>${eh(v.p.name || v.pId)}</span>${updateFlag
       ? ` <span class="pill pill--warn">可更新${typeof updateFlag === 'string' ? ` → v${eh(updateFlag)}` : ''}</span>`
       : ''}`;
-    // 健康条 + N/M 文本：停用 / 无 Key 显示「N 把」，其余显示「N/M 可用」。
-    let count;
-    if (v.group === 'disabled' || !v.keys.length) {
-      count = `<span class="fields">${keyHealthDotsHtml(v.pId, v.keys, v.group !== 'disabled')}<span class="ml-2 tabular">${v.keys.length} 把</span></span>`;
-    } else {
-      count = `${keyHealthDotsHtml(v.pId, v.keys, true)}<span class="ml-2 tabular">${v.okCount}/${v.keys.length} 可用</span>`;
-    }
+    const isOff = v.group === 'disabled';
+    // 健康条 + N/M 可用（停用 / 无 Key 显示「N 把」）。
+    const extra = isOff || !v.keys.length
+      ? `${keyHealthDotsHtml(v.pId, v.keys, !isOff)}<span class="tabular">${v.keys.length} 把</span>`
+      : `${keyHealthDotsHtml(v.pId, v.keys, true)}<span class="tabular">${v.okCount}/${v.keys.length} 可用</span>`;
     return listRow({
+      logo: { name: v.p.name || v.pId, off: isOff },
+      off: isOff,
       title,
       sub: v.sub,
       subError: v.subError,
+      extra,
       status: { dot: v.status.dot, label: v.status.word },
-      count,
-      trailing: `<span class="text-xs text-muted">${v.usedBy ? `被 ${v.usedBy} 个模型使用` : '未被模型使用'}</span>`,
+      count: `${v.usedBy} 个模型`,
       onOpen: () => {
         state.activeEditorKey = `p_${v.pId}`;
         state.creatingProvider = false;
@@ -1821,19 +1732,17 @@
 
     if (views.length === 0) {
       const filtered = Boolean(q) || f !== 'all';
-      const empty = ce('div');
-      empty.className = 'card-pad';
+      const card = ce('div');
+      card.className = 'gcard card-pad';
       const msg = ce('p');
       msg.className = 'text-muted';
       msg.textContent = filtered
         ? '没有符合筛选条件的供应商'
         : '还没有供应商：选一个预设、填上游地址与密钥，网关就能转发';
-      empty.appendChild(msg);
+      card.appendChild(msg);
       if (!filtered) {
         const btn = ce('button');
         btn.type = 'button';
-        // 页头已有唯一的「添加供应商」主按钮；空状态这里用普通按钮，
-        // 避免一个视图出现两个 .btn--primary（v2 §4.3）。
         btn.className = 'btn mt-3';
         btn.textContent = '添加供应商';
         clk(btn, () => {
@@ -1841,24 +1750,28 @@
           state.activeEditorKey = null;
           renderProvidersList();
         });
-        empty.appendChild(btn);
+        card.appendChild(btn);
       }
-      container.appendChild(empty);
+      container.appendChild(card);
       syncProviderDialogs();
       return;
     }
 
-    // 分组：需要处理 / 正常 / 已停用，问题优先排序。筛选到单一组时不再重复组头。
+    // 分组卡片（01-providers.png）：组标题在卡片外（.glabel），行在卡片内（.gcard）。
     const GROUP_DEFS = [['attention', '需要处理'], ['normal', '正常'], ['disabled', '已停用']];
     for (const [gkey, glabel] of GROUP_DEFS) {
       const items = views.filter((v) => v.group === gkey);
       if (!items.length) continue;
       if (f === 'all') {
-        container.appendChild(listRow({
-          title: `<span class="text-xs text-muted">${eh(glabel)} · ${items.length}</span>`,
-        }));
+        const gl = ce('div');
+        gl.className = 'glabel';
+        gl.textContent = `${glabel} · ${items.length}`;
+        container.appendChild(gl);
       }
-      for (const v of items) container.appendChild(buildProviderListRow(v));
+      const card = ce('div');
+      card.className = 'gcard';
+      for (const v of items) card.appendChild(buildProviderListRow(v));
+      container.appendChild(card);
     }
 
     syncProviderDialogs();
@@ -1926,10 +1839,10 @@
     for (const m of entries) {
       const tile = ce('button');
       tile.type = 'button';
-      tile.className = `gw-model-item${state.addProvPresetId === m.id ? ' chip--on' : ''}`;
+      tile.className = `tile${state.addProvPresetId === m.id ? ' on' : ''}`;
       tile.title = m.base_url || '';
-      tile.innerHTML = `<span class="fields">${window.renderBrandIcon ? window.renderBrandIcon(m.label) : ''}<span class="gw-model-item-id">${eh(m.label)}</span></span>`
-        + `<span class="gw-model-item-prov">${eh(protoLabel(m.api_type))}${m.version ? ` · v${eh(m.version)}` : ''}</span>`;
+      tile.innerHTML = `${window.renderBrandIcon ? window.renderBrandIcon(m.label, { sm: true }) : ''}`
+        + `<div class="tile-meta"><div class="tile-name">${eh(m.label)}</div><small class="tile-proto">${eh(protoLabel(m.api_type))}${m.version ? ` · v${eh(m.version)}` : ''}</small></div>`;
       clk(tile, () => {
         state.addProvPresetId = m.id;
         fillAddProvFromPreset(m);
@@ -1940,9 +1853,9 @@
     // 末尾「自定义」：任意兼容接口。不预设任何东西，保存时按名称 / 地址自动匹配。
     const customTile = ce('button');
     customTile.type = 'button';
-    customTile.className = `gw-model-item${state.addProvPresetId === 'custom' ? ' chip--on' : ''}`;
-    customTile.innerHTML = '<span class="fields"><span class="avatar-initial" aria-hidden="true">+</span><span class="gw-model-item-id">自定义</span></span>'
-      + '<span class="gw-model-item-prov">任意兼容接口</span>';
+    customTile.className = `tile dash${state.addProvPresetId === 'custom' ? ' on' : ''}`;
+    customTile.innerHTML = '<span class="av av--sm av--dash" aria-hidden="true">+</span>'
+      + '<div class="tile-meta"><div class="tile-name">自定义</div><small class="tile-proto">任意兼容接口</small></div>';
     clk(customTile, () => {
       state.addProvPresetId = 'custom';
       const titleEl = $('addProvSectionTitle');
@@ -1977,41 +1890,41 @@
     if (!dlg || !body) return;
     body.innerHTML = `
       <div class="search-box">
-        <span class="search-ico"></span>
+        <span class="search-ico">${window.uiIcon ? window.uiIcon('search') : ''}</span>
         <input class="input search-input" id="addProvSearch" placeholder="搜索 ${Object.keys(PRESETS_META).length} 个预设" aria-label="搜索预设">
       </div>
-      <div class="gw-model-grid mt-2" id="addProvTiles"></div>
+      <div class="tiles mt-2" id="addProvTiles"></div>
       <div class="text-xs text-muted mt-2" id="addProvTilesEmpty" hidden>没有匹配的预设</div>
       <div class="mt-3" id="newProvVaultGroup" hidden>
         <div class="section-bar"><span class="form-label">选择中枢托管供应商（仅列出本地缺失的）</span></div>
         <div class="probe-pills-wrap" id="newProvVaultPick"></div>
         <span class="text-xs text-muted" id="newProvVaultHint"></span>
       </div>
-      <div class="section-bar mt-3">
-        <span class="form-label" id="addProvSectionTitle">自定义供应商</span>
+      <div class="dlg-secline mt-3">
+        <span id="addProvSectionTitle">自定义供应商</span>
         <span class="text-xs text-muted" id="addProvPresetHint"></span>
       </div>
-      <div class="form-grid">
+      <div class="form-grid mt-2">
         ${fg('名称', `<input class="input" id="newProvName" placeholder="例如 DeepSeek 官方">`)}
         ${fg('接口地址', `<input class="input input--code" id="newProvBaseUrl" placeholder="https://api.example.com/v1">`)}
-        ${fg('API Key（可粘贴多把，换行分隔；添加后会逐把测试）', `<textarea class="textarea input--code privacy-mask" id="newProvApiKey" placeholder="sk-...&#10;sk-..."></textarea>`, 'newProvApiKeyGroup', 'form-group--full')}
+        ${fg('API Key', `<textarea class="textarea input--code privacy-mask" id="newProvApiKey" placeholder="粘贴一把或多把 Key，换行分隔；添加后会逐把测试"></textarea>`, 'newProvApiKeyGroup', 'form-group--full')}
       </div>
       <div class="form-group mt-2${isHubMode() ? ' hidden' : ''}" id="addProvProbeGroup"${isHubMode() ? ' hidden' : ''}>
         <label class="form-label form-label--check"><input type="checkbox" id="addProvProbeModels" checked><span>添加后从上游拉取模型列表，方便在模型页挑选</span></label>
       </div>
-      <div class="form-group mb-3 hidden" id="curlPasteWrap" hidden>
+      <div class="form-group mt-2 hidden" id="curlPasteWrap" hidden>
         <textarea class="textarea input--code" id="curlPasteInput" placeholder="粘贴 curl 命令，自动解析出接口地址与密钥"></textarea>
       </div>
       <input type="hidden" id="newProvSource" value="custom">
     `;
     const footLeft = $('addProviderFootLeft');
     if (footLeft) {
-      footLeft.innerHTML = `<button type="button" class="text-link" id="btnToggleCurlPaste">粘贴 cURL 解析</button>`
-        + `<button type="button" class="text-link" id="btnProvSourceToggle" hidden>改用中枢托管供应商</button>`;
+      footLeft.innerHTML = `<span class="text-xs text-muted">也可以 <button type="button" class="text-link" id="btnToggleCurlPaste">粘贴 cURL</button> 自动识别</span>`
+        + `<button type="button" class="text-link ml-2" id="btnProvSourceToggle" hidden>改用中枢托管供应商</button>`;
     }
     const footRight = $('addProviderFootRight');
     if (footRight) {
-      footRight.innerHTML = `<button class="btn" id="btnCancelAddProvider" type="button">取消</button>`
+      footRight.innerHTML = `<button class="btn btn--ghost" id="btnCancelAddProvider" type="button">取消</button>`
         + `<button class="btn btn--primary" id="btnConfirmAddProvider" type="button">添加并测试</button>`;
     }
     state.addProvPresetId = 'custom';
