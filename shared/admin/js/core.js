@@ -2,14 +2,11 @@
   const $ = (id) => document.getElementById(id);
   const ce = (t) => document.createElement(t);
   const clk = (el, fn) => el && el.addEventListener('click', fn);
-  // 表单字段组：标签在上方（--fs-note --fg-2），可选 ⓘ 悬停说明。
-  // hint 会渲染成标签旁的 ⓘ 按钮（title 悬停提示）——字段说明不常驻占位。
-  // --- 组件 2 · 字段说明不常驻：标签旁的 ⓘ 悬停提示 ---
-  // 输入框/下拉框的说明文字默认进 placeholder；只有放不下的补充说明才用 ⓘ
-  // 挂在标签右侧（title 悬停提示），校验错误才显示红字。
-  const fieldHint = (text) => (text
-    ? `<button class="field-hint" type="button" title="${escapeHtml(text)}" aria-label="字段说明">ⓘ</button>`
-    : '');
+  // 字段说明不常驻（v2.1 §2）：标签旁「?」，悬停 / 聚焦显示白色浮层，离开消失；点击不跳转。
+  const fieldHint = (text, title = '') => {
+    if (!text) return '';
+    return `<span class="tipwrap"><button class="qi" type="button" aria-label="说明">?</button><span class="tip" role="tooltip">${title ? `<b>${escapeHtml(title)}</b>` : ''}${escapeHtml(text)}</span></span>`;
+  };
 
   const fg = (lbl, ctrl, id = '', cls = '', hint = '') => `<div class="form-group${cls ? ' ' + cls : ''}"${id ? ` id="${id}"` : ''}><label class="form-label">${lbl}${fieldHint(hint)}</label>${ctrl}</div>`;
   const state = {
@@ -42,10 +39,6 @@
     nodeInstallFor: null,
     // 节点凭据（明文只留内存）：nodeId -> { node_token, client_key, admin_password }。
     nodeSecrets: {},
-    // 「新增供应商」create 编辑器的草稿标记：操作者手动改过 ID / 预设 / 协议后，
-    // 自动生成与自动匹配就不再覆盖他的手填值。
-    newProvIdTouched: false,
-    newProvPresetTouched: false,
     searchQuery: '',
     modelQuery: '',
     currentPeriod: 'today',
@@ -104,7 +97,7 @@
     if (res && typeof res._version === 'number' && state.config) {
       state.config._version = res._version;
       const verEl = $('configVersionDisplay');
-      if (verEl) verEl.textContent = `v${res._version}`;
+      if (verEl) verEl.textContent = `配置 v${res._version}`;
       return res._version;
     }
     return null;
@@ -259,11 +252,6 @@
     return raw && typeof raw === 'object' ? raw : {};
   }
 
-  function vaultManifestModels() {
-    const raw = state.vaultManifest?.agent_models;
-    return raw && typeof raw === 'object' ? raw : {};
-  }
-
   function nextKeyLabel(keys = [], prefix = 'k') {
     const used = new Set((keys || []).map((k) => k?.label || k?.id).filter(Boolean));
     let i = 1;
@@ -302,7 +290,9 @@
     const syncMs = rawSyncMs && !Number.isNaN(rawSyncMs) ? rawSyncMs : 0;
     if (!n || n.enabled === false) return { key: 'revoked', pillCls: 'pill--red', label: '已吊销', leaseText: '已吊销', syncMs };
     if (!syncMs) return { key: 'never', pillCls: 'pill', label: '从未同步', leaseText: '从未同步', syncMs: 0 };
-    const lease = Number(n.lease_ttl) || 86400, grace = Number(n.grace_ttl) || 3600, age = Math.max(0, Math.floor((Date.now() - syncMs) / 1000));
+    const lease = Number(n.lease_ttl) || 86400;
+    const grace = (n.grace_ttl !== undefined && n.grace_ttl !== null) ? Number(n.grace_ttl) : 3600;
+    const age = Math.max(0, Math.floor((Date.now() - syncMs) / 1000));
     if (age > lease + grace) return { key: 'expired', pillCls: 'pill--red', label: '过期 / 离线', leaseText: '租约已过期', syncMs };
     if (age > lease) return { key: 'grace', pillCls: 'pill--amber', label: '宽限期内', leaseText: '宽限期内', syncMs };
     return { key: 'synced', pillCls: 'pill--green', label: '已同步', leaseText: `租约剩 ${formatCooldown(Math.max(1, lease - age))}`, syncMs };
@@ -502,9 +492,11 @@
       title = '',
       sub = '',
       subError = false,
+      extra = '',
       status = '',
       count = '',
       logo = null,
+      off = false,
       note = '',
       leading = null,
       trailing = null,
@@ -514,19 +506,24 @@
     } = opts;
     const row = ce(tag === 'button' ? 'button' : 'div');
     if (row.tagName === 'BUTTON') row.type = 'button';
-    row.className = `row${cls ? ` ${cls}` : ''}${typeof onOpen !== 'function' ? ' row--static' : ''}`;
+    row.className = `row${off ? ' row--off' : ''}${cls ? ` ${cls}` : ''}${typeof onOpen !== 'function' ? ' row--static' : ''}`;
     if (leading && leading.nodeType === 1) row.appendChild(leading);
     if (logo) {
       let logoEl;
       if (logo.nodeType === 1) {
         logoEl = logo;
+      } else if (window.renderBrandIcon) {
+        const tmp = ce('span');
+        const label = typeof logo === 'object' ? (logo.name || logo.letter || '') : String(logo);
+        tmp.innerHTML = window.renderBrandIcon(label, { off: Boolean(off || logo?.off) });
+        logoEl = tmp.firstElementChild;
       } else {
         logoEl = ce('span');
         logoEl.className = 'avatar-initial';
         logoEl.setAttribute('aria-hidden', 'true');
         logoEl.textContent = String(logo);
       }
-      row.appendChild(logoEl);
+      if (logoEl) row.appendChild(logoEl);
     }
     const who = ce('div');
     who.className = 'who';
@@ -549,6 +546,13 @@
       who.appendChild(noteEl);
     }
     row.appendChild(who);
+    if (extra) {
+      const extraEl = ce('span');
+      extraEl.className = 'row-extra';
+      if (extra.nodeType === 1) extraEl.appendChild(extra);
+      else extraEl.innerHTML = extra;
+      row.appendChild(extraEl);
+    }
     if (status) {
       const stEl = ce('span');
       stEl.className = 'row-status';
@@ -853,13 +857,325 @@
     }, { passive: true });
   }
 
+  // --- 分段选择 + 「自定义…」（v2.1 §2）：灰色轨道 + 白色选中块 ---
+  // presets: [{ value, label }]；custom=true 时末尾带「自定义…」段（点开变成输入框，
+  // 回车或失焦确认；当前值不在预设里时自定义段直接显示该值并高亮）。
+  function makeSegPicker(opts = {}) {
+    const {
+      id = '',
+      presets = [],
+      value = '',
+      custom = true,
+      customLabel = '自定义…',
+      customUnit = '',
+      customPlaceholder = '输入数值',
+      customType = 'number',
+      min = null,
+      max = null,
+      step = null,
+      allowEmpty = false,
+      disabled = false,
+      onChange = null,
+    } = opts;
+
+    const wrap = ce('div');
+    wrap.className = 'segp';
+    const hiddenIn = ce('input');
+    hiddenIn.type = 'hidden';
+    if (id) hiddenIn.id = id;
+    wrap.appendChild(hiddenIn);
+
+    let curVal = value !== undefined && value !== null ? String(value) : '';
+    hiddenIn.value = curVal;
+
+    const btns = [];
+    for (const p of presets) {
+      const b = ce('button');
+      b.type = 'button';
+      b.className = 'segp-btn';
+      b.textContent = p.label;
+      b.dataset.segVal = String(p.value);
+      if (disabled) b.disabled = true;
+      clk(b, () => {
+        if (disabled) return;
+        setValue(String(p.value), true);
+      });
+      btns.push(b);
+      wrap.appendChild(b);
+    }
+
+    let cusBtn = null;
+    let cusIn = null;
+    if (custom) {
+      cusBtn = ce('button');
+      cusBtn.type = 'button';
+      cusBtn.className = 'segp-btn cus';
+      if (disabled) cusBtn.disabled = true;
+      cusIn = ce('input');
+      cusIn.type = customType;
+      cusIn.className = 'segp-input';
+      cusIn.placeholder = customPlaceholder;
+      if (min !== null && min !== undefined) cusIn.min = String(min);
+      if (max !== null && max !== undefined) cusIn.max = String(max);
+      if (step !== null && step !== undefined) cusIn.step = String(step);
+      cusIn.hidden = true;
+
+      clk(cusBtn, () => {
+        if (disabled) return;
+        cusBtn.hidden = true;
+        cusIn.hidden = false;
+        const isPreset = presets.some((p) => String(p.value) === curVal);
+        cusIn.value = isPreset ? '' : curVal;
+        cusIn.focus();
+        cusIn.select();
+      });
+
+      let cancelling = false;
+      const commit = () => {
+        if (cancelling) { cancelling = false; return; }
+        const raw = String(cusIn.value ?? '').trim();
+        cusIn.hidden = true;
+        cusBtn.hidden = false;
+        if (!raw) {
+          if (allowEmpty) setValue('', true);
+          else syncUi();
+          return;
+        }
+        if (customType === 'number') {
+          const n = Number(raw);
+          if (!Number.isFinite(n) || (min !== null && n < min) || (max !== null && n > max)) {
+            toast(min !== null && max !== null ? `请输入 ${min} ~ ${max} 之间的数值` : '请输入有效数值', 'warn');
+            syncUi();
+            return;
+          }
+          setValue(String(n), true);
+        } else {
+          setValue(raw, true);
+        }
+      };
+      cusIn.addEventListener('blur', commit);
+      cusIn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          cusIn.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelling = true;
+          cusIn.hidden = true;
+          cusBtn.hidden = false;
+        }
+      });
+      wrap.appendChild(cusBtn);
+      wrap.appendChild(cusIn);
+    }
+
+    function syncUi() {
+      const matched = presets.find((p) => String(p.value) === curVal);
+      for (const b of btns) {
+        b.classList.toggle('on', Boolean(matched) && b.dataset.segVal === String(matched.value));
+      }
+      if (cusBtn) {
+        const isCustomActive = !matched && curVal !== '';
+        cusBtn.classList.toggle('on', isCustomActive);
+        cusBtn.textContent = isCustomActive
+          ? `${curVal}${customUnit ? ` ${customUnit}` : ''}`
+          : customLabel;
+      }
+    }
+
+    function setValue(next, emit = false) {
+      const s = next !== undefined && next !== null ? String(next) : '';
+      const changed = s !== curVal;
+      curVal = s;
+      hiddenIn.value = curVal;
+      syncUi();
+      if (emit) {
+        if (typeof onChange === 'function') onChange(curVal, changed);
+        hiddenIn.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    syncUi();
+    hiddenIn._syncPicker = (v) => setValue(v, false);
+    return { el: wrap, input: hiddenIn, getValue: () => curVal, setValue };
+  }
+
+  // --- 胶囊下拉（v2.1 §2）：浅灰底圆角 + 右侧小箭头，禁止原生 <select> 外观 ---
+  const openPillSelects = [];
+
+  function pruneOpenPillSelects() {
+    for (let i = openPillSelects.length - 1; i >= 0; i--) {
+      const p = openPillSelects[i];
+      if (!p || !p.isConnected || p.hidden) openPillSelects.splice(i, 1);
+    }
+    return openPillSelects;
+  }
+
+  function closePillPop(pop) {
+    if (!pop) return;
+    pop.hidden = true;
+    pop.classList.add('hidden');
+    const idx = openPillSelects.indexOf(pop);
+    if (idx >= 0) openPillSelects.splice(idx, 1);
+  }
+
+  function closeAllPillSelects() {
+    pruneOpenPillSelects();
+    openPillSelects.slice().forEach(closePillPop);
+  }
+
+  function makePillSelect(opts = {}) {
+    const {
+      id = '',
+      options = [],
+      value = '',
+      placeholder = '请选择',
+      full = false,
+      sm = false,
+      disabled = false,
+      ariaLabel = '',
+      onChange = null,
+    } = opts;
+
+    const wrap = ce('div');
+    wrap.className = `pillsel-wrap${full ? ' pillsel-wrap--full' : ''}`;
+    const hiddenIn = ce('input');
+    hiddenIn.type = 'hidden';
+    if (id) hiddenIn.id = id;
+    wrap.appendChild(hiddenIn);
+
+    const btn = ce('button');
+    btn.type = 'button';
+    btn.className = `pillsel${sm ? ' pillsel--sm' : ''}`;
+    btn.setAttribute('aria-haspopup', 'listbox');
+    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+    if (disabled) btn.disabled = true;
+
+    const valSpan = ce('span');
+    valSpan.className = 'pillsel-val';
+    const caret = ce('span');
+    caret.className = 'pillsel-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    btn.appendChild(valSpan);
+    btn.appendChild(caret);
+
+    const pop = ce('div');
+    pop.className = 'pillsel-pop hidden';
+    pop.setAttribute('role', 'listbox');
+    pop.hidden = true;
+
+    wrap.appendChild(btn);
+    wrap.appendChild(pop);
+
+    let list = Array.isArray(options) ? options.slice() : [];
+    let curVal = value !== undefined && value !== null ? String(value) : '';
+    let isDisabled = Boolean(disabled);
+    hiddenIn.value = curVal;
+
+    function renderOptionInner(target, opt) {
+      target.innerHTML = '';
+      if (opt.avatar && window.renderBrandIcon) {
+        const tmp = ce('span');
+        const avName = typeof opt.avatar === 'object' ? (opt.avatar.name || opt.label) : String(opt.avatar);
+        tmp.innerHTML = window.renderBrandIcon(avName, { sm: true, off: Boolean(opt.avatar?.off) });
+        if (tmp.firstElementChild) target.appendChild(tmp.firstElementChild);
+      }
+      const lbl = ce('span');
+      lbl.textContent = String(opt.label ?? opt.value ?? '');
+      target.appendChild(lbl);
+      if (opt.meta) {
+        const m = ce('span');
+        m.className = 'pillsel-meta';
+        m.textContent = String(opt.meta);
+        target.appendChild(m);
+      }
+    }
+
+    function paintValue() {
+      const opt = list.find((o) => String(o.value) === curVal) || null;
+      if (opt) {
+        renderOptionInner(valSpan, opt);
+      } else {
+        valSpan.innerHTML = '';
+        const ph = ce('span');
+        ph.className = 'text-muted';
+        ph.textContent = placeholder;
+        valSpan.appendChild(ph);
+      }
+      pop.querySelectorAll('.pillsel-opt').forEach((item) => {
+        item.classList.toggle('on', item.dataset.optVal === curVal);
+      });
+    }
+
+    function buildMenuItems() {
+      pop.innerHTML = '';
+      for (const opt of list) {
+        const item = ce('button');
+        item.type = 'button';
+        item.className = `pillsel-opt${String(opt.value) === curVal ? ' on' : ''}`;
+        item.setAttribute('role', 'option');
+        item.dataset.optVal = String(opt.value);
+        if (opt.disabled) item.disabled = true;
+        renderOptionInner(item, opt);
+        clk(item, (ev) => {
+          ev.stopPropagation();
+          closePillPop(pop);
+          setValue(String(opt.value), true);
+        });
+        pop.appendChild(item);
+      }
+      paintValue();
+    }
+
+    function setValue(next, emit = false) {
+      const s = next !== undefined && next !== null ? String(next) : '';
+      const changed = s !== curVal;
+      curVal = s;
+      hiddenIn.value = curVal;
+      paintValue();
+      if (emit) {
+        const opt = list.find((o) => String(o.value) === curVal) || null;
+        if (typeof onChange === 'function') onChange(curVal, opt, changed);
+        hiddenIn.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    function setOptions(nextOpts, nextVal) {
+      list = Array.isArray(nextOpts) ? nextOpts.slice() : [];
+      if (nextVal !== undefined) curVal = String(nextVal);
+      hiddenIn.value = curVal;
+      buildMenuItems();
+    }
+
+    function setDisabled(d) {
+      isDisabled = Boolean(d);
+      btn.disabled = isDisabled;
+      if (isDisabled) closePillPop(pop);
+    }
+
+    clk(btn, (ev) => {
+      ev.stopPropagation();
+      if (isDisabled) return;
+      const wasOpen = !pop.hidden;
+      closeAllMenus();
+      closeAllPillSelects();
+      if (wasOpen) return;
+      pop.hidden = false;
+      pop.classList.remove('hidden');
+      if (!openPillSelects.includes(pop)) openPillSelects.push(pop);
+    });
+
+    buildMenuItems();
+    hiddenIn._syncPicker = (v) => setValue(v, false);
+    return { el: wrap, input: hiddenIn, btn, getValue: () => curVal, setValue, setOptions, setDisabled };
+  }
+
   function setupStaticIcons() {
     const setIcon = (id, name) => {
       const el = $(id);
       if (el && window.uiIcon) el.innerHTML = window.uiIcon(name);
     };
-    setIcon('brandMark', 'server');
-    setIcon('loginBrandMark', 'server');
     setIcon('logoutBtn', 'logout');
     setIcon('providerSearchIcon', 'search');
     setIcon('modelSearchIcon', 'search');
@@ -886,11 +1202,16 @@
         if (ev.target === dlg) closeDialogById(dlg.id);
       });
     });
-    // 点菜单外部关闭「⋯」浮层。
+    // 点菜单外部关闭「⋯」浮层与胶囊下拉浮层。
     document.addEventListener('click', (ev) => {
-      if (!pruneOpenMenus().length) return;
-      const inMenu = ev.target instanceof Element && ev.target.closest('.menu');
-      if (!inMenu) closeAllMenus();
+      if (pruneOpenMenus().length) {
+        const inMenu = ev.target instanceof Element && ev.target.closest('.menu');
+        if (!inMenu) closeAllMenus();
+      }
+      if (pruneOpenPillSelects().length) {
+        const inPill = ev.target instanceof Element && ev.target.closest('.pillsel-wrap');
+        if (!inPill) closeAllPillSelects();
+      }
     });
   }
 

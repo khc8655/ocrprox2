@@ -1,6 +1,20 @@
 // settings.js — 系统设置页：setting-row 挂载、模型目录、预设同步、设置视图，及 persistConfig/applyPendingEdit 等保存配套与启动注册行（按原文件行序落位）
-  function settingRow(title, desc, controlHtml, id = '') {
-    return `<div class="setting-row"${id ? ` id="${id}"` : ''} title="${eh(desc)}"><div class="setting-main"><div class="setting-title">${eh(title)}</div><div class="setting-desc">${eh(desc)}</div></div><div class="setting-control">${controlHtml}</div></div>`;
+  function settingRow(title, desc, controlHtml, id = '', hintTitle = '') {
+    return `<div class="srow2"${id ? ` id="${id}"` : ''}><div class="t"><span>${eh(title)}</span>${desc ? fieldHint(desc, hintTitle || title) : ''}</div><div class="c">${controlHtml}</div></div>`;
+  }
+
+  function mountSegControl(slot, opts) {
+    if (!slot) return null;
+    const ctrl = makeSegPicker(opts);
+    slot.appendChild(ctrl.el);
+    return ctrl;
+  }
+
+  function mountPillControl(slot, opts) {
+    if (!slot) return null;
+    const ctrl = makePillSelect(opts);
+    slot.appendChild(ctrl.el);
+    return ctrl;
   }
 
   // Mounts the routing-policy and concurrency-guard rows once at init; the inputs
@@ -9,39 +23,77 @@
     const routingRows = $('routingPolicyRows');
     if (routingRows && !routingRows.childElementCount) {
       routingRows.innerHTML = [
-        settingRow('默认路由策略', '候选 Key 间的调度方式；粘性优先可保住上下文缓存', `<select class="select" id="cfgRoutingStrategy">
-          <option value="sticky_failover">多路会话粘性优先</option>
-          <option value="round_robin">空闲优先轮询</option>
-          <option value="weighted">按权重比例分摊</option>
-          <option value="least_busy">最少并发优先</option>
-          <option value="fast">动态低延迟优先</option>
-          <option value="manual">手动直通</option>
-        </select>`),
-        settingRow('首字超时 (秒)', '5~600；等上游吐出首个字片的时限，超时换下一候选', `<input class="input tabular" id="cfgFirstByteTimeout" type="number" min="5" max="600" placeholder="120">`),
-        settingRow('429 限流冷却 (秒)', '命中上游限流后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldown429" type="number" min="0" placeholder="15">`),
-        settingRow('5xx 服务端异常冷却 (秒)', '上游 5xx 后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldown5xx" type="number" min="0" placeholder="30">`),
-        settingRow('网络超时冷却 (秒)', '网络超时等异常后该 Key 暂停调度的时长', `<input class="input tabular" id="cfgCooldownNet" type="number" min="0" placeholder="15">`),
-        settingRow('401/403 鉴权失败冷却 (秒)', '鉴权失败封禁该 Key 的时长；0 不封禁', `<input class="input tabular" id="cfgCooldownAuth" type="number" min="0" placeholder="86400">`),
+        settingRow('默认分流策略', '候选 Key 间的调度方式；会话粘性优先可保住上下文缓存。', `<div id="cfgRoutingStrategySlot"></div>`),
+        settingRow('首字超时', '5~600 秒；等上游吐出首个字片的时限，超时自动换下一候选。', `<div id="cfgFirstByteTimeoutSlot"></div>`),
+        settingRow('429 限流冷却', 'Key 被上游限流（HTTP 429）后暂停调度的时长。期间同一模型改用其它 Key 或来源；到期自动恢复，也可以在供应商里当场解除。', `<div id="cfgCooldown429Slot"></div>`),
+        settingRow('5xx 冷却', '上游返回 5xx 服务端异常后，该 Key 暂停调度的时长。', `<div id="cfgCooldown5xxSlot"></div>`),
+        settingRow('网络超时冷却', '网络超时等连接异常后，该 Key 暂停调度的时长。', `<div id="cfgCooldownNetSlot"></div>`),
+        settingRow('401 / 403 封禁', '鉴权失败封禁该 Key 的时长；选「不封禁」则只计一次失败而不长期禁用。', `<div id="cfgCooldownAuthSlot"></div>`),
       ].join('');
+      mountPillControl($('cfgRoutingStrategySlot'), {
+        id: 'cfgRoutingStrategy',
+        ariaLabel: '默认分流策略',
+        value: 'sticky_failover',
+        options: [
+          { value: 'sticky_failover', label: '会话粘性优先' },
+          { value: 'round_robin', label: '空闲优先轮询' },
+          { value: 'weighted', label: '按权重比例分摊' },
+          { value: 'least_busy', label: '最少并发优先' },
+          { value: 'fast', label: '动态低延迟优先' },
+          { value: 'manual', label: '手动直通' },
+        ],
+      });
+      mountSegControl($('cfgFirstByteTimeoutSlot'), {
+        id: 'cfgFirstByteTimeout',
+        presets: [{ value: '60', label: '60 秒' }, { value: '120', label: '120 秒' }, { value: '300', label: '300 秒' }],
+        value: '120',
+        customUnit: '秒',
+        min: 5,
+        max: 600,
+      });
+      const cdPresets = [{ value: '15', label: '15 秒' }, { value: '30', label: '30 秒' }, { value: '60', label: '60 秒' }];
+      mountSegControl($('cfgCooldown429Slot'), { id: 'cfgCooldown429', presets: cdPresets, value: '15', customUnit: '秒', min: 0, max: 86400 });
+      mountSegControl($('cfgCooldown5xxSlot'), { id: 'cfgCooldown5xx', presets: cdPresets, value: '30', customUnit: '秒', min: 0, max: 86400 });
+      mountSegControl($('cfgCooldownNetSlot'), { id: 'cfgCooldownNet', presets: cdPresets, value: '15', customUnit: '秒', min: 0, max: 86400 });
+      mountSegControl($('cfgCooldownAuthSlot'), {
+        id: 'cfgCooldownAuth',
+        presets: [{ value: '0', label: '不封禁' }, { value: '3600', label: '1 小时' }, { value: '86400', label: '1 天' }],
+        value: '86400',
+        customUnit: '秒',
+        min: 0,
+        max: 604800,
+      });
     }
     const guardRows = $('concurrencyGuardRows');
     if (guardRows && !guardRows.childElementCount) {
       guardRows.innerHTML = [
-        settingRow('OCR 预读并发上限', '1~64；大图预读并发上限，防止内存溢出', `<input class="input tabular" id="cfgOcrInflight" type="number" min="1" max="64" placeholder="4">`),
-        settingRow('固定通道全局并发上限', '1~256；固定通道整体最大并发请求数', `<input class="input tabular" id="cfgKbConcurrency" type="number" min="1" max="256" placeholder="16">`),
+        settingRow('OCR 预读并发', '1~64；大图预读并发上限，防止内存溢出（Lite 节点自动忽略）。', `<div id="cfgOcrInflightSlot"></div>`),
+        settingRow('固定通道并发', '1~256；固定通道整体最大并发请求数（Lite 节点自动忽略）。', `<div id="cfgKbConcurrencySlot"></div>`),
       ].join('');
+      mountSegControl($('cfgOcrInflightSlot'), {
+        id: 'cfgOcrInflight',
+        presets: [{ value: '2', label: '2' }, { value: '4', label: '4' }, { value: '8', label: '8' }],
+        value: '4',
+        min: 1,
+        max: 64,
+      });
+      mountSegControl($('cfgKbConcurrencySlot'), {
+        id: 'cfgKbConcurrency',
+        presets: [{ value: '8', label: '8' }, { value: '16', label: '16' }, { value: '32', label: '32' }],
+        value: '16',
+        min: 1,
+        max: 256,
+      });
     }
-    // Gateway access: the three fields were a plain form-grid; they now follow the
-    // same row规范. Input ids are unchanged so renderSettingsView keeps filling them.
     const gwRows = $('gatewayAccessRows');
     if (gwRows && !gwRows.childElementCount) {
       gwRows.innerHTML = [
-        settingRow('网关入口地址 (Base URL)',
-          '客户端实际调用用的完整地址，供复制到 Cursor / Claude Code 等客户端；只读，由当前访问地址推导',
-          `<input class="input input--code" id="gwBaseUrl" readonly>`, 'gwBaseUrlGroup'),
-        settingRow('主客户端鉴权密钥 (client_key)',
-          '调用 /v1/* 的主密钥；所有客户端至少需要这一把。修改后旧密钥立即失效',
-          `<div class="input-row"><input class="input input--code privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey">随机生成</button></div>`),
+        settingRow('网关地址',
+          '客户端实际调用用的完整基址，供复制到 Cursor / Claude Code 等客户端；只读，由当前访问地址推导。',
+          `<input class="input input--code input--wide" id="gwBaseUrl" readonly>`, 'gwBaseUrlGroup'),
+        settingRow('客户端密钥',
+          '调用 /v1/* 的主密钥；修改后旧密钥立即失效。在 Hub 端修改后会通过 /api/node/config 下发至所有节点，并覆盖 Lite 节点的本地 --client-key。',
+          `<input class="input input--code input--wide privacy-mask" id="gwClientKey" placeholder="输入或生成客户端 API Key"><button class="btn" id="btnGenClientKey" type="button">生成</button>`),
       ].join('');
     }
     // Vault link (Full only): URL + node token.
@@ -49,46 +101,47 @@
     if (vaultRows && !vaultRows.childElementCount) {
       vaultRows.innerHTML = [
         settingRow('Vault 中枢地址',
-          '中枢（Hub）的根地址；改地址必须重新输入 Token',
-          `<input class="input input--code" id="cfgVaultUrl" placeholder="https://key.example.com">`),
+          '中枢（Hub）的根地址；改地址必须重新输入 Token。',
+          `<input class="input input--code input--wide" id="cfgVaultUrl" placeholder="https://key.example.com">`),
         settingRow('节点同步 Token',
-          '该节点专属的 stk_node_* 令牌，仅用于向中枢拉取配置与供应商；丢失请在中枢轮换',
-          `<input class="input input--code privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">`),
+          '该节点专属的 stk_node_* 令牌，仅用于向中枢拉取配置与供应商；丢失请在中枢轮换。',
+          `<input class="input input--code input--wide privacy-mask" id="cfgVaultToken" placeholder="输入 NODE_TOKEN">`),
       ].join('');
     }
     // Config backup: export / import.
     const backupRows = $('configBackupRows');
     if (backupRows && !backupRows.childElementCount) {
       backupRows.innerHTML = [
-        settingRow('导出当前完整配置 (JSON)',
-          '下载一份包含提供商、路由与设置的完整配置，可用于备份或迁移到另一台节点',
-          `<button class="btn" id="btnExportConfig">导出 JSON 配置文件</button>`),
-        settingRow('导入 v1 / v2 配置文件',
-          '从备份恢复：增量合并保留现有内容，全量覆盖会替换全部配置；密钥类字段按脱敏规则处理',
-          `<div class="input-row"><select class="select" id="importConfigMode"><option value="merge">增量合并 (保留现有)</option><option value="overwrite">全量覆盖</option></select><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport">选择文件导入</button></div>`),
+        settingRow('导出当前配置',
+          '下载一份包含供应商、路由与设置的完整配置 JSON，可用于备份或迁移到另一台节点。',
+          `<button class="btn" id="btnExportConfig" type="button">导出 JSON</button>`),
+        settingRow('导入配置文件',
+          '从 v1 / v2 备份恢复：增量合并保留现有内容，全量覆盖会替换全部配置；密钥类字段按脱敏规则处理。',
+          `<div id="importConfigModeSlot"></div><input type="file" id="importConfigFile" accept=".json,application/json" hidden><button class="btn" id="btnTriggerImport" type="button">选择文件导入</button>`),
       ].join('');
+      mountPillControl($('importConfigModeSlot'), {
+        id: 'importConfigMode',
+        ariaLabel: '导入模式',
+        value: 'merge',
+        options: [
+          { value: 'merge', label: '增量合并' },
+          { value: 'overwrite', label: '全量覆盖' },
+        ],
+      });
     }
-    // Model catalog (Hub only — the Hub owns the KV catalog a Full node pulls,
-    // and it is the only side that may reach models.dev). No .btn--primary here:
-    // updating a cache is maintenance, not the card's primary save action.
+    // Model catalog (Hub only) — 单行展示，匹配 11-settings.png。
     const catalogRows = $('modelCatalogRows');
     if (catalogRows && !catalogRows.childElementCount) {
-      catalogRows.innerHTML = [
-        settingRow('上次更新',
-          '当前目录的抓取时间（本地时区）与收录的模型数量；尚未更新时节点各自使用内嵌目录',
-          `<span class="text-xs text-muted tabular" id="modelCatalogMeta">尚未更新</span>`),
-        settingRow('手动更新',
-          '从 models.dev 拉取最新目录并在中枢侧瘦身后写入 KV；失败不会影响现有目录',
-          `<div class="input-row"><a class="text-xs text-link" id="modelCatalogSourceLink" href="https://models.dev" target="_blank" rel="noopener noreferrer" title="数据来源 models.dev">数据来源</a><button class="btn" id="btnUpdateModelCatalog">立即从 models.dev 更新</button></div>`),
-      ].join('');
+      catalogRows.innerHTML = settingRow('models.dev 目录',
+        '从 models.dev 拉取最新能力目录并在中枢侧瘦身后写入 KV；失败不影响现有目录，未更新前节点各自使用内嵌目录。',
+        `<span class="text-xs text-muted tabular" id="modelCatalogMeta">尚未更新</span><button class="btn" id="btnUpdateModelCatalog" type="button">立即更新</button>`);
     }
-    // 预设与中枢同步（Full only，约定 C/D）：preset-status 的可更新数放说明里，
-    // 「一键更新」调 POST /api/admin/providers/sync；只有操作者点击才执行。
+    // 预设与中枢同步（Full only）
     const syncRows = $('presetSyncRows');
     if (syncRows && !syncRows.childElementCount) {
       syncRows.innerHTML = settingRow('预设与中枢同步',
-        '检查各供应商的预设适配规则是否有新版本；一键更新会重新拉取中枢托管供应商，并把未手动改过规则的本地供应商换到最新预设规则',
-        `<div class="input-row"><span class="text-xs text-muted tabular" id="presetSyncMeta">检查中…</span><button class="btn btn--sm" id="btnSyncProviders" type="button">一键更新</button></div>`);
+        '检查各供应商的预设适配规则是否有新版本；一键更新会重新拉取中枢托管供应商，并把未手动改过规则的本地供应商换到最新预设规则。',
+        `<span class="text-xs text-muted tabular" id="presetSyncMeta">检查中…</span><button class="btn" id="btnSyncProviders" type="button">一键更新</button>`);
     }
   }
 
@@ -122,7 +175,7 @@
     for (const it of settingsAnchorTargets()) {
       const b = ce('button');
       b.type = 'button';
-      b.className = 'seg-btn';
+      b.className = 'set2-link';
       b.textContent = it.label;
       b.setAttribute('data-grp', it.id);
       seg.appendChild(b);
@@ -139,7 +192,7 @@
     if (!seg || !section) return;
     if (section.hidden) {
       const first = settingsAnchorTargets().find((it) => $(it.id) && !$(it.id).hidden);
-      seg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', Boolean(first) && b.getAttribute('data-grp') === first.id));
+      seg.querySelectorAll('.set2-link').forEach((b) => b.classList.toggle('on', Boolean(first) && b.getAttribute('data-grp') === first.id));
       return;
     }
     let cur = '';
@@ -151,7 +204,7 @@
       const first = settingsAnchorTargets().find((it) => $(it.id) && !$(it.id).hidden);
       cur = first ? first.id : '';
     }
-    seg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b.getAttribute('data-grp') === cur));
+    seg.querySelectorAll('.set2-link').forEach((b) => b.classList.toggle('on', b.getAttribute('data-grp') === cur));
   }
 
   // 脏检查：可编辑字段集合是固定的（与 renderSettingsView 按 id 填值的清单一致）；
@@ -223,7 +276,7 @@
         if (!btn) return;
         const grp = $(btn.getAttribute('data-grp') || '');
         if (!grp || grp.hidden) return;
-        seg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
+        seg.querySelectorAll('.set2-link').forEach((b) => b.classList.toggle('on', b === btn));
         grp.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     }
@@ -417,7 +470,10 @@
 
     const setVal = (id, val) => {
       const el = $(id);
-      if (el) el.value = val !== undefined ? val : '';
+      if (!el) return;
+      const str = val !== undefined ? String(val) : '';
+      if (typeof el._syncPicker === 'function') el._syncPicker(str);
+      else el.value = str;
     };
 
     const isZeroVersion = state.config._version === 0;
@@ -740,18 +796,12 @@
     }
     const ver = state.config?._version || data._version;
     const verEl = $('configVersionDisplay');
-    if (verEl && ver) verEl.textContent = `v${ver}`;
+    if (verEl && ver) verEl.textContent = `配置 v${ver}`;
     toast(successMsg || '保存成功', 'ok');
     renderProvidersList();
     renderModelsList();
     renderSettingsView();
     return true;
-  }
-
-  function formatTime(isoOrSec) {
-    if (!isoOrSec) return '';
-    const d = typeof isoOrSec === 'number' ? new Date(isoOrSec * 1000) : new Date(isoOrSec);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
   window.addEventListener('DOMContentLoaded', init);

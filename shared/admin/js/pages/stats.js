@@ -491,7 +491,7 @@
         const pct = agg.totalCalls > 0 ? (m.requests / agg.totalCalls) * 100 : 0;
         const rateTxt = m.exact && (m.success + m.failed) > 0 ? fmtPct((m.success / (m.success + m.failed)) * 100) : '—';
         const tokTxt = m.exact ? `${fmtCompactTokens(m.inTok)} / ${fmtCompactTokens(m.outTok)}` : '—';
-        return `<tr><td>${eh(model)}</td><td class="tabular">${m.nodes.size}</td><td class="tabular">${m.requests}</td><td class="tabular">${rateTxt}</td><td class="tabular">${tokTxt}</td><td>${statsShareBarHtml(pct)}</td></tr>`;
+        return `<tr><td>${eh(model)}</td><td class="tabular r">${m.nodes.size}</td><td class="tabular r">${m.requests}</td><td class="tabular r">${rateTxt}</td><td class="tabular r">${tokTxt}</td><td>${statsShareBarHtml(pct)}</td></tr>`;
       }).join('');
     }
 
@@ -499,7 +499,7 @@
     if (agg.nodeRows.length === 0) {
       nodeBody.innerHTML = '<tr><td colspan="5" class="text-muted">暂无已同步的节点。节点完成安装并首次同步后出现在这里。</td></tr>';
     } else {
-      nodeBody.innerHTML = agg.nodeRows.map((r) => `<tr><td>${eh(r.node.name || r.node.id)}</td><td><span class="row-status"><span class="dot ${r.status.dot}" aria-hidden="true"></span><span>${eh(r.status.word)}</span></span></td><td class="tabular">${r.calls > 0 ? r.calls : '—'}</td><td>${r.topModel ? `<span class="tabular">${eh(r.topModel)}</span>` : '<span class="text-muted">未上报</span>'}</td><td class="tabular">${eh(fmtTime(r.node.last_seen))}</td></tr>`).join('');
+      nodeBody.innerHTML = agg.nodeRows.map((r) => `<tr><td>${eh(r.node.name || r.node.id)}</td><td><span class="row-status"><span class="dot dot--${r.status.dot}" aria-hidden="true"></span><span>${eh(r.status.word)}</span></span></td><td class="tabular r">${r.calls > 0 ? r.calls : '—'}</td><td>${r.topModel ? `<span class="tabular">${eh(r.topModel)}</span>` : '<span class="text-muted">未上报</span>'}</td><td class="tabular r">${eh(fmtTime(r.node.last_seen))}</td></tr>`).join('');
     }
 
     // 页头注明更新时间（fmtTime 相对时间）。

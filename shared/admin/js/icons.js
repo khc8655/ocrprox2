@@ -11,10 +11,22 @@
     return /[a-zA-Z]/.test(first) ? first.toUpperCase() : first;
   }
 
-  function renderBrandIcon(idOrName) {
+  function avatarIndexOf(idOrName) {
+    const s = String(idOrName || '').trim().toLowerCase();
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ((h >>> 0) % 8) + 1;
+  }
+
+  function renderBrandIcon(idOrName, opts = {}) {
     const letter = initialOf(idOrName);
     const safe = letter.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    return `<span class="avatar-initial" aria-hidden="true">${safe}</span>`;
+    const idx = avatarIndexOf(idOrName);
+    const cls = ['av', `av-${idx}`, opts.sm ? 'av--sm' : '', opts.off ? 'av--off' : '', opts.cls || ''].filter(Boolean).join(' ');
+    return `<span class="${cls}" aria-hidden="true">${safe}</span>`;
   }
 
   const UI_ICONS = {
@@ -25,7 +37,6 @@
     monitor: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
     logout: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
     search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
-    server: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
   };
 
   function uiIcon(name) {
@@ -34,4 +45,5 @@
 
   window.uiIcon = uiIcon;
   window.renderBrandIcon = renderBrandIcon;
+  window.avatarIndexOf = avatarIndexOf;
 })();
