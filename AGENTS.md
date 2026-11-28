@@ -80,7 +80,7 @@
 | `CHANGELOG.md` | 每版改了什么，面向使用者 | 每次提交加到 `[Unreleased]` |
 | `docs/ADMIN_UI_BACKEND_CONTRACT.md` + `shared/contracts/admin-ui-backend.json` | 控制台 ↔ 后端的接口 | 改接口前先改 |
 | `docs/MULTI_AGENT_BLUEPRINT.md` + `internal/types/types.go` | Go 核心数据结构、包边界 | 改结构前先改 |
-| `docs/UI_DESIGN_SPEC.md` + `docs/ui-v2/`（效果图与落地分工，落地完成后删分工文件） | 界面规范与效果图 | 改界面模式时改 |
+| `docs/UI_DESIGN_SPEC.md` + `docs/ui-v2/mockups/` | 界面规范（含验收清单）与效果图，效果图是外观标准 | 改界面模式时改 |
 | `docs/SYSTEM_DESIGN_SPEC.md` | 三端架构、数据流 | 架构变了改 |
 | `docs/SECURITY_SPEC.md` | 鉴权、凭据、红线 | 安全相关变了改 |
 | `docs/TESTING_SPEC.md` | 测试分层、本机测试环境 | 测试方式变了改 |
